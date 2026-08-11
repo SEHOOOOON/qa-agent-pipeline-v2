@@ -1,136 +1,129 @@
 # QA Agent Pipeline V2
 
-운영 중인 가상 중앙제어 시스템의 승인된 QA 자산을 기준으로 변경 요청을 분석하고, 제품 기능 테스트케이스와 Playwright 자동화 코드 후보를 생성·검증하기 위한 **Governed Agentic QA Pipeline** 설계 저장소입니다.
+운영 중인 가상 중앙제어 시스템에 **MODIFIED 변경 요청 1건**이 들어왔을 때, 실제 모델이 변경점을 분석하고 제품 기능 TC와 Playwright 자동화 코드 후보를 생성하는 흐름을 구현하려는 MVP입니다.
 
-> 문서 기준 버전: 0.2
-> 현재 단계: BASELINE_CANDIDATE
-> 구현 상태: 문서·계약 설계 완료, Live AI Runtime 미구현
+> 현재 저장소는 **설계 문서 단계**입니다. 프로젝트 1의 가상 중앙제어기와 기존 테스트는 재사용 대상이지만, V2의 Live 모델 호출·Agent 인계·코드 생성 실행기는 아직 구현되지 않았습니다.
 
-## 1. 저장소 목적
+## 해결하려는 문제
 
-V1은 4단계 QA Workflow와 기존 Playwright 회귀 실행을 시연하는 Fixture 기반 프로토타입입니다. V2는 다음 간격을 해소하는 것을 목표로 합니다.
+프로젝트 1은 QA 기준, 가상 중앙제어기, 사람이 작성한 Playwright 테스트와 규칙 기반 보고를 보여줍니다. Agent 1·2 화면은 고정 산출물 시연이고 Agent 3는 기존 테스트 실행기이므로 새 입력이 새 분석·TC·코드로 이어지는 Live Pipeline은 아닙니다.
 
-- 사용자가 입력한 변경 요청이 실제 분석 결과를 변경해야 합니다.
-- 앞 단계의 승인 산출물이 다음 단계의 실제 입력이어야 합니다.
-- Agent 2가 승인한 제품 기능 TC가 Agent 3의 자동화 코드 후보로 연결되어야 합니다.
-- 생성 코드는 제품 판정 전에 격리 실행·반복 안정성·오류 검출력·사람 승인을 통과해야 합니다.
-- 일반 회귀 실행에서는 AI가 TC나 Assertion을 다시 생성하지 않고 승인된 고정 자동화만 사용해야 합니다.
+V2는 다음 세 연결만 우선 증명합니다.
 
-## 2. 문서 체계
+1. 변경 요청에 따라 Agent 1·2의 실제 출력이 달라집니다.
+2. 검증된 앞 단계 JSON이 다음 Agent의 실제 입력이 됩니다.
+3. Agent 2의 TC가 Agent 3 코드 후보와 격리 시험 결과로 추적됩니다.
 
-| 순서 | 문서 | 목적 | 현재 상태 |
-|---:|---|---|---|
-| 1 | [V2 설계 개요](00_V2_DESIGN_OVERVIEW.md) | 목표, 범위, 시스템 구성, 실행 Lane과 종료 기준 | REVIEW_READY |
-| 2 | [Baseline SRS 후보](01_REVERSE_ENGINEERED_BASELINE_SRS.md) | 중앙제어 시스템의 검증 가능한 기준과 알려진 편차 | CANDIDATE |
-| 3 | [변경 요청 입력 계약](02_CHANGE_REQUEST_INPUT_CONTRACT.md) | 변경 접수 데이터, 충분성 판정과 입력 검증 | REVIEW_READY |
-| 4 | [Agent 입출력 계약](03_AGENT_IO_CONTRACTS.md) | Agent·Checkpoint 간 Artifact와 인계 규칙 | REVIEW_READY |
-| 5 | [Checkpoint·승인 정책](04_CHECKPOINT_APPROVAL_POLICY.md) | 자동 차단, 사람 검토, 재작업과 Baseline 보호 | REVIEW_READY |
-| 6 | [검증·추적성 감사](05_PROJECT1_COVERAGE_AUDIT.md) | Requirement–구현–TC 연결과 구현 우선순위 | LIVING_DOCUMENT |
+## 구현 상태
 
-문서의 순서는 의도적입니다. SRS가 제품 기준을 정의하고, 입력 계약과 Agent 계약은 그 기준을 임의로 변경하지 못하도록 제한하며, Checkpoint 정책과 추적성 감사가 실제 준수 여부를 확인합니다.
-
-## 3. 핵심 용어
-
-| 용어 | 정의 |
+| 영역 | 현재 상태 |
 |---|---|
-| Baseline | 사람이 승인한 특정 버전의 SRS·TC·자동화 묶음 |
-| Change Request | 기존 Baseline에 추가·수정·삭제를 요청하는 원문 입력 |
-| Product Functional TC | 제품 기능과 기대결과를 정의한 테스트케이스. Agent 2 산출물 |
-| Automation Candidate | 승인 TC를 Playwright로 구현한 검증 전 코드 후보. Agent 3 산출물 |
-| Fixture | 저장된 입력·산출물을 재생하는 데모 또는 회귀용 고정 데이터 |
-| Live | 실제 모델 또는 실행기를 호출해 새 산출물을 생성한 실행 |
-| Checkpoint | 산출물을 수정하지 않고 계약·정책 위반을 판정하는 품질 게이트 |
-| Promotion Gate | 제품 판정 또는 Baseline 반영 전 QA가 TC·코드·증거를 통합 검토하는 승인 단계 |
+| 가상 중앙제어기 | 프로젝트 1에 구현됨 |
+| 기존 Playwright 제품 기능 TC | 7건 후보 중 6건 재사용 가능, TC-INT-002 보완 필요 |
+| 환경 사전 점검 | TC-ENV-000 존재, 후속 차단 Gate는 미구현 |
+| 분류·보고 | 프로젝트 1의 규칙 엔진 존재, V2 입력 계약 연동 필요 |
+| Product SRS | 실제 화면·코드 기준 초기 제품 기준 문서 작성 |
+| Agent 1·2 Live 모델 호출 | 미구현 |
+| Agent 3 코드 후보 생성 | 미구현 |
+| CP1~3·Run Orchestrator | 미구현 |
+| 조건부 검토·정식 QA 자산 등록 승인·최종 보고 | 미구현 |
 
-## 4. 목표 프로세스
+## MVP 프로세스
 
-    Approved Baseline + Change Request
-      → Agent 1: 변경 분석
-      → Checkpoint 1: 근거·충분성 검사
-      → Agent 2: 제품 기능 TC Change Set
-      → Checkpoint 2: TC 품질 검사
-      → Agent 3: Playwright 자동화 코드 후보 생성
-      → Checkpoint 3: 정적 검사·격리 시험·반복 실행·오류 검출
-      → Human Promotion Gate
-      → 승인된 자동화로 변경 검증·Core Regression
-      → Agent 4: 결정론적 결과 분류·보고
-      → Checkpoint 4: Run·수치·증거 정합성 검사
-      → PASS | HOLD | HUMAN_REVIEW
+~~~text
+변경 요청
+  -> Agent 1 변경 분석
+  -> CP1 ID·before·after·근거 검사
+  -> Agent 2 제품 기능 TC 설계
+  -> CP2 구조·추적성·제품 기준 검사
+  -> Agent 3 실제 화면 확인·Playwright 코드 후보 생성
+  -> CP3 정적 검사·격리 시험
+  -> CP 통과 후보의 변경 검증
+  -> 기존 검증 가능 회귀 TC 실행
+  -> Agent 4 규칙 기반 분류·보고
+  -> 사람의 공식 SRS·TC·자동화 저장 승인 1회
 
-## 5. 사실성 원칙
+공통 분기: CP1~3에서 REVIEW 발생 시에만 사람 검토 후 재개·수정·종료
+~~~
 
-- 현재 virtual-controller.html의 Agent 1~4 모달은 Workflow Demo입니다.
-- V1의 Agent 1·2는 저장된 Prompt·Sample이며 반복 모델 호출기가 아닙니다.
-- V1의 Agent 3은 사람이 작성한 Playwright를 실행하며, 신규 코드를 생성하지 않습니다.
-- V1의 Agent 4는 생성형 AI가 아니라 Python 규칙 기반 결과 분석기입니다.
-- 문서, 애니메이션, Fixture 결과는 Live 실행 증거로 간주하지 않습니다.
-- 각 실행은 FIXTURE 또는 LIVE, 모델 호출 여부, 실제 브라우저 실행 여부를 명시해야 합니다.
+## 문서
 
-## 6. 문서 상태와 승인
-
-| 상태 | 의미 |
+| 문서 | 역할 |
 |---|---|
-| DRAFT | 작성 중이며 검토 기준으로 사용 불가 |
-| CANDIDATE | 근거를 수집한 승인 후보. 미확정 정책 포함 |
-| REVIEW_READY | 구조와 필수 항목이 갖춰져 사람 검토 가능 |
-| APPROVED | 승인자·버전·시각이 기록된 적용 기준 |
-| SUPERSEDED | 새 버전으로 대체되었으나 감사 목적으로 보존 |
+| [제품 SRS](docs/01_PRODUCT_SRS.md) | 실제 프로젝트 1 화면·코드에서 확인한 초기 제품 기준 문서 |
+| [V2 MVP 설계](docs/02_V2_MVP_DESIGN.md) | 구현 범위, 단계와 종료선 |
+| [Agent·Checkpoint 명세](docs/03_AGENT_AND_CHECKPOINT_SPEC.md) | 입출력 계약과 최소 판정 규칙 |
+| [테스트·추적성 계획](docs/04_TEST_AND_TRACEABILITY_PLAN.md) | 기존 13개 TC 분리와 V2 검증 계획 |
 
-현재 SRS는 원본 기획서가 아니라 화면·코드·테스트에서 역추출한 문서이므로 CANDIDATE입니다. 승인 전에는 미확정 값을 모델이 임의로 확정하거나 Baseline 원본을 변경할 수 없습니다.
+## 용어
 
-## 7. 변경 관리 원칙
+- **제품 기능 TC**: Agent 2가 만드는 조건·행동·기대 결과
+- **자동화 코드 후보**: Agent 3가 Checkpoint를 통과한 TC를 Playwright Python으로 구현한 검증 전 코드
+- **초기 제품 기준 문서**: 현재 화면·코드에서 확인한 SRS·TC로, 변경 전후를 비교할 출발점
+- **기존 기준 자동화 코드**: 프로젝트 1에서 사람이 작성했고 기존 회귀 검증에 재사용하는 Playwright 코드
+- **제품 기능 회귀 후보**: 기존 7건 중 파이프라인 검증용 고정 사례와 근거 부족 TC를 제외한 테스트
+- **파이프라인 검증용 고정 사례**: 결과 분류·차단 흐름을 확인하기 위해 의도적으로 유지하는 사례
+- **실행 단위(Run)**: 변경 요청 한 건이 Agent 1부터 최종 보고까지 처리되는 한 번의 전체 실행
+- **Checkpoint 통과**: 사람이 승인했다는 뜻이 아니라, 미리 정한 자동 검사 규칙을 충족했다는 뜻
+- **조건부 검토**: 자동 검사만으로 의미를 확정할 수 없는 REVIEW 항목이 생겼을 때만 사람이 확인하는 절차
+- **정식 QA 자산 등록**: 검증이 끝난 SRS·TC·Playwright 코드를 다음 변경에서도 재사용할 공식 버전으로 저장하는 작업
 
-1. 문서 변경은 관련 Requirement ID와 변경 사유를 기록합니다.
-2. 요구사항 변경은 연결 TC와 자동화 영향 범위를 함께 검토합니다.
-3. DELETED 요청도 즉시 삭제하지 않고 DEPRECATION_PROPOSED로 보존합니다.
-4. 승인 전 생성 산출물은 Run 전용 디렉터리에 append-only로 저장합니다.
-5. 승인된 Baseline은 새 버전으로 승격하고 이전 버전은 유지합니다.
-6. 구현이 문서와 다르면 문서를 구현에 맞춰 자동 수정하지 않고 KNOWN_DEVIATION으로 등록합니다.
+## MVP 포함
 
-## 8. 현재 구현 경계
+- MODIFIED 요청 1건
+- Agent 1·2 실제 모델 Adapter
+- Agent 1→2 구조화 JSON 전달
+- 신규 또는 수정 TC 최소 1건
+- Agent 3 Playwright Python 코드 후보 최소 1건
+- 기존 UI Selector와 `window.__vccs` 읽기 인터페이스 활용
+- CP1~3의 구조·근거·금지 패턴 검사
+- 임시 폴더에서 후보 코드 1회 시험
+- Checkpoint 통과 시 중간 승인 없이 자동 진행
+- REVIEW·근거 부족·정책 충돌에만 조건부 사람 검토
+- 검증 후보 변경 실행과 기존 검증 가능 회귀 TC 실행
+- 규칙 기반 결과 분류와 Run 보고
+- 정식 QA 자산 등록 승인 1회
 
-| 구성요소 | 현재 | V2 목표 |
-|---|---|---|
-| Agent 1 | 고정 Demo | 실제 모델 기반 변경 분석 |
-| Agent 2 | 고정 TC Demo | 승인 분석 기반 TC Change Set |
-| Agent 3 | 기존 Pytest 실행 | 승인 TC 기반 코드 후보 생성·격리 검증 |
-| Agent 4 | 결정론적 Python 분석 | V2 Run 계약과 동일 Source Run 검증 |
-| QA Manager | 화면상 순서 제어 | Python 상태 머신과 Artifact 인계 |
-| Dashboard | Demo 모달 | 실제 Run Manifest 표시 |
+## MVP 제외
 
-## 9. MVP 완료 조건
+- ADDED·DELETED 자동 처리
+- 모든 TC 자동 생성·자동화
+- 자유로운 Agent 토론
+- 자연어 의미의 완전 자동 판정
+- 무제한 자동 수정·Self-Healing
+- 정식 QA 자산 자동 등록·버전 갱신
+- Full Regression 전체 구현
+- 다중 모델 비교·대규모 반복 평가
+- 운영 장비·외부 서비스 연결
 
-V2는 다음이 모두 증명될 때만 LIVE_VERIFIED로 평가합니다.
+## 사실성 원칙
 
-- 특정 예시에 고정되지 않은 MODIFIED 변경 요청 한 건을 입력할 수 있습니다.
-- Agent 1·2·3이 실제 모델을 호출하고 원본 응답과 정규화 결과를 보존합니다.
-- Checkpoint를 통과한 Artifact만 다음 단계로 전달됩니다.
-- Agent 3이 승인 TC 한 건의 자동화 코드 후보를 생성합니다.
-- 후보 코드는 원본과 분리된 환경에서 정상 프로필 3회와 대표 오류 1~2개를 실행합니다.
-- QA가 TC·코드·Assertion 매핑·실행 증거를 확인해 통합 승인합니다.
-- 승인된 변경 자동화와 기존 Core Regression을 실행합니다.
-- Agent 4와 Checkpoint 4가 동일 Source Run의 결과만 집계합니다.
-- 보고서 수치와 원본 JSON·실행 증거가 일치합니다.
+- 문서의 계획을 구현 완료로 표현하지 않습니다.
+- Agent 1·2·3만 생성형 모델 대상으로 정의합니다.
+- Agent 4는 규칙 기반 분석기로 표시합니다.
+- 기존 13건의 8 Pass·3 Fail·2 Skipped는 제품 회귀 성공률이 아니라 분류 데모 Dataset입니다.
+- Register는 실제 프로토콜 레지스터가 아니라 HTML 시뮬레이터입니다.
+- TC-ENV-000은 현재 사전 점검 사례이며 후속 차단 Gate가 아닙니다.
+- 정식 QA 자산 등록 승인 전 기존 SRS·TC·자동화를 덮어쓰지 않습니다.
 
-## 10. 제외 범위
+## 구현 순서
 
-- 모든 변경 유형과 모든 제품 기능의 자동 처리
-- 매 회귀 실행마다 전체 TC·코드 재생성
-- 자유로운 Agent 간 토론과 무제한 자동 수정
-- 사람 승인 없는 Baseline 승격
-- 완전한 Self-Healing 또는 모든 오류 자동 복구
-- Full Regression 전체 구현 주장
-- Slack·Notion·다중 모델 비교
+1. Product SRS 초기 기준 확정과 변경 요청 Schema
+2. Agent 1 Adapter·CP1
+3. Agent 2 Adapter·CP2·자동 인계
+4. 실제 화면 확인 자료·Agent 3·CP3·격리 시험
+5. 조건부 HUMAN_REVIEW 분기와 재개 기록
+6. 변경 검증·기존 회귀 후보 실행
+7. Agent 4 입력 정합화·최종 보고
+8. 정식 QA 자산 등록 승인 기록
+9. 서로 다른 변경 요청 2건으로 End-to-End 재검증
 
-## 11. 저장소 운영
+## MVP 완료 기준
 
-현재 저장소는 설계 문서를 관리합니다. 구현이 시작되면 문서와 코드를 같은 저장소에서 버전 관리하되, 실행 결과와 비밀값은 커밋하지 않습니다.
-
-    qa-agent-pipeline-v2/
-    ├─ README.md
-    ├─ 00_V2_DESIGN_OVERVIEW.md
-    ├─ 01_REVERSE_ENGINEERED_BASELINE_SRS.md
-    ├─ 02_CHANGE_REQUEST_INPUT_CONTRACT.md
-    ├─ 03_AGENT_IO_CONTRACTS.md
-    ├─ 04_CHECKPOINT_APPROVAL_POLICY.md
-    └─ 05_PROJECT1_COVERAGE_AUDIT.md
+- 서로 다른 요청에서 서로 다른 Agent 1·2 결과가 생성됩니다.
+- Agent 1 Artifact ID가 Agent 2 입력에 기록됩니다.
+- TC Step·Expected Result가 코드 Assertion에 추적됩니다.
+- 후보는 원본과 분리된 임시 위치에서 실행됩니다.
+- CP가 잡지 못하는 의미 판단만 조건부 사람 검토로 전환됩니다.
+- 제품·자동화·환경 오류를 구분합니다.
+- 실행 결과와 보고 수치가 일치합니다.
