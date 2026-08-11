@@ -1,0 +1,56 @@
+{
+  "checkpoint": "CP1",
+  "status": "PASS",
+  "checks": [
+    {
+      "rule_id": "CP1-001",
+      "status": "PASS",
+      "message": "변경 요청 ID가 일치합니다."
+    },
+    {
+      "rule_id": "CP1-002",
+      "status": "PASS",
+      "message": "대상 Requirement ID가 SRS와 일치합니다."
+    },
+    {
+      "rule_id": "CP1-003",
+      "status": "PASS",
+      "message": "지원 변경 유형 MODIFIED가 유지됐습니다."
+    },
+    {
+      "rule_id": "CP1-004",
+      "status": "PASS",
+      "message": "변경 전 값이 요청과 SRS 근거에 연결됩니다."
+    },
+    {
+      "rule_id": "CP1-005",
+      "status": "PASS",
+      "message": "변경 후 값이 입력 요청과 일치합니다."
+    },
+    {
+      "rule_id": "CP1-006",
+      "status": "PASS",
+      "message": "영향 Requirement ID가 SRS 범위 안에 있습니다."
+    },
+    {
+      "rule_id": "CP1-007",
+      "status": "PASS",
+      "message": "근거 문장이 실제 SRS 행에 존재합니다."
+    },
+    {
+      "rule_id": "CP1-008",
+      "status": "PASS",
+      "message": "검증 범위와 제외 범위가 분리됐습니다."
+    },
+    {
+      "rule_id": "CP1-009",
+      "status": "PASS",
+      "message": "정보 부족과 진행 판정이 일관됩니다."
+    },
+    {
+      "rule_id": "CP1-010",
+      "status": "PASS",
+      "message": "사용자 질문이 변경 요청의 명시 내용을 불필요하게 재확인하지 않습니다."
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+{
+  "request_id": "CR-20260811-001",
+  "change_type": "MODIFIED",
+  "target_requirement_id": "REQ-TEMP-001",
+  "before_condition": "16~30°C",
+  "after_condition": "AUTO 모드는 18~30°C, COOL·HEAT 모드는 16~30°C, FAN·DRY 모드는 온도 설정 비활성화",
+  "changed_fields": [
+    "temperature range policy",
+    "AUTO-mode out-of-range blocking behavior",
+    "blocked-request state retention",
+    "blocked-request Toast notification"
+  ],
+  "direct_impacts": [
+    {
+      "requirement_id": "REQ-TEMP-001",
+      "reason": "섭씨 설정 범위를 모드별로 변경하고, AUTO 모드의 18°C 미만 요청 차단·기존 설정 온도 유지·Toast 표시 정책을 적용해야 합니다."
+    }
+  ],
+  "related_impacts": [
+    {
+      "requirement_id": "REQ-MODE-002",
+      "reason": "FAN·DRY 모드의 온도 설정 비활성화 정책을 변경 후에도 유지해야 합니다."
+    },
+    {
+      "requirement_id": "REQ-STATE-001",
+      "reason": "차단된 AUTO 모드 요청 후 기존 설정 온도가 카드와 내부 상태에서 일치해야 합니다."
+    },
+    {
+      "requirement_id": "REQ-LOG-001",
+      "reason": "차단 안내 Toast는 주요 차단 이벤트 표시 요구사항과 관련됩니다."
+    }
+  ],
+  "verified_scope": [
+    "REQ-TEMP-001의 기존 전 범위 16~30°C 정책",
+    "REQ-MODE-002의 FAN·DRY 온도 입력 비활성화 정책",
+    "REQ-STATE-001의 카드·내부 setTemp 상태 일치 기준",
+    "REQ-LOG-001의 차단 이벤트 표시 기준"
+  ],
+  "excluded_scope": [],
+  "information_gaps": [],
+  "user_questions": [],
+  "evidence": [
+    {
+      "requirement_id": "REQ-TEMP-001",
+      "evidence_text": "섭씨 설정 범위는 16~30°C여야 합니다."
+    },
+    {
+      "requirement_id": "REQ-TEMP-001",
+      "evidence_text": "범위 밖 요청이 차단됩니다."
+    },
+    {
+      "requirement_id": "REQ-MODE-002",
+      "evidence_text": "FAN·DRY에서 온도 입력을 비활성화해야 합니다."
+    },
+    {
+      "requirement_id": "REQ-MODE-002",
+      "evidence_text": "버튼 disabled와 `---`가 확인됩니다."
+    },
+    {
+      "requirement_id": "REQ-STATE-001",
+      "evidence_text": "카드와 내부 상태가 일치해야 합니다."
+    },
+    {
+      "requirement_id": "REQ-STATE-001",
+      "evidence_text": "mode·status·setTemp 등 공통 값이 같습니다."
+    },
+    {
+      "requirement_id": "REQ-LOG-001",
+      "evidence_text": "주요 제어·차단·오류 이벤트를 표시해야 합니다."
+    },
+    {
+      "requirement_id": "REQ-LOG-001",
+      "evidence_text": "출처·시각·메시지가 존재합니다."
+    }
+  ],
+  "decision": "PROCEED"
+}
