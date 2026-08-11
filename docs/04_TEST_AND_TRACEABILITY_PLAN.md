@@ -55,7 +55,8 @@ TC-ENV-000은 현재 일반 첫 테스트이며 실패 시 후속 실행을 자�
 ### Agent 1·CP1
 
 - 유효한 MODIFIED 요청에서 SRS before와 요청 after를 분리합니다.
-- 없는 Requirement, before 불일치, after 누락과 근거 없는 기능을 차단합니다.
+- 없는 Requirement, before 불일치, after 누락과 현재 SRS·변경 요청 모두에 근거 없는 기능을 차단합니다.
+- 변경 요청에 이미 명시된 정책을 SRS에 없다는 이유로 다시 묻는 결과는 CP1 REVIEW로 전환합니다.
 - 알려진 GAP을 정상 정책으로 확정하면 REVIEW 또는 FAIL입니다.
 - 서로 다른 요청 2건이 다른 변경 분석을 만들어야 합니다.
 

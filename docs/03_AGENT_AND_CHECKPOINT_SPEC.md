@@ -51,53 +51,57 @@ Checkpoint는 구조와 명백한 근거 위반을 검사합니다. 간접 영�
 - 초기 제품 기준 문서
 - 지원 유형 MODIFIED
 
+현재 SRS는 변경 전 제품 상태의 기준이고, 변경 요청의 `after_value`·`description`·`acceptance_notes`는 변경 후 정책의 권한 있는 입력입니다. 변경 요청의 신규 값이나 UI 동작이 현재 SRS에 없다는 이유만으로 정보 부족으로 판정하지 않습니다.
+
 ### 출력 최소형
 
 ~~~json
 {
-  "change_request_id": "CR-...",
+  "request_id": "CR-...",
   "change_type": "MODIFIED",
-  "target_requirements": [
-    {
-      "requirement_id": "REQ-...",
-      "before": "SRS의 기존 조건",
-      "after": "요청의 변경 후 조건",
-      "changed_fields": ["..."],
-      "evidence": [
-        {"source": "product_srs", "reference": "REQ-..."},
-        {"source": "change_request", "reference": "requested_behavior"}
-      ]
-    }
+  "target_requirement_id": "REQ-...",
+  "before_condition": "SRS의 기존 조건",
+  "after_condition": "요청의 변경 후 조건",
+  "changed_fields": ["..."],
+  "direct_impacts": [
+    {"requirement_id": "REQ-...", "reason": "..."}
   ],
-  "direct_impacts": ["REQ-..."],
   "related_impacts": [
     {"requirement_id": "REQ-...", "reason": "..."}
   ],
-  "confirmed_scope": ["..."],
+  "verified_scope": ["..."],
   "excluded_scope": ["..."],
-  "open_questions": [],
-  "recommended_disposition": "PROCEED"
+  "information_gaps": [],
+  "user_questions": [],
+  "evidence": [
+    {"requirement_id": "REQ-...", "evidence_text": "SRS 원문 일부"}
+  ],
+  "decision": "PROCEED"
 }
 ~~~
 
 ### 권한과 금지
 
-- 영향 후보는 제안할 수 있지만 SRS를 수정하지 않습니다.
-- 없는 Requirement ID, 요청에 없는 after 값과 근거 없는 기능을 만들 수 없습니다.
-- 알려진 GAP을 정상 정책으로 확정할 수 없습니다.
+- 영향 후보는 제안할 수 있지만 SRS를 직접 수정하지 않습니다.
+- 변경 요청에 명시된 신규 값·동작·UI 표현은 변경 후 정책으로 사용합니다.
+- 현재 SRS와 변경 요청 모두에 없는 Requirement ID, after 값과 기능을 만들 수 없습니다.
+- 변경 요청에 이미 명시된 정책을 SRS에 없다는 이유만으로 다시 확인하지 않습니다.
+- 알려진 GAP을 변경 요청 근거 없이 정상 정책으로 확정할 수 없습니다.
 
 ## 5. Checkpoint 1
 
 | Rule ID | 검사 | 결과 |
 |---|---|---|
-| CP1-001 | Requirement ID가 SRS에 존재 | FAIL |
-| CP1-002 | before가 SRS와 일치 | FAIL |
-| CP1-003 | after가 변경 요청에 존재 | FAIL |
-| CP1-004 | change_type이 MODIFIED | FAIL |
-| CP1-005 | 모든 변경에 source·reference 존재 | FAIL |
-| CP1-006 | confirmed·excluded scope 미중복 | FAIL |
-| CP1-007 | GAP 정책 임의 확정 없음 | REVIEW 또는 FAIL |
-| CP1-008 | JSON Schema 유효 | ERROR |
+| CP1-001 | 분석 결과의 요청 ID가 입력과 일치 | FAIL |
+| CP1-002 | 대상 Requirement ID가 SRS에 존재하고 입력과 일치 | FAIL |
+| CP1-003 | change_type이 MODIFIED로 유지 | FAIL |
+| CP1-004 | before가 입력·대상 SRS 근거와 연결 | REVIEW 또는 FAIL |
+| CP1-005 | after가 변경 요청과 일치 | FAIL |
+| CP1-006 | 영향 ID가 SRS에 존재하고 대상 ID가 직접 영향에 포함 | FAIL |
+| CP1-007 | evidence가 SRS 원문과 일치하고 대상 근거를 포함 | FAIL |
+| CP1-008 | verified·excluded scope 미중복 | FAIL |
+| CP1-009 | 정보 부족·사용자 질문·진행 판정 일관성 | REVIEW |
+| CP1-010 | 변경 요청에 이미 명시된 정책을 불필요하게 재확인하지 않음 | REVIEW |
 
 간접 영향이 충분한지는 자동 PASS로 확정하지 않고 Finding으로 남깁니다.
 

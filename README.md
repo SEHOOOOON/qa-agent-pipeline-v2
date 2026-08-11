@@ -2,7 +2,7 @@
 
 운영 중인 가상 중앙제어 시스템에 **MODIFIED 변경 요청 1건**이 들어왔을 때, 실제 모델이 변경점을 분석하고 제품 기능 TC와 Playwright 자동화 코드 후보를 생성하는 흐름을 구현하려는 MVP입니다.
 
-> 현재 저장소는 **설계 문서 단계**입니다. 프로젝트 1의 가상 중앙제어기와 기존 테스트는 재사용 대상이지만, V2의 Live 모델 호출·Agent 인계·코드 생성 실행기는 아직 구현되지 않았습니다.
+> 현재 저장소는 **Agent 1·CP1 구현 단계**입니다. Agent 1 Live 모델 호출과 결정론적 CP1 검증은 실제 API로 확인했으며, Agent 2 이후 인계·코드 생성 실행기는 아직 구현되지 않았습니다.
 
 ## 해결하려는 문제
 
@@ -23,9 +23,10 @@ V2는 다음 세 연결만 우선 증명합니다.
 | 환경 사전 점검 | TC-ENV-000 존재, 후속 차단 Gate는 미구현 |
 | 분류·보고 | 프로젝트 1의 규칙 엔진 존재, V2 입력 계약 연동 필요 |
 | Product SRS | 실제 화면·코드 기준 초기 제품 기준 문서 작성 |
-| Agent 1·2 Live 모델 호출 | 미구현 |
+| Agent 1 Live 모델 호출·CP1 | 실제 API 호출과 CP1 10개 규칙 PASS 검증 완료 |
+| Agent 2 Live 모델 호출 | 미구현 |
 | Agent 3 코드 후보 생성 | 미구현 |
-| CP1~3·Run Orchestrator | 미구현 |
+| CP1·CP2·CP3·Run Orchestrator | CP1 구현, CP2·CP3·Orchestrator 미구현 |
 | 조건부 검토·정식 QA 자산 등록 승인·최종 보고 | 미구현 |
 
 ## MVP 프로세스
@@ -117,6 +118,27 @@ V2는 다음 세 연결만 우선 증명합니다.
 7. Agent 4 입력 정합화·최종 보고
 8. 정식 QA 자산 등록 승인 기록
 9. 서로 다른 변경 요청 2건으로 End-to-End 재검증
+
+## Agent 1 로컬 실행
+
+OpenAI Python SDK는 `OPENAI_API_KEY` 환경변수를 자동으로 읽습니다. API 키를 코드, JSON, Git 설정에 저장하지 않습니다.
+
+~~~powershell
+python -m pip install ".[test]"
+$env:OPENAI_API_KEY="본인의 API 키"
+python -m qa_pipeline_v2 agent1 --request examples/change_request.example.json
+~~~
+
+기본 모델은 `gpt-5.6-terra`입니다. 다른 모델을 시험할 때만 `--model` 또는 `OPENAI_MODEL`을 사용합니다.
+
+결과는 Git에서 제외되는 `runs/RUN-.../`에 저장됩니다.
+
+- `request.json`: 실제 입력
+- `agent1_change_analysis.json`: 모델의 구조화 분석
+- `checkpoint1.json`: 규칙별 PASS·REVIEW·FAIL
+- `run_manifest.json`: 모델·토큰 수·최종 상태
+
+예시 JSON의 변경 내용은 연결 확인용이며 대표 요구사항으로 고정하지 않습니다.
 
 ## MVP 완료 기준
 

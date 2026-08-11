@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qa-agent-pipeline-v2"
+version = "0.1.0"
+description = "변경 요구사항 기반 Agentic QA Pipeline V2"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "openai>=1.54,<3",
+  "pydantic>=2.8,<3",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<9"]
+
+[project.scripts]
+qa-pipeline-v2 = "qa_pipeline_v2.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
+
