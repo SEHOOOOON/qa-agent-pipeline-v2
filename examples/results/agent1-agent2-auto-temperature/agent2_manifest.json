@@ -1,0 +1,35 @@
+{
+    "run_id":  "RUN-20260812-132412-687EC2",
+    "source_stage":  "AGENT_1_CP1",
+    "stage":  "AGENT_2_CP2",
+    "status":  "PASS",
+    "model":  "gpt-5.6-terra",
+    "usage":  {
+                  "input_tokens":  6998,
+                  "output_tokens":  3268,
+                  "total_tokens":  10266
+              },
+    "attempts":  [
+                     {
+                         "attempt":  1,
+                         "status":  "FAIL",
+                         "model":  "gpt-5.6-terra",
+                         "usage":  {
+                                       "input_tokens":  3966,
+                                       "output_tokens":  3792,
+                                       "total_tokens":  7758
+                                   }
+                     },
+                     {
+                         "attempt":  2,
+                         "status":  "PASS",
+                         "model":  "gpt-5.6-terra",
+                         "usage":  {
+                                       "input_tokens":  6998,
+                                       "output_tokens":  3268,
+                                       "total_tokens":  10266
+                                   }
+                     }
+                 ],
+    "created_at":  "2026-08-12T13:37:06.619400+00:00"
+}

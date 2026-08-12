@@ -8,20 +8,26 @@
 
 ### 프로젝트 1에서 이미 있는 것
 
-- 16대 가상 중앙제어기
+- 16대 가상 중앙제어기와 QA 전용 상태 관찰 인터페이스
 - 사람이 작성한 Playwright 테스트 13건
 - 화면·내부 상태 일부 대조
 - 규칙 기반 결과 분류·보고 코드
-- Agent 1~4 역할과 Checkpoint UI 시연
+- Agent 1~4 역할과 Checkpoint의 Fixture 기반 UI 시연
 
 ### 아직 없는 것
 
-- Agent 1·2의 실제 모델 호출
-- Agent 1 출력의 Agent 2 자동 전달
+- 구조화된 기존 TC 목록과 Agent 2의 NEW·UPDATED·REGRESSION 비교
 - Agent 2 TC 기반 Agent 3 코드 생성
 - 생성 코드의 격리 실행
-- CP1~3 실행 코드, 조건부 검토와 정식 QA 자산 등록 승인 기록
+- CP3 실행 코드, 조건부 검토 UI와 정식 QA 자산 등록 승인 기록
 - V2 Run 단위 최종 보고
+
+## 현재 구현 경계
+
+- 구현 완료: Product SRS·연관 요구사항 파서, Agent 1·2 OpenAI Adapter, 구조화 JSON 자동 인계, CP1 10개 규칙, CP2 9개 규칙, 단계별 최대 1회 재작업과 Run 저장
+- 실행 확인: 한 로컬 Run에서 Agent 1 최종 PASS, Agent 2 최종 PASS, 제품 기능 TC 후보 5건 생성
+- 미구현: 기존 TC 비교, Agent 3·CP3, 전체 Orchestrator, 조건부 검토 재개 UI, V2 Agent 4 입력 계약과 End-to-End 실행
+- Project1 기존 구현 상태와 한계는 [Project1 기준 자산 감사](05_PROJECT1_BASELINE_AUDIT.md), 테스트 지원 인터페이스는 [QA 하네스 가이드](06_TEST_HARNESS_GUIDE.md)를 기준으로 합니다.
 
 ## 3. MVP 목표와 비목표
 
@@ -94,8 +100,8 @@ Checkpoint는 생성형 Agent가 아니라 결정론 검사기입니다. PASS �
 ### Agent 2 — 제품 기능 TC 설계
 
 - 무엇을 검증할지 정의합니다.
-- NEW·UPDATED·REGRESSION 후보를 구분합니다.
-- 사전조건, 행동, 기대 결과와 Requirement 근거를 작성합니다.
+- 현재는 기존 TC 구조화 목록이 없으므로 CHANGE_VALIDATION·RELATED_REGRESSION 목적만 구분합니다.
+- 사전조건, 행동, 기대 결과와 Requirement·Condition 근거를 작성합니다.
 - 상태 변경은 가능한 경우 UI와 내부 상태를 모두 기대 결과로 둡니다.
 
 ### Agent 3 — 자동화 코드 후보 생성

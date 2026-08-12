@@ -17,10 +17,11 @@ dependencies = [
 test = ["pytest>=8,<9"]
 
 [project.scripts]
-qa-pipeline-v2 = "qa_pipeline_v2.cli:main"
+qa-pipeline-v2 = "qa_pipeline_v2:main"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.setuptools]
+py-modules = ["qa_pipeline_v2"]
+package-dir = {"" = "src"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

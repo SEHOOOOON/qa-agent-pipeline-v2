@@ -2,9 +2,11 @@
 
 ## 1. 목적과 상태
 
-V2에서 새로 구현할 Agent 1~3, 기존 규칙 기반 Agent 4와 Checkpoint의 최소 계약을 정의합니다. **현재는 설계 명세이며 실행 코드가 완료된 상태가 아닙니다.**
+V2 Agent 1~3, 기존 규칙 기반 Agent 4와 Checkpoint의 최소 계약을 정의합니다. **Agent 1·CP1과 Agent 2·CP2는 구현·Live 실행을 확인했고, Agent 3 이후는 아직 설계 명세입니다.**
 
 다음 단계에는 화면 문구나 자유 형식 Markdown이 아니라 Schema 검증을 통과한 JSON만 전달합니다.
+
+제품 요구사항은 Product SRS, 기존 구현 상태는 Project1 기준 자산 감사, QA Drawer·Register·window.__vccs 사용법은 QA 하네스 가이드를 각각 기준으로 합니다. Agent는 QA 하네스 기능을 제품 기능으로 추가할 수 없습니다.
 
 ## 2. 공통 Envelope
 
@@ -48,7 +50,7 @@ Checkpoint는 구조와 명백한 근거 위반을 검사합니다. 간접 영�
 ### 입력
 
 - 변경 요청 JSON
-- 초기 제품 기준 문서
+- 초기 제품 기준 문서에서 파싱한 Requirement 행
 - 지원 유형 MODIFIED
 
 현재 SRS는 변경 전 제품 상태의 기준이고, 변경 요청의 `after_value`·`description`·`acceptance_notes`는 변경 후 정책의 권한 있는 입력입니다. 변경 요청의 신규 값이나 UI 동작이 현재 SRS에 없다는 이유만으로 정보 부족으로 판정하지 않습니다.
@@ -60,33 +62,39 @@ Checkpoint는 구조와 명백한 근거 위반을 검사합니다. 간접 영�
   "request_id": "CR-...",
   "change_type": "MODIFIED",
   "target_requirement_id": "REQ-...",
+  "change_summary": "Agent 2가 바로 이해할 수 있는 변경 요약",
   "before_condition": "SRS의 기존 조건",
   "after_condition": "요청의 변경 후 조건",
-  "changed_fields": ["..."],
-  "direct_impacts": [
-    {"requirement_id": "REQ-...", "reason": "..."}
+  "confirmed_conditions": [
+    {
+      "condition_id": "COND-001",
+      "statement": "TC 판정 기준으로 사용할 확정 조건",
+      "source_type": "CHANGE_REQUEST",
+      "source_text": "변경 요청의 원문 전체",
+      "requirement_ids": ["REQ-..."]
+    }
   ],
-  "related_impacts": [
-    {"requirement_id": "REQ-...", "reason": "..."}
+  "requirement_effects": [
+    {"requirement_id": "REQ-...", "relation": "MODIFIED", "reason": "..."},
+    {"requirement_id": "REQ-...", "relation": "VERIFY", "reason": "..."}
   ],
-  "verified_scope": ["..."],
   "excluded_scope": ["..."],
   "information_gaps": [],
   "user_questions": [],
-  "evidence": [
-    {"requirement_id": "REQ-...", "evidence_text": "SRS 원문 일부"}
-  ],
   "decision": "PROCEED"
 }
 ~~~
 
 ### 권한과 금지
 
+- 변경 요약과 확정 조건을 Agent 2가 제품 기능 TC의 입력으로 사용할 수 있게 정리합니다.
+- 변경 요청의 모든 인수 조건을 각각 하나의 확정 조건으로 전달합니다.
+- 확정 조건에는 변경 요청 또는 SRS의 실제 원문 출처를 붙입니다.
+- 대상 Requirement는 MODIFIED, 변경하지 않지만 함께 확인할 기존 기준은 VERIFY로 구분합니다.
 - 영향 후보는 제안할 수 있지만 SRS를 직접 수정하지 않습니다.
-- 변경 요청에 명시된 신규 값·동작·UI 표현은 변경 후 정책으로 사용합니다.
-- 현재 SRS와 변경 요청 모두에 없는 Requirement ID, after 값과 기능을 만들 수 없습니다.
+- 현재 SRS와 변경 요청 모두에 없는 Requirement ID, 값과 기능을 만들 수 없습니다.
 - 변경 요청에 이미 명시된 정책을 SRS에 없다는 이유만으로 다시 확인하지 않습니다.
-- 알려진 GAP을 변경 요청 근거 없이 정상 정책으로 확정할 수 없습니다.
+- 테스트케이스·테스트 절차·Playwright 코드를 작성하지 않습니다.
 
 ## 5. Checkpoint 1
 
@@ -97,87 +105,94 @@ Checkpoint는 구조와 명백한 근거 위반을 검사합니다. 간접 영�
 | CP1-003 | change_type이 MODIFIED로 유지 | FAIL |
 | CP1-004 | before가 입력·대상 SRS 근거와 연결 | REVIEW 또는 FAIL |
 | CP1-005 | after가 변경 요청과 일치 | FAIL |
-| CP1-006 | 영향 ID가 SRS에 존재하고 대상 ID가 직접 영향에 포함 | FAIL |
-| CP1-007 | evidence가 SRS 원문과 일치하고 대상 근거를 포함 | FAIL |
-| CP1-008 | verified·excluded scope 미중복 | FAIL |
-| CP1-009 | 정보 부족·사용자 질문·진행 판정 일관성 | REVIEW |
-| CP1-010 | 변경 요청에 이미 명시된 정책을 불필요하게 재확인하지 않음 | REVIEW |
+| CP1-006 | MODIFIED·VERIFY Requirement가 SRS에 존재하고 확정 조건과 연결 | FAIL |
+| CP1-007 | 확정 조건의 출처 원문이 변경 요청 또는 SRS에 존재 | FAIL |
+| CP1-008 | 변경 요청의 모든 acceptance_notes가 확정 조건에 포함 | FAIL |
+| CP1-009 | 확정 조건·제외 범위 분리 및 요청의 out_of_scope 보존 | FAIL |
+| CP1-010 | 정보 부족·사용자 질문·진행 판정 일관성 및 불필요한 재확인 방지 | REVIEW |
 
-간접 영향이 충분한지는 자동 PASS로 확정하지 않고 Finding으로 남깁니다.
+CP1은 확정 조건의 출처와 누락을 검사하지만 자연어 의미의 완전한 타당성까지 보장하지 않습니다.
 
 ## 6. Agent 2 — Product Test Designer
 
+### 현재 상태
+
+- OpenAI Responses API 구조화 출력 구현
+- CP1 PASS Run만 입력 가능
+- 같은 Run 폴더에 TC 후보·CP2·manifest 저장
+- CP2 FAIL 시 전체 TC 세트를 유지하며 최대 1회 재작업
+- 기존 TC 구조화 목록이 없으므로 NEW·UPDATED·DEPRECATED 판정은 아직 하지 않음
+
 ### 입력
 
-- CP1 통과 Agent 1 Artifact
-- 관련 SRS Requirement와 Acceptance Criteria
-- 기존 TC 목록
-- 3-Tier QA 기준
+- CP1을 통과한 agent1_change_analysis.json
+- Product SRS Requirement·Acceptance Criteria
+- Agent 1의 MODIFIED·VERIFY·NO_IMPACT와 확정 조건
 
 ### 출력 최소형
 
 ~~~json
 {
-  "source_change_analysis_id": "ART-...",
+  "request_id": "CR-...",
   "test_cases": [
     {
-      "tc_id": "TC-CAND-...",
-      "change_action": "NEW",
-      "requirement_ids": ["REQ-..."],
+      "tc_id": "TC-CAND-001",
       "title": "...",
-      "purpose": "...",
+      "purpose": "CHANGE_VALIDATION",
+      "test_type": "BOUNDARY",
+      "requirement_ids": ["REQ-..."],
+      "source_condition_ids": ["COND-..."],
       "preconditions": ["..."],
-      "steps": [{"order": 1, "action": "..."}],
+      "steps": ["..."],
       "expected_results": [
         {
-          "assertion_id": "AR-001",
-          "observable": "ui",
-          "expected": "...",
-          "source_requirement_id": "REQ-..."
+          "result_id": "ER-001",
+          "statement": "...",
+          "observation_layer": "UI",
+          "source_condition_ids": ["COND-..."]
         }
       ],
-      "cleanup": ["브라우저 Context 종료"],
-      "automation_candidate": true
+      "restore_steps": ["..."],
+      "automation_candidate": true,
+      "automation_reason": "..."
     }
   ],
-  "regression_candidates": ["TC-..."]
+  "coverage_summary": "..."
 }
 ~~~
-
-### 3-Tier 기준
-
-1. 공통 QA: 정상·예외·경계, 명확한 조건·행동·기대 결과
-2. 중앙제어: 모드·온도·잠금·오류·대상·비대상·상태 전이
-3. 기능 품질: 요구사항 근거·독립성·자동화 가능성·추적성
 
 ### 권한과 금지
 
 - 제품 기능 TC의 목적과 기대 결과를 설계합니다.
-- CP1이 검증한 범위 밖 동작, 알려진 결함을 정상값으로 사용하거나 근거 없는 UI 표현을 기대값으로 확정할 수 없습니다.
-- 기존 TC를 직접 삭제하지 않습니다.
+- 모든 Agent 1 확정 조건을 최소 한 개 TC와 기대 결과에 연결합니다.
+- 상태 정합성 TC는 UI·내부 상태를 함께 정의하고 알림 조건은 NOTIFICATION으로 구분합니다.
+- CP1 범위 밖 ID, 근거 없는 수치·문구, Playwright·Python 코드를 생성할 수 없습니다.
+- 기존 TC 비교 자산이 생기기 전에는 NEW·UPDATED·DEPRECATED를 주장하지 않습니다.
 
 ## 7. Checkpoint 2
 
-| Rule ID | 검사 | 결과 |
+| Rule ID | 현재 검사 | 결과 |
 |---|---|---|
-| CP2-001 | TC ID·change_action 유효 | FAIL |
-| CP2-002 | Requirement가 CP1 검증 범위에 존재 | FAIL |
-| CP2-003 | precondition·step·expected result 존재 | FAIL |
-| CP2-004 | 기대 결과별 Requirement 근거 존재 | FAIL |
-| CP2-005 | 상태 변경에 UI·내부 상태 관찰 정의 | FAIL 또는 REVIEW |
-| CP2-006 | GAP을 정상 기대값으로 사용하지 않음 | FAIL |
-| CP2-007 | 기존 TC와 명시적 중복 | REVIEW |
-| CP2-008 | 비대상 불변 등 변경 위험 반영 | REVIEW |
-| CP2-009 | Schema 유효 | ERROR |
+| CP2-001 | Agent 1·2 요청 ID 일치 | FAIL |
+| CP2-002 | TC·Expected Result ID와 제목 고유성 | FAIL |
+| CP2-003 | Requirement·Condition이 CP1 활성 범위에 존재 | FAIL |
+| CP2-004 | 모든 Agent 1 확정 조건의 TC 반영 | FAIL |
+| CP2-005 | TC→Requirement·Condition→Expected Result 추적 연결 | FAIL |
+| CP2-006 | REQ-STATE-001 또는 STATE_CONSISTENCY 유형의 UI·내부 상태 이중 검증 | FAIL |
+| CP2-007 | REQ-NOTIFY-001 조건의 NOTIFICATION 기대 결과 | FAIL |
+| CP2-008 | MODIFIED·VERIFY Requirement 범위와 변경 검증 TC 존재 | FAIL |
+| CP2-009 | 제품 TC에 Playwright·Python·무효 Assertion 혼입 금지 | FAIL |
 
-기준 미달 시 Rule ID와 누락 항목만 제시해 Agent 2에 최대 1회 재작업을 요청합니다. Checkpoint가 기대값을 대신 작성하지 않습니다.
+기준 미달 시 Rule ID와 실패 메시지만 제시해 최대 1회 재작업합니다. 재작업은 이전 전체 TC 세트를 반환해야 하며, Checkpoint가 삭제를 요구하지 않은 TC를 제거할 수 없습니다.
+
+CP2 PASS는 구조·ID·명시적 추적 규칙 통과를 뜻합니다. 자연어 의미, 모드·경계 조합의 충분성, 간접 영향의 최종 타당성은 사람의 마지막 검토 범위입니다.
 
 ## 8. Agent 3 — Automation Engineer
 
 ### 입력
 
 - CP2 통과 TC
-- 관련 SRS
+- 관련 Product SRS Requirement
 - 프로젝트 1 기존 기준 자동화 코드
 - 실제 UI Selector Inventory
 - `window.__vccs`에서 읽을 수 있는 필드

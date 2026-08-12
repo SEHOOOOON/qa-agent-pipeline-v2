@@ -1,0 +1,18 @@
+{
+  "request_id": "CR-20260811-001",
+  "change_type": "MODIFIED",
+  "target_requirement_id": "REQ-TEMP-001",
+  "before_value": "16~30°C",
+  "after_value": "AUTO 모드는 18~30°C, COOL·HEAT 모드는 16~30°C, FAN·DRY 모드는 온도 설정 비활성화",
+  "description": "AUTO 모드의 설정 온도 범위는 18~30°C로 제한합니다. AUTO 모드에서 18°C 미만의 온도를 요청하면 적용을 차단하고, 기존 설정 온도를 유지하며 차단 안내 Toast를 표시합니다. COOL·HEAT 모드는 기존 16~30°C 범위를 유지하고, FAN·DRY 모드는 기존과 같이 온도 설정을 비활성화합니다.",
+  "reason": "AUTO 모드의 최저 설정 온도 정책 변경",
+  "acceptance_notes": [
+    "AUTO 모드에서 18°C는 허용합니다.",
+    "AUTO 모드에서 18°C 미만 요청은 적용하지 않습니다.",
+    "차단 시 기존 설정 온도를 유지합니다.",
+    "차단 안내 Toast를 표시합니다.",
+    "COOL·HEAT 모드는 16~30°C 범위를 유지합니다.",
+    "FAN·DRY 모드는 기존과 같이 온도 설정을 비활성화합니다."
+  ],
+  "out_of_scope": []
+}

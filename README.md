@@ -2,7 +2,7 @@
 
 운영 중인 가상 중앙제어 시스템에 **MODIFIED 변경 요청 1건**이 들어왔을 때, 실제 모델이 변경점을 분석하고 제품 기능 TC와 Playwright 자동화 코드 후보를 생성하는 흐름을 구현하려는 MVP입니다.
 
-> 현재 저장소는 **Agent 1·CP1 구현 단계**입니다. Agent 1 Live 모델 호출과 결정론적 CP1 검증은 실제 API로 확인했으며, Agent 2 이후 인계·코드 생성 실행기는 아직 구현되지 않았습니다.
+> 현재 저장소는 **Agent 1·CP1 → Agent 2·CP2 Live 인계 구현 단계**입니다. 같은 Run에서 실제 모델 호출, 구조화 JSON 전달, 결정론적 Checkpoint와 최대 1회 재작업을 확인했습니다. Agent 3 코드 생성 이후는 아직 구현되지 않았습니다.
 
 ## 해결하려는 문제
 
@@ -23,10 +23,10 @@ V2는 다음 세 연결만 우선 증명합니다.
 | 환경 사전 점검 | TC-ENV-000 존재, 후속 차단 Gate는 미구현 |
 | 분류·보고 | 프로젝트 1의 규칙 엔진 존재, V2 입력 계약 연동 필요 |
 | Product SRS | 실제 화면·코드 기준 초기 제품 기준 문서 작성 |
-| Agent 1 Live 모델 호출·CP1 | 실제 API 호출과 CP1 10개 규칙 PASS 검증 완료 |
-| Agent 2 Live 모델 호출 | 미구현 |
+| Agent 1 Live 모델 호출·CP1 | SRS 연관 요구사항 포함 구조화 분석, CP1 10개 규칙, 실패 시 최대 1회 재작업 구현·실행 확인 |
+| Agent 2 Live 모델 호출 | CP1 PASS 산출물 자동 입력, 제품 TC 후보 생성, 실패 시 최대 1회 재작업 구현·실행 확인 |
 | Agent 3 코드 후보 생성 | 미구현 |
-| CP1·CP2·CP3·Run Orchestrator | CP1 구현, CP2·CP3·Orchestrator 미구현 |
+| CP1·CP2·CP3·Run Orchestrator | CP1·CP2 구현, CP3·전체 Orchestrator 미구현 |
 | 조건부 검토·정식 QA 자산 등록 승인·최종 보고 | 미구현 |
 
 ## MVP 프로세스
@@ -34,7 +34,7 @@ V2는 다음 세 연결만 우선 증명합니다.
 ~~~text
 변경 요청
   -> Agent 1 변경 분석
-  -> CP1 ID·before·after·근거 검사
+  -> CP1 ID·before·after·확정 조건 출처·인수 조건 누락 검사
   -> Agent 2 제품 기능 TC 설계
   -> CP2 구조·추적성·제품 기준 검사
   -> Agent 3 실제 화면 확인·Playwright 코드 후보 생성
@@ -51,16 +51,18 @@ V2는 다음 세 연결만 우선 증명합니다.
 
 | 문서 | 역할 |
 |---|---|
-| [제품 SRS](docs/01_PRODUCT_SRS.md) | 실제 프로젝트 1 화면·코드에서 확인한 초기 제품 기준 문서 |
+| [제품 SRS](docs/01_PRODUCT_SRS.md) | 변경 분석에 사용하는 제품 기대 동작과 인수 기준 |
 | [V2 MVP 설계](docs/02_V2_MVP_DESIGN.md) | 구현 범위, 단계와 종료선 |
 | [Agent·Checkpoint 명세](docs/03_AGENT_AND_CHECKPOINT_SPEC.md) | 입출력 계약과 최소 판정 규칙 |
-| [테스트·추적성 계획](docs/04_TEST_AND_TRACEABILITY_PLAN.md) | 기존 13개 TC 분리와 V2 검증 계획 |
+| [테스트·추적성 계획](docs/04_TEST_AND_TRACEABILITY_PLAN.md) | V2 단계별 검증·증거·완료 기준 |
+| [Project1 기준 자산 감사](docs/05_PROJECT1_BASELINE_AUDIT.md) | 기존 구현·13개 TC·Coverage·알려진 한계 |
+| [QA 하네스 가이드](docs/06_TEST_HARNESS_GUIDE.md) | QA Drawer·Register·window.__vccs 사용 경계 |
 
 ## 용어
 
 - **제품 기능 TC**: Agent 2가 만드는 조건·행동·기대 결과
 - **자동화 코드 후보**: Agent 3가 Checkpoint를 통과한 TC를 Playwright Python으로 구현한 검증 전 코드
-- **초기 제품 기준 문서**: 현재 화면·코드에서 확인한 SRS·TC로, 변경 전후를 비교할 출발점
+- **초기 제품 기준 문서**: 화면 정책과 확인 가능한 제품 근거로 정리한 기대 동작으로, 현재 코드와 다르면 감사 문서에 구현 불일치를 남기는 변경 전 출발점
 - **기존 기준 자동화 코드**: 프로젝트 1에서 사람이 작성했고 기존 회귀 검증에 재사용하는 Playwright 코드
 - **제품 기능 회귀 후보**: 기존 7건 중 파이프라인 검증용 고정 사례와 근거 부족 TC를 제외한 테스트
 - **파이프라인 검증용 고정 사례**: 결과 분류·차단 흐름을 확인하기 위해 의도적으로 유지하는 사례
@@ -76,7 +78,7 @@ V2는 다음 세 연결만 우선 증명합니다.
 - Agent 1→2 구조화 JSON 전달
 - 신규 또는 수정 TC 최소 1건
 - Agent 3 Playwright Python 코드 후보 최소 1건
-- 기존 UI Selector와 `window.__vccs` 읽기 인터페이스 활용
+- 기존 UI Selector와 테스트 전용 `window.__vccs` 읽기 인터페이스 활용
 - CP1~3의 구조·근거·금지 패턴 검사
 - 임시 폴더에서 후보 코드 1회 시험
 - Checkpoint 통과 시 중간 승인 없이 자동 진행
@@ -106,6 +108,8 @@ V2는 다음 세 연결만 우선 증명합니다.
 - Register는 실제 프로토콜 레지스터가 아니라 HTML 시뮬레이터입니다.
 - TC-ENV-000은 현재 사전 점검 사례이며 후속 차단 Gate가 아닙니다.
 - 정식 QA 자산 등록 승인 전 기존 SRS·TC·자동화를 덮어쓰지 않습니다.
+- Project1은 Fixture 기반 Workflow Prototype이며, Agent 1·2 Live 생성과 Agent 3 코드 생성은 V2에서 보완합니다.
+- 제품 SRS와 QA 하네스·기존 구현 감사 내용을 별도 문서로 관리합니다.
 
 ## 구현 순서
 
@@ -119,7 +123,26 @@ V2는 다음 세 연결만 우선 증명합니다.
 8. 정식 QA 자산 등록 승인 기록
 9. 서로 다른 변경 요청 2건으로 End-to-End 재검증
 
-## Agent 1 로컬 실행
+## 저장소 구조
+
+~~~text
+qa-agent-pipeline-v2/
+├─ docs/                         # SRS·MVP 설계·Agent/Checkpoint 계약·테스트 계획
+├─ examples/
+│  └─ results/                  # API 키를 제외한 공개 실행 결과
+├─ src/
+│  └─ qa_pipeline_v2.py         # 데이터 계약·Agent 1/2·CP1/2·CLI
+├─ tests/
+│  └─ test_pipeline.py          # SRS·Agent·Checkpoint 통합 회귀 테스트
+├─ runs/                        # 로컬 원본 실행 결과(Git 제외)
+├─ pyproject.toml               # 의존성·실행 명령·테스트 설정
+└─ README.md
+~~~
+
+현재 구현 규모에서는 한 핵심 모듈과 한 테스트 파일이 역할을 찾기 가장 쉽습니다. Agent 3 격리 실행처럼 독립 보안 경계가 실제로 생길 때만 파일을 다시 분리합니다.
+
+실제 Live Run의 공개 가능한 최종 산출물은 [examples/results/agent1-agent2-auto-temperature](examples/results/agent1-agent2-auto-temperature/)에서 확인할 수 있습니다.
+## Agent 1·2 로컬 실행
 
 OpenAI Python SDK는 `OPENAI_API_KEY` 환경변수를 자동으로 읽습니다. API 키를 코드, JSON, Git 설정에 저장하지 않습니다.
 
@@ -127,6 +150,7 @@ OpenAI Python SDK는 `OPENAI_API_KEY` 환경변수를 자동으로 읽습니다.
 python -m pip install ".[test]"
 $env:OPENAI_API_KEY="본인의 API 키"
 python -m qa_pipeline_v2 agent1 --request examples/change_request.example.json
+python -m qa_pipeline_v2 agent2 --run-id "Agent 1이 출력한 RUN-..."
 ~~~
 
 기본 모델은 `gpt-5.6-terra`입니다. 다른 모델을 시험할 때만 `--model` 또는 `OPENAI_MODEL`을 사용합니다.
@@ -136,7 +160,10 @@ python -m qa_pipeline_v2 agent1 --request examples/change_request.example.json
 - `request.json`: 실제 입력
 - `agent1_change_analysis.json`: 모델의 구조화 분석
 - `checkpoint1.json`: 규칙별 PASS·REVIEW·FAIL
-- `run_manifest.json`: 모델·토큰 수·최종 상태
+- `run_manifest.json`: Agent 1 모델·시도별 토큰 수·최종 상태
+- `agent2_test_design.json`: Agent 2가 만든 제품 기능 TC 후보
+- `checkpoint2.json`: CP2 규칙별 판정
+- `agent2_manifest.json`: Agent 2 모델·시도별 토큰 수·최종 상태
 
 예시 JSON의 변경 내용은 연결 확인용이며 대표 요구사항으로 고정하지 않습니다.
 
