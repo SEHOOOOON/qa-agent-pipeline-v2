@@ -1,6 +1,6 @@
 {
   "checkpoint": "CP2",
-  "status": "PASS",
+  "status": "FAIL",
   "checks": [
     {
       "rule_id": "CP2-001",
@@ -9,8 +9,8 @@
     },
     {
       "rule_id": "CP2-002",
-      "status": "PASS",
-      "message": "TC·기대 결과 ID와 제목이 고유합니다."
+      "status": "FAIL",
+      "message": "TC·기대 결과 ID 또는 제목이 중복됩니다."
     },
     {
       "rule_id": "CP2-003",
@@ -29,8 +29,8 @@
     },
     {
       "rule_id": "CP2-006",
-      "status": "PASS",
-      "message": "상태 관련 TC가 UI·내부 상태를 함께 검증합니다."
+      "status": "FAIL",
+      "message": "상태 관련 TC에 UI·내부 상태 이중 검증이 누락됐습니다: TC-CAND-011, TC-CAND-012"
     },
     {
       "rule_id": "CP2-007",
@@ -49,13 +49,13 @@
     },
     {
       "rule_id": "CP2-010",
-      "status": "PASS",
-      "message": "실행에 필요한 대상 역할과 시험 데이터가 구조화됐습니다."
+      "status": "FAIL",
+      "message": "경계·예외·상태 TC의 구조화된 요청 시험 데이터가 없습니다: TC-CAND-011, TC-CAND-012"
     },
     {
       "rule_id": "CP2-011",
       "status": "PASS",
-      "message": "차단 없는 참고 사항 4건을 기록했습니다."
+      "message": "차단 없는 참고 사항 3건을 기록했습니다."
     }
   ]
 }

@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import argparse
+import ast
+import hashlib
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -15,7 +21,7 @@ from typing import Annotated, Any
 from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, model_validator
 
-__version__ = "0.1.0"
+__version__ = "0.3.0"
 
 # ---------------------------------------------------------------------------
 # 데이터 계약
@@ -46,6 +52,12 @@ class CheckStatus(str, Enum):
     ERROR = "ERROR"
 
 
+class HandoffStatus(str, Enum):
+    CONTINUE = "CONTINUE"
+    PAUSE = "PAUSE"
+    BLOCKED = "BLOCKED"
+
+
 class ConditionSource(str, Enum):
     CHANGE_REQUEST = "CHANGE_REQUEST"
     SRS = "SRS"
@@ -53,6 +65,7 @@ class ConditionSource(str, Enum):
 
 class RequirementRelation(str, Enum):
     MODIFIED = "MODIFIED"
+    UPDATE_REQUIRED = "UPDATE_REQUIRED"
     VERIFY = "VERIFY"
     NO_IMPACT = "NO_IMPACT"
 
@@ -120,6 +133,7 @@ class CheckResult(StrictModel):
 class Checkpoint1Result(StrictModel):
     checkpoint: str = "CP1"
     status: CheckStatus
+    handoff_status: HandoffStatus
     checks: list[CheckResult] = Field(min_length=1)
 
 
@@ -142,6 +156,19 @@ class ObservationLayer(str, Enum):
     NOTIFICATION = "NOTIFICATION"
 
 
+class ControlPath(str, Enum):
+    CENTRAL = "CENTRAL"
+    LOCAL = "LOCAL"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+
+
+class TestData(StrictModel):
+    initial_mode: NonEmptyStr | None = None
+    requested_mode: NonEmptyStr | None = None
+    initial_temperature_c: float | None = None
+    requested_temperature_c: float | None = None
+
+
 class ExpectedResult(StrictModel):
     result_id: Annotated[str, StringConstraints(pattern=r"^ER-\d{3}$")]
     statement: NonEmptyStr
@@ -160,24 +187,140 @@ class ProductTestCaseCandidate(StrictModel):
     source_condition_ids: list[
         Annotated[str, StringConstraints(pattern=r"^COND-\d{3}$")]
     ] = Field(min_length=1)
+    control_path: ControlPath
+    target_role: NonEmptyStr
+    test_data: TestData
     preconditions: list[NonEmptyStr] = Field(min_length=1)
     steps: list[NonEmptyStr] = Field(min_length=1)
     expected_results: list[ExpectedResult] = Field(min_length=1)
-    restore_steps: list[NonEmptyStr] = Field(min_length=1)
+    restore_required: bool
+    restore_steps: list[NonEmptyStr] = Field(default_factory=list)
     automation_candidate: bool
     automation_reason: NonEmptyStr
+
+    @model_validator(mode="after")
+    def restore_contract_must_be_consistent(self) -> "ProductTestCaseCandidate":
+        if self.restore_required and not self.restore_steps:
+            raise ValueError("restore_required가 true이면 restore_steps가 필요합니다.")
+        if not self.restore_required and self.restore_steps:
+            raise ValueError("restore_required가 false이면 restore_steps는 비워야 합니다.")
+        return self
 
 
 class Agent2TestDesign(StrictModel):
     request_id: NonEmptyStr
     test_cases: list[ProductTestCaseCandidate] = Field(min_length=1)
     coverage_summary: NonEmptyStr
+    coverage_notes: list[NonEmptyStr] = Field(default_factory=list)
+    human_review_notes: list[NonEmptyStr] = Field(default_factory=list)
 
 
 class Checkpoint2Result(StrictModel):
     checkpoint: str = "CP2"
     status: CheckStatus
     checks: list[CheckResult] = Field(min_length=1)
+
+class AutomationPhase(str, Enum):
+    PRECONDITION = "PRECONDITION"
+    TEST = "TEST"
+    RESTORE = "RESTORE"
+
+
+class AutomationActionType(str, Enum):
+    SELECT_DEVICE = "SELECT_DEVICE"
+    SET_MODE = "SET_MODE"
+    SET_TEMPERATURE = "SET_TEMPERATURE"
+    APPLY_COMMANDS = "APPLY_COMMANDS"
+
+
+class AssertionStrategy(str, Enum):
+    UI_TEMPERATURE = "UI_TEMPERATURE"
+    INTERNAL_SET_TEMP = "INTERNAL_SET_TEMP"
+    TOAST_VISIBLE = "TOAST_VISIBLE"
+    CONTROLS_DISABLED = "CONTROLS_DISABLED"
+    DISABLED_TEMPERATURE_TEXT = "DISABLED_TEMPERATURE_TEXT"
+
+
+class AutomationCandidateStatus(str, Enum):
+    READY_FOR_EXECUTION = "READY_FOR_EXECUTION"
+    PRODUCT_MISMATCH_DETECTED = "PRODUCT_MISMATCH_DETECTED"
+    REVISION_REQUIRED = "REVISION_REQUIRED"
+    TRIAL_FAILED = "TRIAL_FAILED"
+    NOT_AUTOMATABLE = "NOT_AUTOMATABLE"
+    BLOCKED = "BLOCKED"
+
+
+class TrialOutcome(str, Enum):
+    PASS = "PASS"
+    PRODUCT_MISMATCH_CANDIDATE = "PRODUCT_MISMATCH_CANDIDATE"
+    AUTOMATION_ERROR = "AUTOMATION_ERROR"
+    ENVIRONMENT_ERROR = "ENVIRONMENT_ERROR"
+    TIMEOUT = "TIMEOUT"
+
+
+class ObservedUiElement(StrictModel):
+    selector: NonEmptyStr
+    tag: NonEmptyStr
+    text: str = ""
+    visible: bool
+    enabled: bool
+    action_hint: NonEmptyStr
+
+
+class UiObservation(StrictModel):
+    target_file: NonEmptyStr
+    target_sha256: NonEmptyStr
+    page_title: NonEmptyStr
+    elements: list[ObservedUiElement] = Field(min_length=1)
+    harness_keys: list[NonEmptyStr] = Field(min_length=1)
+    observed_at: NonEmptyStr
+    observer: str = "python-playwright"
+
+
+class AutomationAction(StrictModel):
+    action_id: Annotated[str, StringConstraints(pattern=r"^ACT-\d{3}$")]
+    phase: AutomationPhase
+    action_type: AutomationActionType
+    selector: NonEmptyStr
+    value: str | float | int | None = None
+    source_text: NonEmptyStr
+
+
+class AutomationAssertion(StrictModel):
+    result_id: Annotated[str, StringConstraints(pattern=r"^ER-\d{3}$")]
+    observation_layer: ObservationLayer
+    strategy: AssertionStrategy
+    selector: NonEmptyStr
+    expected_number: float | None = None
+    expected_text: str | None = None
+
+
+class Agent3AutomationPlan(StrictModel):
+    tc_id: Annotated[str, StringConstraints(pattern=r"^TC-CAND-\d{3}$")]
+    target_device_id: int = Field(ge=1, le=16)
+    summary: NonEmptyStr
+    actions: list[AutomationAction] = Field(min_length=1)
+    assertions: list[AutomationAssertion] = Field(min_length=1)
+    technical_notes: list[NonEmptyStr] = Field(default_factory=list)
+
+
+class Checkpoint3Result(StrictModel):
+    checkpoint: str = "CP3"
+    status: CheckStatus
+    candidate_status: AutomationCandidateStatus
+    checks: list[CheckResult] = Field(min_length=1)
+
+
+class Agent3TrialResult(StrictModel):
+    outcome: TrialOutcome
+    exit_code: int | None
+    duration_ms: int = Field(ge=0)
+    stdout_file: NonEmptyStr
+    stderr_file: NonEmptyStr
+    screenshot_file: str | None = None
+    trace_file: str | None = None
+    evidence_complete: bool
+
 
 # ---------------------------------------------------------------------------
 # Product SRS 로더
@@ -271,13 +414,13 @@ AGENT1_SYSTEM_INSTRUCTIONS = """
 4. before_condition과 after_condition은 요청 값을 바꾸거나 보완하지 않습니다.
 5. change_summary는 Agent 2가 변경 목적을 바로 이해할 수 있게 한두 문장으로 작성합니다.
 6. confirmed_conditions에는 Agent 2가 TC의 판정 기준으로 사용할 수 있는 확정 조건만 한 항목씩 분리합니다. 테스트 절차나 새로운 기대값은 만들지 않습니다.
-7. acceptance_notes의 모든 항목을 각각 confirmed_conditions에 포함하고 source_type을 CHANGE_REQUEST, source_text를 해당 원문 전체로 기록합니다.
+7. acceptance_notes의 모든 항목은 각각 별도 confirmed_condition으로 만들고 source_text에 해당 인수 조건 원문 전체를 한 글자도 합치거나 바꾸지 않고 기록합니다. 그 밖에 after_value와 description에만 있는 변경 후 범위·경계·모드별 정책도 별도 조건으로 포함합니다. 특히 하한~상한 범위는 두 경계를 모두 전달하고, 추가 조건의 source_type은 CHANGE_REQUEST, source_text는 해당 요청의 연속된 원문으로 기록합니다.
 8. 기존 SRS 조건을 사용할 때는 source_type을 SRS로 지정하고 source_text는 연결 Requirement의 요구사항 또는 인수 기준에서 연속된 원문 일부를 그대로 사용합니다.
 9. 각 confirmed_condition의 requirement_ids와 requirement_effects에는 제공된 SRS에 존재하는 ID만 사용합니다.
 10. target_requirement_id는 requirement_effects에서 MODIFIED로 분류합니다.
-11. 대상 Requirement의 related_requirement_ids와 변경 요청이 직접 언급하는 기존 Requirement를 모두 검토합니다. 함께 검증할 기준은 VERIFY, 이번 변경과 무관한 기준은 NO_IMPACT로 분류하고 이유를 작성합니다. 연관 항목을 조용히 생략하지 않습니다.
-12. MODIFIED 또는 VERIFY로 분류한 모든 Requirement는 confirmed_conditions의 requirement_ids에 최소 한 번 연결하고, 변경 요청 또는 해당 SRS의 검증 가능한 원문 조건을 함께 전달합니다.
-13. VERIFY로 분류할 Requirement에서 전달할 검증 조건 원문을 찾지 못하면 이유만 추측해 VERIFY로 두지 말고 NO_IMPACT로 분류합니다.
+11. 대상 Requirement의 related_requirement_ids와 변경 요청이 직접 언급하는 기존 Requirement를 모두 검토합니다. 변경 후 정책 때문에 기존 문장이나 인수 기준의 수정이 필요한 연관 Requirement는 UPDATE_REQUIRED, 문서는 유지하되 회귀 확인이 필요한 기준은 VERIFY, 이번 변경과 무관한 기준은 NO_IMPACT로 분류하고 이유를 작성합니다. 연관 항목을 조용히 생략하지 않습니다.
+12. MODIFIED, UPDATE_REQUIRED 또는 VERIFY로 분류한 모든 Requirement는 confirmed_conditions의 requirement_ids에 최소 한 번 연결하고, 변경 요청 또는 해당 SRS의 검증 가능한 원문 조건을 함께 전달합니다.
+13. VERIFY로 분류할 Requirement에서 전달할 검증 조건 원문을 찾지 못하면 이유만 추측해 VERIFY로 두지 말고 NO_IMPACT로 분류합니다. UPDATE_REQUIRED는 변경 요청과 기존 SRS가 실제로 충돌하는 경우에만 사용합니다.
 14. NO_IMPACT Requirement는 confirmed_conditions의 requirement_ids에 연결하지 않습니다.
 15. excluded_scope에는 요청에 명시된 제외 범위와, 요청·SRS 근거로 이번 변경과 무관하다고 명확히 구분할 수 있는 범위만 기록합니다.
 16. 변경 요청 내부의 충돌, 필수 기대 동작 누락 또는 대상 Requirement 불일치가 있을 때만 information_gaps와 user_questions에 기록합니다.
@@ -390,6 +533,16 @@ def _terms(value: str) -> set[str]:
         for token in re.findall(r"[가-힣A-Za-z0-9°%._~+·-]{2,}", value)
     }
 
+
+def _temperature_ranges(value: str) -> set[tuple[float, float]]:
+    return {
+        (float(match.group(1)), float(match.group(2)))
+        for match in re.finditer(
+            r"(?<!\d)(-?\d+(?:\.\d+)?)\s*~\s*(-?\d+(?:\.\d+)?)\s*°?\s*C",
+            value,
+            flags=re.IGNORECASE,
+        )
+    }
 
 def _request_authority_text(request: ChangeRequest) -> str:
     return " ".join(
@@ -603,14 +756,31 @@ def evaluate_checkpoint1(
         for note in request.acceptance_notes
         if not any(_normalize(note) == _normalize(source) for source in change_request_sources)
     ]
-    if missing_acceptance_notes:
+    required_ranges = _temperature_ranges(f"{request.after_value} {request.description}")
+    delivered_ranges = _temperature_ranges(
+        " ".join(
+            f"{condition.statement} {condition.source_text}"
+            for condition in analysis.confirmed_conditions
+            if condition.source_type == ConditionSource.CHANGE_REQUEST
+        )
+    )
+    missing_ranges = sorted(required_ranges - delivered_ranges)
+    if missing_acceptance_notes or missing_ranges:
+        details = []
+        if missing_acceptance_notes:
+            details.append("인수 조건 원문=" + " | ".join(missing_acceptance_notes))
+        if missing_ranges:
+            details.append(
+                "변경 후 온도 범위 "
+                + ", ".join(f"{low:g}~{high:g}°C" for low, high in missing_ranges)
+            )
         add(
             "CP1-008",
             CheckStatus.FAIL,
-            f"Agent 2 전달 조건에서 누락된 인수 조건이 {len(missing_acceptance_notes)}개 있습니다.",
+            "Agent 2 전달 조건에서 누락된 항목: " + "; ".join(details),
         )
     else:
-        add("CP1-008", CheckStatus.PASS, "변경 요청의 인수 조건이 모두 확정 조건으로 전달됩니다.")
+        add("CP1-008", CheckStatus.PASS, "변경 요청의 인수 조건과 변경 후 범위가 모두 전달됩니다.")
 
     confirmed_statements = {_normalize(item.statement) for item in analysis.confirmed_conditions}
     excluded = {_normalize(item) for item in analysis.excluded_scope}
@@ -662,7 +832,25 @@ def evaluate_checkpoint1(
         status = CheckStatus.REVIEW
     else:
         status = CheckStatus.PASS
-    return Checkpoint1Result(status=status, checks=checks)
+    if status in {CheckStatus.FAIL, CheckStatus.ERROR}:
+        handoff_status = HandoffStatus.BLOCKED
+    elif status == CheckStatus.REVIEW:
+        handoff_status = HandoffStatus.PAUSE
+    elif analysis.decision == AnalysisDecision.PROCEED:
+        handoff_status = HandoffStatus.CONTINUE
+    elif analysis.decision in {
+        AnalysisDecision.PARTIAL_PROCEED,
+        AnalysisDecision.WAITING_FOR_USER,
+    }:
+        # 현재 MVP는 승인 범위만 분리 실행하거나 사용자 답변 후 재개하는 기능이 없다.
+        handoff_status = HandoffStatus.PAUSE
+    else:
+        handoff_status = HandoffStatus.BLOCKED
+    return Checkpoint1Result(
+        status=status,
+        handoff_status=handoff_status,
+        checks=checks,
+    )
 
 # ---------------------------------------------------------------------------
 # Agent 2: 제품 기능 테스트케이스 설계
@@ -677,18 +865,27 @@ AGENT2_SYSTEM_INSTRUCTIONS = """
 - 출력은 사람의 마지막 승인 전 변경 검증용 제품 TC 후보입니다.
 
 반드시 지킬 규칙:
-1. Agent 1의 confirmed_conditions와 제공된 SRS만 사실 근거로 사용합니다.
+1. 검증된 변경 요청 원문, Agent 1의 confirmed_conditions와 고정된 SRS만 사실 근거로 사용합니다.
 2. requirement_effects가 NO_IMPACT인 Requirement는 테스트 범위에 포함하지 않습니다.
-3. 모든 confirmed_condition을 최소 한 개 TC의 source_condition_ids로 반영합니다.
-4. 모든 기대 결과는 source_condition_ids로 근거를 연결합니다. 근거에 없는 수치·시간·문구·UI 동작을 추가하지 않습니다.
-5. 한 TC에는 하나의 분명한 검증 목적을 두고 정상·경계·예외·상태 정합성 관점을 필요 범위에서 선택합니다.
-6. 상태 변경 또는 차단을 검증하는 TC는 사용자 화면(UI)과 내부 상태(INTERNAL_STATE)를 함께 확인합니다.
-7. 안내 표시 조건을 검증하는 TC는 NOTIFICATION 기대 결과를 포함합니다. 정확한 Toast 문구가 입력에 없으면 문구를 만들어 일치 검증하지 않습니다.
-8. 사전조건, 실행 행동, 판정 가능한 기대 결과와 원상 복구 절차를 구체적으로 작성합니다.
-9. TC가 참조하는 Requirement와 Condition은 입력에 존재하는 ID만 사용합니다.
-10. confirmed_condition을 여러 TC가 공유할 수 있지만, 동일 목적의 TC를 표현만 바꿔 중복 생성하지 않습니다.
-11. automation_candidate는 현재 가상 중앙제어 화면과 내부 상태 조회로 자동화 가능한지 판단한 후보 표시일 뿐이며 코드를 만들지 않습니다.
-12. 정보가 부족해 기대 결과를 확정할 수 없는 새 조건을 추측하지 않습니다.
+3. MODIFIED는 변경 동작 검증, UPDATE_REQUIRED는 변경으로 문구 수정이 필요한 연관 기준 검증, VERIFY는 기존 동작 회귀 검증으로 해석합니다.
+4. 모든 confirmed_condition을 최소 한 개 TC의 source_condition_ids로 반영합니다.
+5. 모든 기대 결과는 source_condition_ids로 근거를 연결합니다. 근거에 없는 수치·시간·문구·UI 동작을 추가하지 않습니다.
+6. CHANGE_VALIDATION은 실제로 변경된 동작에만 사용하고 유지되는 기존 동작은 RELATED_REGRESSION으로 분류합니다.
+6-1. 범위 변경은 변경된 경계뿐 아니라 변경 후 범위의 하한과 상한을 각각 검증합니다.
+6-2. Agent 1이 CENTRAL과 LOCAL Requirement를 모두 활성 범위로 전달했다면 두 제어 경로에 각각 target_requirement_id를 포함한 CHANGE_VALIDATION TC를 만듭니다.
+7. 한 TC에는 하나의 제어 경로와 하나의 주된 모드·경계·상태 목적만 둡니다. 서로 다른 모드의 경계 검증을 한 TC에 합치지 않습니다.
+8. REQ-CONTROL-001을 검증하면 CENTRAL 경로에서 관제 패널을 통한 일괄 적용을 다룹니다. REQ-LOCAL-002를 검증하면 LOCAL 경로에서 개별 장치 제어를 다룹니다. LOCAL TC에 REQ-CONTROL-001을 근거처럼 붙이지 않습니다.
+9. target_role은 고정 장치 ID를 추측하지 말고 PRIMARY_TEST_DEVICE처럼 역할로 지정합니다.
+10. test_data에는 준비·요청에 필요한 모드와 온도를 구조화합니다. TC 절차 안에만 값을 숨기지 않습니다.
+11. 상태 변경 또는 차단을 검증하는 TC는 사용자 화면(UI)과 내부 상태(INTERNAL_STATE)를 함께 확인합니다.
+12. 안내 표시 조건을 검증하는 TC는 NOTIFICATION 기대 결과를 포함합니다. 정확한 Toast 문구가 입력에 없으면 문구를 만들어 일치 검증하지 않습니다.
+13. 사전조건, 실행 행동과 판정 가능한 기대 결과를 구체적으로 작성합니다. 실행 후 상태가 실제로 바뀌면 restore_required=true와 원상 복구 절차를 작성하고, 차단되어 상태가 변하지 않으면 false와 빈 목록을 사용합니다.
+14. TC가 참조하는 Requirement와 Condition은 입력에 존재하는 ID만 사용합니다.
+15. confirmed_condition을 여러 TC가 공유할 수 있지만 동일 목적의 TC를 표현만 바꿔 중복 생성하지 않습니다.
+16. automation_candidate는 현재 가상 중앙제어 화면과 내부 상태 조회로 자동화 가능한지 판단한 후보 표시일 뿐이며 코드를 만들지 않습니다.
+17. SRS 문구의 후속 개정 필요, 정확한 안내 문구 미지정처럼 기대 동작을 바꾸지 않고 현재 TC를 설계할 수 있는 참고 사항은 coverage_notes에 남깁니다.
+18. 서로 충돌하는 권한 입력, 기대 결과 미정처럼 TC 의미를 확정할 수 없어 후속 자동 진행을 중단해야 하는 항목만 human_review_notes에 남깁니다.
+19. UPDATE_REQUIRED 자체는 변경관리의 정상 결과이므로 그것만으로 human_review_notes를 만들지 않습니다.
 """.strip()
 
 
@@ -718,6 +915,7 @@ class OpenAIAgent2:
 
     def design(
         self,
+        request: ChangeRequest,
         analysis: Agent1Analysis,
         requirements: dict[str, SrsRequirement],
         *,
@@ -725,9 +923,11 @@ class OpenAIAgent2:
         checkpoint_feedback: list[str] | None = None,
     ) -> Agent2Response:
         user_input = (
+            "[검증된 변경 요청 원문]\n"
+            f"{request.model_dump_json(indent=2)}\n\n"
             "[CP1 통과 Agent 1 분석]\n"
             f"{analysis.model_dump_json(indent=2)}\n\n"
-            "[현재 SRS Requirement]\n"
+            "[고정된 SRS Requirement]\n"
             f"{render_srs_context(requirements)}"
         )
         if previous_design is not None:
@@ -781,6 +981,7 @@ _FORBIDDEN_CODE = re.compile(
 
 
 def evaluate_checkpoint2(
+    request: ChangeRequest,
     analysis: Agent1Analysis,
     design: Agent2TestDesign,
     requirements: dict[str, SrsRequirement],
@@ -790,25 +991,22 @@ def evaluate_checkpoint2(
     def add(rule_id: str, status: CheckStatus, message: str) -> None:
         checks.append(CheckResult(rule_id=rule_id, status=status, message=message))
 
-    if design.request_id == analysis.request_id:
-        add("CP2-001", CheckStatus.PASS, "Agent 1과 Agent 2의 변경 요청 ID가 일치합니다.")
+    if design.request_id == analysis.request_id == request.request_id:
+        add("CP2-001", CheckStatus.PASS, "변경 요청·Agent 1·Agent 2의 요청 ID가 일치합니다.")
     else:
-        add("CP2-001", CheckStatus.FAIL, "Agent 2의 변경 요청 ID가 Agent 1과 다릅니다.")
+        add("CP2-001", CheckStatus.FAIL, "Agent 2의 변경 요청 ID가 앞 단계 입력과 다릅니다.")
 
     tc_ids = [tc.tc_id for tc in design.test_cases]
-    result_ids = [
-        result.result_id
-        for tc in design.test_cases
-        for result in tc.expected_results
-    ]
+    result_ids = [result.result_id for tc in design.test_cases for result in tc.expected_results]
     duplicate_tc_ids = sorted({item for item in tc_ids if tc_ids.count(item) > 1})
-    duplicate_result_ids = sorted(
-        {item for item in result_ids if result_ids.count(item) > 1}
-    )
+    duplicate_result_ids = sorted({item for item in result_ids if result_ids.count(item) > 1})
     normalized_titles = [re.sub(r"\s+", "", tc.title).casefold() for tc in design.test_cases]
     duplicate_titles = sorted(
-        {design.test_cases[index].title for index, item in enumerate(normalized_titles)
-         if normalized_titles.count(item) > 1}
+        {
+            design.test_cases[index].title
+            for index, item in enumerate(normalized_titles)
+            if normalized_titles.count(item) > 1
+        }
     )
     if duplicate_tc_ids or duplicate_result_ids or duplicate_titles:
         add("CP2-002", CheckStatus.FAIL, "TC·기대 결과 ID 또는 제목이 중복됩니다.")
@@ -821,33 +1019,21 @@ def evaluate_checkpoint2(
         for item in analysis.requirement_effects
         if item.relation != RequirementRelation.NO_IMPACT
     }
-    referenced_requirements = {
-        item for tc in design.test_cases for item in tc.requirement_ids
-    }
-    referenced_conditions = {
-        item for tc in design.test_cases for item in tc.source_condition_ids
-    }
+    referenced_requirements = {item for tc in design.test_cases for item in tc.requirement_ids}
+    referenced_conditions = {item for tc in design.test_cases for item in tc.source_condition_ids}
     unknown_requirements = sorted(
-        referenced_requirements - requirements.keys()
+        (referenced_requirements - requirements.keys())
         | (referenced_requirements - active_requirements)
     )
     unknown_conditions = sorted(referenced_conditions - known_conditions.keys())
     if unknown_requirements or unknown_conditions:
-        add(
-            "CP2-003",
-            CheckStatus.FAIL,
-            "입력 범위 밖 Requirement 또는 Condition을 참조했습니다.",
-        )
+        add("CP2-003", CheckStatus.FAIL, "입력 범위 밖 Requirement 또는 Condition을 참조했습니다.")
     else:
         add("CP2-003", CheckStatus.PASS, "모든 추적 ID가 승인된 입력 범위에 존재합니다.")
 
     missing_conditions = sorted(known_conditions.keys() - referenced_conditions)
     if missing_conditions:
-        add(
-            "CP2-004",
-            CheckStatus.FAIL,
-            "TC에 반영되지 않은 확정 조건: " + ", ".join(missing_conditions),
-        )
+        add("CP2-004", CheckStatus.FAIL, "TC에 반영되지 않은 확정 조건: " + ", ".join(missing_conditions))
     else:
         add("CP2-004", CheckStatus.PASS, "Agent 1의 모든 확정 조건을 TC가 반영합니다.")
 
@@ -871,10 +1057,11 @@ def evaluate_checkpoint2(
         if not tc_condition_ids.issubset(expected_condition_ids):
             trace_errors.append(tc.tc_id)
             continue
-        for expected in tc.expected_results:
-            if not set(expected.source_condition_ids).issubset(tc_condition_ids):
-                trace_errors.append(tc.tc_id)
-                break
+        if any(
+            not set(expected.source_condition_ids).issubset(tc_condition_ids)
+            for expected in tc.expected_results
+        ):
+            trace_errors.append(tc.tc_id)
     if trace_errors:
         add(
             "CP2-005",
@@ -904,50 +1091,69 @@ def evaluate_checkpoint2(
             ObservationLayer.INTERNAL_STATE,
         }.issubset(layers):
             state_errors.append(tc.tc_id)
-        if (
-            "REQ-NOTIFY-001" in source_requirements
-            and ObservationLayer.NOTIFICATION not in layers
-        ):
+        if "REQ-NOTIFY-001" in source_requirements and ObservationLayer.NOTIFICATION not in layers:
             notify_errors.append(tc.tc_id)
     if state_errors:
         add(
             "CP2-006",
             CheckStatus.FAIL,
-            "상태 정합성 Requirement 또는 TC 유형에 UI·내부 상태 이중 검증이 누락됐습니다: "
-            + ", ".join(state_errors),
+            "상태 관련 TC에 UI·내부 상태 이중 검증이 누락됐습니다: " + ", ".join(state_errors),
         )
     else:
         add("CP2-006", CheckStatus.PASS, "상태 관련 TC가 UI·내부 상태를 함께 검증합니다.")
-
     if notify_errors:
-        add(
-            "CP2-007",
-            CheckStatus.FAIL,
-            "알림 기대 결과가 누락된 TC: " + ", ".join(notify_errors),
-        )
+        add("CP2-007", CheckStatus.FAIL, "알림 기대 결과가 누락된 TC: " + ", ".join(notify_errors))
     else:
         add("CP2-007", CheckStatus.PASS, "알림 조건이 NOTIFICATION 결과로 연결됩니다.")
 
-    active_effect_ids = {
-        item.requirement_id
-        for item in analysis.requirement_effects
-        if item.relation != RequirementRelation.NO_IMPACT
-    }
-    uncovered_requirements = sorted(active_effect_ids - referenced_requirements)
+    path_errors: list[str] = []
+    for tc in design.test_cases:
+        if "REQ-CONTROL-001" in tc.requirement_ids and tc.control_path != ControlPath.CENTRAL:
+            path_errors.append(f"{tc.tc_id}:REQ-CONTROL-001은 CENTRAL 필요")
+        if "REQ-LOCAL-002" in tc.requirement_ids and tc.control_path != ControlPath.LOCAL:
+            path_errors.append(f"{tc.tc_id}:REQ-LOCAL-002는 LOCAL 필요")
+    if "REQ-CONTROL-001" in active_requirements and not any(
+        tc.control_path == ControlPath.CENTRAL and "REQ-CONTROL-001" in tc.requirement_ids
+        for tc in design.test_cases
+    ):
+        path_errors.append("REQ-CONTROL-001 중앙 제어 TC 누락")
+    if "REQ-LOCAL-002" in active_requirements and not any(
+        tc.control_path == ControlPath.LOCAL and "REQ-LOCAL-002" in tc.requirement_ids
+        for tc in design.test_cases
+    ):
+        path_errors.append("REQ-LOCAL-002 로컬 제어 TC 누락")
+
+    required_change_paths: list[tuple[str, ControlPath]] = []
+    if "REQ-CONTROL-001" in active_requirements:
+        required_change_paths.append(("REQ-CONTROL-001", ControlPath.CENTRAL))
+    if "REQ-LOCAL-002" in active_requirements:
+        required_change_paths.append(("REQ-LOCAL-002", ControlPath.LOCAL))
+    for requirement_id, control_path in required_change_paths:
+        if not any(
+            tc.purpose == TcPurpose.CHANGE_VALIDATION
+            and tc.control_path == control_path
+            and request.target_requirement_id in tc.requirement_ids
+            and requirement_id in tc.requirement_ids
+            for tc in design.test_cases
+        ):
+            path_errors.append(f"{control_path.value} 경로의 직접 변경 검증 TC 누락")
+    uncovered_requirements = sorted(active_requirements - referenced_requirements)
     target_change_tests = [
         tc
         for tc in design.test_cases
-        if analysis.target_requirement_id in tc.requirement_ids
+        if request.target_requirement_id in tc.requirement_ids
         and tc.purpose == TcPurpose.CHANGE_VALIDATION
     ]
-    if uncovered_requirements or not target_change_tests:
-        add(
-            "CP2-008",
-            CheckStatus.FAIL,
-            "변경 또는 확인 Requirement의 TC 범위가 불완전합니다.",
-        )
+    if uncovered_requirements or not target_change_tests or path_errors:
+        details = []
+        if uncovered_requirements:
+            details.append("미포함 Requirement=" + ",".join(uncovered_requirements))
+        if not target_change_tests:
+            details.append("대상 변경 검증 TC 없음")
+        details.extend(path_errors)
+        add("CP2-008", CheckStatus.FAIL, "변경 범위 또는 제어 경로가 불완전합니다: " + "; ".join(details))
     else:
-        add("CP2-008", CheckStatus.PASS, "변경·확인 Requirement가 TC 범위에 포함됩니다.")
+        add("CP2-008", CheckStatus.PASS, "변경·회귀 Requirement와 중앙·로컬 경로가 구분됩니다.")
 
     text_fields = [
         value
@@ -966,6 +1172,40 @@ def evaluate_checkpoint2(
     else:
         add("CP2-009", CheckStatus.PASS, "제품 TC와 자동화 구현의 역할이 분리됐습니다.")
 
+    test_data_errors = [
+        tc.tc_id
+        for tc in design.test_cases
+        if tc.test_type in {TcType.BOUNDARY, TcType.EXCEPTION, TcType.STATE_CONSISTENCY}
+        and tc.test_data.requested_mode is None
+        and tc.test_data.requested_temperature_c is None
+    ]
+    if test_data_errors:
+        add(
+            "CP2-010",
+            CheckStatus.FAIL,
+            "경계·예외·상태 TC의 구조화된 요청 시험 데이터가 없습니다: "
+            + ", ".join(test_data_errors),
+        )
+    else:
+        add("CP2-010", CheckStatus.PASS, "실행에 필요한 대상 역할과 시험 데이터가 구조화됐습니다.")
+
+    if design.human_review_notes:
+        add(
+            "CP2-011",
+            CheckStatus.REVIEW,
+            "사람이 최종 승인 전에 확인할 의미 판단 항목이 있습니다: "
+            + " / ".join(design.human_review_notes),
+        )
+    else:
+        if design.coverage_notes:
+            add(
+                "CP2-011",
+                CheckStatus.PASS,
+                f"차단 없는 참고 사항 {len(design.coverage_notes)}건을 기록했습니다.",
+            )
+        else:
+            add("CP2-011", CheckStatus.PASS, "추가 의미 판단이 필요한 항목이 없습니다.")
+
     statuses = {item.status for item in checks}
     if CheckStatus.ERROR in statuses:
         status = CheckStatus.ERROR
@@ -978,10 +1218,606 @@ def evaluate_checkpoint2(
     return Checkpoint2Result(status=status, checks=checks)
 
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Agent 3: Evidence-grounded automation planning
+# ---------------------------------------------------------------------------
+AGENT3_SYSTEM_INSTRUCTIONS = """
+You are an Automation Engineer translating an approved product test case into a browser automation plan.
+
+Rules:
+1. Never change or invent the TC purpose, preconditions, steps, expected results, values, or Requirement IDs.
+2. Use only selectors and window.__vccs interfaces present in the supplied UI Observation.
+3. Map PRIMARY_TEST_DEVICE and CENTRAL_COMMAND_ALLOWED_ROLE to target_device_id=1 for this MVP.
+4. PRECONDITION actions establish the target, initial mode, initial temperature, and applied state.
+5. TEST actions implement only the approved TC steps. Never assume a blocked request changes the value.
+6. Create RESTORE actions only when restore_required=true and use only the approved restore values.
+7. Map every Expected Result exactly once without changing result_id or observation_layer.
+8. Use UI_TEMPERATURE, INTERNAL_SET_TEMP, and TOAST_VISIBLE for the corresponding observations.
+9. Use CONTROLS_DISABLED and DISABLED_TEMPERATURE_TEXT for FAN or DRY disabled states.
+10. Return only the structured plan. Do not write Python code.
+11. Do not propose external URLs, shell commands, file changes, arbitrary waits, skip, or ignored exceptions.
+""".strip()
+
+
+class Agent3Error(RuntimeError):
+    """Raised when Agent 3 cannot create or validate an automation candidate."""
+
+
+@dataclass(frozen=True)
+class Agent3Response:
+    plan: Agent3AutomationPlan
+    response_id: str | None
+    model: str
+    usage: dict[str, int | None]
+
+
+def build_agent3_model_input(
+    test_case: ProductTestCaseCandidate,
+    observation: UiObservation,
+    requirements: dict[str, SrsRequirement],
+) -> dict[str, Any]:
+    related = {
+        key: value.model_dump(mode="json")
+        for key, value in requirements.items()
+        if key in test_case.requirement_ids
+    }
+    return {
+        "destination": "OpenAI Responses API",
+        "store": False,
+        "system_instructions": AGENT3_SYSTEM_INSTRUCTIONS,
+        "test_case": test_case.model_dump(mode="json"),
+        "related_srs_requirements": related,
+        "ui_observation": observation.model_dump(mode="json"),
+        "excluded": [
+            "API keys and authentication values",
+            "local absolute paths and HTML source",
+            "screenshots and Playwright traces",
+        ],
+    }
+
+
+class OpenAIAgent3:
+    def __init__(self, *, model: str | None = None, client: Any | None = None) -> None:
+        self.model = model or os.getenv("OPENAI_MODEL", "gpt-5.6-terra")
+        if client is None:
+            if not os.getenv("OPENAI_API_KEY"):
+                raise Agent3Error(
+                    "OPENAI_API_KEY is missing. Never place secrets in code or Run artifacts."
+                )
+            client = OpenAI()
+        self.client = client
+
+    def plan(
+        self,
+        test_case: ProductTestCaseCandidate,
+        observation: UiObservation,
+        requirements: dict[str, SrsRequirement],
+        *,
+        previous_plan: Agent3AutomationPlan | None = None,
+        checkpoint_feedback: list[str] | None = None,
+    ) -> Agent3Response:
+        payload = build_agent3_model_input(test_case, observation, requirements)
+        user_input = (
+            "[CP2-approved product test case]\n"
+            f"{json.dumps(payload['test_case'], ensure_ascii=False, indent=2)}\n\n"
+            "[Related SRS Requirements]\n"
+            f"{json.dumps(payload['related_srs_requirements'], ensure_ascii=False, indent=2)}\n\n"
+            "[Observed real UI inventory]\n"
+            f"{json.dumps(payload['ui_observation'], ensure_ascii=False, indent=2)}"
+        )
+        if previous_plan is not None:
+            feedback = "\n".join(f"- {item}" for item in (checkpoint_feedback or []))
+            user_input += (
+                "\n\n[Previous automation plan]\n"
+                f"{previous_plan.model_dump_json(indent=2)}\n\n"
+                "[Checkpoint 3 revision request]\n"
+                f"{feedback}\n"
+                "Keep all TC semantics and values unchanged; fix only the reported technical plan issues."
+            )
+        try:
+            response = self.client.responses.parse(
+                model=self.model,
+                reasoning={"effort": "medium"},
+                store=False,
+                input=[
+                    {"role": "system", "content": AGENT3_SYSTEM_INSTRUCTIONS},
+                    {"role": "user", "content": user_input},
+                ],
+                text_format=Agent3AutomationPlan,
+            )
+        except Exception as exc:
+            raise Agent3Error(f"Agent 3 model call failed: {exc}") from exc
+        parsed = getattr(response, "output_parsed", None)
+        if parsed is None:
+            raise Agent3Error("The model did not return a structured Agent 3 automation plan.")
+        usage = getattr(response, "usage", None)
+        return Agent3Response(
+            plan=parsed,
+            response_id=getattr(response, "id", None),
+            model=self.model,
+            usage={
+                "input_tokens": getattr(usage, "input_tokens", None),
+                "output_tokens": getattr(usage, "output_tokens", None),
+                "total_tokens": getattr(usage, "total_tokens", None),
+            },
+        )
+
+
+_UI_SELECTOR_INVENTORY = {
+    "#device-card-1 .card-body-split": "Select PRIMARY_TEST_DEVICE",
+    "#det-mode-cool": "Request COOL mode",
+    "#det-mode-heat": "Request HEAT mode",
+    "#det-mode-fan": "Request FAN mode",
+    "#det-mode-dry": "Request DRY mode",
+    "#det-mode-auto": "Request AUTO mode",
+    "#det-temp-display": "Read pending temperature",
+    "#det-temp-down-btn": "Request one degree lower",
+    "#det-temp-up-btn": "Request one degree higher",
+    "#det-temp-adjust-card": "Read temperature control state",
+    ".btn-apply-cmd": "Apply pending commands",
+    "#global-toast": "Read blocking toast",
+}
+_REQUIRED_HARNESS_KEYS = {
+    "devices",
+    "pendingState",
+    "selectedUnitId",
+    "selectUnit",
+    "applyPanelCommands",
+}
+
+
+def inspect_target_ui(target_html: Path) -> UiObservation:
+    """Inspect the real local page without modifying Project1 files."""
+    target = target_html.resolve()
+    if not target.is_file() or target.suffix.casefold() != ".html":
+        raise Agent3Error("--target-html must point to an existing local HTML file.")
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:
+        raise Agent3Error(
+            "Agent 3 UI inspection requires Playwright. Run pip install -e .[agent3]."
+        ) from exc
+
+    elements: list[ObservedUiElement] = []
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        context = browser.new_context()
+        page = context.new_page()
+        page.goto(target.as_uri(), wait_until="domcontentloaded")
+        page.evaluate("() => localStorage.clear()")
+        page.reload(wait_until="domcontentloaded")
+        page.wait_for_selector("#device-card-1", timeout=5000)
+        for selector, hint in _UI_SELECTOR_INVENTORY.items():
+            locator = page.locator(selector).first
+            if locator.count() == 0:
+                continue
+            elements.append(
+                ObservedUiElement(
+                    selector=selector,
+                    tag=locator.evaluate("el => el.tagName.toLowerCase()"),
+                    text=(locator.inner_text() or "").strip(),
+                    visible=locator.is_visible(),
+                    enabled=locator.is_enabled(),
+                    action_hint=hint,
+                )
+            )
+        harness_keys = sorted(page.evaluate("() => window.__vccs ? Object.keys(window.__vccs) : []"))
+        title = page.title()
+        context.close()
+        browser.close()
+
+    observed_selectors = {item.selector for item in elements}
+    missing_selectors = set(_UI_SELECTOR_INVENTORY) - observed_selectors
+    missing_harness = _REQUIRED_HARNESS_KEYS - set(harness_keys)
+    if missing_selectors or missing_harness:
+        details = []
+        if missing_selectors:
+            details.append("selector=" + ", ".join(sorted(missing_selectors)))
+        if missing_harness:
+            details.append("window.__vccs=" + ", ".join(sorted(missing_harness)))
+        raise Agent3Error("Required automation interfaces are missing from the observed UI: " + " / ".join(details))
+    return UiObservation(
+        target_file=target.name,
+        target_sha256=_sha256_file(target),
+        page_title=title,
+        elements=elements,
+        harness_keys=harness_keys,
+        observed_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+_MODE_SELECTOR = {
+    "AUTO": "#det-mode-auto",
+    "COOL": "#det-mode-cool",
+    "HEAT": "#det-mode-heat",
+    "FAN": "#det-mode-fan",
+    "DRY": "#det-mode-dry",
+}
+
+
+def _expected_selector_for_assertion(result: ExpectedResult) -> set[str]:
+    if result.observation_layer == ObservationLayer.NOTIFICATION:
+        return {"#global-toast"}
+    if result.observation_layer == ObservationLayer.INTERNAL_STATE:
+        return {"window.__vccs.devices"}
+    return {"#det-temp-display", "#det-temp-adjust-card", "#det-temp-down-btn"}
+
+
+def evaluate_checkpoint3_plan(
+    test_case: ProductTestCaseCandidate,
+    plan: Agent3AutomationPlan,
+    observation: UiObservation,
+) -> Checkpoint3Result:
+    checks: list[CheckResult] = []
+
+    def add(rule_id: str, status: CheckStatus, message: str) -> None:
+        checks.append(CheckResult(rule_id=rule_id, status=status, message=message))
+
+    observed_selectors = {item.selector for item in observation.elements}
+    if plan.tc_id == test_case.tc_id:
+        add("CP3-001", CheckStatus.PASS, "The plan preserves the approved TC ID.")
+    else:
+        add("CP3-001", CheckStatus.FAIL, "The plan TC ID differs from the approved TC.")
+
+    action_ids = [item.action_id for item in plan.actions]
+    unobserved = sorted(
+        {
+            item.selector
+            for item in plan.actions
+            if item.selector not in observed_selectors
+        }
+    )
+    action_errors: list[str] = []
+    for item in plan.actions:
+        if item.action_type == AutomationActionType.SELECT_DEVICE and item.selector != "#device-card-1 .card-body-split":
+            action_errors.append(f"{item.action_id}: invalid device selector")
+        elif item.action_type == AutomationActionType.SET_MODE:
+            expected_selector = _MODE_SELECTOR.get(str(item.value))
+            if expected_selector is None or item.selector != expected_selector:
+                action_errors.append(f"{item.action_id}: mode and selector do not match")
+        elif item.action_type == AutomationActionType.SET_TEMPERATURE and item.selector != "#det-temp-display":
+            action_errors.append(f"{item.action_id}: invalid temperature target")
+        elif item.action_type == AutomationActionType.APPLY_COMMANDS and item.selector != ".btn-apply-cmd":
+            action_errors.append(f"{item.action_id}: invalid apply selector")
+
+    if len(action_ids) == len(set(action_ids)) and not unobserved and not action_errors:
+        add("CP3-002", CheckStatus.PASS, "Action IDs are unique and every selector was observed.")
+    else:
+        details = []
+        if len(action_ids) != len(set(action_ids)):
+            details.append("duplicate action IDs")
+        if unobserved:
+            details.append("unobserved selectors: " + ", ".join(unobserved))
+        if action_errors:
+            details.extend(action_errors)
+        add("CP3-002", CheckStatus.FAIL, " / ".join(details))
+
+    expected_ids = {item.result_id for item in test_case.expected_results}
+    mapped_ids = [item.result_id for item in plan.assertions]
+    if set(mapped_ids) == expected_ids and len(mapped_ids) == len(set(mapped_ids)):
+        add("CP3-003", CheckStatus.PASS, "Every Expected Result maps to exactly one assertion.")
+    else:
+        add(
+            "CP3-003",
+            CheckStatus.FAIL,
+            "Expected Result to assertion mapping is incomplete or duplicated. "
+            f"expected={sorted(expected_ids)}, mapped={sorted(mapped_ids)}",
+        )
+
+    results_by_id = {item.result_id: item for item in test_case.expected_results}
+    fidelity_errors: list[str] = []
+    for assertion in plan.assertions:
+        result = results_by_id.get(assertion.result_id)
+        if result is None:
+            continue
+        if assertion.observation_layer != result.observation_layer:
+            fidelity_errors.append(f"{assertion.result_id}: observation layer changed")
+        if assertion.selector not in _expected_selector_for_assertion(result):
+            fidelity_errors.append(f"{assertion.result_id}: invalid observation target")
+        allowed_strategies = {
+            ObservationLayer.UI: {
+                AssertionStrategy.UI_TEMPERATURE,
+                AssertionStrategy.CONTROLS_DISABLED,
+                AssertionStrategy.DISABLED_TEMPERATURE_TEXT,
+            },
+            ObservationLayer.INTERNAL_STATE: {AssertionStrategy.INTERNAL_SET_TEMP},
+            ObservationLayer.NOTIFICATION: {AssertionStrategy.TOAST_VISIBLE},
+        }
+        if assertion.strategy not in allowed_strategies[result.observation_layer]:
+            fidelity_errors.append(f"{assertion.result_id}: assertion strategy changed the observation meaning")
+        if assertion.strategy in {AssertionStrategy.UI_TEMPERATURE, AssertionStrategy.INTERNAL_SET_TEMP}:
+            if assertion.expected_number is None:
+                fidelity_errors.append(f"{assertion.result_id}: numeric expectation is missing")
+            else:
+                statement_numbers = {float(item) for item in re.findall(r"\d+(?:\.\d+)?", result.statement)}
+                if statement_numbers and float(assertion.expected_number) not in statement_numbers:
+                    fidelity_errors.append(f"{assertion.result_id}: numeric expectation is not grounded in the Expected Result")
+        if assertion.selector != "window.__vccs.devices" and assertion.selector not in observed_selectors:
+            fidelity_errors.append(f"{assertion.result_id}: selector was not observed")
+    if fidelity_errors:
+        add("CP3-004", CheckStatus.FAIL, " / ".join(fidelity_errors))
+    else:
+        add("CP3-004", CheckStatus.PASS, "Observation layers and targets preserve the approved expectations.")
+
+    data = test_case.test_data
+    plan_values = [item.value for item in plan.actions]
+    value_errors: list[str] = []
+    allowed_numbers = {
+        value
+        for value in (
+            data.initial_temperature_c,
+            data.requested_temperature_c,
+        )
+        if value is not None
+    }
+    for item in plan.actions:
+        if item.action_type == AutomationActionType.SET_TEMPERATURE:
+            if not isinstance(item.value, (int, float)) or float(item.value) not in {
+                float(value) for value in allowed_numbers
+            }:
+                value_errors.append(f"{item.action_id}: temperature not present in TC: {item.value}")
+        if item.action_type == AutomationActionType.SET_MODE:
+            allowed_modes = {x for x in (data.initial_mode, data.requested_mode) if x}
+            if item.value not in allowed_modes:
+                value_errors.append(f"{item.action_id}: mode not present in TC: {item.value}")
+    for assertion in plan.assertions:
+        if assertion.expected_number is not None and float(assertion.expected_number) not in {
+            float(value) for value in allowed_numbers
+        }:
+            value_errors.append(f"{assertion.result_id}: expected temperature not present in TC")
+    if value_errors:
+        add("CP3-005", CheckStatus.FAIL, " / ".join(value_errors))
+    else:
+        add("CP3-005", CheckStatus.PASS, "Mode and temperature values are unchanged from the TC.")
+
+    sequence_errors: list[str] = []
+    phase_rank = {AutomationPhase.PRECONDITION: 0, AutomationPhase.TEST: 1, AutomationPhase.RESTORE: 2}
+    ranks = [phase_rank[item.phase] for item in plan.actions]
+    if ranks != sorted(ranks):
+        sequence_errors.append("action phases are not ordered PRECONDITION -> TEST -> RESTORE")
+
+    def has_action(phase: AutomationPhase, action_type: AutomationActionType, value: Any = None) -> bool:
+        return any(
+            item.phase == phase
+            and item.action_type == action_type
+            and (value is None or item.value == value)
+            for item in plan.actions
+        )
+
+    if not has_action(AutomationPhase.PRECONDITION, AutomationActionType.SELECT_DEVICE):
+        sequence_errors.append("target device selection is missing")
+    if data.initial_mode and not has_action(AutomationPhase.PRECONDITION, AutomationActionType.SET_MODE, data.initial_mode):
+        sequence_errors.append("initial mode setup is missing")
+    if data.initial_temperature_c is not None and not has_action(AutomationPhase.PRECONDITION, AutomationActionType.SET_TEMPERATURE, data.initial_temperature_c):
+        sequence_errors.append("initial temperature setup is missing")
+    if not has_action(AutomationPhase.PRECONDITION, AutomationActionType.APPLY_COMMANDS):
+        sequence_errors.append("initial state apply is missing")
+    if data.requested_mode and not has_action(AutomationPhase.TEST, AutomationActionType.SET_MODE, data.requested_mode):
+        sequence_errors.append("requested mode action is missing")
+    if data.requested_temperature_c is not None and not has_action(AutomationPhase.TEST, AutomationActionType.SET_TEMPERATURE, data.requested_temperature_c):
+        sequence_errors.append("requested temperature action is missing")
+    if test_case.control_path == ControlPath.CENTRAL and not has_action(AutomationPhase.TEST, AutomationActionType.APPLY_COMMANDS):
+        sequence_errors.append("central command apply is missing")
+    add("CP3-006A", CheckStatus.FAIL if sequence_errors else CheckStatus.PASS, " / ".join(sequence_errors) if sequence_errors else "Action sequence implements the approved setup and test steps.")
+
+    restore_actions = [item for item in plan.actions if item.phase == AutomationPhase.RESTORE]
+    if bool(restore_actions) == test_case.restore_required:
+        add("CP3-006", CheckStatus.PASS, "Restore actions match the TC restore contract.")
+    else:
+        add("CP3-006", CheckStatus.FAIL, "Restore actions do not match the TC restore contract.")
+
+    statuses = {item.status for item in checks}
+    status = CheckStatus.FAIL if CheckStatus.FAIL in statuses else CheckStatus.PASS
+    candidate_status = (
+        AutomationCandidateStatus.REVISION_REQUIRED
+        if status == CheckStatus.FAIL
+        else AutomationCandidateStatus.READY_FOR_EXECUTION
+    )
+    return Checkpoint3Result(status=status, candidate_status=candidate_status, checks=checks)
+
+
+def _py_literal(value: Any) -> str:
+    return repr(value)
+
+def _safe_comment(value: str) -> str:
+    return " ".join(value.replace("\r", " ").replace("\n", " ").split())
+
+
+
+def compile_automation_candidate(
+    run_id: str,
+    test_case: ProductTestCaseCandidate,
+    plan: Agent3AutomationPlan,
+) -> str:
+    """Compile a constrained plan into deterministic pytest + Playwright code."""
+    blocked_request = any(item.observation_layer == ObservationLayer.NOTIFICATION for item in test_case.expected_results)
+    lines = [
+        "from __future__ import annotations",
+        "",
+        "import os",
+        "import re",
+        "from pathlib import Path",
+        "",
+        "from playwright.sync_api import sync_playwright",
+        "",
+        f"# RUN_ID: {run_id}",
+        f"# SOURCE_TC: {test_case.tc_id}",
+        "TARGET_URL = os.environ['QA_TARGET_URL']",
+        "EVIDENCE_DIR = Path(os.environ['QA_EVIDENCE_DIR'])",
+        "",
+        "def _temperature(page):",
+        "    text = page.locator('#det-temp-display').inner_text()",
+        "    match = re.search(r'-?\\d+(?:\\.\\d+)?', text)",
+        "    return float(match.group(0)) if match else None",
+        "",
+        "def _set_temperature(page, target):",
+        "    for _ in range(40):",
+        "        current = _temperature(page)",
+        "        if current == target:",
+        "            return",
+        "        selector = '#det-temp-up-btn' if current < target else '#det-temp-down-btn'",
+        "        page.locator(selector).click()",
+        "    raise RuntimeError(f'temperature setup failed: target={target}, actual={_temperature(page)}')",
+        "",
+        "def _request_temperature(page, target):",
+        "    for _ in range(40):",
+        "        before = _temperature(page)",
+        "        if before == target:",
+        "            return",
+        "        selector = '#det-temp-up-btn' if before < target else '#det-temp-down-btn'",
+        "        page.locator(selector).click()",
+        "        after = _temperature(page)",
+        "        if after == before:",
+        "            return",
+        "    raise RuntimeError(f'temperature request did not settle: target={target}, actual={_temperature(page)}')",
+        "",
+        f"def test_{test_case.tc_id.lower().replace('-', '_')}():",
+        "    EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)",
+        "    mismatches = []",
+        "    with sync_playwright() as playwright:",
+        "        browser = playwright.chromium.launch(headless=True)",
+        "        context = browser.new_context()",
+        "        context.tracing.start(screenshots=True, snapshots=True, sources=True)",
+        "        page = context.new_page()",
+        "        try:",
+        "            page.goto(TARGET_URL, wait_until='domcontentloaded')",
+        "            page.evaluate('() => localStorage.clear()')",
+        "            page.reload(wait_until='domcontentloaded')",
+        "            page.wait_for_selector('#device-card-1', timeout=5000)",
+    ]
+    indent = "            "
+    for action in [item for item in plan.actions if item.phase != AutomationPhase.RESTORE]:
+        lines.append(f"{indent}# {action.action_id} {action.phase.value}: {_safe_comment(action.source_text)}")
+        if action.action_type == AutomationActionType.SELECT_DEVICE:
+            lines.append(f"{indent}page.locator({_py_literal(action.selector)}).click()")
+            lines.append(f"{indent}page.wait_for_function(\"() => window.__vccs.selectedUnitId === {plan.target_device_id}\")")
+        elif action.action_type == AutomationActionType.SET_MODE:
+            lines.append(f"{indent}page.locator({_py_literal(action.selector)}).click()")
+        elif action.action_type == AutomationActionType.SET_TEMPERATURE:
+            if action.phase == AutomationPhase.TEST and blocked_request:
+                lines.append(f"{indent}_request_temperature(page, {float(action.value)})")
+            else:
+                lines.append(f"{indent}_set_temperature(page, {float(action.value)})")
+        elif action.action_type == AutomationActionType.APPLY_COMMANDS:
+            lines.append(f"{indent}page.locator({_py_literal(action.selector)}).click()")
+            lines.append(f"{indent}page.wait_for_timeout(100)")
+
+    for assertion in plan.assertions:
+        marker = f"{indent}# EXPECTED_RESULT: {assertion.result_id}"
+        lines.append(marker)
+        if assertion.strategy == AssertionStrategy.UI_TEMPERATURE:
+            lines.extend(
+                [
+                    f"{indent}actual = _temperature(page)",
+                    f"{indent}if actual != {float(assertion.expected_number)}:",
+                    f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + f': UI temperature={{actual}}')",
+                ]
+            )
+        elif assertion.strategy == AssertionStrategy.INTERNAL_SET_TEMP:
+            lines.extend(
+                [
+                    f"{indent}actual = page.evaluate(\"id => window.__vccs.devices.find(d => d.id === id).setTemp\", {plan.target_device_id})",
+                    f"{indent}if actual != {float(assertion.expected_number)}:",
+                    f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + f': internal setTemp={{actual}}')",
+                ]
+            )
+        elif assertion.strategy == AssertionStrategy.TOAST_VISIBLE:
+            lines.extend(
+                [
+                    f"{indent}toast = page.locator('#global-toast')",
+                    f"{indent}if 'show' not in (toast.get_attribute('class') or '').split():",
+                    f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + ': toast not visible')",
+                ]
+            )
+        elif assertion.strategy == AssertionStrategy.CONTROLS_DISABLED:
+            lines.extend(
+                [
+                    f"{indent}if page.locator('#det-temp-down-btn').is_enabled() or page.locator('#det-temp-up-btn').is_enabled():",
+                    f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + ': temperature controls enabled')",
+                ]
+            )
+        elif assertion.strategy == AssertionStrategy.DISABLED_TEMPERATURE_TEXT:
+            lines.extend(
+                [
+                    f"{indent}if '---' not in page.locator('#det-temp-display').inner_text():",
+                    f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + ': disabled text missing')",
+                ]
+            )
+
+    lines.extend(
+        [
+            f"{indent}page.screenshot(path=str(EVIDENCE_DIR / 'trial-final.png'), full_page=True)",
+            f"{indent}assert not mismatches, 'PRODUCT_MISMATCH: ' + ' | '.join(mismatches)",
+            "        finally:",
+            *[
+                statement
+                for action in plan.actions
+                if action.phase == AutomationPhase.RESTORE
+                for statement in (
+                    f"            # {action.action_id} RESTORE: {_safe_comment(action.source_text)}",
+                    (
+                        f"            page.locator({_py_literal(action.selector)}).click()"
+                        if action.action_type in {AutomationActionType.SELECT_DEVICE, AutomationActionType.SET_MODE, AutomationActionType.APPLY_COMMANDS}
+                        else f"            _set_temperature(page, {float(action.value)})"
+                    ),
+                )
+            ],
+            "            context.tracing.stop(path=str(EVIDENCE_DIR / 'trial-trace.zip'))",
+            "            context.close()",
+            "            browser.close()",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+_FORBIDDEN_AGENT3_AST_CALLS = {"eval", "exec", "compile", "open", "system", "remove", "unlink", "rmtree"}
+
+
+def evaluate_compiled_candidate(
+    test_case: ProductTestCaseCandidate, code: str
+) -> list[CheckResult]:
+    checks: list[CheckResult] = []
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as exc:
+        return [CheckResult(rule_id="CP3-007", status=CheckStatus.FAIL, message=f"Python syntax error: {exc}")]
+    checks.append(CheckResult(rule_id="CP3-007", status=CheckStatus.PASS, message="Python syntax and the test function are valid."))
+
+    unsafe: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            modules = [item.name.split('.')[0] for item in node.names] if isinstance(node, ast.Import) else [(node.module or '').split('.')[0]]
+            if any(module not in {"__future__", "os", "re", "pathlib", "playwright"} for module in modules):
+                unsafe.append("disallowed import: " + ", ".join(modules))
+        if isinstance(node, ast.Call):
+            name = node.func.id if isinstance(node.func, ast.Name) else node.func.attr if isinstance(node.func, ast.Attribute) else ""
+            if name in _FORBIDDEN_AGENT3_AST_CALLS:
+                unsafe.append("forbidden call: " + name)
+    if "assert True" in code or "pytest.skip" in code or "@pytest.mark.skip" in code:
+        unsafe.append("disabled assertion or unconditional skip")
+    if unsafe:
+        checks.append(CheckResult(rule_id="CP3-008", status=CheckStatus.FAIL, message=" / ".join(sorted(set(unsafe)))))
+    else:
+        checks.append(CheckResult(rule_id="CP3-008", status=CheckStatus.PASS, message="No shell, file mutation, external call, or assertion bypass was found."))
+
+    missing_markers = [
+        item.result_id
+        for item in test_case.expected_results
+        if f"# EXPECTED_RESULT: {item.result_id}" not in code
+    ]
+    if missing_markers:
+        checks.append(CheckResult(rule_id="CP3-009", status=CheckStatus.FAIL, message="Missing code mappings: " + ", ".join(missing_markers)))
+    else:
+        checks.append(CheckResult(rule_id="CP3-009", status=CheckStatus.PASS, message="Every Expected Result is traceable to a code assertion."))
+    return checks
+
 # CLI
 # ---------------------------------------------------------------------------
 DEFAULT_SRS = Path("docs") / "01_PRODUCT_SRS.md"
 DEFAULT_RUNS_ROOT = Path("runs")
+_RUN_ID_PATTERN = re.compile(r"^RUN-\d{8}-\d{6}-[A-F0-9]{6}$")
 
 
 def _read_request(path: Path) -> ChangeRequest:
@@ -996,17 +1832,28 @@ def _read_request(path: Path) -> ChangeRequest:
         raise ValueError(f"변경 요청 Schema 검증에 실패했습니다:\n{exc}") from exc
 
 
-def _read_json_model(path: Path, model_type):
+def _read_json_payload(path: Path) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-        return model_type.model_validate(payload)
     except FileNotFoundError as exc:
-        raise ValueError(f"필수 실행 산출물을 찾을 수 없습니다: {path}") from exc
-    except (json.JSONDecodeError, ValidationError) as exc:
-        raise ValueError(f"실행 산출물 검증에 실패했습니다: {path}\n{exc}") from exc
+        raise ValueError(f"필수 실행 산출물을 찾을 수 없습니다: {path.name}") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"실행 산출물 JSON 형식이 잘못됐습니다: {path.name}\n{exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"실행 산출물은 JSON 객체여야 합니다: {path.name}")
+    return payload
+
+
+def _read_json_model(path: Path, model_type):
+    try:
+        return model_type.model_validate(_read_json_payload(path))
+    except ValidationError as exc:
+        raise ValueError(f"실행 산출물 Schema 검증에 실패했습니다: {path.name}\n{exc}") from exc
 
 
 def _resolve_run_dir(runs_root: Path, run_id: str) -> Path:
+    if not _RUN_ID_PATTERN.fullmatch(run_id):
+        raise ValueError("Run ID 형식이 올바르지 않습니다.")
     root = runs_root.resolve()
     run_dir = (root / run_id).resolve()
     try:
@@ -1023,22 +1870,57 @@ def _new_run_id() -> str:
     return f"RUN-{stamp}-{uuid.uuid4().hex[:6].upper()}"
 
 
+def _write_text_atomic(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temp_path.write_text(text, encoding="utf-8")
+        os.replace(temp_path, path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+
+
 def _write_json(path: Path, payload: Any) -> None:
-    path.write_text(
+    _write_text_atomic(
+        path,
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
     )
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _verify_sha256(path: Path, expected: Any, label: str) -> None:
+    if not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{64}", expected):
+        raise ValueError(f"run_manifest의 {label} SHA-256 값이 올바르지 않습니다.")
+    actual = _sha256_file(path)
+    if actual != expected:
+        raise ValueError(f"{label} 파일이 Agent 1 실행 후 변경되어 Agent 2를 차단했습니다.")
+
+
 def run_agent1(args: argparse.Namespace) -> int:
-    request = _read_request(Path(args.request).resolve())
-    requirements = load_srs_requirements(Path(args.srs).resolve())
+    request_path = Path(args.request).resolve()
+    srs_path = Path(args.srs).resolve()
+    request = _read_request(request_path)
+    requirements = load_srs_requirements(srs_path)
+    srs_text = srs_path.read_text(encoding="utf-8")
     agent = OpenAIAgent1(model=args.model)
     run_id = _new_run_id()
     run_dir = Path(args.runs_root).resolve() / run_id
     run_dir.mkdir(parents=True, exist_ok=False)
 
-    _write_json(run_dir / "request.json", request.model_dump(mode="json"))
+    request_file = run_dir / "request.json"
+    srs_snapshot_file = run_dir / "srs_snapshot.md"
+    analysis_file = run_dir / "agent1_change_analysis.json"
+    checkpoint_file = run_dir / "checkpoint1.json"
+    _write_json(request_file, request.model_dump(mode="json"))
+    _write_text_atomic(srs_snapshot_file, srs_text)
     try:
         response = agent.analyze(request, requirements)
         checkpoint = evaluate_checkpoint1(request, response.analysis, requirements)
@@ -1046,8 +1928,8 @@ def run_agent1(args: argparse.Namespace) -> int:
             {
                 "attempt": 1,
                 "status": checkpoint.status.value,
+                "handoff_status": checkpoint.handoff_status.value,
                 "model": response.model,
-                "response_id": response.response_id,
                 "usage": response.usage,
             }
         ]
@@ -1070,36 +1952,37 @@ def run_agent1(args: argparse.Namespace) -> int:
                     if item.status == CheckStatus.FAIL
                 ],
             )
-            checkpoint = evaluate_checkpoint1(
-                request, response.analysis, requirements
-            )
+            checkpoint = evaluate_checkpoint1(request, response.analysis, requirements)
             attempts.append(
                 {
                     "attempt": 2,
                     "status": checkpoint.status.value,
+                    "handoff_status": checkpoint.handoff_status.value,
                     "model": response.model,
-                    "response_id": response.response_id,
                     "usage": response.usage,
                 }
             )
 
-        _write_json(
-            run_dir / "agent1_change_analysis.json",
-            response.analysis.model_dump(mode="json"),
-        )
-        _write_json(
-            run_dir / "checkpoint1.json", checkpoint.model_dump(mode="json")
-        )
+        _write_json(analysis_file, response.analysis.model_dump(mode="json"))
+        _write_json(checkpoint_file, checkpoint.model_dump(mode="json"))
         _write_json(
             run_dir / "run_manifest.json",
             {
+                "contract_version": "2.2",
+                "prompt_version": "agent1-2.2",
                 "run_id": run_id,
                 "stage": "AGENT_1_CP1",
                 "status": checkpoint.status.value,
+                "handoff_status": checkpoint.handoff_status.value,
                 "model": response.model,
-                "response_id": response.response_id,
                 "usage": response.usage,
                 "attempts": attempts,
+                "request_file": request_file.name,
+                "request_sha256": _sha256_file(request_file),
+                "srs_snapshot_file": srs_snapshot_file.name,
+                "srs_sha256": _sha256_file(srs_snapshot_file),
+                "agent1_analysis_sha256": _sha256_file(analysis_file),
+                "checkpoint1_sha256": _sha256_file(checkpoint_file),
                 "created_at": datetime.now(timezone.utc).isoformat(),
             },
         )
@@ -1120,36 +2003,77 @@ def run_agent1(args: argparse.Namespace) -> int:
     print(f"Run ID: {run_id}")
     print(f"Agent 1 model: {response.model}")
     print(f"Checkpoint 1: {checkpoint.status.value}")
+    print(f"Agent 2 handoff: {checkpoint.handoff_status.value}")
     print(f"결과 위치: {run_dir}")
-    return 0 if checkpoint.status == CheckStatus.PASS else 2
+    return 0 if (
+        checkpoint.status == CheckStatus.PASS
+        and checkpoint.handoff_status == HandoffStatus.CONTINUE
+    ) else 2
+
+
+def _load_verified_agent1_run(run_dir: Path, run_id: str) -> tuple[
+    ChangeRequest,
+    dict[str, SrsRequirement],
+    Agent1Analysis,
+    Checkpoint1Result,
+    dict[str, Any],
+]:
+    manifest_file = run_dir / "run_manifest.json"
+    manifest = _read_json_payload(manifest_file)
+    if manifest.get("run_id") != run_id or manifest.get("stage") != "AGENT_1_CP1":
+        raise ValueError("run_manifest가 요청한 Agent 1 Run과 일치하지 않습니다.")
+    if manifest.get("status") != CheckStatus.PASS.value:
+        raise ValueError(f"Checkpoint 1이 {manifest.get('status')}이므로 Agent 2를 실행할 수 없습니다.")
+    if manifest.get("handoff_status") != HandoffStatus.CONTINUE.value:
+        raise ValueError(
+            f"Agent 2 인계 상태가 {manifest.get('handoff_status')}이므로 실행을 계속할 수 없습니다."
+        )
+
+    request_file = run_dir / "request.json"
+    srs_snapshot_file = run_dir / "srs_snapshot.md"
+    analysis_file = run_dir / "agent1_change_analysis.json"
+    checkpoint_file = run_dir / "checkpoint1.json"
+    _verify_sha256(request_file, manifest.get("request_sha256"), "변경 요청")
+    _verify_sha256(srs_snapshot_file, manifest.get("srs_sha256"), "SRS 스냅샷")
+    _verify_sha256(analysis_file, manifest.get("agent1_analysis_sha256"), "Agent 1 분석")
+    _verify_sha256(checkpoint_file, manifest.get("checkpoint1_sha256"), "Checkpoint 1")
+
+    request = _read_request(request_file)
+    requirements = load_srs_requirements(srs_snapshot_file)
+    analysis = _read_json_model(analysis_file, Agent1Analysis)
+    checkpoint = _read_json_model(checkpoint_file, Checkpoint1Result)
+    recomputed = evaluate_checkpoint1(request, analysis, requirements)
+    if recomputed.model_dump(mode="json") != checkpoint.model_dump(mode="json"):
+        raise ValueError("현재 CP1 규칙으로 재검증한 결과가 저장된 Checkpoint 1과 다릅니다.")
+    if checkpoint.status != CheckStatus.PASS or checkpoint.handoff_status != HandoffStatus.CONTINUE:
+        raise ValueError("Checkpoint 1이 Agent 2 실행을 허용하지 않습니다.")
+    return request, requirements, analysis, checkpoint, manifest
 
 
 def run_agent2(args: argparse.Namespace) -> int:
     run_dir = _resolve_run_dir(Path(args.runs_root), args.run_id)
-    analysis = _read_json_model(
-        run_dir / "agent1_change_analysis.json", Agent1Analysis
-    )
-    checkpoint1 = _read_json_model(
-        run_dir / "checkpoint1.json", Checkpoint1Result
-    )
-    if checkpoint1.status != CheckStatus.PASS:
-        raise ValueError(
-            f"Checkpoint 1이 {checkpoint1.status.value}이므로 Agent 2를 실행할 수 없습니다."
-        )
+    immutable_outputs = [
+        run_dir / "agent2_test_design.json",
+        run_dir / "checkpoint2.json",
+        run_dir / "agent2_manifest.json",
+    ]
+    if any(path.exists() for path in immutable_outputs):
+        raise ValueError("이 Run에는 Agent 2 최종 산출물이 이미 존재합니다. 새 Agent 1 Run을 사용하세요.")
 
-    requirements = load_srs_requirements(Path(args.srs).resolve())
+    request, requirements, analysis, _, source_manifest = _load_verified_agent1_run(
+        run_dir, args.run_id
+    )
     agent = OpenAIAgent2(model=args.model)
     try:
-        response = agent.design(analysis, requirements)
+        response = agent.design(request, analysis, requirements)
         checkpoint2 = evaluate_checkpoint2(
-            analysis, response.design, requirements
+            request, analysis, response.design, requirements
         )
         attempts = [
             {
                 "attempt": 1,
                 "status": checkpoint2.status.value,
                 "model": response.model,
-                "response_id": response.response_id,
                 "usage": response.usage,
             }
         ]
@@ -1163,6 +2087,7 @@ def run_agent2(args: argparse.Namespace) -> int:
                 checkpoint2.model_dump(mode="json"),
             )
             response = agent.design(
+                request,
                 analysis,
                 requirements,
                 previous_design=response.design,
@@ -1173,37 +2098,40 @@ def run_agent2(args: argparse.Namespace) -> int:
                 ],
             )
             checkpoint2 = evaluate_checkpoint2(
-                analysis, response.design, requirements
+                request, analysis, response.design, requirements
             )
             attempts.append(
                 {
                     "attempt": 2,
                     "status": checkpoint2.status.value,
                     "model": response.model,
-                    "response_id": response.response_id,
                     "usage": response.usage,
                 }
             )
 
-        _write_json(
-            run_dir / "agent2_test_design.json",
-            response.design.model_dump(mode="json"),
-        )
-        _write_json(
-            run_dir / "checkpoint2.json",
-            checkpoint2.model_dump(mode="json"),
-        )
+        design_file = run_dir / "agent2_test_design.json"
+        checkpoint2_file = run_dir / "checkpoint2.json"
+        _write_json(design_file, response.design.model_dump(mode="json"))
+        _write_json(checkpoint2_file, checkpoint2.model_dump(mode="json"))
         _write_json(
             run_dir / "agent2_manifest.json",
             {
+                "contract_version": "2.2",
+                "prompt_version": "agent2-2.2",
                 "run_id": args.run_id,
                 "source_stage": "AGENT_1_CP1",
                 "stage": "AGENT_2_CP2",
                 "status": checkpoint2.status.value,
                 "model": response.model,
-                "response_id": response.response_id,
                 "usage": response.usage,
                 "attempts": attempts,
+                "source_run_manifest_sha256": _sha256_file(run_dir / "run_manifest.json"),
+                "request_sha256": source_manifest["request_sha256"],
+                "srs_sha256": source_manifest["srs_sha256"],
+                "agent1_analysis_sha256": source_manifest["agent1_analysis_sha256"],
+                "checkpoint1_sha256": source_manifest["checkpoint1_sha256"],
+                "agent2_design_sha256": _sha256_file(design_file),
+                "checkpoint2_sha256": _sha256_file(checkpoint2_file),
                 "created_at": datetime.now(timezone.utc).isoformat(),
             },
         )
@@ -1229,6 +2157,290 @@ def run_agent2(args: argparse.Namespace) -> int:
     return 0 if checkpoint2.status == CheckStatus.PASS else 2
 
 
+
+def _load_verified_agent2_run(
+    run_dir: Path, run_id: str
+) -> tuple[
+    ChangeRequest,
+    dict[str, SrsRequirement],
+    Agent1Analysis,
+    Agent2TestDesign,
+    Checkpoint2Result,
+    dict[str, Any],
+]:
+    request, requirements, analysis, _, source_manifest = _load_verified_agent1_run(run_dir, run_id)
+    manifest_file = run_dir / "agent2_manifest.json"
+    manifest = _read_json_payload(manifest_file)
+    if manifest.get("run_id") != run_id or manifest.get("stage") != "AGENT_2_CP2":
+        raise ValueError("agent2_manifest does not match the requested Run.")
+    if manifest.get("status") != CheckStatus.PASS.value:
+        raise ValueError("Checkpoint 2 must PASS before Agent 3 can run.")
+    _verify_sha256(
+        run_dir / "run_manifest.json",
+        manifest.get("source_run_manifest_sha256"),
+        "Agent 1 Run manifest",
+    )
+    for key in ("request_sha256", "srs_sha256", "agent1_analysis_sha256", "checkpoint1_sha256"):
+        if manifest.get(key) != source_manifest.get(key):
+            raise ValueError(f"Agent 2 source chain mismatch: {key}")
+    design_file = run_dir / "agent2_test_design.json"
+    checkpoint_file = run_dir / "checkpoint2.json"
+    _verify_sha256(design_file, manifest.get("agent2_design_sha256"), "Agent 2 design")
+    _verify_sha256(checkpoint_file, manifest.get("checkpoint2_sha256"), "Checkpoint 2")
+    design = _read_json_model(design_file, Agent2TestDesign)
+    checkpoint = _read_json_model(checkpoint_file, Checkpoint2Result)
+    recomputed = evaluate_checkpoint2(request, analysis, design, requirements)
+    if recomputed.model_dump(mode="json") != checkpoint.model_dump(mode="json"):
+        raise ValueError("Stored Checkpoint 2 differs from the current CP2 rules.")
+    if checkpoint.status != CheckStatus.PASS:
+        raise ValueError("Checkpoint 2 does not allow Agent 3 execution.")
+    return request, requirements, analysis, design, checkpoint, manifest
+
+
+_AGENT3_TRIAL_ENV_ALLOWLIST = (
+    "PATH",
+    "PATHEXT",
+    "SYSTEMROOT",
+    "WINDIR",
+    "TEMP",
+    "TMP",
+    "LOCALAPPDATA",
+    "USERPROFILE",
+    "HOME",
+    "PYTHONUTF8",
+    "PYTHONIOENCODING",
+)
+
+
+def run_candidate_trial(
+    code_file: Path,
+    target_html: Path,
+    evidence_dir: Path,
+    *,
+    timeout_seconds: int,
+) -> Agent3TrialResult:
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    stdout_file = evidence_dir / "trial-stdout.txt"
+    stderr_file = evidence_dir / "trial-stderr.txt"
+    started = time.monotonic()
+    exit_code: int | None = None
+    stdout = ""
+    stderr = ""
+    outcome = TrialOutcome.AUTOMATION_ERROR
+
+    def redact_output(value: str, *paths: Path) -> str:
+        redacted = value
+        for path in paths:
+            resolved = str(path.resolve())
+            redacted = redacted.replace(resolved, "<LOCAL_PATH>")
+            redacted = redacted.replace(path.resolve().as_uri(), "<LOCAL_FILE_URL>")
+        return redacted
+
+    with tempfile.TemporaryDirectory(prefix="qa-agent3-") as temp_name:
+        temp_root = Path(temp_name)
+        isolated_candidate = temp_root / code_file.name
+        shutil.copy2(code_file, isolated_candidate)
+        env = {name: os.environ[name] for name in _AGENT3_TRIAL_ENV_ALLOWLIST if name in os.environ}
+        env["QA_TARGET_URL"] = target_html.resolve().as_uri()
+        env["QA_EVIDENCE_DIR"] = str(evidence_dir.resolve())
+        try:
+            completed = subprocess.run(
+                [sys.executable, "-m", "pytest", isolated_candidate.name, "-q"],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout_seconds,
+                shell=False,
+            )
+            exit_code = completed.returncode
+            stdout = redact_output(completed.stdout[-20000:], temp_root, target_html, evidence_dir)
+            stderr = redact_output(completed.stderr[-20000:], temp_root, target_html, evidence_dir)
+            combined = stdout + "\n" + stderr
+            if exit_code == 0:
+                outcome = TrialOutcome.PASS
+            elif "PRODUCT_MISMATCH:" in combined:
+                outcome = TrialOutcome.PRODUCT_MISMATCH_CANDIDATE
+            elif any(
+                marker in combined
+                for marker in (
+                    "Executable doesn't exist",
+                    "BrowserType.launch",
+                    "ERR_FILE_NOT_FOUND",
+                    "Target page, context or browser has been closed",
+                )
+            ):
+                outcome = TrialOutcome.ENVIRONMENT_ERROR
+            else:
+                outcome = TrialOutcome.AUTOMATION_ERROR
+        except subprocess.TimeoutExpired as exc:
+            stdout = redact_output((exc.stdout or "")[-20000:], temp_root, target_html, evidence_dir) if isinstance(exc.stdout, str) else ""
+            stderr = redact_output((exc.stderr or "")[-20000:], temp_root, target_html, evidence_dir) if isinstance(exc.stderr, str) else ""
+            outcome = TrialOutcome.TIMEOUT
+    _write_text_atomic(stdout_file, stdout)
+    _write_text_atomic(stderr_file, stderr)
+    screenshot = evidence_dir / "trial-final.png"
+    trace = evidence_dir / "trial-trace.zip"
+    return Agent3TrialResult(
+        outcome=outcome,
+        exit_code=exit_code,
+        duration_ms=int((time.monotonic() - started) * 1000),
+        stdout_file=stdout_file.name,
+        stderr_file=stderr_file.name,
+        screenshot_file=screenshot.name if screenshot.is_file() else None,
+        trace_file=trace.name if trace.is_file() else None,
+        evidence_complete=screenshot.is_file() and trace.is_file(),
+    )
+
+
+def run_agent3(args: argparse.Namespace) -> int:
+    run_dir = _resolve_run_dir(Path(args.runs_root), args.run_id)
+    final_outputs = [
+        run_dir / "agent3_automation_plan.json",
+        run_dir / "checkpoint3.json",
+        run_dir / "agent3_trial.json",
+        run_dir / "agent3_manifest.json",
+    ]
+    candidate_dir = run_dir / "candidates"
+    evidence_dir = run_dir / "evidence" / args.tc_id
+    if any(path.exists() for path in final_outputs) or candidate_dir.exists():
+        raise ValueError("This Run already contains final Agent 3 artifacts.")
+
+    _, requirements, _, design, _, source_manifest = _load_verified_agent2_run(
+        run_dir, args.run_id
+    )
+    matches = [item for item in design.test_cases if item.tc_id == args.tc_id]
+    if len(matches) != 1:
+        raise ValueError(f"Exactly one CP2-approved TC is required: {args.tc_id}")
+    test_case = matches[0]
+    if not test_case.automation_candidate:
+        raise ValueError(f"TC is not an automation candidate: {args.tc_id}")
+    if test_case.control_path != ControlPath.CENTRAL:
+        raise Agent3Error(
+            "Agent 3 MVP currently supports the observed CENTRAL control panel only; LOCAL needs a separate real UI target."
+        )
+
+    target_html = Path(args.target_html).resolve()
+    try:
+        observation = inspect_target_ui(target_html)
+        observation_file = run_dir / "agent3_ui_observation.json"
+        _write_json(observation_file, observation.model_dump(mode="json"))
+        agent = OpenAIAgent3(model=args.model)
+        preview_payload = build_agent3_model_input(test_case, observation, requirements)
+        preview_payload["model"] = args.model or os.getenv("OPENAI_MODEL", "gpt-5.6-terra")
+        preview_file = run_dir / "agent3_model_input_preview.json"
+        _write_json(preview_file, preview_payload)
+        if getattr(args, "preview_only", False):
+            print(f"Run ID: {args.run_id}")
+            print("Agent 3 model call: NOT EXECUTED")
+            print(f"Preview: {preview_file}")
+            return 0
+
+        response = agent.plan(test_case, observation, requirements)
+        checkpoint = evaluate_checkpoint3_plan(test_case, response.plan, observation)
+        attempts = [{"attempt": 1, "status": checkpoint.status.value, "model": response.model, "usage": response.usage}]
+        if checkpoint.status == CheckStatus.FAIL:
+            _write_json(run_dir / "agent3_automation_plan_attempt_1.json", response.plan.model_dump(mode="json"))
+            _write_json(run_dir / "checkpoint3_attempt_1.json", checkpoint.model_dump(mode="json"))
+            response = agent.plan(
+                test_case,
+                observation,
+                requirements,
+                previous_plan=response.plan,
+                checkpoint_feedback=[item.message for item in checkpoint.checks if item.status == CheckStatus.FAIL],
+            )
+            checkpoint = evaluate_checkpoint3_plan(test_case, response.plan, observation)
+            attempts.append({"attempt": 2, "status": checkpoint.status.value, "model": response.model, "usage": response.usage})
+
+        plan_file = run_dir / "agent3_automation_plan.json"
+        checkpoint_file = run_dir / "checkpoint3.json"
+        _write_json(plan_file, response.plan.model_dump(mode="json"))
+        trial: Agent3TrialResult | None = None
+        candidate_file: Path | None = None
+        if checkpoint.status == CheckStatus.PASS:
+            candidate_dir.mkdir(parents=True, exist_ok=False)
+            candidate_file = candidate_dir / f"test_{args.tc_id.lower().replace('-', '_')}.py"
+            code = compile_automation_candidate(args.run_id, test_case, response.plan)
+            static_checks = evaluate_compiled_candidate(test_case, code)
+            checkpoint.checks.extend(static_checks)
+            if any(item.status == CheckStatus.FAIL for item in static_checks):
+                checkpoint.status = CheckStatus.FAIL
+                checkpoint.candidate_status = AutomationCandidateStatus.REVISION_REQUIRED
+            else:
+                _write_text_atomic(candidate_file, code)
+                trial = run_candidate_trial(
+                    candidate_file,
+                    target_html,
+                    evidence_dir,
+                    timeout_seconds=args.timeout,
+                )
+                if _sha256_file(target_html) != observation.target_sha256:
+                    raise Agent3Error(
+                        "The read-only Project1 target changed during the isolated trial."
+                    )
+                if trial.outcome == TrialOutcome.PASS:
+                    checkpoint.candidate_status = AutomationCandidateStatus.READY_FOR_EXECUTION
+                elif trial.outcome == TrialOutcome.PRODUCT_MISMATCH_CANDIDATE:
+                    checkpoint.candidate_status = AutomationCandidateStatus.PRODUCT_MISMATCH_DETECTED
+                else:
+                    checkpoint.candidate_status = AutomationCandidateStatus.TRIAL_FAILED
+        _write_json(checkpoint_file, checkpoint.model_dump(mode="json"))
+        if trial is not None:
+            _write_json(run_dir / "agent3_trial.json", trial.model_dump(mode="json"))
+
+        manifest_payload = {
+            "contract_version": "3.0",
+            "prompt_version": "agent3-3.0",
+            "run_id": args.run_id,
+            "source_stage": "AGENT_2_CP2",
+            "stage": "AGENT_3_CP3_TRIAL",
+            "tc_id": args.tc_id,
+            "status": checkpoint.status.value,
+            "candidate_status": checkpoint.candidate_status.value,
+            "model": response.model,
+            "usage": response.usage,
+            "attempts": attempts,
+            "source_agent2_manifest_sha256": _sha256_file(run_dir / "agent2_manifest.json"),
+            "source_agent2_design_sha256": source_manifest["agent2_design_sha256"],
+            "ui_observation_sha256": _sha256_file(observation_file),
+            "target_file": target_html.name,
+            "target_sha256": observation.target_sha256,
+            "automation_plan_sha256": _sha256_file(plan_file),
+            "checkpoint3_sha256": _sha256_file(checkpoint_file),
+            "candidate_file": candidate_file.name if candidate_file and candidate_file.is_file() else None,
+            "candidate_sha256": _sha256_file(candidate_file) if candidate_file and candidate_file.is_file() else None,
+            "trial_file": "agent3_trial.json" if trial is not None else None,
+            "trial_sha256": _sha256_file(run_dir / "agent3_trial.json") if trial is not None else None,
+            "project1_modified": _sha256_file(target_html) != observation.target_sha256,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _write_json(run_dir / "agent3_manifest.json", manifest_payload)
+    except Exception as exc:
+        _write_json(
+            run_dir / "agent3_error.json",
+            {
+                "run_id": args.run_id,
+                "stage": "AGENT_3_CP3_TRIAL",
+                "tc_id": args.tc_id,
+                "error_type": type(exc).__name__,
+                "message": str(exc),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        print(f"Agent 3 failed: {exc}\nArtifacts: {run_dir}", file=sys.stderr)
+        return 1
+
+    print(f"Run ID: {args.run_id}")
+    print(f"Agent 3 model: {response.model}")
+    print(f"Checkpoint 3: {checkpoint.status.value}")
+    print(f"Candidate status: {checkpoint.candidate_status.value}")
+    if trial is not None:
+        print(f"Trial outcome: {trial.outcome.value}")
+    print(f"Artifacts: {run_dir}")
+    return 0 if checkpoint.status == CheckStatus.PASS and trial is not None else 2
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="qa-pipeline-v2",
@@ -1250,7 +2462,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     agent2 = subparsers.add_parser("agent2", help="Agent 2와 Checkpoint 2 실행")
     agent2.add_argument("--run-id", required=True, help="CP1을 통과한 Run ID")
-    agent2.add_argument("--srs", default=str(DEFAULT_SRS), help="제품 SRS Markdown 경로")
     agent2.add_argument(
         "--runs-root", default=str(DEFAULT_RUNS_ROOT), help="실행 결과 저장 폴더"
     )
@@ -1260,6 +2471,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="OpenAI 모델 ID. 미지정 시 OPENAI_MODEL 또는 gpt-5.6-terra",
     )
     agent2.set_defaults(handler=run_agent2)
+
+    agent3 = subparsers.add_parser("agent3", help="Run Agent 3, CP3, and the isolated trial")
+    agent3.add_argument("--run-id", required=True, help="Run ID whose CP2 status is PASS")
+    agent3.add_argument("--tc-id", required=True, help="One CP2-approved automation candidate TC ID")
+    agent3.add_argument("--target-html", required=True, help="Read-only local virtual controller HTML path")
+    agent3.add_argument("--runs-root", default=str(DEFAULT_RUNS_ROOT), help="Run artifact root")
+    agent3.add_argument("--model", default=None, help="OpenAI model ID")
+    agent3.add_argument("--timeout", type=int, default=30, help="Isolated trial timeout in seconds")
+    agent3.add_argument("--preview-only", action="store_true", help="Inspect UI and write the exact model-input preview without calling the API")
+    agent3.set_defaults(handler=run_agent3)
     return parser
 
 
@@ -1271,7 +2492,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.handler(args)
-    except (OSError, ValueError, Agent1Error, Agent2Error) as exc:
+    except (OSError, ValueError, Agent1Error, Agent2Error, Agent3Error) as exc:
         parser.error(str(exc))
     return 1
 

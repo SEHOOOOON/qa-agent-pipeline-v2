@@ -2,7 +2,7 @@
   "request_id": "CR-20260811-001",
   "change_type": "MODIFIED",
   "target_requirement_id": "REQ-TEMP-001",
-  "change_summary": "AUTO 모드의 설정 온도 허용 범위를 기존 16~30°C에서 18~30°C로 변경합니다. AUTO 모드의 18°C 미만 요청은 차단·기존 온도 유지·Toast 안내 대상이며, COOL·HEAT 및 FAN·DRY의 기존 정책은 각각 유지 여부를 함께 검증합니다.",
+  "change_summary": "REQ-TEMP-001의 설정 온도 정책을 모드별로 변경합니다. AUTO 모드는 18~30°C만 허용하고 18°C 미만 요청은 기존 설정 온도를 유지한 채 차단 안내 Toast를 표시하며, COOL·HEAT 및 FAN·DRY의 기존 정책은 유지합니다.",
   "before_condition": "16~30°C",
   "after_condition": "AUTO 모드는 18~30°C, COOL·HEAT 모드는 16~30°C, FAN·DRY 모드는 온도 설정 비활성화",
   "confirmed_conditions": [
@@ -10,23 +10,20 @@
       "condition_id": "COND-001",
       "statement": "AUTO 모드의 설정 온도 범위는 18~30°C입니다.",
       "source_type": "CHANGE_REQUEST",
-      "source_text": "AUTO 모드는 18~30°C, COOL·HEAT 모드는 16~30°C, FAN·DRY 모드는 온도 설정 비활성화",
+      "source_text": "AUTO 모드는 18~30°C",
       "requirement_ids": [
         "REQ-TEMP-001",
-        "REQ-LOCAL-002",
-        "REQ-CONTROL-001"
+        "REQ-LOCAL-002"
       ]
     },
     {
       "condition_id": "COND-002",
-      "statement": "AUTO 모드에서 18°C는 허용합니다.",
+      "statement": "AUTO 모드에서 18°C는 허용됩니다.",
       "source_type": "CHANGE_REQUEST",
       "source_text": "AUTO 모드에서 18°C는 허용합니다.",
       "requirement_ids": [
         "REQ-TEMP-001",
-        "REQ-LOCAL-002",
-        "REQ-CONTROL-001",
-        "REQ-STATE-001"
+        "REQ-LOCAL-002"
       ]
     },
     {
@@ -36,8 +33,7 @@
       "source_text": "AUTO 모드에서 18°C 미만 요청은 적용하지 않습니다.",
       "requirement_ids": [
         "REQ-TEMP-001",
-        "REQ-LOCAL-002",
-        "REQ-CONTROL-001"
+        "REQ-LOCAL-002"
       ]
     },
     {
@@ -56,6 +52,7 @@
       "source_type": "CHANGE_REQUEST",
       "source_text": "차단 안내 Toast를 표시합니다.",
       "requirement_ids": [
+        "REQ-TEMP-001",
         "REQ-NOTIFY-001"
       ]
     },
@@ -75,7 +72,35 @@
       "source_type": "CHANGE_REQUEST",
       "source_text": "FAN·DRY 모드는 기존과 같이 온도 설정을 비활성화합니다.",
       "requirement_ids": [
+        "REQ-TEMP-001",
         "REQ-MODE-002"
+      ]
+    },
+    {
+      "condition_id": "COND-008",
+      "statement": "현장 온도 변경 범위를 온도 활성 모드 전체에 16~30°C로 규정한 기존 기준은 AUTO 모드의 18°C 하한 정책과 충돌합니다.",
+      "source_type": "SRS",
+      "source_text": "온라인·오류 없음·잠금 해제·온도 활성 모드에서 내부 설정 온도가 16~30°C 안에서 ±1°C 변경됩니다.",
+      "requirement_ids": [
+        "REQ-LOCAL-002"
+      ]
+    },
+    {
+      "condition_id": "COND-009",
+      "statement": "제어 패널 대기값 적용 후 허용 장비 반영 기준은 모드별 온도 정책 적용에 대해 회귀 확인합니다.",
+      "source_type": "SRS",
+      "source_text": "적용 전 상태는 유지되고 적용 후 허용 대상의 화면·내부 상태가 대기값과 같습니다.",
+      "requirement_ids": [
+        "REQ-CONTROL-001"
+      ]
+    },
+    {
+      "condition_id": "COND-010",
+      "statement": "사용자 화면과 내부 장비 상태의 setTemp 일치 기준은 차단 시 기존 설정 온도 유지 정책에 대해 회귀 확인합니다.",
+      "source_type": "SRS",
+      "source_text": "status·mode·currentTemp·setTemp·fanSpeed·locked 등 검증 대상 공통 값이 같습니다.",
+      "requirement_ids": [
+        "REQ-STATE-001"
       ]
     }
   ],
@@ -83,32 +108,32 @@
     {
       "requirement_id": "REQ-TEMP-001",
       "relation": "MODIFIED",
-      "reason": "기존의 모든 섭씨 설정 범위 16~30°C 조건을 모드별 정책으로 변경하며, AUTO 모드의 하한을 18°C로 제한합니다."
-    },
-    {
-      "requirement_id": "REQ-LOCAL-002",
-      "relation": "VERIFY",
-      "reason": "온도 활성 모드에서 현장 설정 온도가 16~30°C 안에서 변경되는 기존 기준은 AUTO 모드 18~30°C 및 COOL·HEAT 16~30°C 정책과 함께 검증해야 합니다."
+      "reason": "기존 단일 16~30°C 설정 범위를 AUTO 18~30°C, COOL·HEAT 16~30°C, FAN·DRY 비활성화의 모드별 정책으로 변경해야 합니다."
     },
     {
       "requirement_id": "REQ-CONTROL-001",
       "relation": "VERIFY",
-      "reason": "AUTO 모드의 허용 온도 요청은 적용 후 허용 장비의 화면·내부 상태에 반영되는 기존 중앙 제어 기준과 함께 검증해야 합니다."
+      "reason": "모드별 온도 요청의 적용 또는 차단 후 제어 패널 대기값과 허용 대상의 화면·내부 상태 반영 기준이 유지되는지 회귀 확인이 필요합니다."
+    },
+    {
+      "requirement_id": "REQ-LOCAL-002",
+      "relation": "UPDATE_REQUIRED",
+      "reason": "온도 활성 모드 전체에 16~30°C를 적용하는 기존 인수 기준이 AUTO 모드의 18°C 하한 정책과 실제로 충돌합니다."
     },
     {
       "requirement_id": "REQ-NOTIFY-001",
       "relation": "VERIFY",
-      "reason": "AUTO 모드의 18°C 미만 요청 차단 시 Toast 안내 표시가 변경 요청의 확정 조건입니다."
+      "reason": "AUTO 모드에서 18°C 미만 요청을 차단할 때 차단 안내 Toast를 표시해야 하므로 처리 결과와 일치하는 Toast 표시 기준의 회귀 확인이 필요합니다."
     },
     {
       "requirement_id": "REQ-STATE-001",
       "relation": "VERIFY",
-      "reason": "허용 요청의 설정 온도 반영 및 차단 요청에서 기존 설정 온도 유지 시 화면과 내부 setTemp의 일치 여부를 검증해야 합니다."
+      "reason": "차단된 AUTO 모드 요청에서 기존 설정 온도를 유지할 때 화면과 내부 setTemp의 일치 기준을 회귀 확인해야 합니다."
     },
     {
       "requirement_id": "REQ-MODE-002",
       "relation": "VERIFY",
-      "reason": "변경 요청이 FAN·DRY 모드의 온도 설정 비활성화 정책 유지를 명시하므로, 해당 모드의 기존 비활성화 기준을 함께 검증해야 합니다."
+      "reason": "FAN·DRY의 온도 설정 비활성화 정책은 유지되므로 기존 비활성화 기준이 변경 후에도 유지되는지 회귀 확인이 필요합니다."
     }
   ],
   "excluded_scope": [],

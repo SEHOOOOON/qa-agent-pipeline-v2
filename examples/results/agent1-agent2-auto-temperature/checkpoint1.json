@@ -1,6 +1,7 @@
 {
   "checkpoint": "CP1",
   "status": "PASS",
+  "handoff_status": "CONTINUE",
   "checks": [
     {
       "rule_id": "CP1-001",
@@ -40,7 +41,7 @@
     {
       "rule_id": "CP1-008",
       "status": "PASS",
-      "message": "변경 요청의 인수 조건이 모두 확정 조건으로 전달됩니다."
+      "message": "변경 요청의 인수 조건과 변경 후 범위가 모두 전달됩니다."
     },
     {
       "rule_id": "CP1-009",

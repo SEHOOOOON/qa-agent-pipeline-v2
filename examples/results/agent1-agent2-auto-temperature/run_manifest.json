@@ -1,34 +1,34 @@
 {
-    "run_id":  "RUN-20260812-132412-687EC2",
-    "stage":  "AGENT_1_CP1",
-    "status":  "PASS",
-    "model":  "gpt-5.6-terra",
-    "usage":  {
-                  "input_tokens":  4620,
-                  "output_tokens":  1078,
-                  "total_tokens":  5698
-              },
-    "attempts":  [
-                     {
-                         "attempt":  1,
-                         "status":  "FAIL",
-                         "model":  "gpt-5.6-terra",
-                         "usage":  {
-                                       "input_tokens":  3295,
-                                       "output_tokens":  2156,
-                                       "total_tokens":  5451
-                                   }
-                     },
-                     {
-                         "attempt":  2,
-                         "status":  "PASS",
-                         "model":  "gpt-5.6-terra",
-                         "usage":  {
-                                       "input_tokens":  4620,
-                                       "output_tokens":  1078,
-                                       "total_tokens":  5698
-                                   }
-                     }
-                 ],
-    "created_at":  "2026-08-12T13:24:50.750992+00:00"
+  "contract_version": "2.2",
+  "prompt_version": "agent1-2.2",
+  "run_id": "RUN-20260813-125229-31EB5F",
+  "stage": "AGENT_1_CP1",
+  "status": "PASS",
+  "handoff_status": "CONTINUE",
+  "model": "gpt-5.6-terra",
+  "usage": {
+    "input_tokens": 3430,
+    "output_tokens": 2467,
+    "total_tokens": 5897
+  },
+  "attempts": [
+    {
+      "attempt": 1,
+      "status": "PASS",
+      "handoff_status": "CONTINUE",
+      "model": "gpt-5.6-terra",
+      "usage": {
+        "input_tokens": 3430,
+        "output_tokens": 2467,
+        "total_tokens": 5897
+      }
+    }
+  ],
+  "request_file": "request.json",
+  "request_sha256": "227f7082975be272dbe1137e5509b9f96d3ce5c7f1f356e1e880188991c9617b",
+  "srs_snapshot_file": "srs_snapshot.md",
+  "srs_sha256": "9b473ff161a39644dc200e1c5d4d023f0c8591c5191a54b15950ca18d2d204d2",
+  "agent1_analysis_sha256": "9c278966c06190f192327f7f83011fa2f1cc3413b1563c8babc5718cba4ee799",
+  "checkpoint1_sha256": "099388c0cfd89f76dd741a45316d518ec411594246ac44552a6611239ffab286",
+  "created_at": "2026-08-13T12:53:06.934848+00:00"
 }

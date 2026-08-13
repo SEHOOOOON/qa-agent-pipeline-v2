@@ -1,35 +1,44 @@
 {
-    "run_id":  "RUN-20260812-132412-687EC2",
-    "source_stage":  "AGENT_1_CP1",
-    "stage":  "AGENT_2_CP2",
-    "status":  "PASS",
-    "model":  "gpt-5.6-terra",
-    "usage":  {
-                  "input_tokens":  6998,
-                  "output_tokens":  3268,
-                  "total_tokens":  10266
-              },
-    "attempts":  [
-                     {
-                         "attempt":  1,
-                         "status":  "FAIL",
-                         "model":  "gpt-5.6-terra",
-                         "usage":  {
-                                       "input_tokens":  3966,
-                                       "output_tokens":  3792,
-                                       "total_tokens":  7758
-                                   }
-                     },
-                     {
-                         "attempt":  2,
-                         "status":  "PASS",
-                         "model":  "gpt-5.6-terra",
-                         "usage":  {
-                                       "input_tokens":  6998,
-                                       "output_tokens":  3268,
-                                       "total_tokens":  10266
-                                   }
-                     }
-                 ],
-    "created_at":  "2026-08-12T13:37:06.619400+00:00"
+  "contract_version": "2.2",
+  "prompt_version": "agent2-2.2",
+  "run_id": "RUN-20260813-125229-31EB5F",
+  "source_stage": "AGENT_1_CP1",
+  "stage": "AGENT_2_CP2",
+  "status": "PASS",
+  "model": "gpt-5.6-terra",
+  "usage": {
+    "input_tokens": 12001,
+    "output_tokens": 6243,
+    "total_tokens": 18244
+  },
+  "attempts": [
+    {
+      "attempt": 1,
+      "status": "FAIL",
+      "model": "gpt-5.6-terra",
+      "usage": {
+        "input_tokens": 5239,
+        "output_tokens": 6993,
+        "total_tokens": 12232
+      }
+    },
+    {
+      "attempt": 2,
+      "status": "PASS",
+      "model": "gpt-5.6-terra",
+      "usage": {
+        "input_tokens": 12001,
+        "output_tokens": 6243,
+        "total_tokens": 18244
+      }
+    }
+  ],
+  "source_run_manifest_sha256": "e577bb3e166cb115847766cf5a4a07d33c826460b52319e1f42076351fca7f01",
+  "request_sha256": "227f7082975be272dbe1137e5509b9f96d3ce5c7f1f356e1e880188991c9617b",
+  "srs_sha256": "9b473ff161a39644dc200e1c5d4d023f0c8591c5191a54b15950ca18d2d204d2",
+  "agent1_analysis_sha256": "9c278966c06190f192327f7f83011fa2f1cc3413b1563c8babc5718cba4ee799",
+  "checkpoint1_sha256": "099388c0cfd89f76dd741a45316d518ec411594246ac44552a6611239ffab286",
+  "agent2_design_sha256": "ff67d3ec44ea00e58ecb494563084de67dd78703a1b496ed32b1c5c16e0d3d8e",
+  "checkpoint2_sha256": "e091eabb8d302f6560430f51bfc717d9d7db1922b9aad928e30c66149032b297",
+  "created_at": "2026-08-13T12:55:29.459773+00:00"
 }

@@ -17,16 +17,14 @@
 ### 아직 없는 것
 
 - 구조화된 기존 TC 목록과 Agent 2의 NEW·UPDATED·REGRESSION 비교
-- Agent 2 TC 기반 Agent 3 코드 생성
-- 생성 코드의 격리 실행
-- CP3 실행 코드, 조건부 검토 UI와 정식 QA 자산 등록 승인 기록
+- 조건부 검토 UI와 정식 QA 자산 등록 승인 기록
 - V2 Run 단위 최종 보고
 
 ## 현재 구현 경계
 
-- 구현 완료: Product SRS·연관 요구사항 파서, Agent 1·2 OpenAI Adapter, 구조화 JSON 자동 인계, CP1 10개 규칙, CP2 9개 규칙, 단계별 최대 1회 재작업과 Run 저장
-- 실행 확인: 한 로컬 Run에서 Agent 1 최종 PASS, Agent 2 최종 PASS, 제품 기능 TC 후보 5건 생성
-- 미구현: 기존 TC 비교, Agent 3·CP3, 전체 Orchestrator, 조건부 검토 재개 UI, V2 Agent 4 입력 계약과 End-to-End 실행
+- 구현 완료: Product SRS·연관 요구사항 파서, Agent 1·2 OpenAI Adapter, Agent 3 구조화 계획 Adapter·결정론적 코드 컴파일러, CP1 10개·CP2 11개·CP3 계획/코드 규칙, 격리 시험, 요청·SRS·단계 산출물 SHA-256 고정
+- 실행 확인: v2.2 Live Run `RUN-20260813-125229-31EB5F`에서 Agent 1 `PASS + CONTINUE`, Agent 2·CP2 `PASS`, TC 후보 12건을 확인했습니다. 실제 Project1 화면을 읽기 전용으로 조사한 로컬 검증에서 CP3와 격리 시험까지 확인했고 자동 테스트 46건을 통과했습니다.
+- 미구현: 기존 TC 비교, Agent 3 실제 모델 공개 Run, 전체 Orchestrator, 조건부 검토 재개 UI, V2 Agent 4 입력 계약과 End-to-End 실행
 - Project1 기존 구현 상태와 한계는 [Project1 기준 자산 감사](05_PROJECT1_BASELINE_AUDIT.md), 테스트 지원 인터페이스는 [QA 하네스 가이드](06_TEST_HARNESS_GUIDE.md)를 기준으로 합니다.
 
 ## 3. MVP 목표와 비목표
@@ -35,8 +33,8 @@
 
 1. MODIFIED 요청 한 건을 실제 모델에 전달합니다.
 2. Agent 1이 SRS와 요청을 비교한 JSON을 생성합니다.
-3. Agent 2가 검증된 Agent 1 JSON으로 TC Change Set을 만듭니다.
-4. Agent 3가 TC 한 건의 Playwright Python 코드 후보를 만듭니다.
+3. Agent 2가 검증된 변경 요청·고정 SRS·Agent 1 JSON으로 제품 기능 TC 후보를 만듭니다.
+4. Agent 3가 TC 한 건의 구조화 실행 계획을 만들고, 컴파일러가 Playwright Python 후보로 변환합니다.
 5. CP1~3이 명백한 계약·근거·금지 패턴 위반을 찾습니다.
 6. 후보를 임시 폴더에서 한 번 실행합니다.
 7. CP1~3과 격리 시험을 통과한 후보는 중간 사람 승인 없이 현재 Run 검증으로 자동 전달합니다.
@@ -58,12 +56,13 @@
 ~~~text
 [사람] 변경 요청 입력
   -> [Agent 1 / 모델] 변경 분석 JSON
-  -> [CP1 / 코드] ID·before·after·근거 검사
-  -> [Agent 2 / 모델] 제품 기능 TC Change Set
-  -> [CP2 / 코드] 구조·추적성·제품 기준 검사
-  -> [Agent 3 / 모델] 실제 화면 확인 + Playwright Python 코드 후보
-  -> [CP3 / 코드] 구문·금지 패턴·TC 매핑 검사
-  -> [격리 실행] 임시 폴더에서 후보 1회 시험
+  -> [CP1 / 코드] ID·before·after·근거 검사 + 후속 인계 상태
+  -> [Agent 2 / 모델] 제품 기능 TC 후보
+  -> [CP2 / 코드] 구조·추적성·제어 경로·시험 데이터 검사
+  -> [UI 조사기 / 코드] Project1 실제 Selector·window.__vccs 목록 확인
+  -> [Agent 3 / 모델] 승인 TC를 제한된 행동·Assertion 계획으로 변환
+  -> [컴파일러·CP3 / 코드] Playwright Python 후보 생성 + 추적성·금지 패턴 검사
+  -> [격리 실행] 비밀 환경변수를 제거한 임시 폴더에서 후보 1회 시험
   -> [실행기] CP 통과 후보 변경 검증 + 기존 회귀 후보
   -> [Agent 4 / 규칙] 분류·정합성·보고
   -> [사람] 공식 SRS·TC·자동화 저장 승인 1회
@@ -77,12 +76,13 @@ Checkpoint는 생성형 Agent가 아니라 결정론 검사기입니다. PASS �
 
 | 필드 | 필수 | 설명 |
 |---|---|---|
-| change_request_id | Y | 변경 요청 ID |
-| title | Y | 변경 제목 |
-| description | Y | 변경 내용 |
-| target_requirement_ids | Y | 기존 SRS ID |
+| request_id | Y | 변경 요청 ID |
 | change_type | Y | MVP는 MODIFIED |
-| requested_behavior | Y | 변경 후 기대 동작 |
+| target_requirement_id | Y | 변경 대상 기존 SRS ID |
+| before_value | Y | 변경 전 값·조건 |
+| after_value | Y | 변경 후 값·조건 |
+| description | Y | 변경 내용을 설명한 원문 |
+| reason | N | 변경 이유 |
 | acceptance_notes | N | 추가 인수 조건 |
 | out_of_scope | N | 제외 범위 |
 
@@ -94,7 +94,7 @@ Checkpoint는 생성형 Agent가 아니라 결정론 검사기입니다. PASS �
 
 - SRS의 기존 조건과 요청의 변경 후 조건을 분리합니다.
 - 변경 요청의 after 값·동작·인수 조건을 변경 후 정책의 권한 있는 입력으로 사용합니다.
-- 직접 영향과 관련 영향 후보를 근거와 함께 냅니다.
+- 대상은 MODIFIED, 기존 문구 수정이 필요한 연관 기준은 UPDATE_REQUIRED, 회귀 확인만 필요한 기준은 VERIFY로 구분합니다.
 - 두 입력 어디에도 없는 정책을 새로 만들거나 SRS를 직접 수정하지 않습니다.
 
 ### Agent 2 — 제품 기능 TC 설계
@@ -102,17 +102,20 @@ Checkpoint는 생성형 Agent가 아니라 결정론 검사기입니다. PASS �
 - 무엇을 검증할지 정의합니다.
 - 현재는 기존 TC 구조화 목록이 없으므로 CHANGE_VALIDATION·RELATED_REGRESSION 목적만 구분합니다.
 - 사전조건, 행동, 기대 결과와 Requirement·Condition 근거를 작성합니다.
+- 중앙·로컬 제어 경로, 대상 역할, 모드·온도 시험 데이터, 복원 필요 여부를 구조화합니다.
 - 상태 변경은 가능한 경우 UI와 내부 상태를 모두 기대 결과로 둡니다.
 
 ### Agent 3 — 자동화 코드 후보 생성
 
-- Agent 2가 확정한 테스트 목적과 기대 결과를 Playwright Python으로 구현합니다.
-- 새 테스트 아이디어나 기대값을 추가하지 않습니다.
-- 코드 생성 전에 실제 로컬 화면의 접근성 구조, role·name·test id와 상태 변화를 확인합니다.
-- 프로젝트 1의 기존 기준 자동화 코드와 실제 화면 확인 자료를 참고합니다.
-- 내부 상태는 기존 `window.__vccs` 읽기 인터페이스를 사용합니다.
-- Playwright MCP는 실제 화면 조작과 Locator 확인을 돕는 개발 시점 도구입니다. 사용할 수 없으면 Python Playwright 조사 스크립트로 같은 근거를 수집합니다.
-- 생성·검증을 마친 코드는 Python Playwright 파일로 저장하며, 이후 회귀 실행에서는 모델이나 MCP를 다시 호출하지 않고 저장된 코드를 재사용합니다.
+- UI 조사기가 실제 Project1 페이지에서 허용 Selector와 `window.__vccs` 키를 먼저 수집합니다.
+- Agent 3 모델은 Agent 2가 확정한 TC를 행동·Assertion의 구조화 계획으로만 변환합니다.
+- 모델은 Python 코드를 직접 작성하지 않으며 새 테스트 목적, 기대값, Selector와 Requirement를 추가할 수 없습니다.
+- CP3는 행동 유형과 Selector의 대응, 모든 Expected Result의 1:1 Assertion, 관찰 계층, 모드·온도 값, 단계 순서와 복원 계약을 검사합니다.
+- 허용 목록 컴파일러가 CP3 PASS 계획을 Python Playwright 후보로 결정론적으로 만듭니다.
+- 내부 상태는 기존 `window.__vccs.devices` 읽기 인터페이스를 사용합니다.
+- 현재 MVP는 조사된 CENTRAL 제어 패널 TC 한 건만 지원하며 LOCAL 경로는 별도 실제 화면을 조사할 때까지 차단합니다.
+- 생성·검증을 마친 코드는 Run 폴더에 저장하며 이후 재실행에서는 모델을 다시 호출하지 않습니다.
+- Playwright MCP는 향후 조사 보조 도구일 뿐, 현재 구현의 실행 조건이나 품질 보장 근거가 아닙니다.
 
 ### Agent 4 — 결과 분석
 
@@ -143,7 +146,7 @@ Checkpoint는 생성형 Agent가 아니라 결정론 검사기입니다. PASS �
 
 ### 자동 수정 범위
 
-문법, Locator, Wait, Fixture 참조만 최대 1회 수정할 수 있습니다. 기대값, 경계값, Requirement, Assertion 의미는 수정할 수 없습니다.
+CP3가 구조화 계획을 반려하면 같은 TC와 실패 Rule만 전달해 계획을 최대 1회 재작성합니다. 컴파일된 후보의 시험 실행에서 발생한 Locator·Wait·Fixture 오류는 현재 자동 수정하지 않고 `TRIAL_FAILED`로 보존합니다. 기대값, 경계값, Requirement와 Assertion 의미는 어떤 경우에도 수정하지 않습니다.
 
 ## 8. 조건부 검토와 정식 QA 자산 등록 승인
 
@@ -190,30 +193,37 @@ TC-ENV-000은 현재 일반 테스트이므로 V2 Orchestrator가 결과를 읽�
 
 ~~~text
 runs/RUN-<id>/
-  request.json
-  agent1_change_analysis.json
-  checkpoint1.json
-  agent2_tc_change_set.json
-  checkpoint2.json
-  candidates/test_candidate.py
-  candidate_manifest.json
-  checkpoint3.json
-  trial_result.json
-  conditional_review.json       # REVIEW 발생 시에만 생성
+  request.json                   # 현재 구현
+  srs_snapshot.md                # 현재 구현
+  agent1_change_analysis.json    # 현재 구현
+  checkpoint1.json               # 현재 구현
+  run_manifest.json              # 현재 구현: 입력·출력 SHA-256
+  agent2_test_design.json        # 현재 구현
+  checkpoint2.json               # 현재 구현
+  agent2_manifest.json           # 현재 구현: 단계 간 SHA-256 체인
+  agent3_ui_observation.json      # 구현: 파일명·해시·Selector·하네스 목록
+  agent3_model_input_preview.json # 구현: API 전송 예정 데이터
+  agent3_automation_plan.json     # 구현: 모델의 제한된 행동·Assertion 계획
+  candidates/test_<tc-id>.py     # 구현: 결정론적 Playwright 후보
+  checkpoint3.json               # 구현: 계획·코드 규칙 판정
+  agent3_trial.json               # 구현: 격리 시험 결과
+  agent3_manifest.json            # 구현: 단계 입력·출력 SHA-256
+  evidence/<tc-id>/               # 구현: stdout·stderr·Screenshot·Trace
+  conditional_review.json        # REVIEW 재개 기능 계획
   asset_registration_decision.json
   execution_results.json
   final_report.json
 ~~~
 
-모든 파일은 같은 Run ID와 실제 입력 Artifact ID를 가져야 합니다.
+현재 Agent 1~3 파일은 같은 Run ID를 사용합니다. Agent 3 시작 전 Agent 1·2 Manifest와 산출물 SHA-256 및 CP1·CP2 재계산 결과를 다시 확인하며, `agent3_manifest.json`에 UI·계획·코드·시험 SHA-256을 기록합니다. Artifact ID는 다수 후보를 동시에 처리할 때 검토합니다.
 
 ## 12. 구현 순서
 
 1. SRS 초기 기준 확정·변경 요청 Schema
 2. Agent 1 모델 Adapter·CP1
 3. Agent 2 모델 Adapter·CP2·자동 인계
-4. 실제 화면 확인 자료·Agent 3·CP3
-5. 임시 폴더 격리 실행
+4. 실제 화면 확인 자료·Agent 3·CP3 — 구현
+5. 임시 폴더 격리 실행 — 구현
 6. 조건부 HUMAN_REVIEW 분기·재개 기록
 7. 기존 회귀 후보 실행
 8. Agent 4 입력 정합화·최종 보고
@@ -222,7 +232,7 @@ runs/RUN-<id>/
 ## 13. MVP 완료 기준
 
 - 서로 다른 변경 요청 2건이 서로 다른 Agent 1·2 결과를 만듭니다.
-- Agent 1 Artifact가 Agent 2 실제 입력으로 기록됩니다.
+- Agent 1의 요청·SRS 스냅샷·분석·CP1 SHA-256이 Agent 2 실행 전에 다시 검증됩니다.
 - Agent 2 TC 한 건이 Agent 3 코드 후보 한 건으로 이어집니다.
 - TC의 핵심 기대 결과가 Assertion과 내부 상태 대조에 매핑됩니다.
 - 후보는 원본과 분리된 위치에서 실행됩니다.
