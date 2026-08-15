@@ -1,0 +1,732 @@
+{
+  "request_id": "CR-20260811-001",
+  "test_cases": [
+    {
+      "tc_id": "TC-CAND-001",
+      "title": "중앙 제어 패널에서 AUTO 모드 하한 18°C 일괄 적용",
+      "purpose": "CHANGE_VALIDATION",
+      "test_type": "BOUNDARY",
+      "requirement_ids": [
+        "REQ-TEMP-001",
+        "REQ-CONTROL-001"
+      ],
+      "source_condition_ids": [
+        "COND-001",
+        "COND-002",
+        "COND-009"
+      ],
+      "control_path": "CENTRAL",
+      "target_role": "CENTRAL_COMMAND_ALLOWED_ROLE",
+      "test_data": {
+        "initial_mode": "AUTO",
+        "requested_mode": null,
+        "initial_temperature_c": 30.0,
+        "requested_temperature_c": 18.0
+      },
+      "preconditions": [
+        "중앙 명령이 허용되는 역할로 제어 패널에 접근한다.",
+        "선택된 허용 장비는 AUTO 모드이고 설정 온도는 30°C이다.",
+        "선택 장비는 중앙 제어 패널의 적용 대상이다."
+      ],
+      "steps": [
+        "제어 패널에서 대기 설정 온도를 18°C로 지정한다.",
+        "제어 패널을 통해 선택된 허용 장비에 대기값을 일괄 적용한다.",
+        "장비 카드 또는 제어 화면과 내부 장비 상태를 확인한다."
+      ],
+      "expected_results": [
+        {
+          "result_id": "ER-001",
+          "statement": "적용 후 허용 장비의 사용자 화면 설정 온도는 제어 패널 대기값인 18°C로 표시된다.",
+          "observation_layer": "UI",
+          "source_condition_ids": [
+            "COND-001",
+            "COND-002",
+            "COND-009"
+          ]
+        },
+        {
+          "result_id": "ER-002",
+          "statement": "적용 후 허용 장비의 내부 setTemp는 18°C이며 사용자 화면의 설정 온도와 일치한다.",
+          "observation_layer": "INTERNAL_STATE",
+          "source_condition_ids": [
+            "COND-001",
+            "COND-002",
+            "COND-009"
+          ]
+        }
+      ],
+      "restore_required": true,
+      "restore_steps": [
+        "제어 패널에서 대기 설정 온도를 30°C로 지정한다.",
+        "동일한 허용 장비에 대기값을 적용하여 설정 온도를 30°C로 복구한다.",
+        "사용자 화면과 내부 setTemp가 30°C로 일치하는지 확인한다."
+      ],
+      "automation_candidate": true,
+      "automation_reason": "가상 중앙 제어 화면에서 대기값 적용을 수행하고 장비 화면 및 내부 setTemp를 조회할 수 있다."
+    },
+    {
+      "tc_id": "TC-CAND-002",
+      "title": "중앙 제어 패널에서 AUTO 모드 상한 30°C 일괄 적용",
+      "purpose": "CHANGE_VALIDATION",
+      "test_type": "BOUNDARY",
+      "requirement_ids": [
+        "REQ-TEMP-001",
+        "REQ-CONTROL-001"
+      ],
+      "source_condition_ids": [
+        "COND-001",
+        "COND-009"
+      ],
+      "control_path": "CENTRAL",
+      "target_role": "CENTRAL_COMMAND_ALLOWED_ROLE",
+      "test_data": {
+        "initial_mode": "AUTO",
+        "requested_mode": null,
+        "initial_temperature_c": 18.0,
+        "requested_temperature_c": 30.0
+      },
+      "preconditions": [
+        "중앙 명령이 허용되는 역할로 제어 패널에 접근한다.",
+        "선택된 허용 장비는 AUTO 모드이고 설정 온도는 18°C이다.",
+        "선택 장비는 중앙 제어 패널의 적용 대상이다."
+      ],
+      "steps": [
+        "제어 패널에서 대기 설정 온도를 30°C로 지정한다.",
+        "제어 패널을 통해 선택된 허용 장비에 대기값을 일괄 적용한다.",
+        "장비 카드 또는 제어 화면과 내부 장비 상태를 확인한다."
+      ],
+      "expected_results": [
+        {
+          "result_id": "ER-003",
+          "statement": "적용 후 허용 장비의 사용자 화면 설정 온도는 제어 패널 대기값인 30°C로 표시된다.",
+          "observation_layer": "UI",
+          "source_condition_ids": [
+            "COND-001",
+            "COND-009"
+          ]
+        },
+        {
+          "result_id": "ER-004",
+          "statement": "적용 후 허용 장비의 내부 setTemp는 30°C이며 사용자 화면의 설정 온도와 일치한다.",
+          "observation_layer": "INTERNAL_STATE",
+          "source_condition_ids": [
+            "COND-001",
+            "COND-009"
+          ]
+        }
+      ],
+      "restore_required": true,
+      "restore_steps": [
+        "제어 패널에서 대기 설정 온도를 18°C로 지정한다.",
+        "동일한 허용 장비에 대기값을 적용하여 설정 온도를 18°C로 복구한다.",
+        "사용자 화면과 내부 setTemp가 18°C로 일치하는지 확인한다."
+      ],
+      "automation_candidate": true,
+      "automation_reason": "가상 중앙 제어 화면에서 대기값 적용을 수행하고 장비 화면 및 내부 setTemp를 조회할 수 있다."
+    },
+    {
+      "tc_id": "TC-CAND-003",
+      "title": "중앙 제어 패널에서 AUTO 모드 18°C 미만 요청 차단 및 기존 온도 유지",
+      "purpose": "CHANGE_VALIDATION",
+      "test_type": "EXCEPTION",
+      "requirement_ids": [
+        "REQ-TEMP-001",
+        "REQ-CONTROL-001",
+        "REQ-NOTIFY-001",
+        "REQ-STATE-001"
+      ],
+      "source_condition_ids": [
+        "COND-003",
+        "COND-004",
+        "COND-005",
+        "COND-009",
+        "COND-010"
+      ],
+      "control_path": "CENTRAL",
+      "target_role": "CENTRAL_COMMAND_ALLOWED_ROLE",
+      "test_data": {
+        "initial_mode": "AUTO",
+        "requested_mode": null,
+        "initial_temperature_c": 18.0,
+        "requested_temperature_c": 17.0
+      },
+      "preconditions": [
+        "중앙 명령이 허용되는 역할로 제어 패널에 접근한다.",
+        "선택된 허용 장비는 AUTO 모드이고 설정 온도는 18°C이다.",
+        "선택 장비는 중앙 제어 패널의 적용 대상이다."
+      ],
+      "steps": [
+        "제어 패널에서 대기 설정 온도를 17°C로 지정한다.",
+        "제어 패널을 통해 선택된 허용 장비에 대기값을 일괄 적용한다.",
+        "장비 카드 또는 제어 화면, 내부 장비 상태 및 안내 표시를 확인한다."
+      ],
+      "expected_results": [
+        {
+          "result_id": "ER-005",
+          "statement": "18°C 미만 요청은 적용되지 않으며 사용자 화면의 설정 온도는 기존 값 18°C로 유지된다.",
+          "observation_layer": "UI",
+          "source_condition_ids": [
+            "COND-003",
+            "COND-004",
+            "COND-009",
+            "COND-010"
+          ]
+        },
+        {
+          "result_id": "ER-006",
+          "statement": "내부 setTemp는 기존 값 18°C로 유지되고 사용자 화면의 설정 온도와 일치한다.",
+          "observation_layer": "INTERNAL_STATE",
+          "source_condition_ids": [
+            "COND-003",
+            "COND-004",
+            "COND-010"
+          ]
+        },
+        {
+          "result_id": "ER-007",
+          "statement": "차단 안내 Toast가 표시된다.",
+          "observation_layer": "NOTIFICATION",
+          "source_condition_ids": [
+            "COND-005"
+          ]
+        }
+      ],
+      "restore_required": false,
+      "restore_steps": [],
+      "automation_candidate": true,
+      "automation_reason": "중앙 제어 화면에서 범위 밖 요청을 적용하고 Toast, 화면 설정 온도 및 내부 setTemp를 확인할 수 있다."
+    },
+    {
+      "tc_id": "TC-CAND-004",
+      "title": "현장 제어에서 AUTO 모드 하한 18°C 설정",
+      "purpose": "CHANGE_VALIDATION",
+      "test_type": "BOUNDARY",
+      "requirement_ids": [
+        "REQ-TEMP-001",
+        "REQ-LOCAL-002"
+      ],
+      "source_condition_ids": [
+        "COND-001",
+        "COND-002",
+        "COND-008"
+      ],
+      "control_path": "LOCAL",
+      "target_role": "PRIMARY_TEST_DEVICE",
+      "test_data": {
+        "initial_mode": "AUTO",
+        "requested_mode": null,
+        "initial_temperature_c": 30.0,
+        "requested_temperature_c": 18.0
+      },
+      "preconditions": [
+        "PRIMARY_TEST_DEVICE는 온라인, 오류 없음, 잠금 해제 상태이다.",
+        "PRIMARY_TEST_DEVICE는 AUTO 모드이고 설정 온도는 30°C이다.",
+        "PRIMARY_TEST_DEVICE의 온도 설정이 활성화되어 있다."
+      ],
+      "steps": [
+        "PRIMARY_TEST_DEVICE의 개별 현장 온도 제어를 사용하여 설정 온도를 18°C로 요청한다.",
+        "장비의 사용자 화면과 내부 장비 상태를 확인한다."
+      ],
+      "expected_results": [
+        {
+          "result_id": "ER-008",
+          "statement": "PRIMARY_TEST_DEVICE의 사용자 화면 설정 온도는 18°C로 변경된다.",
+          "observation_layer": "UI",
+          "source_condition_ids": [
+            "COND-001",
+            "COND-002",
+            "COND-008"
+          ]
+        },
+        {
+          "result_id": "ER-009",
+          "statement": "PRIMARY_TEST_DEVICE의 내부 setTemp는 18°C이며 사용자 화면의 설정 온도와 일치한다.",
+          "observation_layer": "INTERNAL_STATE",
+          "source_condition_ids": [
+            "COND-001",
+            "COND-002",
+            "COND-008"
+          ]
+        }
+      ],
+      "restore_required": true,
+      "restore_steps": [
+        "PRIMARY_TEST_DEVICE의 개별 현장 온도 제어를 사용하여 설정 온도를 30°C로 복구한다.",
+        "사용자 화면과 내부 setTemp가 30°C로 일치하는지 확인한다."
+      ],
+      "automation_candidate": true,
+      "automation_reason": "가상 장비의 개별 온도 제어와 내부 setTemp 조회로 경계값 적용 여부를 검증할 수 있다."
+    },
+    {
+      "tc_id": "TC-CAND-005",
+      "title": "현장 제어에서 AUTO 모드 상한 30°C 설정",
+      "purpose": "CHANGE_VALIDATION",
+      "test_type": "BOUNDARY",
+      "requirement_ids": [
+        "REQ-TEMP-001",
+        "REQ-LOCAL-002"
+      ],
+      "source_condition_ids": [
+        "COND-001",
+        "COND-008"
+      ],
+      "control_path": "LOCAL",
+      "target_role": "PRIMARY_TEST_DEVICE",
+      "test_data": {
+        "initial_mode": "AUTO",
+        "requested_mode": null,
+        "initial_temperature_c": 18.0,
+        "requested_temperature_c": 30.0
+      },
+      "preconditions": [
+        "PRIMARY_TEST_DEVICE는 온라인, 오류 없음, 잠금 해제 상태이다.",
+        "PRIMARY_TEST_DEVICE는 AUTO 모드이고 설정 온도는 18°C이다.",
+        "PRIMARY_TEST_DEVICE의 온도 설정이 활성화되어 있다."
+      ],
+      "steps": [
+        "PRIMARY_TEST_DEVICE의 개별 현장 온도 제어를 사용하여 설정 온도를 30°C로 요청한다.",
+        "장비의 사용자 화면과 내부 장비 상태를 확인한다."
+      ],
+      "expected_results": [
+        {
+          "result_id": "ER-010",
+          "statement": "PRIMARY_TEST_DEVICE의 사용자 화면 설정 온도는 30°C로 변경된다.",
+          "observation_layer": "UI",
+          "source_condition_ids": [
+            "COND-001",
+            "COND-008"
+          ]
+        },
+        {
+          "result_id": "ER-011",
+          "statement": "PRIMARY_TEST_DEVICE의 내부 setTemp는 30°C이며 사용자 화면의 설정 온도와 일치한다.",
+          "observation_layer": "INTERNAL_STATE",
+          "source_condition_ids": [
+            "COND-001",
+            "COND-008"
+          ]
+        }
+      ],
+      "restore_required": true,
+      "restore_steps": [
+        "PRIMARY_TEST_DEVICE의 개별 현장 온도 제어를 사용하여 설정 온도를 18°C로 복구한다.",
+        "사용자 화면과 내부 setTemp가 18°C로 일치하는지 확인한다."
+      ],
+      "automation_candidate": true,
+      "automation_reason": "가상 장비의 개별 온도 제어와 내부 setTemp 조회로 경계값 적용 여부를 검증할 수 있다."
+    },
+    {
+      "tc_id": "TC-CAND-006",
+      "title": "현장 제어에서 AUTO 모드 18°C 미만 요청 차단 및 기존 온도 유지",
+      "purpose": "CHANGE_VALIDATION",
+      "test_type": "EXCEPTION",
+      "requirement_ids": [
+        "REQ-TEMP-001",
+        "REQ-LOCAL-002",
+        "REQ-NOTIFY-001",
+        "REQ-STATE-001"
+      ],
+      "source_condition_ids": [
+        "COND-003",
+        "COND-004",
+        "COND-005",
+        "COND-008",
+        "COND-010"
+      ],
+      "control_path": "LOCAL",
+      "target_role": "PRIMARY_TEST_DEVICE",
+      "test_data": {
+        "initial_mode": "AUTO",
+        "requested_mode": null,
+        "initial_temperature_c": 18.0,
+        "requested_temperature_c": 17.0
+      },
+      "preconditions": [
+        "PRIMARY_TEST_DEVICE는 온라인, 오류 없음, 잠금 해제 상태이다.",
+        "PRIMARY_TEST_DEVICE는 AUTO 모드이고 설정 온도는 18°C이다.",
+        "PRIMARY_TEST_DEVICE의 온도 설정이 활성화되어 있다."
+      ],
+      "steps": [
+        "PRIMARY_TEST_DEVICE의 개별 현장 온도 제어를 사용하여 설정 온도를 17°C로 요청한다.",
+        "장비의 사용자 화면, 내부 장비 상태 및 안내 표시를 확인한다."
+      ],
+      "expected_results": [
+        {
+          "result_id": "ER-012",
+          "statement": "18°C 미만 요청은 적용되지 않으며 PRIMARY_TEST_DEVICE의 사용자 화면 설정 온도는 기존 값 18°C로 유지된다.",
+          "observation_layer": "UI",
+          "source_condition_ids": [
+            "COND-003",
+            "COND-004",
+            "COND-008",
+            "COND-010"
+          ]
+        },
+        {
+          "result_id": "ER-013",
+          "statement": "PRIMARY_TEST_DEVICE의 내부 setTemp는 기존 값 18°C로 유지되고 사용자 화면의 설정 온도와 일치한다.",
+          "observation_layer": "INTERNAL_STATE",
+          "source_condition_ids": [
+            "COND-003",
+            "COND-004",
+            "COND-010"
+          ]
+        },
+        {
+          "result_id": "ER-014",
+          "statement": "차단 안내 Toast가 표시된다.",
+          "observation_layer": "NOTIFICATION",
+          "source_condition_ids": [
+            "COND-005"
+          ]
+        }
+      ],
+      "restore_required": false,
+      "restore_steps": [],
+      "automation_candidate": true,
+      "automation_reason": "가상 장비의 개별 온도 요청 후 Toast, 화면 설정 온도 및 내부 setTemp의 유지 상태를 조회할 수 있다."
+    },
+    {
+      "tc_id": "TC-CAND-007",
+      "title": "현장 제어에서 COOL 모드 하한 16°C 유지",
+      "purpose": "RELATED_REGRESSION",
+      "test_type": "BOUNDARY",
+      "requirement_ids": [
+        "REQ-TEMP-001",
+        "REQ-LOCAL-002"
+      ],
+      "source_condition_ids": [
+        "COND-006"
+      ],
+      "control_path": "LOCAL",
+      "target_role": "PRIMARY_TEST_DEVICE",
+      "test_data": {
+        "initial_mode": "COOL",
+        "requested_mode": null,
+        "initial_temperature_c": 30.0,
+        "requested_temperature_c": 16.0
+      },
+      "preconditions": [
+        "PRIMARY_TEST_DEVICE는 온라인, 오류 없음, 잠금 해제 상태이다.",
+        "PRIMARY_TEST_DEVICE는 COOL 모드이고 설정 온도는 30°C이다.",
+        "PRIMARY_TEST_DEVICE의 온도 설정이 활성화되어 있다."
+      ],
+      "steps": [
+        "PRIMARY_TEST_DEVICE의 개별 현장 온도 제어를 사용하여 설정 온도를 16°C로 요청한다.",
+        "장비의 사용자 화면과 내부 장비 상태를 확인한다."
+      ],
+      "expected_results": [
+        {
+          "result_id": "ER-015",
+          "statement": "PRIMARY_TEST_DEVICE의 사용자 화면 설정 온도는 16°C로 변경된다.",
+          "observation_layer": "UI",
+          "source_condition_ids": [
+            "COND-006"
+          ]
+        },
+        {
+          "result_id": "ER-016",
+          "statement": "PRIMARY_TEST_DEVICE의 내부 setTemp는 16°C이며 사용자 화면의 설정 온도와 일치한다.",
+          "observation_layer": "INTERNAL_STATE",
+          "source_condition_ids": [
+            "COND-006"
+          ]
+        }
+      ],
+      "restore_required": true,
+      "restore_steps": [
+        "PRIMARY_TEST_DEVICE의 개별 현장 온도 제어를 사용하여 설정 온도를 30°C로 복구한다.",
+        "사용자 화면과 내부 setTemp가 30°C로 일치하는지 확인한다."
+      ],
+      "automation_candidate": true,
+      "automation_reason": "가상 장비의 COOL 모드 개별 온도 제어와 내부 setTemp 조회로 기존 하한을 검증할 수 있다."
+    },
+    {
+      "tc_id": "TC-CAND-008",
+      "title": "현장 제어에서 COOL 모드 상한 30°C 유지",
+      "purpose": "RELATED_REGRESSION",
+      "test_type": "BOUNDARY",
+      "requirement_ids": [
+        "REQ-TEMP-001",
+        "REQ-LOCAL-002"
+      ],
+      "source_condition_ids": [
+        "COND-006"
+      ],
+      "control_path": "LOCAL",
+      "target_role": "PRIMARY_TEST_DEVICE",
+      "test_data": {
+        "initial_mode": "COOL",
+        "requested_mode": null,
+        "initial_temperature_c": 16.0,
+        "requested_temperature_c": 30.0
+      },
+      "preconditions": [
+        "PRIMARY_TEST_DEVICE는 온라인, 오류 없음, 잠금 해제 상태이다.",
+        "PRIMARY_TEST_DEVICE는 COOL 모드이고 설정 온도는 16°C이다.",
+        "PRIMARY_TEST_DEVICE의 온도 설정이 활성화되어 있다."
+      ],
+      "steps": [
+        "PRIMARY_TEST_DEVICE의 개별 현장 온도 제어를 사용하여 설정 온도를 30°C로 요청한다.",
+        "장비의 사용자 화면과 내부 장비 상태를 확인한다."
+      ],
+      "expected_results": [
+        {
+          "result_id": "ER-017",
+          "statement": "PRIMARY_TEST_DEVICE의 사용자 화면 설정 온도는 30°C로 변경된다.",
+          "observation_layer": "UI",
+          "source_condition_ids": [
+            "COND-006"
+          ]
+        },
+        {
+          "result_id": "ER-018",
+          "statement": "PRIMARY_TEST_DEVICE의 내부 setTemp는 30°C이며 사용자 화면의 설정 온도와 일치한다.",
+          "observation_layer": "INTERNAL_STATE",
+          "source_condition_ids": [
+            "COND-006"
+          ]
+        }
+      ],
+      "restore_required": true,
+      "restore_steps": [
+        "PRIMARY_TEST_DEVICE의 개별 현장 온도 제어를 사용하여 설정 온도를 16°C로 복구한다.",
+        "사용자 화면과 내부 setTemp가 16°C로 일치하는지 확인한다."
+      ],
+      "automation_candidate": true,
+      "automation_reason": "가상 장비의 COOL 모드 개별 온도 제어와 내부 setTemp 조회로 기존 상한을 검증할 수 있다."
+    },
+    {
+      "tc_id": "TC-CAND-009",
+      "title": "현장 제어에서 HEAT 모드 하한 16°C 유지",
+      "purpose": "RELATED_REGRESSION",
+      "test_type": "BOUNDARY",
+      "requirement_ids": [
+        "REQ-TEMP-001",
+        "REQ-LOCAL-002"
+      ],
+      "source_condition_ids": [
+        "COND-006"
+      ],
+      "control_path": "LOCAL",
+      "target_role": "PRIMARY_TEST_DEVICE",
+      "test_data": {
+        "initial_mode": "HEAT",
+        "requested_mode": null,
+        "initial_temperature_c": 30.0,
+        "requested_temperature_c": 16.0
+      },
+      "preconditions": [
+        "PRIMARY_TEST_DEVICE는 온라인, 오류 없음, 잠금 해제 상태이다.",
+        "PRIMARY_TEST_DEVICE는 HEAT 모드이고 설정 온도는 30°C이다.",
+        "PRIMARY_TEST_DEVICE의 온도 설정이 활성화되어 있다."
+      ],
+      "steps": [
+        "PRIMARY_TEST_DEVICE의 개별 현장 온도 제어를 사용하여 설정 온도를 16°C로 요청한다.",
+        "장비의 사용자 화면과 내부 장비 상태를 확인한다."
+      ],
+      "expected_results": [
+        {
+          "result_id": "ER-019",
+          "statement": "PRIMARY_TEST_DEVICE의 사용자 화면 설정 온도는 16°C로 변경된다.",
+          "observation_layer": "UI",
+          "source_condition_ids": [
+            "COND-006"
+          ]
+        },
+        {
+          "result_id": "ER-020",
+          "statement": "PRIMARY_TEST_DEVICE의 내부 setTemp는 16°C이며 사용자 화면의 설정 온도와 일치한다.",
+          "observation_layer": "INTERNAL_STATE",
+          "source_condition_ids": [
+            "COND-006"
+          ]
+        }
+      ],
+      "restore_required": true,
+      "restore_steps": [
+        "PRIMARY_TEST_DEVICE의 개별 현장 온도 제어를 사용하여 설정 온도를 30°C로 복구한다.",
+        "사용자 화면과 내부 setTemp가 30°C로 일치하는지 확인한다."
+      ],
+      "automation_candidate": true,
+      "automation_reason": "가상 장비의 HEAT 모드 개별 온도 제어와 내부 setTemp 조회로 기존 하한을 검증할 수 있다."
+    },
+    {
+      "tc_id": "TC-CAND-010",
+      "title": "현장 제어에서 HEAT 모드 상한 30°C 유지",
+      "purpose": "RELATED_REGRESSION",
+      "test_type": "BOUNDARY",
+      "requirement_ids": [
+        "REQ-TEMP-001",
+        "REQ-LOCAL-002"
+      ],
+      "source_condition_ids": [
+        "COND-006"
+      ],
+      "control_path": "LOCAL",
+      "target_role": "PRIMARY_TEST_DEVICE",
+      "test_data": {
+        "initial_mode": "HEAT",
+        "requested_mode": null,
+        "initial_temperature_c": 16.0,
+        "requested_temperature_c": 30.0
+      },
+      "preconditions": [
+        "PRIMARY_TEST_DEVICE는 온라인, 오류 없음, 잠금 해제 상태이다.",
+        "PRIMARY_TEST_DEVICE는 HEAT 모드이고 설정 온도는 16°C이다.",
+        "PRIMARY_TEST_DEVICE의 온도 설정이 활성화되어 있다."
+      ],
+      "steps": [
+        "PRIMARY_TEST_DEVICE의 개별 현장 온도 제어를 사용하여 설정 온도를 30°C로 요청한다.",
+        "장비의 사용자 화면과 내부 장비 상태를 확인한다."
+      ],
+      "expected_results": [
+        {
+          "result_id": "ER-021",
+          "statement": "PRIMARY_TEST_DEVICE의 사용자 화면 설정 온도는 30°C로 변경된다.",
+          "observation_layer": "UI",
+          "source_condition_ids": [
+            "COND-006"
+          ]
+        },
+        {
+          "result_id": "ER-022",
+          "statement": "PRIMARY_TEST_DEVICE의 내부 setTemp는 30°C이며 사용자 화면의 설정 온도와 일치한다.",
+          "observation_layer": "INTERNAL_STATE",
+          "source_condition_ids": [
+            "COND-006"
+          ]
+        }
+      ],
+      "restore_required": true,
+      "restore_steps": [
+        "PRIMARY_TEST_DEVICE의 개별 현장 온도 제어를 사용하여 설정 온도를 16°C로 복구한다.",
+        "사용자 화면과 내부 setTemp가 16°C로 일치하는지 확인한다."
+      ],
+      "automation_candidate": true,
+      "automation_reason": "가상 장비의 HEAT 모드 개별 온도 제어와 내부 setTemp 조회로 기존 상한을 검증할 수 있다."
+    },
+    {
+      "tc_id": "TC-CAND-011",
+      "title": "FAN 모드에서 온도 설정 비활성화 유지",
+      "purpose": "RELATED_REGRESSION",
+      "test_type": "STATE_CONSISTENCY",
+      "requirement_ids": [
+        "REQ-MODE-002"
+      ],
+      "source_condition_ids": [
+        "COND-007"
+      ],
+      "control_path": "LOCAL",
+      "target_role": "PRIMARY_TEST_DEVICE",
+      "test_data": {
+        "initial_mode": "FAN",
+        "requested_mode": "FAN",
+        "initial_temperature_c": null,
+        "requested_temperature_c": null
+      },
+      "preconditions": [
+        "PRIMARY_TEST_DEVICE는 FAN 모드이다."
+      ],
+      "steps": [
+        "PRIMARY_TEST_DEVICE에서 FAN 모드를 요청한다.",
+        "PRIMARY_TEST_DEVICE의 온도 설정 영역과 내부 장비 상태를 확인한다."
+      ],
+      "expected_results": [
+        {
+          "result_id": "ER-023",
+          "statement": "온도 조작 버튼은 비활성화되어 있다.",
+          "observation_layer": "UI",
+          "source_condition_ids": [
+            "COND-007"
+          ]
+        },
+        {
+          "result_id": "ER-024",
+          "statement": "설정 온도 표시는 비활성 표시로 나타난다.",
+          "observation_layer": "UI",
+          "source_condition_ids": [
+            "COND-007"
+          ]
+        },
+        {
+          "result_id": "ER-025",
+          "statement": "내부 장비 상태에서 확인한 설정 온도 관련 상태는 사용자 화면의 온도 설정 비활성 표시와 일치한다.",
+          "observation_layer": "INTERNAL_STATE",
+          "source_condition_ids": [
+            "COND-007"
+          ]
+        }
+      ],
+      "restore_required": false,
+      "restore_steps": [],
+      "automation_candidate": true,
+      "automation_reason": "가상 장비 화면에서 FAN 모드의 온도 조작 가능 여부와 설정 온도 표시, 내부 장비 상태를 확인할 수 있다."
+    },
+    {
+      "tc_id": "TC-CAND-012",
+      "title": "DRY 모드에서 온도 설정 비활성화 유지",
+      "purpose": "RELATED_REGRESSION",
+      "test_type": "STATE_CONSISTENCY",
+      "requirement_ids": [
+        "REQ-MODE-002"
+      ],
+      "source_condition_ids": [
+        "COND-007"
+      ],
+      "control_path": "LOCAL",
+      "target_role": "PRIMARY_TEST_DEVICE",
+      "test_data": {
+        "initial_mode": "DRY",
+        "requested_mode": "DRY",
+        "initial_temperature_c": null,
+        "requested_temperature_c": null
+      },
+      "preconditions": [
+        "PRIMARY_TEST_DEVICE는 DRY 모드이다."
+      ],
+      "steps": [
+        "PRIMARY_TEST_DEVICE에서 DRY 모드를 요청한다.",
+        "PRIMARY_TEST_DEVICE의 온도 설정 영역과 내부 장비 상태를 확인한다."
+      ],
+      "expected_results": [
+        {
+          "result_id": "ER-026",
+          "statement": "온도 조작 버튼은 비활성화되어 있다.",
+          "observation_layer": "UI",
+          "source_condition_ids": [
+            "COND-007"
+          ]
+        },
+        {
+          "result_id": "ER-027",
+          "statement": "설정 온도 표시는 비활성 표시로 나타난다.",
+          "observation_layer": "UI",
+          "source_condition_ids": [
+            "COND-007"
+          ]
+        },
+        {
+          "result_id": "ER-028",
+          "statement": "내부 장비 상태에서 확인한 설정 온도 관련 상태는 사용자 화면의 온도 설정 비활성 표시와 일치한다.",
+          "observation_layer": "INTERNAL_STATE",
+          "source_condition_ids": [
+            "COND-007"
+          ]
+        }
+      ],
+      "restore_required": false,
+      "restore_steps": [],
+      "automation_candidate": true,
+      "automation_reason": "가상 장비 화면에서 DRY 모드의 온도 조작 가능 여부와 설정 온도 표시, 내부 장비 상태를 확인할 수 있다."
+    }
+  ],
+  "coverage_summary": "AUTO 모드 변경 범위의 하한 18°C와 상한 30°C를 중앙 일괄 적용 및 현장 개별 제어 경로에서 각각 검증하고, 18°C 미만 차단·기존 setTemp 유지·차단 Toast를 두 경로에서 검증한다. COOL·HEAT의 기존 16~30°C 경계와 FAN·DRY의 온도 설정 비활성화도 회귀 범위에 포함한다. 모든 기대 결과 ID를 전체 TC 집합에서 고유하게 부여했으며, FAN·DRY 상태 TC에는 구조화된 요청 모드와 내부 상태 확인을 추가했다.",
+  "coverage_notes": [
+    "REQ-LOCAL-002의 기존 인수 기준은 온도 활성 모드 전체의 하한을 16°C로 규정하여 AUTO 모드 18°C 하한 정책과 충돌하므로, AUTO·COOL·HEAT별 허용 범위를 구분하도록 후속 문구 개정이 필요하다.",
+    "차단 Toast의 정확한 문구는 입력에 지정되지 않았으므로, 본 후보는 차단 안내 Toast의 표시 여부만 검증한다.",
+    "중앙 경로의 성공 적용 TC는 제어 패널 대기값이 허용 장비의 화면 및 내부 setTemp에 반영되는 REQ-CONTROL-001 회귀 기준을 함께 검증한다.",
+    "FAN·DRY 비활성 상태의 내부 표현값은 고정 입력에 구체적으로 정의되지 않았으므로, 해당 TC의 내부 상태 검증은 UI 비활성 표시와의 상태 일치 여부로 판정한다."
+  ],
+  "human_review_notes": []
+}

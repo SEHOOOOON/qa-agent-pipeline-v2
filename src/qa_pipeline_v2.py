@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 import uuid
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -237,6 +238,7 @@ class AssertionStrategy(str, Enum):
     UI_TEMPERATURE = "UI_TEMPERATURE"
     INTERNAL_SET_TEMP = "INTERNAL_SET_TEMP"
     TOAST_VISIBLE = "TOAST_VISIBLE"
+    TOAST_BLOCKING = "TOAST_BLOCKING"
     CONTROLS_DISABLED = "CONTROLS_DISABLED"
     DISABLED_TEMPERATURE_TEXT = "DISABLED_TEMPERATURE_TEXT"
 
@@ -248,6 +250,22 @@ class AutomationCandidateStatus(str, Enum):
     TRIAL_FAILED = "TRIAL_FAILED"
     NOT_AUTOMATABLE = "NOT_AUTOMATABLE"
     BLOCKED = "BLOCKED"
+
+
+class Agent3EligibilityStatus(str, Enum):
+    ELIGIBLE = "ELIGIBLE"
+    NOT_AUTOMATABLE = "NOT_AUTOMATABLE"
+
+
+class Agent3EligibilityResult(StrictModel):
+    tc_id: Annotated[str, StringConstraints(pattern=r"^TC-CAND-\d{3}$")]
+    status: Agent3EligibilityStatus
+    candidate_status: AutomationCandidateStatus | None = None
+    required_capabilities: list[NonEmptyStr]
+    missing_capabilities: list[NonEmptyStr]
+    required_selectors: list[NonEmptyStr]
+    required_harness_keys: list[NonEmptyStr]
+    model_call_allowed: bool
 
 
 class TrialOutcome(str, Enum):
@@ -883,6 +901,7 @@ AGENT2_SYSTEM_INSTRUCTIONS = """
 14. TC가 참조하는 Requirement와 Condition은 입력에 존재하는 ID만 사용합니다.
 15. confirmed_condition을 여러 TC가 공유할 수 있지만 동일 목적의 TC를 표현만 바꿔 중복 생성하지 않습니다.
 16. automation_candidate는 현재 가상 중앙제어 화면과 내부 상태 조회로 자동화 가능한지 판단한 후보 표시일 뿐이며 코드를 만들지 않습니다.
+16-1. CENTRAL 변경 검증에는 현재 단일 장비 MVP가 실행할 수 있도록 target_role=PRIMARY_TEST_DEVICE인 automation_candidate TC를 최소 한 건 포함합니다. 복수 장비 TC는 추가할 수 있지만 유일한 CENTRAL 후보로 만들지 않습니다.
 17. SRS 문구의 후속 개정 필요, 정확한 안내 문구 미지정처럼 기대 동작을 바꾸지 않고 현재 TC를 설계할 수 있는 참고 사항은 coverage_notes에 남깁니다.
 18. 서로 충돌하는 권한 입력, 기대 결과 미정처럼 TC 의미를 확정할 수 없어 후속 자동 진행을 중단해야 하는 항목만 human_review_notes에 남깁니다.
 19. UPDATE_REQUIRED 자체는 변경관리의 정상 결과이므로 그것만으로 human_review_notes를 만들지 않습니다.
@@ -935,9 +954,10 @@ class OpenAIAgent2:
             user_input += (
                 "\n\n[이전 TC 후보]\n"
                 f"{previous_design.model_dump_json(indent=2)}\n\n"
-                "[Checkpoint 2 재작업 요청]\n"
+                "[Checkpoint 2 전체 판정과 재작업 요청]\n"
                 f"{feedback}\n"
                 "근거와 검증 목적은 바꾸지 말고 실패한 품질 기준만 수정하세요. "
+                "PASS인 규칙과 그 근거를 보존하고 새 FAIL을 만들지 마세요. "
                 "수정 대상 TC만 반환하지 말고 이전의 전체 test_cases를 완전한 결과로 반환하세요. "
                 "Checkpoint가 삭제를 요구하지 않은 기존 TC는 제거하지 마세요. "
                 "Playwright 코드는 작성하지 마세요."
@@ -1228,15 +1248,26 @@ You are an Automation Engineer translating an approved product test case into a 
 Rules:
 1. Never change or invent the TC purpose, preconditions, steps, expected results, values, or Requirement IDs.
 2. Use only selectors and window.__vccs interfaces present in the supplied UI Observation.
-3. Map PRIMARY_TEST_DEVICE and CENTRAL_COMMAND_ALLOWED_ROLE to target_device_id=1 for this MVP.
+3. Map PRIMARY_TEST_DEVICE and CENTRAL_COMMAND_ALLOWED_ROLE to target_device_id=1 for this MVP,
+   and set every SELECT_DEVICE action value to the same integer 1.
 4. PRECONDITION actions establish the target, initial mode, initial temperature, and applied state.
 5. TEST actions implement only the approved TC steps. Never assume a blocked request changes the value.
 6. Create RESTORE actions only when restore_required=true and use only the approved restore values.
 7. Map every Expected Result exactly once without changing result_id or observation_layer.
-8. Use UI_TEMPERATURE, INTERNAL_SET_TEMP, and TOAST_VISIBLE for the corresponding observations.
+8. Use UI_TEMPERATURE and INTERNAL_SET_TEMP for their corresponding observations.
+   Use TOAST_BLOCKING when the approved Expected Result requires a blocking Toast.
 9. Use CONTROLS_DISABLED and DISABLED_TEMPERATURE_TEXT for FAN or DRY disabled states.
 10. Return only the structured plan. Do not write Python code.
 11. Do not propose external URLs, shell commands, file changes, arbitrary waits, skip, or ignored exceptions.
+12. Use these action targets exactly: SELECT_DEVICE=#device-card-1 .card-body-split;
+    SET_MODE=the selector matching the requested mode; SET_TEMPERATURE=#det-temp-display;
+    APPLY_COMMANDS=.btn-apply-cmd. The compiler operates the temperature buttons itself.
+13. Leave expected_text null. The current compiler does not implement text-expectation comparison.
+14. Use these assertion targets exactly: UI_TEMPERATURE=#det-temp-display;
+    INTERNAL_SET_TEMP=window.__vccs.devices; TOAST_VISIBLE=#global-toast;
+    TOAST_BLOCKING=#global-toast;
+    CONTROLS_DISABLED=#det-temp-down-btn; DISABLED_TEMPERATURE_TEXT=#det-temp-display.
+    Do not append indexes, properties, or expressions to a window.__vccs interface.
 """.strip()
 
 
@@ -1367,11 +1398,35 @@ _REQUIRED_HARNESS_KEYS = {
 }
 
 
-def inspect_target_ui(target_html: Path) -> UiObservation:
-    """Inspect the real local page without modifying Project1 files."""
+def inspect_target_ui(
+    target_html: Path,
+    *,
+    required_selectors: set[str] | None = None,
+    required_harness_keys: set[str] | None = None,
+) -> UiObservation:
+    """Inspect only the interfaces required by the selected approved TC."""
     target = target_html.resolve()
     if not target.is_file() or target.suffix.casefold() != ".html":
         raise Agent3Error("--target-html must point to an existing local HTML file.")
+    selectors_to_observe = (
+        set(_UI_SELECTOR_INVENTORY)
+        if required_selectors is None
+        else set(required_selectors)
+    )
+    harness_to_observe = (
+        set(_REQUIRED_HARNESS_KEYS)
+        if required_harness_keys is None
+        else set(required_harness_keys)
+    )
+    unknown_selectors = selectors_to_observe - set(_UI_SELECTOR_INVENTORY)
+    unknown_harness = harness_to_observe - _REQUIRED_HARNESS_KEYS
+    if unknown_selectors or unknown_harness:
+        details = []
+        if unknown_selectors:
+            details.append("selector=" + ", ".join(sorted(unknown_selectors)))
+        if unknown_harness:
+            details.append("window.__vccs=" + ", ".join(sorted(unknown_harness)))
+        raise Agent3Error("Unknown Agent 3 inspection capability: " + " / ".join(details))
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as exc:
@@ -1389,6 +1444,8 @@ def inspect_target_ui(target_html: Path) -> UiObservation:
         page.reload(wait_until="domcontentloaded")
         page.wait_for_selector("#device-card-1", timeout=5000)
         for selector, hint in _UI_SELECTOR_INVENTORY.items():
+            if selector not in selectors_to_observe:
+                continue
             locator = page.locator(selector).first
             if locator.count() == 0:
                 continue
@@ -1402,14 +1459,17 @@ def inspect_target_ui(target_html: Path) -> UiObservation:
                     action_hint=hint,
                 )
             )
-        harness_keys = sorted(page.evaluate("() => window.__vccs ? Object.keys(window.__vccs) : []"))
+        available_harness_keys = set(
+            page.evaluate("() => window.__vccs ? Object.keys(window.__vccs) : []")
+        )
+        harness_keys = sorted(harness_to_observe & available_harness_keys)
         title = page.title()
         context.close()
         browser.close()
 
     observed_selectors = {item.selector for item in elements}
-    missing_selectors = set(_UI_SELECTOR_INVENTORY) - observed_selectors
-    missing_harness = _REQUIRED_HARNESS_KEYS - set(harness_keys)
+    missing_selectors = selectors_to_observe - observed_selectors
+    missing_harness = harness_to_observe - available_harness_keys
     if missing_selectors or missing_harness:
         details = []
         if missing_selectors:
@@ -1436,12 +1496,169 @@ _MODE_SELECTOR = {
 }
 
 
-def _expected_selector_for_assertion(result: ExpectedResult) -> set[str]:
-    if result.observation_layer == ObservationLayer.NOTIFICATION:
-        return {"#global-toast"}
-    if result.observation_layer == ObservationLayer.INTERNAL_STATE:
-        return {"window.__vccs.devices"}
-    return {"#det-temp-display", "#det-temp-adjust-card", "#det-temp-down-btn"}
+_SUPPORTED_AGENT3_TARGET_ROLES = {
+    "PRIMARY_TEST_DEVICE",
+    "CENTRAL_COMMAND_ALLOWED_ROLE",
+}
+_SUPPORTED_AGENT3_REQUIREMENT_IDS = {
+    "REQ-CONTROL-001",
+    "REQ-MODE-002",
+    "REQ-NOTIFY-001",
+    "REQ-STATE-001",
+    "REQ-TEMP-001",
+}
+_TEMPERATURE_TERMS = ("temperature", "degree", "settemp", "온도", "°")
+_DISABLED_TERMS = ("disabled", "비활성", "조작할 수 없", "사용할 수 없")
+_CONTROL_TERMS = ("control", "button", "버튼", "조작")
+_DISPLAY_TERMS = ("display", "text", "표시")
+_TOAST_TERMS = ("toast", "토스트")
+_VISIBLE_TERMS = ("visible", "shown", "appears", "displayed", "표시")
+_BLOCKING_EXPECTATION_TERMS = ("block", "blocked", "blocking", "차단")
+_BLOCKING_TOAST_ACTUAL_TERMS = (
+    "block",
+    "blocked",
+    "blocking",
+    "reject",
+    "denied",
+    "invalid",
+    "out of range",
+    "failed",
+    "차단",
+    "범위",
+    "초과",
+    "거부",
+    "실패",
+    "허용되지",
+    "할 수 없",
+)
+
+
+def _contains_any(value: str, terms: tuple[str, ...]) -> bool:
+    normalized = value.casefold()
+    return any(term.casefold() in normalized for term in terms)
+
+
+def evaluate_agent3_eligibility(
+    test_case: ProductTestCaseCandidate,
+) -> Agent3EligibilityResult:
+    """Determine supported capabilities before UI inspection or a model call."""
+    required_capabilities = {"SELECT_PRIMARY_DEVICE"}
+    missing_capabilities: set[str] = set()
+    required_selectors = {"#device-card-1 .card-body-split"}
+    required_harness_keys = {"selectedUnitId"}
+
+    if not test_case.automation_candidate:
+        missing_capabilities.add("CP2_AUTOMATION_CANDIDATE")
+    if test_case.control_path == ControlPath.CENTRAL:
+        required_capabilities.add("APPLY_CENTRAL_COMMAND")
+        required_selectors.add(".btn-apply-cmd")
+    else:
+        missing_capabilities.add(f"CONTROL_PATH_{test_case.control_path.value}")
+    if test_case.target_role not in _SUPPORTED_AGENT3_TARGET_ROLES:
+        missing_capabilities.add(f"TARGET_ROLE:{test_case.target_role}")
+    for requirement_id in test_case.requirement_ids:
+        if requirement_id not in _SUPPORTED_AGENT3_REQUIREMENT_IDS:
+            missing_capabilities.add(f"REQUIREMENT:{requirement_id}")
+
+    modes = {
+        value
+        for value in (
+            test_case.test_data.initial_mode,
+            test_case.test_data.requested_mode,
+        )
+        if value
+    }
+    if modes:
+        required_capabilities.add("SET_MODE")
+    for mode in modes:
+        selector = _MODE_SELECTOR.get(mode)
+        if selector is None:
+            missing_capabilities.add(f"SET_MODE:{mode}")
+        else:
+            required_selectors.add(selector)
+
+    temperature_values = {
+        float(value)
+        for value in (
+            test_case.test_data.initial_temperature_c,
+            test_case.test_data.requested_temperature_c,
+        )
+        if value is not None
+    }
+    if temperature_values:
+        required_capabilities.add("SET_TEMPERATURE")
+        required_selectors.update(
+            {"#det-temp-display", "#det-temp-down-btn", "#det-temp-up-btn"}
+        )
+
+    disabled_mode = bool(modes) and modes <= {"FAN", "DRY"}
+    for result in test_case.expected_results:
+        statement = result.statement
+        if result.observation_layer == ObservationLayer.UI:
+            if temperature_values and _contains_any(statement, _TEMPERATURE_TERMS):
+                required_capabilities.add("ASSERT_UI_TEMPERATURE")
+                required_selectors.add("#det-temp-display")
+            elif disabled_mode and _contains_any(statement, _DISABLED_TERMS):
+                if _contains_any(statement, _CONTROL_TERMS):
+                    required_capabilities.add("ASSERT_TEMPERATURE_CONTROLS_DISABLED")
+                    required_selectors.update(
+                        {"#det-temp-down-btn", "#det-temp-up-btn"}
+                    )
+                elif _contains_any(statement, _DISPLAY_TERMS):
+                    required_capabilities.add("ASSERT_DISABLED_TEMPERATURE_TEXT")
+                    required_selectors.add("#det-temp-display")
+                else:
+                    missing_capabilities.add(f"ASSERT_UI:{result.result_id}")
+            else:
+                missing_capabilities.add(f"ASSERT_UI:{result.result_id}")
+        elif result.observation_layer == ObservationLayer.INTERNAL_STATE:
+            if temperature_values and _contains_any(statement, _TEMPERATURE_TERMS):
+                required_capabilities.add("ASSERT_INTERNAL_SET_TEMP")
+                required_harness_keys.add("devices")
+            else:
+                missing_capabilities.add(
+                    f"ASSERT_INTERNAL_STATE:{result.result_id}"
+                )
+        elif result.observation_layer == ObservationLayer.NOTIFICATION:
+            if _contains_any(statement, _TOAST_TERMS) and _contains_any(
+                statement, _VISIBLE_TERMS
+            ) and _contains_any(statement, _BLOCKING_EXPECTATION_TERMS):
+                required_capabilities.add("ASSERT_TOAST_BLOCKING")
+                required_selectors.add("#global-toast")
+            else:
+                missing_capabilities.add(f"ASSERT_NOTIFICATION:{result.result_id}")
+
+    supported = not missing_capabilities
+    return Agent3EligibilityResult(
+        tc_id=test_case.tc_id,
+        status=(
+            Agent3EligibilityStatus.ELIGIBLE
+            if supported
+            else Agent3EligibilityStatus.NOT_AUTOMATABLE
+        ),
+        candidate_status=(
+            None if supported else AutomationCandidateStatus.NOT_AUTOMATABLE
+        ),
+        required_capabilities=sorted(required_capabilities),
+        missing_capabilities=sorted(missing_capabilities),
+        required_selectors=sorted(required_selectors),
+        required_harness_keys=sorted(required_harness_keys),
+        model_call_allowed=supported,
+    )
+
+
+_ASSERTION_SELECTOR = {
+    AssertionStrategy.UI_TEMPERATURE: "#det-temp-display",
+    AssertionStrategy.INTERNAL_SET_TEMP: "window.__vccs.devices",
+    AssertionStrategy.TOAST_VISIBLE: "#global-toast",
+    AssertionStrategy.TOAST_BLOCKING: "#global-toast",
+    AssertionStrategy.CONTROLS_DISABLED: "#det-temp-down-btn",
+    AssertionStrategy.DISABLED_TEMPERATURE_TEXT: "#det-temp-display",
+}
+
+
+def _expected_selector_for_assertion(assertion: AutomationAssertion) -> str:
+    return _ASSERTION_SELECTOR[assertion.strategy]
 
 
 def evaluate_checkpoint3_plan(
@@ -1455,10 +1672,18 @@ def evaluate_checkpoint3_plan(
         checks.append(CheckResult(rule_id=rule_id, status=status, message=message))
 
     observed_selectors = {item.selector for item in observation.elements}
-    if plan.tc_id == test_case.tc_id:
-        add("CP3-001", CheckStatus.PASS, "The plan preserves the approved TC ID.")
+    if plan.tc_id == test_case.tc_id and plan.target_device_id == 1:
+        add(
+            "CP3-001",
+            CheckStatus.PASS,
+            "The plan preserves the approved TC ID and MVP target device.",
+        )
     else:
-        add("CP3-001", CheckStatus.FAIL, "The plan TC ID differs from the approved TC.")
+        add(
+            "CP3-001",
+            CheckStatus.FAIL,
+            "The plan TC ID or MVP target device differs from the approved contract.",
+        )
 
     action_ids = [item.action_id for item in plan.actions]
     unobserved = sorted(
@@ -1470,8 +1695,11 @@ def evaluate_checkpoint3_plan(
     )
     action_errors: list[str] = []
     for item in plan.actions:
-        if item.action_type == AutomationActionType.SELECT_DEVICE and item.selector != "#device-card-1 .card-body-split":
-            action_errors.append(f"{item.action_id}: invalid device selector")
+        if item.action_type == AutomationActionType.SELECT_DEVICE and (
+            item.selector != "#device-card-1 .card-body-split"
+            or item.value != plan.target_device_id
+        ):
+            action_errors.append(f"{item.action_id}: invalid device selector or target value")
         elif item.action_type == AutomationActionType.SET_MODE:
             expected_selector = _MODE_SELECTOR.get(str(item.value))
             if expected_selector is None or item.selector != expected_selector:
@@ -1513,7 +1741,7 @@ def evaluate_checkpoint3_plan(
             continue
         if assertion.observation_layer != result.observation_layer:
             fidelity_errors.append(f"{assertion.result_id}: observation layer changed")
-        if assertion.selector not in _expected_selector_for_assertion(result):
+        if assertion.selector != _expected_selector_for_assertion(assertion):
             fidelity_errors.append(f"{assertion.result_id}: invalid observation target")
         allowed_strategies = {
             ObservationLayer.UI: {
@@ -1522,10 +1750,18 @@ def evaluate_checkpoint3_plan(
                 AssertionStrategy.DISABLED_TEMPERATURE_TEXT,
             },
             ObservationLayer.INTERNAL_STATE: {AssertionStrategy.INTERNAL_SET_TEMP},
-            ObservationLayer.NOTIFICATION: {AssertionStrategy.TOAST_VISIBLE},
+            ObservationLayer.NOTIFICATION: (
+                {AssertionStrategy.TOAST_BLOCKING}
+                if _contains_any(result.statement, _BLOCKING_EXPECTATION_TERMS)
+                else {AssertionStrategy.TOAST_VISIBLE}
+            ),
         }
         if assertion.strategy not in allowed_strategies[result.observation_layer]:
             fidelity_errors.append(f"{assertion.result_id}: assertion strategy changed the observation meaning")
+        if assertion.expected_text is not None:
+            fidelity_errors.append(
+                f"{assertion.result_id}: expected_text is unsupported by the current compiler"
+            )
         if assertion.strategy in {AssertionStrategy.UI_TEMPERATURE, AssertionStrategy.INTERNAL_SET_TEMP}:
             if assertion.expected_number is None:
                 fidelity_errors.append(f"{assertion.result_id}: numeric expectation is missing")
@@ -1602,10 +1838,47 @@ def evaluate_checkpoint3_plan(
     add("CP3-006A", CheckStatus.FAIL if sequence_errors else CheckStatus.PASS, " / ".join(sequence_errors) if sequence_errors else "Action sequence implements the approved setup and test steps.")
 
     restore_actions = [item for item in plan.actions if item.phase == AutomationPhase.RESTORE]
-    if bool(restore_actions) == test_case.restore_required:
-        add("CP3-006", CheckStatus.PASS, "Restore actions match the TC restore contract.")
-    else:
-        add("CP3-006", CheckStatus.FAIL, "Restore actions do not match the TC restore contract.")
+    restore_errors: list[str] = []
+    if bool(restore_actions) != test_case.restore_required:
+        restore_errors.append("restore action presence does not match restore_required")
+    elif test_case.restore_required:
+        if (
+            data.initial_mode is not None
+            and data.requested_mode is not None
+            and data.initial_mode != data.requested_mode
+            and not has_action(
+                AutomationPhase.RESTORE,
+                AutomationActionType.SET_MODE,
+                data.initial_mode,
+            )
+        ):
+            restore_errors.append("initial mode restore is missing")
+        if (
+            data.initial_temperature_c is not None
+            and data.requested_temperature_c is not None
+            and data.initial_temperature_c != data.requested_temperature_c
+            and not has_action(
+                AutomationPhase.RESTORE,
+                AutomationActionType.SET_TEMPERATURE,
+                data.initial_temperature_c,
+            )
+        ):
+            restore_errors.append("initial temperature restore is missing")
+        if (
+            test_case.control_path == ControlPath.CENTRAL
+            and not has_action(
+                AutomationPhase.RESTORE,
+                AutomationActionType.APPLY_COMMANDS,
+            )
+        ):
+            restore_errors.append("central restore apply is missing")
+    add(
+        "CP3-006",
+        CheckStatus.FAIL if restore_errors else CheckStatus.PASS,
+        " / ".join(restore_errors)
+        if restore_errors
+        else "Restore actions preserve the TC initial state contract.",
+    )
 
     statuses = {item.status for item in checks}
     status = CheckStatus.FAIL if CheckStatus.FAIL in statuses else CheckStatus.PASS
@@ -1675,6 +1948,7 @@ def compile_automation_candidate(
         f"def test_{test_case.tc_id.lower().replace('-', '_')}():",
         "    EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)",
         "    mismatches = []",
+        "    test_completed = False",
         "    with sync_playwright() as playwright:",
         "        browser = playwright.chromium.launch(headless=True)",
         "        context = browser.new_context()",
@@ -1722,6 +1996,17 @@ def compile_automation_candidate(
                     f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + f': internal setTemp={{actual}}')",
                 ]
             )
+        elif assertion.strategy == AssertionStrategy.TOAST_BLOCKING:
+            lines.extend(
+                [
+                    f"{indent}toast = page.locator('#global-toast')",
+                    f"{indent}toast_text = toast.inner_text().strip().lower()",
+                    f"{indent}if 'show' not in (toast.get_attribute('class') or '').split():",
+                    f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + ': toast not visible')",
+                    f"{indent}elif not any(term in toast_text for term in {_py_literal(_BLOCKING_TOAST_ACTUAL_TERMS)}):",
+                    f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + f': toast does not indicate blocking: {{toast_text}}')",
+                ]
+            )
         elif assertion.strategy == AssertionStrategy.TOAST_VISIBLE:
             lines.extend(
                 [
@@ -1749,26 +2034,74 @@ def compile_automation_candidate(
         [
             f"{indent}page.screenshot(path=str(EVIDENCE_DIR / 'trial-final.png'), full_page=True)",
             f"{indent}assert not mismatches, 'PRODUCT_MISMATCH: ' + ' | '.join(mismatches)",
+            f"{indent}test_completed = True",
             "        finally:",
-            *[
-                statement
-                for action in plan.actions
-                if action.phase == AutomationPhase.RESTORE
-                for statement in (
-                    f"            # {action.action_id} RESTORE: {_safe_comment(action.source_text)}",
-                    (
-                        f"            page.locator({_py_literal(action.selector)}).click()"
-                        if action.action_type in {AutomationActionType.SELECT_DEVICE, AutomationActionType.SET_MODE, AutomationActionType.APPLY_COMMANDS}
-                        else f"            _set_temperature(page, {float(action.value)})"
-                    ),
-                )
-            ],
-            "            context.tracing.stop(path=str(EVIDENCE_DIR / 'trial-trace.zip'))",
-            "            context.close()",
-            "            browser.close()",
-            "",
         ]
     )
+    restore_actions = [
+        action for action in plan.actions if action.phase == AutomationPhase.RESTORE
+    ]
+    if restore_actions:
+        lines.extend(
+            [
+                "            restore_mismatches = []",
+                "            try:",
+            ]
+        )
+    for action in restore_actions:
+        lines.append(
+            f"                # {action.action_id} RESTORE: {_safe_comment(action.source_text)}"
+        )
+        if action.action_type in {
+            AutomationActionType.SELECT_DEVICE,
+            AutomationActionType.SET_MODE,
+            AutomationActionType.APPLY_COMMANDS,
+        }:
+            lines.append(
+                f"                page.locator({_py_literal(action.selector)}).click()"
+            )
+            if action.action_type == AutomationActionType.APPLY_COMMANDS:
+                lines.append("                page.wait_for_timeout(100)")
+        else:
+            lines.append(f"                _set_temperature(page, {float(action.value)})")
+    if restore_actions and test_case.test_data.initial_temperature_c is not None:
+        initial_temperature = float(test_case.test_data.initial_temperature_c)
+        lines.extend(
+            [
+                "                restore_ui_temperature = _temperature(page)",
+                f"                if restore_ui_temperature != {initial_temperature}:",
+                "                    restore_mismatches.append(f'UI temperature={restore_ui_temperature}')",
+                f"                restore_internal_temperature = page.evaluate(\"id => window.__vccs.devices.find(d => d.id === id).setTemp\", {plan.target_device_id})",
+                f"                if restore_internal_temperature != {initial_temperature}:",
+                "                    restore_mismatches.append(f'internal setTemp={restore_internal_temperature}')",
+            ]
+        )
+    if restore_actions:
+        lines.extend(
+            [
+                "            except Exception as restore_error:",
+                "                restore_mismatches.append(f'exception={type(restore_error).__name__}: {restore_error}')",
+                "            finally:",
+                "                context.tracing.stop(path=str(EVIDENCE_DIR / 'trial-trace.zip'))",
+                "                context.close()",
+                "                browser.close()",
+                "            if restore_mismatches:",
+                "                restore_message = 'RESTORE_MISMATCH: ' + ' | '.join(restore_mismatches)",
+                "                print(restore_message)",
+                "                if test_completed:",
+                "                    raise AssertionError(restore_message)",
+                "",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "            context.tracing.stop(path=str(EVIDENCE_DIR / 'trial-trace.zip'))",
+                "            context.close()",
+                "            browser.close()",
+                "",
+            ]
+        )
     return "\n".join(lines)
 
 
@@ -1911,7 +2244,7 @@ def run_agent1(args: argparse.Namespace) -> int:
     requirements = load_srs_requirements(srs_path)
     srs_text = srs_path.read_text(encoding="utf-8")
     agent = OpenAIAgent1(model=args.model)
-    run_id = _new_run_id()
+    run_id = getattr(args, "run_id", None) or _new_run_id()
     run_dir = Path(args.runs_root).resolve() / run_id
     run_dir.mkdir(parents=True, exist_ok=False)
 
@@ -1968,14 +2301,15 @@ def run_agent1(args: argparse.Namespace) -> int:
         _write_json(
             run_dir / "run_manifest.json",
             {
-                "contract_version": "2.2",
+                "contract_version": "2.3",
                 "prompt_version": "agent1-2.2",
                 "run_id": run_id,
                 "stage": "AGENT_1_CP1",
                 "status": checkpoint.status.value,
                 "handoff_status": checkpoint.handoff_status.value,
                 "model": response.model,
-                "usage": response.usage,
+                "usage": _aggregate_model_usage(attempts),
+                "final_attempt_usage": response.usage,
                 "attempts": attempts,
                 "request_file": request_file.name,
                 "request_sha256": _sha256_file(request_file),
@@ -2092,9 +2426,8 @@ def run_agent2(args: argparse.Namespace) -> int:
                 requirements,
                 previous_design=response.design,
                 checkpoint_feedback=[
-                    item.message
+                    f"{item.rule_id} {item.status.value}: {item.message}"
                     for item in checkpoint2.checks
-                    if item.status == CheckStatus.FAIL
                 ],
             )
             checkpoint2 = evaluate_checkpoint2(
@@ -2116,14 +2449,15 @@ def run_agent2(args: argparse.Namespace) -> int:
         _write_json(
             run_dir / "agent2_manifest.json",
             {
-                "contract_version": "2.2",
-                "prompt_version": "agent2-2.2",
+                "contract_version": "2.3",
+                "prompt_version": "agent2-2.3",
                 "run_id": args.run_id,
                 "source_stage": "AGENT_1_CP1",
                 "stage": "AGENT_2_CP2",
                 "status": checkpoint2.status.value,
                 "model": response.model,
-                "usage": response.usage,
+                "usage": _aggregate_model_usage(attempts),
+                "final_attempt_usage": response.usage,
                 "attempts": attempts,
                 "source_run_manifest_sha256": _sha256_file(run_dir / "run_manifest.json"),
                 "request_sha256": source_manifest["request_sha256"],
@@ -2212,6 +2546,48 @@ _AGENT3_TRIAL_ENV_ALLOWLIST = (
 )
 
 
+def _redact_playwright_trace(
+    trace_file: Path,
+    redactions: dict[Path, str],
+) -> None:
+    """Rewrite a Playwright trace without known local filesystem paths."""
+    replacements: set[tuple[bytes, bytes]] = set()
+    for path, placeholder in redactions.items():
+        resolved = path.resolve()
+        values = {
+            str(resolved),
+            resolved.as_posix(),
+            resolved.as_uri(),
+        }
+        for value in tuple(values):
+            values.add(json.dumps(value, ensure_ascii=False)[1:-1])
+            values.add(json.dumps(value, ensure_ascii=True)[1:-1])
+        for value in values:
+            replacements.add((value.encode("utf-8"), placeholder.encode("utf-8")))
+
+    ordered_replacements = sorted(replacements, key=lambda item: len(item[0]), reverse=True)
+    with tempfile.NamedTemporaryFile(
+        prefix=f".{trace_file.stem}-",
+        suffix=".zip",
+        dir=trace_file.parent,
+        delete=False,
+    ) as temp_handle:
+        temp_trace = Path(temp_handle.name)
+    try:
+        with zipfile.ZipFile(trace_file, "r") as source, zipfile.ZipFile(
+            temp_trace, "w"
+        ) as destination:
+            for info in source.infolist():
+                payload = source.read(info.filename)
+                for raw_value, placeholder in ordered_replacements:
+                    payload = payload.replace(raw_value, placeholder)
+                destination.writestr(info, payload)
+        os.replace(temp_trace, trace_file)
+    finally:
+        if temp_trace.exists():
+            temp_trace.unlink()
+
+
 def run_candidate_trial(
     code_file: Path,
     target_html: Path,
@@ -2241,6 +2617,11 @@ def run_candidate_trial(
         isolated_candidate = temp_root / code_file.name
         shutil.copy2(code_file, isolated_candidate)
         env = {name: os.environ[name] for name in _AGENT3_TRIAL_ENV_ALLOWLIST if name in os.environ}
+        # PYTHONUTF8=1 also changes how Windows decodes legacy site-package
+        # .pth files and can prevent Python from starting. Keep locale-mode
+        # startup while making the captured stdout/stderr encoding explicit.
+        env["PYTHONUTF8"] = "0"
+        env["PYTHONIOENCODING"] = "utf-8"
         env["QA_TARGET_URL"] = target_html.resolve().as_uri()
         env["QA_EVIDENCE_DIR"] = str(evidence_dir.resolve())
         try:
@@ -2283,6 +2664,17 @@ def run_candidate_trial(
     _write_text_atomic(stderr_file, stderr)
     screenshot = evidence_dir / "trial-final.png"
     trace = evidence_dir / "trial-trace.zip"
+    if trace.is_file():
+        _redact_playwright_trace(
+            trace,
+            {
+                temp_root: "<TRIAL_WORKSPACE>",
+                Path.home(): "<USER_HOME>",
+                target_html: "<QA_TARGET_FILE>",
+                evidence_dir: "<EVIDENCE_DIR>",
+                code_file: "<CANDIDATE_FILE>",
+            },
+        )
     return Agent3TrialResult(
         outcome=outcome,
         exit_code=exit_code,
@@ -2295,6 +2687,49 @@ def run_candidate_trial(
     )
 
 
+def _agent3_cli_exit_code(
+    checkpoint: Checkpoint3Result,
+    trial: Agent3TrialResult | None,
+) -> int:
+    """Return success only when the evaluation flow completed meaningfully.
+
+    A product mismatch is a valid QA finding, so the pipeline itself completed
+    successfully. Automation, environment, and timeout failures mean that the
+    product result is not trustworthy and must not be reported as CLI success.
+    """
+    if checkpoint.status != CheckStatus.PASS or trial is None:
+        return 2
+    if trial.outcome in {
+        TrialOutcome.PASS,
+        TrialOutcome.PRODUCT_MISMATCH_CANDIDATE,
+    }:
+        return 0
+    return 2
+
+
+def _aggregate_model_usage(
+    attempts: list[dict[str, Any]],
+) -> dict[str, int | None]:
+    """Sum model-token usage across every structured model attempt."""
+    aggregate: dict[str, int | None] = {}
+    for key in ("input_tokens", "output_tokens", "total_tokens"):
+        values = [
+            usage[key]
+            for attempt in attempts
+            if isinstance((usage := attempt.get("usage")), dict)
+            and isinstance(usage.get(key), int)
+        ]
+        aggregate[key] = sum(values) if values else None
+    return aggregate
+
+
+def _aggregate_agent3_usage(
+    attempts: list[dict[str, Any]],
+) -> dict[str, int | None]:
+    """Backward-compatible Agent 3 name for the shared usage aggregator."""
+    return _aggregate_model_usage(attempts)
+
+
 def run_agent3(args: argparse.Namespace) -> int:
     run_dir = _resolve_run_dir(Path(args.runs_root), args.run_id)
     final_outputs = [
@@ -2302,6 +2737,7 @@ def run_agent3(args: argparse.Namespace) -> int:
         run_dir / "checkpoint3.json",
         run_dir / "agent3_trial.json",
         run_dir / "agent3_manifest.json",
+        run_dir / "agent3_error.json",
     ]
     candidate_dir = run_dir / "candidates"
     evidence_dir = run_dir / "evidence" / args.tc_id
@@ -2315,19 +2751,41 @@ def run_agent3(args: argparse.Namespace) -> int:
     if len(matches) != 1:
         raise ValueError(f"Exactly one CP2-approved TC is required: {args.tc_id}")
     test_case = matches[0]
-    if not test_case.automation_candidate:
-        raise ValueError(f"TC is not an automation candidate: {args.tc_id}")
-    if test_case.control_path != ControlPath.CENTRAL:
-        raise Agent3Error(
-            "Agent 3 MVP currently supports the observed CENTRAL control panel only; LOCAL needs a separate real UI target."
-        )
+    eligibility = evaluate_agent3_eligibility(test_case)
+    eligibility_file = run_dir / "agent3_eligibility.json"
+    _write_json(
+        eligibility_file,
+        {
+            "contract_version": "3.1",
+            "run_id": args.run_id,
+            "stage": "AGENT_3_ELIGIBILITY",
+            "source_agent2_manifest_sha256": _sha256_file(
+                run_dir / "agent2_manifest.json"
+            ),
+            "source_agent2_design_sha256": source_manifest[
+                "agent2_design_sha256"
+            ],
+            **eligibility.model_dump(mode="json"),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    if not eligibility.model_call_allowed:
+        print(f"Run ID: {args.run_id}")
+        print(f"Candidate status: {AutomationCandidateStatus.NOT_AUTOMATABLE.value}")
+        print("Agent 3 model call: NOT EXECUTED")
+        print("Missing capabilities: " + ", ".join(eligibility.missing_capabilities))
+        print(f"Artifacts: {run_dir}")
+        return 2
 
     target_html = Path(args.target_html).resolve()
     try:
-        observation = inspect_target_ui(target_html)
+        observation = inspect_target_ui(
+            target_html,
+            required_selectors=set(eligibility.required_selectors),
+            required_harness_keys=set(eligibility.required_harness_keys),
+        )
         observation_file = run_dir / "agent3_ui_observation.json"
         _write_json(observation_file, observation.model_dump(mode="json"))
-        agent = OpenAIAgent3(model=args.model)
         preview_payload = build_agent3_model_input(test_case, observation, requirements)
         preview_payload["model"] = args.model or os.getenv("OPENAI_MODEL", "gpt-5.6-terra")
         preview_file = run_dir / "agent3_model_input_preview.json"
@@ -2338,6 +2796,7 @@ def run_agent3(args: argparse.Namespace) -> int:
             print(f"Preview: {preview_file}")
             return 0
 
+        agent = OpenAIAgent3(model=args.model)
         response = agent.plan(test_case, observation, requirements)
         checkpoint = evaluate_checkpoint3_plan(test_case, response.plan, observation)
         attempts = [{"attempt": 1, "status": checkpoint.status.value, "model": response.model, "usage": response.usage}]
@@ -2391,8 +2850,8 @@ def run_agent3(args: argparse.Namespace) -> int:
             _write_json(run_dir / "agent3_trial.json", trial.model_dump(mode="json"))
 
         manifest_payload = {
-            "contract_version": "3.0",
-            "prompt_version": "agent3-3.0",
+            "contract_version": "3.3",
+            "prompt_version": "agent3-3.4",
             "run_id": args.run_id,
             "source_stage": "AGENT_2_CP2",
             "stage": "AGENT_3_CP3_TRIAL",
@@ -2400,10 +2859,12 @@ def run_agent3(args: argparse.Namespace) -> int:
             "status": checkpoint.status.value,
             "candidate_status": checkpoint.candidate_status.value,
             "model": response.model,
-            "usage": response.usage,
+            "usage": _aggregate_agent3_usage(attempts),
+            "final_attempt_usage": response.usage,
             "attempts": attempts,
             "source_agent2_manifest_sha256": _sha256_file(run_dir / "agent2_manifest.json"),
             "source_agent2_design_sha256": source_manifest["agent2_design_sha256"],
+            "eligibility_sha256": _sha256_file(eligibility_file),
             "ui_observation_sha256": _sha256_file(observation_file),
             "target_file": target_html.name,
             "target_sha256": observation.target_sha256,
@@ -2439,7 +2900,245 @@ def run_agent3(args: argparse.Namespace) -> int:
     if trial is not None:
         print(f"Trial outcome: {trial.outcome.value}")
     print(f"Artifacts: {run_dir}")
-    return 0 if checkpoint.status == CheckStatus.PASS and trial is not None else 2
+    return _agent3_cli_exit_code(checkpoint, trial)
+
+
+def _write_orchestrator_manifest(
+    run_dir: Path,
+    run_id: str,
+    *,
+    status: str,
+    selected_tc_id: str | None,
+    target_html: Path,
+    stage_exit_codes: dict[str, int],
+    stopped_at: str | None,
+    error: Exception | None = None,
+) -> None:
+    """Write the one-command A1→A3 summary without replacing stage evidence."""
+    stage_manifests = {
+        "agent1_manifest_sha256": run_dir / "run_manifest.json",
+        "agent2_manifest_sha256": run_dir / "agent2_manifest.json",
+        "agent3_manifest_sha256": run_dir / "agent3_manifest.json",
+    }
+    payload: dict[str, Any] = {
+        "contract_version": "1.0",
+        "run_id": run_id,
+        "stage": "ORCHESTRATOR_AGENT_1_TO_3",
+        "status": status,
+        "selected_tc_id": selected_tc_id,
+        "target_file": target_html.name,
+        "stage_exit_codes": stage_exit_codes,
+        "completed_stages": [
+            stage
+            for stage in ("agent1", "agent2", "agent3")
+            if stage_exit_codes.get(stage) == 0
+        ],
+        "stopped_at": stopped_at,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    for key, path in stage_manifests.items():
+        payload[key] = _sha256_file(path) if path.is_file() else None
+    agent3_manifest_file = run_dir / "agent3_manifest.json"
+    if agent3_manifest_file.is_file():
+        agent3_manifest = _read_json_payload(agent3_manifest_file)
+        payload["candidate_status"] = agent3_manifest.get("candidate_status")
+    trial_file = run_dir / "agent3_trial.json"
+    if trial_file.is_file():
+        payload["trial_outcome"] = _read_json_payload(trial_file).get("outcome")
+    selection_file = run_dir / "agent3_selection.json"
+    if selection_file.is_file():
+        payload["agent3_selection_sha256"] = _sha256_file(selection_file)
+    if error is not None:
+        payload["error_type"] = type(error).__name__
+    _write_json(run_dir / "orchestrator_manifest.json", payload)
+
+
+def _orchestrator_status(exit_code: int) -> str:
+    if exit_code == 0:
+        return "PASS"
+    if exit_code == 1:
+        return "ERROR"
+    return "STOPPED"
+
+
+def _select_agent3_tc(
+    design: Agent2TestDesign,
+) -> tuple[str | None, list[dict[str, Any]]]:
+    """Choose a current-Run TC by capability, never by a previous Run's ID."""
+    candidates: list[tuple[ProductTestCaseCandidate, Agent3EligibilityResult]] = []
+    summaries: list[dict[str, Any]] = []
+    for test_case in design.test_cases:
+        eligibility = evaluate_agent3_eligibility(test_case)
+        summaries.append(
+            {
+                "tc_id": test_case.tc_id,
+                "purpose": test_case.purpose.value,
+                "test_type": test_case.test_type.value,
+                "control_path": test_case.control_path.value,
+                "target_role": test_case.target_role,
+                "status": eligibility.status.value,
+                "missing_capabilities": eligibility.missing_capabilities,
+            }
+        )
+        if eligibility.model_call_allowed:
+            candidates.append((test_case, eligibility))
+    if not candidates:
+        return None, summaries
+
+    def priority(
+        item: tuple[ProductTestCaseCandidate, Agent3EligibilityResult],
+    ) -> tuple[Any, ...]:
+        test_case = item[0]
+        layers = {result.observation_layer for result in test_case.expected_results}
+        return (
+            test_case.purpose != TcPurpose.CHANGE_VALIDATION,
+            ObservationLayer.NOTIFICATION not in layers,
+            test_case.restore_required,
+            test_case.test_type != TcType.BOUNDARY,
+            test_case.tc_id,
+        )
+
+    selected = min(candidates, key=priority)[0]
+    return selected.tc_id, summaries
+
+
+def _select_agent3_tc_from_run(
+    run_dir: Path,
+    run_id: str,
+) -> tuple[str | None, list[dict[str, Any]]]:
+    _, _, _, design, _, _ = _load_verified_agent2_run(run_dir, run_id)
+    return _select_agent3_tc(design)
+
+
+def run_pipeline(args: argparse.Namespace) -> int:
+    """Run Agent 1→2→3 once and stop when a stage cannot continue."""
+    run_id = _new_run_id()
+    runs_root = Path(args.runs_root).resolve()
+    run_dir = runs_root / run_id
+    target_html = Path(args.target_html).resolve()
+    if not target_html.is_file():
+        raise ValueError(f"Agent 3 target HTML does not exist: {target_html.name}")
+    selected_tc_id = None if args.tc_id in {None, "AUTO"} else args.tc_id
+    stage_exit_codes: dict[str, int] = {}
+    current_stage = "agent1"
+    try:
+        agent1_exit = run_agent1(
+            argparse.Namespace(
+                request=args.request,
+                srs=args.srs,
+                runs_root=str(runs_root),
+                model=args.model,
+                run_id=run_id,
+            )
+        )
+        stage_exit_codes["agent1"] = agent1_exit
+        if agent1_exit != 0:
+            _write_orchestrator_manifest(
+                run_dir,
+                run_id,
+                status=_orchestrator_status(agent1_exit),
+                selected_tc_id=selected_tc_id,
+                target_html=target_html,
+                stage_exit_codes=stage_exit_codes,
+                stopped_at="agent1",
+            )
+            return agent1_exit
+
+        current_stage = "agent2"
+        agent2_exit = run_agent2(
+            argparse.Namespace(
+                run_id=run_id,
+                runs_root=str(runs_root),
+                model=args.model,
+            )
+        )
+        stage_exit_codes["agent2"] = agent2_exit
+        if agent2_exit != 0:
+            _write_orchestrator_manifest(
+                run_dir,
+                run_id,
+                status=_orchestrator_status(agent2_exit),
+                selected_tc_id=selected_tc_id,
+                target_html=target_html,
+                stage_exit_codes=stage_exit_codes,
+                stopped_at="agent2",
+            )
+            return agent2_exit
+
+        current_stage = "agent3"
+        if selected_tc_id is None:
+            selected_tc_id, selection_candidates = _select_agent3_tc_from_run(
+                run_dir, run_id
+            )
+            selection_file = run_dir / "agent3_selection.json"
+            _write_json(
+                selection_file,
+                {
+                    "contract_version": "1.0",
+                    "run_id": run_id,
+                    "stage": "AGENT_3_SELECTION",
+                    "status": "SELECTED" if selected_tc_id else "NOT_AUTOMATABLE",
+                    "selected_tc_id": selected_tc_id,
+                    "candidates": selection_candidates,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+            if selected_tc_id is None:
+                stage_exit_codes["agent3"] = 2
+                _write_orchestrator_manifest(
+                    run_dir,
+                    run_id,
+                    status="STOPPED",
+                    selected_tc_id=None,
+                    target_html=target_html,
+                    stage_exit_codes=stage_exit_codes,
+                    stopped_at="agent3",
+                )
+                print(f"Run ID: {run_id}")
+                print("Agent 3 selection: NO ELIGIBLE TC")
+                print("Agent 3 model call: NOT EXECUTED")
+                print(f"Orchestrator manifest: {run_dir / 'orchestrator_manifest.json'}")
+                return 2
+            print(f"Agent 3 auto-selected TC: {selected_tc_id}")
+        agent3_exit = run_agent3(
+            argparse.Namespace(
+                run_id=run_id,
+                tc_id=selected_tc_id,
+                target_html=str(target_html),
+                runs_root=str(runs_root),
+                model=args.model,
+                timeout=args.timeout,
+                preview_only=False,
+            )
+        )
+        stage_exit_codes["agent3"] = agent3_exit
+        status = _orchestrator_status(agent3_exit)
+        _write_orchestrator_manifest(
+            run_dir,
+            run_id,
+            status=status,
+            selected_tc_id=selected_tc_id,
+            target_html=target_html,
+            stage_exit_codes=stage_exit_codes,
+            stopped_at=None if agent3_exit == 0 else "agent3",
+        )
+        print(f"Orchestrator status: {status}")
+        print(f"Orchestrator manifest: {run_dir / 'orchestrator_manifest.json'}")
+        return agent3_exit
+    except Exception as exc:
+        if run_dir.is_dir():
+            _write_orchestrator_manifest(
+                run_dir,
+                run_id,
+                status="ERROR",
+                selected_tc_id=selected_tc_id,
+                target_html=target_html,
+                stage_exit_codes=stage_exit_codes,
+                stopped_at=current_stage,
+                error=exc,
+            )
+        raise
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -2481,6 +3180,27 @@ def build_parser() -> argparse.ArgumentParser:
     agent3.add_argument("--timeout", type=int, default=30, help="Isolated trial timeout in seconds")
     agent3.add_argument("--preview-only", action="store_true", help="Inspect UI and write the exact model-input preview without calling the API")
     agent3.set_defaults(handler=run_agent3)
+
+    pipeline = subparsers.add_parser(
+        "pipeline",
+        help="Agent 1→2→3, CP1→3, and the candidate trial in one command",
+    )
+    pipeline.add_argument("--request", required=True, help="Change-request JSON path")
+    pipeline.add_argument(
+        "--tc-id",
+        default="AUTO",
+        help="Current-Run TC ID, or AUTO to select one eligible CP2 candidate",
+    )
+    pipeline.add_argument(
+        "--target-html",
+        required=True,
+        help="Read-only local virtual controller HTML path",
+    )
+    pipeline.add_argument("--srs", default=str(DEFAULT_SRS), help="Product SRS Markdown path")
+    pipeline.add_argument("--runs-root", default=str(DEFAULT_RUNS_ROOT), help="Run artifact root")
+    pipeline.add_argument("--model", default=None, help="OpenAI model ID shared by Agent 1→3")
+    pipeline.add_argument("--timeout", type=int, default=30, help="Isolated trial timeout in seconds")
+    pipeline.set_defaults(handler=run_pipeline)
     return parser
 
 

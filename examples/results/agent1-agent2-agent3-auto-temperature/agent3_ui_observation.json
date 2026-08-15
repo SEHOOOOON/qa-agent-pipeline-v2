@@ -1,0 +1,69 @@
+{
+  "target_file": "virtual-controller.html",
+  "target_sha256": "5d7649f401b1e721372e4abdb8fdc65e4a3bd2d4e0fd0bd9e2c7161c9aa9b93c",
+  "page_title": "Virtual Central Control System (가상 중앙제어 시스템) — Central Control Simulator",
+  "elements": [
+    {
+      "selector": "#device-card-1 .card-body-split",
+      "tag": "div",
+      "text": "❄️ 냉방\n약풍\n25.0°C\n24.0°C\n16.0 ~ 30.0",
+      "visible": true,
+      "enabled": true,
+      "action_hint": "Select PRIMARY_TEST_DEVICE"
+    },
+    {
+      "selector": "#det-mode-auto",
+      "tag": "button",
+      "text": "자동",
+      "visible": true,
+      "enabled": true,
+      "action_hint": "Request AUTO mode"
+    },
+    {
+      "selector": "#det-temp-display",
+      "tag": "div",
+      "text": "24.0°C",
+      "visible": true,
+      "enabled": true,
+      "action_hint": "Read pending temperature"
+    },
+    {
+      "selector": "#det-temp-down-btn",
+      "tag": "button",
+      "text": "-",
+      "visible": true,
+      "enabled": true,
+      "action_hint": "Request one degree lower"
+    },
+    {
+      "selector": "#det-temp-up-btn",
+      "tag": "button",
+      "text": "+",
+      "visible": true,
+      "enabled": true,
+      "action_hint": "Request one degree higher"
+    },
+    {
+      "selector": ".btn-apply-cmd",
+      "tag": "button",
+      "text": "적용",
+      "visible": true,
+      "enabled": true,
+      "action_hint": "Apply pending commands"
+    },
+    {
+      "selector": "#global-toast",
+      "tag": "div",
+      "text": "경고 메시지",
+      "visible": true,
+      "enabled": true,
+      "action_hint": "Read blocking toast"
+    }
+  ],
+  "harness_keys": [
+    "devices",
+    "selectedUnitId"
+  ],
+  "observed_at": "2026-08-15T05:50:04.607903+00:00",
+  "observer": "python-playwright"
+}

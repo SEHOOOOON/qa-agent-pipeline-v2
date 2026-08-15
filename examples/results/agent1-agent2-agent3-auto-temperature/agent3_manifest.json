@@ -1,0 +1,47 @@
+{
+  "contract_version": "3.3",
+  "prompt_version": "agent3-3.4",
+  "run_id": "RUN-20260813-125229-31EB5F",
+  "source_stage": "AGENT_2_CP2",
+  "stage": "AGENT_3_CP3_TRIAL",
+  "tc_id": "TC-CAND-003",
+  "status": "PASS",
+  "candidate_status": "PRODUCT_MISMATCH_DETECTED",
+  "model": "gpt-5.6-terra",
+  "usage": {
+    "input_tokens": 2533,
+    "output_tokens": 594,
+    "total_tokens": 3127
+  },
+  "final_attempt_usage": {
+    "input_tokens": 2533,
+    "output_tokens": 594,
+    "total_tokens": 3127
+  },
+  "attempts": [
+    {
+      "attempt": 1,
+      "status": "PASS",
+      "model": "gpt-5.6-terra",
+      "usage": {
+        "input_tokens": 2533,
+        "output_tokens": 594,
+        "total_tokens": 3127
+      }
+    }
+  ],
+  "source_agent2_manifest_sha256": "b3a38f92244629cf2d00fe27eb811eb1396f74c77dcd8e188c5586e6e6937367",
+  "source_agent2_design_sha256": "ff67d3ec44ea00e58ecb494563084de67dd78703a1b496ed32b1c5c16e0d3d8e",
+  "eligibility_sha256": "b359e1e54c33b53bb0149714008fd81503e77fdf6c1a187365876dc7e8ceb9fd",
+  "ui_observation_sha256": "ee2106366a9dc5484a9f83b81a889ea302d2e49b8a05cb44296391cab9026b05",
+  "target_file": "virtual-controller.html",
+  "target_sha256": "5d7649f401b1e721372e4abdb8fdc65e4a3bd2d4e0fd0bd9e2c7161c9aa9b93c",
+  "automation_plan_sha256": "225b44dbbaf04c1dfb4eb7c523032fb9859b31948996fb9686210da033ec3e94",
+  "checkpoint3_sha256": "11ae1896dc93791d20535cee55cb436e0ba2627b24c50ac1996e9365ed5aa5ff",
+  "candidate_file": "test_tc_cand_003.py",
+  "candidate_sha256": "14ab553f5aede03f22a3d54e33635cd4c831051c890d7a17490ebbf7e49cd59f",
+  "trial_file": "agent3_trial.json",
+  "trial_sha256": "0c3441e11cff73d765e94c7e8a5670e305198f8ca82f9e878e0053b8e38b312c",
+  "project1_modified": false,
+  "created_at": "2026-08-15T05:50:34.947930+00:00"
+}

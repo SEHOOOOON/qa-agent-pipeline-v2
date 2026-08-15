@@ -1,0 +1,188 @@
+{
+  "destination": "OpenAI Responses API",
+  "store": false,
+  "system_instructions": "You are an Automation Engineer translating an approved product test case into a browser automation plan.\n\nRules:\n1. Never change or invent the TC purpose, preconditions, steps, expected results, values, or Requirement IDs.\n2. Use only selectors and window.__vccs interfaces present in the supplied UI Observation.\n3. Map PRIMARY_TEST_DEVICE and CENTRAL_COMMAND_ALLOWED_ROLE to target_device_id=1 for this MVP,\n   and set every SELECT_DEVICE action value to the same integer 1.\n4. PRECONDITION actions establish the target, initial mode, initial temperature, and applied state.\n5. TEST actions implement only the approved TC steps. Never assume a blocked request changes the value.\n6. Create RESTORE actions only when restore_required=true and use only the approved restore values.\n7. Map every Expected Result exactly once without changing result_id or observation_layer.\n8. Use UI_TEMPERATURE and INTERNAL_SET_TEMP for their corresponding observations.\n   Use TOAST_BLOCKING when the approved Expected Result requires a blocking Toast.\n9. Use CONTROLS_DISABLED and DISABLED_TEMPERATURE_TEXT for FAN or DRY disabled states.\n10. Return only the structured plan. Do not write Python code.\n11. Do not propose external URLs, shell commands, file changes, arbitrary waits, skip, or ignored exceptions.\n12. Use these action targets exactly: SELECT_DEVICE=#device-card-1 .card-body-split;\n    SET_MODE=the selector matching the requested mode; SET_TEMPERATURE=#det-temp-display;\n    APPLY_COMMANDS=.btn-apply-cmd. The compiler operates the temperature buttons itself.\n13. Leave expected_text null. The current compiler does not implement text-expectation comparison.\n14. Use these assertion targets exactly: UI_TEMPERATURE=#det-temp-display;\n    INTERNAL_SET_TEMP=window.__vccs.devices; TOAST_VISIBLE=#global-toast;\n    TOAST_BLOCKING=#global-toast;\n    CONTROLS_DISABLED=#det-temp-down-btn; DISABLED_TEMPERATURE_TEXT=#det-temp-display.\n    Do not append indexes, properties, or expressions to a window.__vccs interface.",
+  "test_case": {
+    "tc_id": "TC-CAND-003",
+    "title": "중앙 제어 패널에서 AUTO 모드 18°C 미만 요청 차단 및 기존 온도 유지",
+    "purpose": "CHANGE_VALIDATION",
+    "test_type": "EXCEPTION",
+    "requirement_ids": [
+      "REQ-TEMP-001",
+      "REQ-CONTROL-001",
+      "REQ-NOTIFY-001",
+      "REQ-STATE-001"
+    ],
+    "source_condition_ids": [
+      "COND-003",
+      "COND-004",
+      "COND-005",
+      "COND-009",
+      "COND-010"
+    ],
+    "control_path": "CENTRAL",
+    "target_role": "CENTRAL_COMMAND_ALLOWED_ROLE",
+    "test_data": {
+      "initial_mode": "AUTO",
+      "requested_mode": null,
+      "initial_temperature_c": 18.0,
+      "requested_temperature_c": 17.0
+    },
+    "preconditions": [
+      "중앙 명령이 허용되는 역할로 제어 패널에 접근한다.",
+      "선택된 허용 장비는 AUTO 모드이고 설정 온도는 18°C이다.",
+      "선택 장비는 중앙 제어 패널의 적용 대상이다."
+    ],
+    "steps": [
+      "제어 패널에서 대기 설정 온도를 17°C로 지정한다.",
+      "제어 패널을 통해 선택된 허용 장비에 대기값을 일괄 적용한다.",
+      "장비 카드 또는 제어 화면, 내부 장비 상태 및 안내 표시를 확인한다."
+    ],
+    "expected_results": [
+      {
+        "result_id": "ER-005",
+        "statement": "18°C 미만 요청은 적용되지 않으며 사용자 화면의 설정 온도는 기존 값 18°C로 유지된다.",
+        "observation_layer": "UI",
+        "source_condition_ids": [
+          "COND-003",
+          "COND-004",
+          "COND-009",
+          "COND-010"
+        ]
+      },
+      {
+        "result_id": "ER-006",
+        "statement": "내부 setTemp는 기존 값 18°C로 유지되고 사용자 화면의 설정 온도와 일치한다.",
+        "observation_layer": "INTERNAL_STATE",
+        "source_condition_ids": [
+          "COND-003",
+          "COND-004",
+          "COND-010"
+        ]
+      },
+      {
+        "result_id": "ER-007",
+        "statement": "차단 안내 Toast가 표시된다.",
+        "observation_layer": "NOTIFICATION",
+        "source_condition_ids": [
+          "COND-005"
+        ]
+      }
+    ],
+    "restore_required": false,
+    "restore_steps": [],
+    "automation_candidate": true,
+    "automation_reason": "중앙 제어 화면에서 범위 밖 요청을 적용하고 Toast, 화면 설정 온도 및 내부 setTemp를 확인할 수 있다."
+  },
+  "related_srs_requirements": {
+    "REQ-CONTROL-001": {
+      "requirement_id": "REQ-CONTROL-001",
+      "statement": "제어 패널 대기값은 적용 후 허용 장비에 반영되어야 합니다.",
+      "acceptance_criteria": "적용 전 상태는 유지되고 적용 후 허용 대상의 화면·내부 상태가 대기값과 같습니다.",
+      "related_requirement_ids": [
+        "REQ-AUTH-001",
+        "REQ-ERROR-001",
+        "REQ-GATEWAY-001",
+        "REQ-LOCK-001"
+      ]
+    },
+    "REQ-TEMP-001": {
+      "requirement_id": "REQ-TEMP-001",
+      "statement": "섭씨 설정 범위는 16~30°C여야 합니다.",
+      "acceptance_criteria": "범위 안 요청은 반영되고 범위 밖 요청은 차단되며 화면·내부 설정 온도가 기존 값을 유지합니다.",
+      "related_requirement_ids": [
+        "REQ-CONTROL-001",
+        "REQ-LOCAL-002",
+        "REQ-NOTIFY-001",
+        "REQ-STATE-001"
+      ]
+    },
+    "REQ-STATE-001": {
+      "requirement_id": "REQ-STATE-001",
+      "statement": "사용자 화면과 내부 장비 상태가 일치해야 합니다.",
+      "acceptance_criteria": "status·mode·currentTemp·setTemp·fanSpeed·locked 등 검증 대상 공통 값이 같습니다.",
+      "related_requirement_ids": []
+    },
+    "REQ-NOTIFY-001": {
+      "requirement_id": "REQ-NOTIFY-001",
+      "statement": "주요 적용·차단·오류 결과를 사용자에게 안내해야 합니다.",
+      "acceptance_criteria": "처리 결과와 일치하는 Toast가 표시되며 차단 안내 시 대상 상태가 유지됩니다.",
+      "related_requirement_ids": []
+    }
+  },
+  "ui_observation": {
+    "target_file": "virtual-controller.html",
+    "target_sha256": "5d7649f401b1e721372e4abdb8fdc65e4a3bd2d4e0fd0bd9e2c7161c9aa9b93c",
+    "page_title": "Virtual Central Control System (가상 중앙제어 시스템) — Central Control Simulator",
+    "elements": [
+      {
+        "selector": "#device-card-1 .card-body-split",
+        "tag": "div",
+        "text": "❄️ 냉방\n약풍\n25.0°C\n24.0°C\n16.0 ~ 30.0",
+        "visible": true,
+        "enabled": true,
+        "action_hint": "Select PRIMARY_TEST_DEVICE"
+      },
+      {
+        "selector": "#det-mode-auto",
+        "tag": "button",
+        "text": "자동",
+        "visible": true,
+        "enabled": true,
+        "action_hint": "Request AUTO mode"
+      },
+      {
+        "selector": "#det-temp-display",
+        "tag": "div",
+        "text": "24.0°C",
+        "visible": true,
+        "enabled": true,
+        "action_hint": "Read pending temperature"
+      },
+      {
+        "selector": "#det-temp-down-btn",
+        "tag": "button",
+        "text": "-",
+        "visible": true,
+        "enabled": true,
+        "action_hint": "Request one degree lower"
+      },
+      {
+        "selector": "#det-temp-up-btn",
+        "tag": "button",
+        "text": "+",
+        "visible": true,
+        "enabled": true,
+        "action_hint": "Request one degree higher"
+      },
+      {
+        "selector": ".btn-apply-cmd",
+        "tag": "button",
+        "text": "적용",
+        "visible": true,
+        "enabled": true,
+        "action_hint": "Apply pending commands"
+      },
+      {
+        "selector": "#global-toast",
+        "tag": "div",
+        "text": "경고 메시지",
+        "visible": true,
+        "enabled": true,
+        "action_hint": "Read blocking toast"
+      }
+    ],
+    "harness_keys": [
+      "devices",
+      "selectedUnitId"
+    ],
+    "observed_at": "2026-08-15T05:50:04.607903+00:00",
+    "observer": "python-playwright"
+  },
+  "excluded": [
+    "API keys and authentication values",
+    "local absolute paths and HTML source",
+    "screenshots and Playwright traces"
+  ],
+  "model": "gpt-5.6-terra"
+}

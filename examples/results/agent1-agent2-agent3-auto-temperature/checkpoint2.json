@@ -1,0 +1,61 @@
+{
+  "checkpoint": "CP2",
+  "status": "PASS",
+  "checks": [
+    {
+      "rule_id": "CP2-001",
+      "status": "PASS",
+      "message": "변경 요청·Agent 1·Agent 2의 요청 ID가 일치합니다."
+    },
+    {
+      "rule_id": "CP2-002",
+      "status": "PASS",
+      "message": "TC·기대 결과 ID와 제목이 고유합니다."
+    },
+    {
+      "rule_id": "CP2-003",
+      "status": "PASS",
+      "message": "모든 추적 ID가 승인된 입력 범위에 존재합니다."
+    },
+    {
+      "rule_id": "CP2-004",
+      "status": "PASS",
+      "message": "Agent 1의 모든 확정 조건을 TC가 반영합니다."
+    },
+    {
+      "rule_id": "CP2-005",
+      "status": "PASS",
+      "message": "TC 내부 추적성이 유지됩니다."
+    },
+    {
+      "rule_id": "CP2-006",
+      "status": "PASS",
+      "message": "상태 관련 TC가 UI·내부 상태를 함께 검증합니다."
+    },
+    {
+      "rule_id": "CP2-007",
+      "status": "PASS",
+      "message": "알림 조건이 NOTIFICATION 결과로 연결됩니다."
+    },
+    {
+      "rule_id": "CP2-008",
+      "status": "PASS",
+      "message": "변경·회귀 Requirement와 중앙·로컬 경로가 구분됩니다."
+    },
+    {
+      "rule_id": "CP2-009",
+      "status": "PASS",
+      "message": "제품 TC와 자동화 구현의 역할이 분리됐습니다."
+    },
+    {
+      "rule_id": "CP2-010",
+      "status": "PASS",
+      "message": "실행에 필요한 대상 역할과 시험 데이터가 구조화됐습니다."
+    },
+    {
+      "rule_id": "CP2-011",
+      "status": "PASS",
+      "message": "차단 없는 참고 사항 4건을 기록했습니다."
+    }
+  ]
+}

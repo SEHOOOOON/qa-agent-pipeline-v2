@@ -1,0 +1,57 @@
+{
+  "checkpoint": "CP3",
+  "status": "PASS",
+  "candidate_status": "PRODUCT_MISMATCH_DETECTED",
+  "checks": [
+    {
+      "rule_id": "CP3-001",
+      "status": "PASS",
+      "message": "The plan preserves the approved TC ID and MVP target device."
+    },
+    {
+      "rule_id": "CP3-002",
+      "status": "PASS",
+      "message": "Action IDs are unique and every selector was observed."
+    },
+    {
+      "rule_id": "CP3-003",
+      "status": "PASS",
+      "message": "Every Expected Result maps to exactly one assertion."
+    },
+    {
+      "rule_id": "CP3-004",
+      "status": "PASS",
+      "message": "Observation layers and targets preserve the approved expectations."
+    },
+    {
+      "rule_id": "CP3-005",
+      "status": "PASS",
+      "message": "Mode and temperature values are unchanged from the TC."
+    },
+    {
+      "rule_id": "CP3-006A",
+      "status": "PASS",
+      "message": "Action sequence implements the approved setup and test steps."
+    },
+    {
+      "rule_id": "CP3-006",
+      "status": "PASS",
+      "message": "Restore actions match the TC restore contract."
+    },
+    {
+      "rule_id": "CP3-007",
+      "status": "PASS",
+      "message": "Python syntax and the test function are valid."
+    },
+    {
+      "rule_id": "CP3-008",
+      "status": "PASS",
+      "message": "No shell, file mutation, external call, or assertion bypass was found."
+    },
+    {
+      "rule_id": "CP3-009",
+      "status": "PASS",
+      "message": "Every Expected Result is traceable to a code assertion."
+    }
+  ]
+}

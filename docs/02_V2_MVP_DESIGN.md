@@ -22,9 +22,9 @@
 
 ## 현재 구현 경계
 
-- 구현 완료: Product SRS·연관 요구사항 파서, Agent 1·2 OpenAI Adapter, Agent 3 구조화 계획 Adapter·결정론적 코드 컴파일러, CP1 10개·CP2 11개·CP3 계획/코드 규칙, 격리 시험, 요청·SRS·단계 산출물 SHA-256 고정
-- 실행 확인: v2.2 Live Run `RUN-20260813-125229-31EB5F`에서 Agent 1 `PASS + CONTINUE`, Agent 2·CP2 `PASS`, TC 후보 12건을 확인했습니다. 실제 Project1 화면을 읽기 전용으로 조사한 로컬 검증에서 CP3와 격리 시험까지 확인했고 자동 테스트 46건을 통과했습니다.
-- 미구현: 기존 TC 비교, Agent 3 실제 모델 공개 Run, 전체 Orchestrator, 조건부 검토 재개 UI, V2 Agent 4 입력 계약과 End-to-End 실행
+- 구현 완료: Product SRS·연관 요구사항 파서, Agent 1·2 OpenAI Adapter, Agent 3 Capability 사전 판정·선택 TC 범위 UI 조사·구조화 계획 Adapter·결정론적 코드 컴파일러, CP1 10개·CP2 11개·CP3 계획/코드 규칙, 격리 시험, 요청·SRS·단계 산출물 SHA-256 고정, A1→A3 최소 Orchestrator·현재 Run 적격 TC 자동 선택·중단·요약 Manifest
+- 실행 확인: v2.2 Live Run `RUN-20260813-125229-31EB5F`에서 Agent 1 `PASS + CONTINUE`, Agent 2·CP2 `PASS`, TC 후보 12건을 확인했습니다. 2026-08-15 `agent3-3.4` 공개 Live Run은 첫 계획 CP3 PASS, input 2,533·output 594·total 3,127 tokens와 ER-005·006·007의 `PRODUCT_MISMATCH_CANDIDATE`를 기록했습니다. Orchestrator `RUN-20260815-092107-0C075E`은 CP1·2·3 PASS, AUTO `TC-CAND-001`, Trial PASS로 정상 완료됐고 총 36,553 tokens를 사용했습니다. 모든 인계 SHA-256과 Project1 대상 해시가 일치했으며 텍스트·Trace 로컬 경로·비밀정보 검사를 통과했습니다. 복원 후 UI·내부 상태 재확인 보완 뒤 동일 계획의 무API 로컬 Trial도 PASS했고 자동 테스트 71건을 통과했습니다. 앞선 중단 Run 3건은 보완 전 진단 증거로 공개하지 않습니다.
+- 미구현·미확인: 기존 TC 비교, 조건부 검토 재개 UI, V2 Agent 4 입력 계약과 End-to-End 최종 보고
 - Project1 기존 구현 상태와 한계는 [Project1 기준 자산 감사](05_PROJECT1_BASELINE_AUDIT.md), 테스트 지원 인터페이스는 [QA 하네스 가이드](06_TEST_HARNESS_GUIDE.md)를 기준으로 합니다.
 
 ## 3. MVP 목표와 비목표
@@ -59,7 +59,8 @@
   -> [CP1 / 코드] ID·before·after·근거 검사 + 후속 인계 상태
   -> [Agent 2 / 모델] 제품 기능 TC 후보
   -> [CP2 / 코드] 구조·추적성·제어 경로·시험 데이터 검사
-  -> [UI 조사기 / 코드] Project1 실제 Selector·window.__vccs 목록 확인
+  -> [지원 Gate / 코드] TC Capability 판정, 미지원 시 NOT_AUTOMATABLE
+  -> [UI 조사기 / 코드] 선택 TC에 필요한 Project1 Selector·window.__vccs 키 확인
   -> [Agent 3 / 모델] 승인 TC를 제한된 행동·Assertion 계획으로 변환
   -> [컴파일러·CP3 / 코드] Playwright Python 후보 생성 + 추적성·금지 패턴 검사
   -> [격리 실행] 비밀 환경변수를 제거한 임시 폴더에서 후보 1회 시험
@@ -107,13 +108,15 @@ Checkpoint는 생성형 Agent가 아니라 결정론 검사기입니다. PASS �
 
 ### Agent 3 — 자동화 코드 후보 생성
 
-- UI 조사기가 실제 Project1 페이지에서 허용 Selector와 `window.__vccs` 키를 먼저 수집합니다.
+- 지원 Gate가 선택 TC의 제어 경로·대상 역할·모드·행동·기대 결과를 현재 Capability로 표현할 수 있는지 모델 호출 전에 판정합니다.
+- 미지원 TC는 `NOT_AUTOMATABLE`과 누락 Capability를 기록하고 UI 조사와 API 호출을 실행하지 않습니다.
+- UI 조사기가 실제 Project1 페이지에서 선택 TC에 필요한 허용 Selector와 `window.__vccs` 키만 수집합니다.
 - Agent 3 모델은 Agent 2가 확정한 TC를 행동·Assertion의 구조화 계획으로만 변환합니다.
 - 모델은 Python 코드를 직접 작성하지 않으며 새 테스트 목적, 기대값, Selector와 Requirement를 추가할 수 없습니다.
-- CP3는 행동 유형과 Selector의 대응, 모든 Expected Result의 1:1 Assertion, 관찰 계층, 모드·온도 값, 단계 순서와 복원 계약을 검사합니다.
+- CP3는 행동 유형과 Selector의 대응, 모든 Expected Result의 1:1 Assertion, 관찰 계층, 모드·온도 값, 단계 순서와 변경된 초기값·CENTRAL 적용을 포함한 복원 계약을 검사합니다.
 - 허용 목록 컴파일러가 CP3 PASS 계획을 Python Playwright 후보로 결정론적으로 만듭니다.
 - 내부 상태는 기존 `window.__vccs.devices` 읽기 인터페이스를 사용합니다.
-- 현재 MVP는 조사된 CENTRAL 제어 패널 TC 한 건만 지원하며 LOCAL 경로는 별도 실제 화면을 조사할 때까지 차단합니다.
+- 현재 MVP는 조사된 CENTRAL 제어 패널의 모드·온도·적용과 온도 UI·내부 `setTemp`·Toast·온도 비활성 표시 Capability만 지원합니다. LOCAL과 미지원 Assertion은 구조화된 `NOT_AUTOMATABLE`로 종료합니다.
 - 생성·검증을 마친 코드는 Run 폴더에 저장하며 이후 재실행에서는 모델을 다시 호출하지 않습니다.
 - Playwright MCP는 향후 조사 보조 도구일 뿐, 현재 구현의 실행 조건이나 품질 보장 근거가 아닙니다.
 
@@ -201,21 +204,22 @@ runs/RUN-<id>/
   agent2_test_design.json        # 현재 구현
   checkpoint2.json               # 현재 구현
   agent2_manifest.json           # 현재 구현: 단계 간 SHA-256 체인
+  agent3_eligibility.json        # 구현: 지원·누락 Capability와 모델 호출 허용 여부
   agent3_ui_observation.json      # 구현: 파일명·해시·Selector·하네스 목록
   agent3_model_input_preview.json # 구현: API 전송 예정 데이터
   agent3_automation_plan.json     # 구현: 모델의 제한된 행동·Assertion 계획
   candidates/test_<tc-id>.py     # 구현: 결정론적 Playwright 후보
   checkpoint3.json               # 구현: 계획·코드 규칙 판정
   agent3_trial.json               # 구현: 격리 시험 결과
-  agent3_manifest.json            # 구현: 단계 입력·출력 SHA-256
-  evidence/<tc-id>/               # 구현: stdout·stderr·Screenshot·Trace
+  agent3_manifest.json            # 구현: 단계 SHA-256·누적/마지막 시도 토큰
+  evidence/<tc-id>/               # 구현: stdout·stderr·Screenshot·경로 치환 Trace
   conditional_review.json        # REVIEW 재개 기능 계획
   asset_registration_decision.json
   execution_results.json
   final_report.json
 ~~~
 
-현재 Agent 1~3 파일은 같은 Run ID를 사용합니다. Agent 3 시작 전 Agent 1·2 Manifest와 산출물 SHA-256 및 CP1·CP2 재계산 결과를 다시 확인하며, `agent3_manifest.json`에 UI·계획·코드·시험 SHA-256을 기록합니다. Artifact ID는 다수 후보를 동시에 처리할 때 검토합니다.
+현재 Agent 1~3 파일은 같은 Run ID를 사용합니다. 계약 2.3부터 Agent 1·2 Manifest도 모든 모델 시도의 누적 토큰과 마지막 시도 토큰을 분리합니다. Agent 3 시작 전 Agent 1·2 Manifest와 산출물 SHA-256 및 CP1·CP2 재계산 결과를 다시 확인하며, `agent3_manifest.json`에 Eligibility·UI·계획·코드·시험 SHA-256과 모든 계획 시도의 누적 토큰을 기록합니다. `agent3_error.json`이 생긴 시도는 같은 폴더에서 덮어쓰지 않고 새 Candidate Workspace로 재실행합니다. Artifact ID는 다수 후보를 동시에 처리할 때 검토합니다.
 
 ## 12. 구현 순서
 

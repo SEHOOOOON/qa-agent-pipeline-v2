@@ -1,0 +1,56 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+______________________________ test_tc_cand_003 _______________________________
+
+    def test_tc_cand_003():
+        EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
+        mismatches = []
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context()
+            context.tracing.start(screenshots=True, snapshots=True, sources=True)
+            page = context.new_page()
+            try:
+                page.goto(TARGET_URL, wait_until='domcontentloaded')
+                page.evaluate('() => localStorage.clear()')
+                page.reload(wait_until='domcontentloaded')
+                page.wait_for_selector('#device-card-1', timeout=5000)
+                # ACT-001 PRECONDITION: 중앙 명령이 허용되는 역할로 제어 패널에 접근한다.
+                page.locator('#device-card-1 .card-body-split').click()
+                page.wait_for_function("() => window.__vccs.selectedUnitId === 1")
+                # ACT-002 PRECONDITION: 선택된 허용 장비는 AUTO 모드이고 설정 온도는 18°C이다.
+                page.locator('#det-mode-auto').click()
+                # ACT-003 PRECONDITION: 선택된 허용 장비는 AUTO 모드이고 설정 온도는 18°C이다.
+                _set_temperature(page, 18.0)
+                # ACT-004 PRECONDITION: 선택 장비는 중앙 제어 패널의 적용 대상이다.
+                page.locator('.btn-apply-cmd').click()
+                page.wait_for_timeout(100)
+                # ACT-005 TEST: 제어 패널에서 대기 설정 온도를 17°C로 지정한다.
+                _request_temperature(page, 17.0)
+                # ACT-006 TEST: 제어 패널을 통해 선택된 허용 장비에 대기값을 일괄 적용한다.
+                page.locator('.btn-apply-cmd').click()
+                page.wait_for_timeout(100)
+                # EXPECTED_RESULT: ER-005
+                actual = _temperature(page)
+                if actual != 18.0:
+                    mismatches.append('ER-005' + f': UI temperature={actual}')
+                # EXPECTED_RESULT: ER-006
+                actual = page.evaluate("id => window.__vccs.devices.find(d => d.id === id).setTemp", 1)
+                if actual != 18.0:
+                    mismatches.append('ER-006' + f': internal setTemp={actual}')
+                # EXPECTED_RESULT: ER-007
+                toast = page.locator('#global-toast')
+                toast_text = toast.inner_text().strip().lower()
+                if 'show' not in (toast.get_attribute('class') or '').split():
+                    mismatches.append('ER-007' + ': toast not visible')
+                elif not any(term in toast_text for term in ('block', 'blocked', 'blocking', 'reject', 'denied', 'invalid', 'out of range', 'failed', '차단', '범위', '초과', '거부', '실패', '허용되지', '할 수 없')):
+                    mismatches.append('ER-007' + f': toast does not indicate blocking: {toast_text}')
+                page.screenshot(path=str(EVIDENCE_DIR / 'trial-final.png'), full_page=True)
+>               assert not mismatches, 'PRODUCT_MISMATCH: ' + ' | '.join(mismatches)
+E               AssertionError: PRODUCT_MISMATCH: ER-005: UI temperature=17.0 | ER-006: internal setTemp=17 | ER-007: toast does not indicate blocking: 1대 실내기 제어 관제점 명령이 게이트웨이로 전송되어 성공적으로 적용되었습니다.
+E               assert not ['ER-005: UI temperature=17.0', 'ER-006: internal setTemp=17', 'ER-007: toast does not indicate blocking: 1대 실내기 제어 관제점 명령이 게이트웨이로 전송되어 성공적으로 적용되었습니다.']
+
+test_tc_cand_003.py:84: AssertionError
+=========================== short test summary info ===========================
+FAILED test_tc_cand_003.py::test_tc_cand_003 - AssertionError: PRODUCT_MISMAT...
+1 failed in 15.44s

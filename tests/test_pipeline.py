@@ -1,5 +1,6 @@
 # Product SRS parser
 import json
+import zipfile
 from pathlib import Path
 
 from qa_pipeline_v2 import load_srs_requirements, render_srs_context
@@ -140,7 +141,7 @@ def test_agent1_uses_structured_responses_api() -> None:
     assert "테스트 절차나 Playwright 코드는 작성하지 않습니다" in instructions
 
 
-def test_missing_api_key_fails_before_network(monkeypatch) -> None:
+def test_agent1_missing_api_key_fails_before_network(monkeypatch) -> None:
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     with pytest.raises(Agent1Error, match="OPENAI_API_KEY"):
@@ -628,10 +629,26 @@ def test_agent2_uses_structured_responses_api() -> None:
     assert "제품 기능 테스트케이스 후보" in AGENT2_SYSTEM_INSTRUCTIONS
     assert "Playwright 코드" in AGENT2_SYSTEM_INSTRUCTIONS
     assert "모든 confirmed_condition" in AGENT2_SYSTEM_INSTRUCTIONS
+    assert "target_role=PRIMARY_TEST_DEVICE" in AGENT2_SYSTEM_INSTRUCTIONS
     assert "전체 test_cases를 완전한 결과로 반환" in Path("src/qa_pipeline_v2.py").read_text(encoding="utf-8")
 
+    agent.design(
+        cp1_request(),
+        analysis,
+        {},
+        previous_design=agent2_design(),
+        checkpoint_feedback=[
+            "CP2-001 PASS: 요청 ID 일치",
+            "CP2-002 FAIL: 중복 ID",
+        ],
+    )
+    rework_input = responses.kwargs["input"][1]["content"]
+    assert "Checkpoint 2 전체 판정" in rework_input
+    assert "CP2-001 PASS" in rework_input
+    assert "PASS인 규칙과 그 근거를 보존" in rework_input
 
-def test_missing_api_key_fails_before_network(monkeypatch) -> None:
+
+def test_agent2_missing_api_key_fails_before_network(monkeypatch) -> None:
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     with pytest.raises(Agent2Error, match="OPENAI_API_KEY"):
@@ -1200,10 +1217,12 @@ def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
 # Agent 3
 from qa_pipeline_v2 import (
     Agent3AutomationPlan,
+    Agent3EligibilityStatus,
     AssertionStrategy,
     AutomationAction,
     AutomationActionType,
     AutomationAssertion,
+    AutomationCandidateStatus,
     AutomationPhase,
     CheckStatus,
     ObservedUiElement,
@@ -1213,6 +1232,7 @@ from qa_pipeline_v2 import (
     UiObservation,
     compile_automation_candidate,
     build_agent3_model_input,
+    evaluate_agent3_eligibility,
     evaluate_checkpoint3_plan,
     evaluate_compiled_candidate,
     inspect_target_ui,
@@ -1293,7 +1313,7 @@ def agent3_plan() -> Agent3AutomationPlan:
         assertions=[
             AutomationAssertion(result_id="ER-005", observation_layer="UI", strategy="UI_TEMPERATURE", selector="#det-temp-display", expected_number=18.0),
             AutomationAssertion(result_id="ER-006", observation_layer="INTERNAL_STATE", strategy="INTERNAL_SET_TEMP", selector="window.__vccs.devices", expected_number=18.0),
-            AutomationAssertion(result_id="ER-007", observation_layer="NOTIFICATION", strategy="TOAST_VISIBLE", selector="#global-toast"),
+            AutomationAssertion(result_id="ER-007", observation_layer="NOTIFICATION", strategy="TOAST_BLOCKING", selector="#global-toast"),
         ],
     )
 
@@ -1315,6 +1335,13 @@ def test_agent3_uses_structured_plan_api() -> None:
     assert result.plan.tc_id == "TC-CAND-003"
     assert responses.kwargs["text_format"] is Agent3AutomationPlan
     assert responses.kwargs["store"] is False
+    instructions = responses.kwargs["input"][0]["content"]
+    assert "SET_TEMPERATURE=#det-temp-display" in instructions
+    assert "Leave expected_text null" in instructions
+    assert "INTERNAL_SET_TEMP=window.__vccs.devices" in instructions
+    assert "Do not append indexes, properties, or expressions" in instructions
+    assert "SELECT_DEVICE action value to the same integer 1" in instructions
+    assert "Use TOAST_BLOCKING" in instructions
 
 
 def test_agent3_model_input_preview_is_minimal_and_has_no_local_path() -> None:
@@ -1330,6 +1357,174 @@ def test_agent3_model_input_preview_is_minimal_and_has_no_local_path() -> None:
     assert payload["ui_observation"]["target_file"] == "virtual-controller.html"
     assert "C:\\" not in serialized
     assert "<!doctype html" not in serialized
+
+
+def test_agent3_eligibility_scopes_ui_inventory_to_selected_tc(tmp_path: Path) -> None:
+    eligibility = evaluate_agent3_eligibility(agent3_test_case())
+    assert eligibility.status == Agent3EligibilityStatus.ELIGIBLE
+    assert eligibility.model_call_allowed is True
+    assert "#det-mode-auto" in eligibility.required_selectors
+    assert "#det-mode-dry" not in eligibility.required_selectors
+    assert set(eligibility.required_harness_keys) == {"devices", "selectedUnitId"}
+    assert "ASSERT_TOAST_BLOCKING" in eligibility.required_capabilities
+
+    target = tmp_path / "target.html"
+    target.write_text(
+        """<!doctype html><title>Scoped Inventory</title>
+<div id='device-card-1'><button class='card-body-split'>device</button></div>
+<button id='det-mode-auto'>AUTO</button>
+<span id='det-temp-display'>18 C</span>
+<button id='det-temp-down-btn'>-</button><button id='det-temp-up-btn'>+</button>
+<button class='btn-apply-cmd'>apply</button><div id='global-toast'>warning</div>
+<script>window.__vccs={devices:[],selectedUnitId:null};</script>""",
+        encoding="utf-8",
+    )
+
+    observation = inspect_target_ui(
+        target,
+        required_selectors=set(eligibility.required_selectors),
+        required_harness_keys=set(eligibility.required_harness_keys),
+    )
+
+    assert {item.selector for item in observation.elements} == set(
+        eligibility.required_selectors
+    )
+    assert set(observation.harness_keys) == {"devices", "selectedUnitId"}
+
+
+def test_agent3_scoped_inventory_still_blocks_a_required_selector(tmp_path: Path) -> None:
+    eligibility = evaluate_agent3_eligibility(agent3_test_case())
+    target = tmp_path / "target.html"
+    target.write_text(
+        """<!doctype html><div id='device-card-1'><button class='card-body-split'>device</button></div>
+<span id='det-temp-display'>18 C</span>
+<button id='det-temp-down-btn'>-</button><button id='det-temp-up-btn'>+</button>
+<button class='btn-apply-cmd'>apply</button><div id='global-toast'>warning</div>
+<script>window.__vccs={devices:[],selectedUnitId:null};</script>""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(pipeline.Agent3Error, match="#det-mode-auto"):
+        inspect_target_ui(
+            target,
+            required_selectors=set(eligibility.required_selectors),
+            required_harness_keys=set(eligibility.required_harness_keys),
+        )
+
+
+def test_agent3_eligibility_rejects_an_unsupported_internal_assertion() -> None:
+    payload = agent3_test_case().model_dump(mode="json")
+    payload["requirement_ids"].append("REQ-LOCK-001")
+    payload["expected_results"][1]["statement"] = "Internal locked state remains true."
+
+    eligibility = evaluate_agent3_eligibility(
+        ProductTestCaseCandidate.model_validate(payload)
+    )
+
+    assert eligibility.status == Agent3EligibilityStatus.NOT_AUTOMATABLE
+    assert eligibility.candidate_status == AutomationCandidateStatus.NOT_AUTOMATABLE
+    assert eligibility.model_call_allowed is False
+    assert "REQUIREMENT:REQ-LOCK-001" in eligibility.missing_capabilities
+    assert "ASSERT_INTERNAL_STATE:ER-006" in eligibility.missing_capabilities
+
+
+def test_agent3_unsupported_tc_records_not_automatable_before_ui_or_model(
+    tmp_path: Path, monkeypatch
+) -> None:
+    run_id = "RUN-20260815-120000-ABCDEF"
+    run_dir = tmp_path / run_id
+    run_dir.mkdir()
+    (run_dir / "agent2_manifest.json").write_text("{}", encoding="utf-8")
+    payload = agent3_test_case().model_dump(mode="json")
+    payload["control_path"] = "LOCAL"
+    local_tc = ProductTestCaseCandidate.model_validate(payload)
+    design = SimpleNamespace(test_cases=[local_tc])
+    monkeypatch.setattr(
+        pipeline,
+        "_load_verified_agent2_run",
+        lambda *_: (
+            None,
+            {},
+            None,
+            design,
+            None,
+            {"agent2_design_sha256": "b" * 64},
+        ),
+    )
+
+    def unexpected_call(*_args, **_kwargs):
+        raise AssertionError("UI inspection and model construction must not run")
+
+    monkeypatch.setattr(pipeline, "inspect_target_ui", unexpected_call)
+    monkeypatch.setattr(pipeline, "OpenAIAgent3", unexpected_call)
+    args = SimpleNamespace(
+        runs_root=str(tmp_path),
+        run_id=run_id,
+        tc_id=local_tc.tc_id,
+        target_html=str(tmp_path / "unused.html"),
+        model=None,
+        timeout=30,
+        preview_only=False,
+    )
+
+    assert pipeline.run_agent3(args) == 2
+    result = json.loads((run_dir / "agent3_eligibility.json").read_text(encoding="utf-8"))
+    assert result["status"] == "NOT_AUTOMATABLE"
+    assert result["candidate_status"] == "NOT_AUTOMATABLE"
+    assert result["model_call_allowed"] is False
+    assert result["source_agent2_design_sha256"] == "b" * 64
+    assert "CONTROL_PATH_LOCAL" in result["missing_capabilities"]
+    assert not (run_dir / "agent3_model_input_preview.json").exists()
+    assert not (run_dir / "agent3_error.json").exists()
+
+
+def test_agent3_preview_does_not_require_api_key_or_create_model_client(
+    tmp_path: Path, monkeypatch
+) -> None:
+    run_id = "RUN-20260815-120001-ABCDEF"
+    run_dir = tmp_path / run_id
+    run_dir.mkdir()
+    (run_dir / "agent2_manifest.json").write_text("{}", encoding="utf-8")
+    design = SimpleNamespace(test_cases=[agent3_test_case()])
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        pipeline,
+        "_load_verified_agent2_run",
+        lambda *_: (
+            None,
+            {},
+            None,
+            design,
+            None,
+            {"agent2_design_sha256": "c" * 64},
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "inspect_target_ui",
+        lambda *_args, **_kwargs: agent3_observation(),
+    )
+
+    def unexpected_model_client(*_args, **_kwargs):
+        raise AssertionError("Preview must not create the Agent 3 model client")
+
+    monkeypatch.setattr(pipeline, "OpenAIAgent3", unexpected_model_client)
+    args = SimpleNamespace(
+        runs_root=str(tmp_path),
+        run_id=run_id,
+        tc_id=agent3_test_case().tc_id,
+        target_html=str(tmp_path / "unused.html"),
+        model=None,
+        timeout=30,
+        preview_only=True,
+    )
+
+    assert pipeline.run_agent3(args) == 0
+    preview = json.loads(
+        (run_dir / "agent3_model_input_preview.json").read_text(encoding="utf-8")
+    )
+    assert preview["destination"] == "OpenAI Responses API"
+    assert not (run_dir / "agent3_error.json").exists()
 
 
 def test_valid_agent3_plan_passes_cp3_and_compiles() -> None:
@@ -1352,6 +1547,88 @@ def test_blocked_temperature_request_compiles_until_target_or_stall() -> None:
     assert "_request_temperature(page, 17.0)" in code
 
 
+def test_restore_contract_requires_initial_temperature_and_apply() -> None:
+    tc = agent3_test_case().model_copy(
+        update={
+            "restore_required": True,
+            "restore_steps": ["Restore AUTO 18 and verify UI and internal state."],
+        }
+    )
+    plan = agent3_plan().model_copy(
+        update={
+            "actions": [
+                *agent3_plan().actions,
+                AutomationAction(
+                    action_id="ACT-007",
+                    phase="RESTORE",
+                    action_type="SET_TEMPERATURE",
+                    selector="#det-temp-display",
+                    value=17.0,
+                    source_text="Keep requested temperature",
+                ),
+                AutomationAction(
+                    action_id="ACT-008",
+                    phase="RESTORE",
+                    action_type="APPLY_COMMANDS",
+                    selector=".btn-apply-cmd",
+                    source_text="Apply restore",
+                ),
+            ]
+        }
+    )
+
+    checkpoint = evaluate_checkpoint3_plan(tc, plan, agent3_observation())
+
+    assert checkpoint.status == CheckStatus.FAIL
+    assert any(
+        item.rule_id == "CP3-006"
+        and item.status == CheckStatus.FAIL
+        and "initial temperature restore is missing" in item.message
+        for item in checkpoint.checks
+    )
+
+
+def test_compiler_verifies_restored_ui_and_internal_temperature() -> None:
+    tc = agent3_test_case().model_copy(
+        update={
+            "restore_required": True,
+            "restore_steps": ["Restore AUTO 18 and verify UI and internal state."],
+        }
+    )
+    plan = agent3_plan().model_copy(
+        update={
+            "actions": [
+                *agent3_plan().actions,
+                AutomationAction(
+                    action_id="ACT-007",
+                    phase="RESTORE",
+                    action_type="SET_TEMPERATURE",
+                    selector="#det-temp-display",
+                    value=18.0,
+                    source_text="Restore initial temperature",
+                ),
+                AutomationAction(
+                    action_id="ACT-008",
+                    phase="RESTORE",
+                    action_type="APPLY_COMMANDS",
+                    selector=".btn-apply-cmd",
+                    source_text="Apply restore",
+                ),
+            ]
+        }
+    )
+
+    checkpoint = evaluate_checkpoint3_plan(tc, plan, agent3_observation())
+    code = compile_automation_candidate("RUN-20260813-120000-ABCDEF", tc, plan)
+    compiled_checks = evaluate_compiled_candidate(tc, code)
+
+    assert checkpoint.status == CheckStatus.PASS
+    assert all(item.status == CheckStatus.PASS for item in compiled_checks)
+    assert "restore_ui_temperature = _temperature(page)" in code
+    assert "restore_internal_temperature = page.evaluate" in code
+    assert "RESTORE_MISMATCH:" in code
+
+
 
 def test_unobserved_selector_is_rejected_by_cp3() -> None:
     payload = agent3_plan().model_dump(mode="json")
@@ -1368,6 +1645,42 @@ def test_observed_but_wrong_action_selector_is_rejected_by_cp3() -> None:
     assert any(item.rule_id == "CP3-002" and item.status == CheckStatus.FAIL for item in checkpoint.checks)
 
 
+def test_missing_select_device_value_is_rejected_by_cp3() -> None:
+    payload = agent3_plan().model_dump(mode="json")
+    payload["actions"][0]["value"] = None
+    checkpoint = evaluate_checkpoint3_plan(
+        agent3_test_case(),
+        Agent3AutomationPlan.model_validate(payload),
+        agent3_observation(),
+    )
+
+    assert checkpoint.status == CheckStatus.FAIL
+    assert any(
+        item.rule_id == "CP3-002"
+        and item.status == CheckStatus.FAIL
+        and "invalid device selector or target value" in item.message
+        for item in checkpoint.checks
+    )
+
+
+def test_observed_but_wrong_assertion_selector_is_rejected_by_cp3() -> None:
+    payload = agent3_plan().model_dump(mode="json")
+    payload["assertions"][0]["selector"] = "#det-temp-adjust-card"
+    checkpoint = evaluate_checkpoint3_plan(
+        agent3_test_case(),
+        Agent3AutomationPlan.model_validate(payload),
+        agent3_observation(),
+    )
+
+    assert checkpoint.status == CheckStatus.FAIL
+    assert any(
+        item.rule_id == "CP3-004"
+        and item.status == CheckStatus.FAIL
+        and "invalid observation target" in item.message
+        for item in checkpoint.checks
+    )
+
+
 def test_ungrounded_numeric_expectation_is_rejected_by_cp3() -> None:
     payload = agent3_plan().model_dump(mode="json")
     payload["assertions"][0]["expected_number"] = 19.0
@@ -1375,6 +1688,42 @@ def test_ungrounded_numeric_expectation_is_rejected_by_cp3() -> None:
     assert checkpoint.status == CheckStatus.FAIL
     assert any(item.rule_id == "CP3-004" and item.status == CheckStatus.FAIL for item in checkpoint.checks)
     assert any(item.rule_id == "CP3-005" and item.status == CheckStatus.FAIL for item in checkpoint.checks)
+
+
+def test_unsupported_expected_text_is_rejected_by_cp3() -> None:
+    payload = agent3_plan().model_dump(mode="json")
+    payload["assertions"][2]["expected_text"] = "warning message"
+    checkpoint = evaluate_checkpoint3_plan(
+        agent3_test_case(),
+        Agent3AutomationPlan.model_validate(payload),
+        agent3_observation(),
+    )
+
+    assert checkpoint.status == CheckStatus.FAIL
+    assert any(
+        item.rule_id == "CP3-004"
+        and item.status == CheckStatus.FAIL
+        and "expected_text is unsupported" in item.message
+        for item in checkpoint.checks
+    )
+
+
+def test_generic_visible_toast_is_rejected_for_blocking_expected_result() -> None:
+    payload = agent3_plan().model_dump(mode="json")
+    payload["assertions"][2]["strategy"] = "TOAST_VISIBLE"
+    checkpoint = evaluate_checkpoint3_plan(
+        agent3_test_case(),
+        Agent3AutomationPlan.model_validate(payload),
+        agent3_observation(),
+    )
+
+    assert checkpoint.status == CheckStatus.FAIL
+    assert any(
+        item.rule_id == "CP3-004"
+        and item.status == CheckStatus.FAIL
+        and "assertion strategy changed" in item.message
+        for item in checkpoint.checks
+    )
 
 
 
@@ -1401,7 +1750,7 @@ let devices=[{id:1,setTemp:24,mode:'COOL'}]; let pendingState={setTemp:24,mode:'
 function draw(){document.getElementById('det-temp-display').innerText=pendingState.setTemp.toFixed(1)+' C'}
 function selectUnit(id){selectedUnitId=id; pendingState={...devices[0]}; draw()}
 function adjust(v){pendingState.setTemp+=v; draw()}
-function applyPanelCommands(){devices[0].setTemp=pendingState.setTemp; devices[0].mode=pendingState.mode}
+function applyPanelCommands(){devices[0].setTemp=pendingState.setTemp; devices[0].mode=pendingState.mode; let toast=document.getElementById('global-toast'); toast.innerText='Successfully applied'; toast.className='toast-box show'}
 window.__vccs={get devices(){return devices},get pendingState(){return pendingState},get selectedUnitId(){return selectedUnitId},selectUnit,applyPanelCommands,renderGrid(){},saveStateToLocalStorage(){}};
 </script>""",
         encoding="utf-8",
@@ -1413,6 +1762,43 @@ window.__vccs={get devices(){return devices},get pendingState(){return pendingSt
     trial = run_candidate_trial(candidate, target, tmp_path / "evidence", timeout_seconds=20)
     assert trial.outcome == TrialOutcome.PRODUCT_MISMATCH_CANDIDATE
     assert trial.evidence_complete is True
+    stdout = (tmp_path / "evidence" / "trial-stdout.txt").read_text(encoding="utf-8")
+    assert "ER-007: toast does not indicate blocking: successfully applied" in stdout
+    with zipfile.ZipFile(tmp_path / "evidence" / "trial-trace.zip") as archive:
+        trace_payload = b"".join(archive.read(name) for name in archive.namelist())
+    assert str(tmp_path.resolve()).encode("utf-8") not in trace_payload
+    assert tmp_path.resolve().as_uri().encode("utf-8") not in trace_payload
+
+
+def test_agent3_trace_redaction_handles_path_uri_and_json_escapes(
+    tmp_path: Path,
+) -> None:
+    local_root = tmp_path / "사용자 폴더"
+    local_root.mkdir()
+    trace_file = tmp_path / "trial-trace.zip"
+    raw_path = str(local_root.resolve())
+    raw_uri = local_root.resolve().as_uri()
+    escaped_path = json.dumps(raw_path, ensure_ascii=True)[1:-1]
+    with zipfile.ZipFile(trace_file, "w") as archive:
+        archive.writestr(
+            "trace.trace",
+            f"path={raw_path}\nuri={raw_uri}\nescaped={escaped_path}".encode("utf-8"),
+        )
+        archive.writestr("resources/evidence.bin", b"unchanged-binary-evidence")
+
+    pipeline._redact_playwright_trace(
+        trace_file,
+        {local_root: "<LOCAL_ROOT>"},
+    )
+
+    with zipfile.ZipFile(trace_file) as archive:
+        redacted = archive.read("trace.trace").decode("utf-8")
+        binary = archive.read("resources/evidence.bin")
+    assert raw_path not in redacted
+    assert raw_uri not in redacted
+    assert escaped_path not in redacted
+    assert redacted.count("<LOCAL_ROOT>") == 3
+    assert binary == b"unchanged-binary-evidence"
 
 
 def test_agent3_trial_strips_secrets_and_redacts_local_paths(tmp_path: Path, monkeypatch) -> None:
@@ -1426,7 +1812,11 @@ def test_agent3_trial_strips_secrets_and_redacts_local_paths(tmp_path: Path, mon
         captured_env.update(kwargs["env"])
         local_path = str(target.resolve())
         temp_path = str(Path(kwargs["cwd"]).resolve())
-        return SimpleNamespace(returncode=1, stdout=f"{local_path}\n{temp_path}", stderr="")
+        return SimpleNamespace(
+            returncode=1,
+            stdout=f"한글 실행 증거\n{local_path}\n{temp_path}",
+            stderr="",
+        )
 
     for name in ("OPENAI_API_KEY", "SLACK_WEBHOOK_URL", "NOTION_API_KEY", "NOTION_TOKEN", "GITHUB_TOKEN"):
         monkeypatch.setenv(name, "must-not-reach-trial")
@@ -1439,9 +1829,129 @@ def test_agent3_trial_strips_secrets_and_redacts_local_paths(tmp_path: Path, mon
     assert all(name not in captured_env for name in ("OPENAI_API_KEY", "SLACK_WEBHOOK_URL", "NOTION_API_KEY", "NOTION_TOKEN", "GITHUB_TOKEN"))
     allowed = set(pipeline._AGENT3_TRIAL_ENV_ALLOWLIST) | {"QA_TARGET_URL", "QA_EVIDENCE_DIR"}
     assert set(captured_env) <= allowed
+    assert captured_env["PYTHONUTF8"] == "0"
+    assert captured_env["PYTHONIOENCODING"] == "utf-8"
     stdout = (evidence_dir / "trial-stdout.txt").read_text(encoding="utf-8")
+    assert "한글 실행 증거" in stdout
     assert str(target.resolve()) not in stdout
     assert "<LOCAL_PATH>" in stdout
+
+
+def _checkpoint3(status: CheckStatus) -> pipeline.Checkpoint3Result:
+    candidate_status = (
+        pipeline.AutomationCandidateStatus.READY_FOR_EXECUTION
+        if status == CheckStatus.PASS
+        else pipeline.AutomationCandidateStatus.REVISION_REQUIRED
+    )
+    return pipeline.Checkpoint3Result(
+        status=status,
+        candidate_status=candidate_status,
+        checks=[
+            pipeline.CheckResult(
+                rule_id="CP3-TEST",
+                status=status,
+                message="CLI exit-code test fixture.",
+            )
+        ],
+    )
+
+
+def _trial(outcome: TrialOutcome) -> pipeline.Agent3TrialResult:
+    return pipeline.Agent3TrialResult(
+        outcome=outcome,
+        exit_code=0 if outcome == TrialOutcome.PASS else 1,
+        duration_ms=1,
+        stdout_file="trial-stdout.txt",
+        stderr_file="trial-stderr.txt",
+        evidence_complete=False,
+    )
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected_exit_code"),
+    [
+        (TrialOutcome.PASS, 0),
+        (TrialOutcome.PRODUCT_MISMATCH_CANDIDATE, 0),
+        (TrialOutcome.AUTOMATION_ERROR, 2),
+        (TrialOutcome.ENVIRONMENT_ERROR, 2),
+        (TrialOutcome.TIMEOUT, 2),
+    ],
+)
+def test_agent3_cli_exit_code_reflects_trial_trustworthiness(
+    outcome: TrialOutcome,
+    expected_exit_code: int,
+) -> None:
+    assert (
+        pipeline._agent3_cli_exit_code(
+            _checkpoint3(CheckStatus.PASS),
+            _trial(outcome),
+        )
+        == expected_exit_code
+    )
+
+
+def test_agent3_cli_exit_code_blocks_missing_trial_or_failed_checkpoint() -> None:
+    assert pipeline._agent3_cli_exit_code(_checkpoint3(CheckStatus.PASS), None) == 2
+    assert (
+        pipeline._agent3_cli_exit_code(
+            _checkpoint3(CheckStatus.FAIL),
+            _trial(TrialOutcome.PASS),
+        )
+        == 2
+    )
+
+
+def test_agent3_usage_aggregates_all_planning_attempts() -> None:
+    attempts = [
+        {
+            "attempt": 1,
+            "usage": {
+                "input_tokens": 2337,
+                "output_tokens": 1023,
+                "total_tokens": 3360,
+            },
+        },
+        {
+            "attempt": 2,
+            "usage": {
+                "input_tokens": 3157,
+                "output_tokens": 1139,
+                "total_tokens": 4296,
+            },
+        },
+    ]
+
+    assert pipeline._aggregate_agent3_usage(attempts) == {
+        "input_tokens": 5494,
+        "output_tokens": 2162,
+        "total_tokens": 7656,
+    }
+    assert pipeline._aggregate_model_usage(attempts) == {
+        "input_tokens": 5494,
+        "output_tokens": 2162,
+        "total_tokens": 7656,
+    }
+
+
+def test_agent3_error_artifact_requires_a_fresh_attempt_workspace(
+    tmp_path: Path,
+) -> None:
+    run_id = "RUN-20260815-120002-ABCDEF"
+    run_dir = tmp_path / run_id
+    run_dir.mkdir()
+    (run_dir / "agent3_error.json").write_text("{}", encoding="utf-8")
+    args = SimpleNamespace(
+        runs_root=str(tmp_path),
+        run_id=run_id,
+        tc_id=agent3_test_case().tc_id,
+        target_html=str(tmp_path / "unused.html"),
+        model=None,
+        timeout=30,
+        preview_only=False,
+    )
+
+    with pytest.raises(ValueError, match="final Agent 3 artifacts"):
+        pipeline.run_agent3(args)
 
 
 def test_modified_agent2_artifact_is_blocked_before_agent3(tmp_path: Path) -> None:
@@ -1456,3 +1966,190 @@ def test_modified_agent2_artifact_is_blocked_before_agent3(tmp_path: Path) -> No
 
     with pytest.raises(ValueError, match="Agent 2 design"):
         pipeline._load_verified_agent2_run(run_dir, run_id)
+
+
+# Minimal Agent 1→3 orchestrator
+def _pipeline_args(tmp_path: Path) -> SimpleNamespace:
+    return SimpleNamespace(
+        request=str(tmp_path / "request.json"),
+        srs=str(REPO_ROOT / "docs" / "01_PRODUCT_SRS.md"),
+        runs_root=str(tmp_path / "runs"),
+        model="fake-model",
+        tc_id="AUTO",
+        target_html=str(tmp_path / "virtual-controller.html"),
+        timeout=30,
+    )
+
+
+def test_pipeline_parser_exposes_one_command_agent1_to_agent3() -> None:
+    args = pipeline.build_parser().parse_args(
+        [
+            "pipeline",
+            "--request",
+            "request.json",
+            "--target-html",
+            "virtual-controller.html",
+        ]
+    )
+
+    assert args.handler is pipeline.run_pipeline
+    assert args.tc_id == "AUTO"
+    assert args.timeout == 30
+    assert pipeline._orchestrator_status(0) == "PASS"
+    assert pipeline._orchestrator_status(1) == "ERROR"
+    assert pipeline._orchestrator_status(2) == "STOPPED"
+
+    eligible = agent3_test_case()
+    unsupported = eligible.model_copy(
+        update={
+            "tc_id": "TC-CAND-004",
+            "target_role": "MULTIPLE_ALLOWED_TEST_DEVICES",
+        }
+    )
+    selected, summaries = pipeline._select_agent3_tc(
+        Agent2TestDesign(
+            request_id="CR-TEST-001",
+            test_cases=[unsupported, eligible],
+            coverage_summary="Selection fixture",
+        )
+    )
+    assert selected == eligible.tc_id
+    assert len(summaries) == 2
+    assert summaries[0]["status"] == "NOT_AUTOMATABLE"
+    missing, unsupported_summaries = pipeline._select_agent3_tc(
+        Agent2TestDesign(
+            request_id="CR-TEST-001",
+            test_cases=[unsupported],
+            coverage_summary="No eligible candidate fixture",
+        )
+    )
+    assert missing is None
+    assert unsupported_summaries[0]["missing_capabilities"] == [
+        "TARGET_ROLE:MULTIPLE_ALLOWED_TEST_DEVICES"
+    ]
+
+
+def test_pipeline_runs_stages_in_order_and_hashes_manifests(
+    tmp_path: Path, monkeypatch
+) -> None:
+    args = _pipeline_args(tmp_path)
+    Path(args.request).write_text("{}", encoding="utf-8")
+    Path(args.target_html).write_text("<html></html>", encoding="utf-8")
+    calls: list[str] = []
+
+    def fake_agent1(stage_args) -> int:
+        calls.append("agent1")
+        run_dir = Path(stage_args.runs_root) / stage_args.run_id
+        run_dir.mkdir(parents=True)
+        _write_json(run_dir / "run_manifest.json", {"run_id": stage_args.run_id})
+        return 0
+
+    def fake_agent2(stage_args) -> int:
+        calls.append("agent2")
+        run_dir = Path(stage_args.runs_root) / stage_args.run_id
+        _write_json(run_dir / "agent2_manifest.json", {"run_id": stage_args.run_id})
+        return 0
+
+    def fake_agent3(stage_args) -> int:
+        calls.append("agent3")
+        assert stage_args.tc_id == "TC-CAND-003"
+        run_dir = Path(stage_args.runs_root) / stage_args.run_id
+        _write_json(
+            run_dir / "agent3_manifest.json",
+            {
+                "run_id": stage_args.run_id,
+                "candidate_status": "PRODUCT_MISMATCH_DETECTED",
+            },
+        )
+        _write_json(
+            run_dir / "agent3_trial.json",
+            {"outcome": "PRODUCT_MISMATCH_CANDIDATE"},
+        )
+        return 0
+
+    monkeypatch.setattr(pipeline, "run_agent1", fake_agent1)
+    monkeypatch.setattr(pipeline, "run_agent2", fake_agent2)
+    monkeypatch.setattr(pipeline, "run_agent3", fake_agent3)
+    monkeypatch.setattr(
+        pipeline,
+        "_select_agent3_tc_from_run",
+        lambda _run_dir, _run_id: (
+            "TC-CAND-003",
+            [
+                {
+                    "tc_id": "TC-CAND-003",
+                    "status": "ELIGIBLE",
+                    "missing_capabilities": [],
+                }
+            ],
+        ),
+    )
+
+    assert pipeline.run_pipeline(args) == 0
+    assert calls == ["agent1", "agent2", "agent3"]
+    run_dir = next((tmp_path / "runs").iterdir())
+    manifest = json.loads(
+        (run_dir / "orchestrator_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["status"] == "PASS"
+    assert manifest["completed_stages"] == ["agent1", "agent2", "agent3"]
+    assert manifest["stopped_at"] is None
+    assert manifest["selected_tc_id"] == "TC-CAND-003"
+    assert manifest["trial_outcome"] == "PRODUCT_MISMATCH_CANDIDATE"
+    assert manifest["agent3_selection_sha256"] == _sha256_file(
+        run_dir / "agent3_selection.json"
+    )
+    assert manifest["agent1_manifest_sha256"] == _sha256_file(
+        run_dir / "run_manifest.json"
+    )
+    assert manifest["agent2_manifest_sha256"] == _sha256_file(
+        run_dir / "agent2_manifest.json"
+    )
+    assert manifest["agent3_manifest_sha256"] == _sha256_file(
+        run_dir / "agent3_manifest.json"
+    )
+
+
+def test_pipeline_stops_after_checkpoint_block_without_later_calls(
+    tmp_path: Path, monkeypatch
+) -> None:
+    args = _pipeline_args(tmp_path)
+    Path(args.request).write_text("{}", encoding="utf-8")
+    Path(args.target_html).write_text("<html></html>", encoding="utf-8")
+
+    def blocked_agent1(stage_args) -> int:
+        run_dir = Path(stage_args.runs_root) / stage_args.run_id
+        run_dir.mkdir(parents=True)
+        _write_json(run_dir / "run_manifest.json", {"status": "REVIEW"})
+        return 2
+
+    def unexpected_call(_stage_args) -> int:
+        raise AssertionError("A blocked checkpoint must stop later agents")
+
+    monkeypatch.setattr(pipeline, "run_agent1", blocked_agent1)
+    monkeypatch.setattr(pipeline, "run_agent2", unexpected_call)
+    monkeypatch.setattr(pipeline, "run_agent3", unexpected_call)
+
+    assert pipeline.run_pipeline(args) == 2
+    run_dir = next((tmp_path / "runs").iterdir())
+    manifest = json.loads(
+        (run_dir / "orchestrator_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["status"] == "STOPPED"
+    assert manifest["stage_exit_codes"] == {"agent1": 2}
+    assert manifest["completed_stages"] == []
+    assert manifest["stopped_at"] == "agent1"
+
+
+def test_pipeline_rejects_missing_target_before_any_model_stage(
+    tmp_path: Path, monkeypatch
+) -> None:
+    args = _pipeline_args(tmp_path)
+
+    def unexpected_call(_stage_args) -> int:
+        raise AssertionError("Missing local inputs must fail before a model stage")
+
+    monkeypatch.setattr(pipeline, "run_agent1", unexpected_call)
+
+    with pytest.raises(ValueError, match="target HTML does not exist"):
+        pipeline.run_pipeline(args)

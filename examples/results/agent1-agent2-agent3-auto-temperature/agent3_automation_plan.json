@@ -1,0 +1,86 @@
+{
+  "tc_id": "TC-CAND-003",
+  "target_device_id": 1,
+  "summary": "중앙 제어 패널에서 AUTO 모드 장비에 17°C를 요청하여 18°C 미만 요청 차단, 기존 화면 및 내부 설정 온도 유지, 차단 Toast 표시를 검증한다.",
+  "actions": [
+    {
+      "action_id": "ACT-001",
+      "phase": "PRECONDITION",
+      "action_type": "SELECT_DEVICE",
+      "selector": "#device-card-1 .card-body-split",
+      "value": 1,
+      "source_text": "중앙 명령이 허용되는 역할로 제어 패널에 접근한다."
+    },
+    {
+      "action_id": "ACT-002",
+      "phase": "PRECONDITION",
+      "action_type": "SET_MODE",
+      "selector": "#det-mode-auto",
+      "value": "AUTO",
+      "source_text": "선택된 허용 장비는 AUTO 모드이고 설정 온도는 18°C이다."
+    },
+    {
+      "action_id": "ACT-003",
+      "phase": "PRECONDITION",
+      "action_type": "SET_TEMPERATURE",
+      "selector": "#det-temp-display",
+      "value": 18,
+      "source_text": "선택된 허용 장비는 AUTO 모드이고 설정 온도는 18°C이다."
+    },
+    {
+      "action_id": "ACT-004",
+      "phase": "PRECONDITION",
+      "action_type": "APPLY_COMMANDS",
+      "selector": ".btn-apply-cmd",
+      "value": null,
+      "source_text": "선택 장비는 중앙 제어 패널의 적용 대상이다."
+    },
+    {
+      "action_id": "ACT-005",
+      "phase": "TEST",
+      "action_type": "SET_TEMPERATURE",
+      "selector": "#det-temp-display",
+      "value": 17,
+      "source_text": "제어 패널에서 대기 설정 온도를 17°C로 지정한다."
+    },
+    {
+      "action_id": "ACT-006",
+      "phase": "TEST",
+      "action_type": "APPLY_COMMANDS",
+      "selector": ".btn-apply-cmd",
+      "value": null,
+      "source_text": "제어 패널을 통해 선택된 허용 장비에 대기값을 일괄 적용한다."
+    }
+  ],
+  "assertions": [
+    {
+      "result_id": "ER-005",
+      "observation_layer": "UI",
+      "strategy": "UI_TEMPERATURE",
+      "selector": "#det-temp-display",
+      "expected_number": 18.0,
+      "expected_text": null
+    },
+    {
+      "result_id": "ER-006",
+      "observation_layer": "INTERNAL_STATE",
+      "strategy": "INTERNAL_SET_TEMP",
+      "selector": "window.__vccs.devices",
+      "expected_number": 18.0,
+      "expected_text": null
+    },
+    {
+      "result_id": "ER-007",
+      "observation_layer": "NOTIFICATION",
+      "strategy": "TOAST_BLOCKING",
+      "selector": "#global-toast",
+      "expected_number": null,
+      "expected_text": null
+    }
+  ],
+  "technical_notes": [
+    "PRECONDITION applies AUTO mode and 18°C to establish the approved initial device state.",
+    "The TEST phase requests 17°C and applies the pending command; assertions verify the blocked request does not change the displayed or internal set temperature.",
+    "No RESTORE actions are included because restore_required is false."
+  ]
+}

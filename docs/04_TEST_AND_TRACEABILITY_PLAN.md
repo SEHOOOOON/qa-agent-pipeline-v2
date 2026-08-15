@@ -10,17 +10,17 @@
 | Agent 1 OpenAI Adapter | 구현 | tests/test_pipeline.py, 로컬 Live Run |
 | Checkpoint 1 | 구현 | tests/test_pipeline.py |
 | Agent 2·Checkpoint 2 | 구현 | tests/test_pipeline.py, 같은 Run의 Live 인계 |
-| Agent 3·Checkpoint 3 | 구현 | 실제 UI 조사·구조화 계획·결정론적 코드 컴파일·CP3·격리 시험 |
-| V2 Orchestrator | 설계 | 아직 End-to-End Run 없음 |
+| Agent 3·Checkpoint 3 | 구현 | Capability 사전 판정·선택 TC 범위 UI 조사·구조화 계획·결정론적 코드 컴파일·CP3·격리 시험 |
+| V2 Orchestrator | 구현·Live 확인 | API 미호출 테스트 4건, 실제 세 중단 경로와 CP1→CP2→CP3→Trial PASS 정상 완료, Manifest 해시 확인 |
 | Agent 4 V2 연동 | 설계 | Project1 규칙 엔진은 있으나 V2 중립 계약 미연결 |
 
-현재 자동 테스트는 Product SRS·Agent 1~3·CP1~3·Run 무결성·실제 브라우저 격리 시험 범위 46건입니다. v2.2 Live Run에서 Agent 1·2 호출, 자동 인계, CP2 재작업과 최종 PASS를 확인했습니다. Agent 3는 실제 Project1 UI를 읽기 전용으로 조사한 로컬 결정론 검증을 완료했지만, 실제 모델 호출 공개 Run과 전체 End-to-End 완료를 의미하지 않습니다.
+현재 자동 테스트는 Product SRS·Agent 1~3·CP1~3·Run 무결성·실제 브라우저 격리 시험·최소 Orchestrator 범위 71건입니다. v2.2 Live Run에서 Agent 1·2 호출, 자동 인계, CP2 재작업과 최종 PASS를 확인했습니다. 현재 `agent3-3.4` 공개 Live Run은 첫 계획 CP3 PASS와 제품 불일치 후보 Trial까지 확인했습니다. 한 명령 Orchestrator는 실제 세 중단 경로와 `RUN-20260815-092107-0C075E`의 A1→A3·Trial PASS를 확인했습니다. Agent 4와 최종 보고가 없어 전체 End-to-End 완료를 의미하지 않습니다.
 
 ## 2. 검증 원칙
 
 - 문서의 계획과 구현 완료 상태를 구분합니다.
 - 제품 Requirement, 테스트 하네스, 기존 회귀 코드와 Pipeline Fixture를 별도 자산으로 관리합니다.
-- 현재 Agent 1~3은 요청·SRS 스냅샷·구조화 JSON·Checkpoint·UI 조사·코드·시험 결과를 파일 SHA-256으로 연결합니다. Artifact ID는 다수 후보 동시 처리 이후 확장 항목입니다.
+- 현재 Agent 1~3은 요청·SRS 스냅샷·구조화 JSON·Checkpoint·Eligibility·UI 조사·코드·시험 결과를 파일 SHA-256으로 연결합니다. Artifact ID는 다수 후보 동시 처리 이후 확장 항목입니다.
 - Checkpoint 자동 검사는 구조·정확한 ID·명백한 정책 위반을 확인합니다.
 - 자연어 의미의 타당성, 간접 영향의 완전성과 제품 정책 선택은 완전 자동 판정하지 않습니다.
 - 저장하지 않은 Screenshot·Trace나 실행하지 않은 시험을 증거로 표시하지 않습니다.
@@ -119,10 +119,10 @@
 
 **현재 구현**
 
-- CP2 PASS CENTRAL TC 한 건과 관련 SRS만 Agent 3 입력으로 사용합니다.
-- 실제 Project1 페이지에서 허용 Selector와 `window.__vccs` 키를 확인합니다.
+- CP2 PASS 자동화 후보 TC를 Capability 사전 판정하고 미지원이면 모델 호출 전에 `NOT_AUTOMATABLE`로 종료합니다.
+- 지원 TC에 필요한 실제 Project1 Selector와 `window.__vccs` 키만 확인하고 모델 입력도 같은 범위로 제한합니다.
 - 모델은 Python이 아닌 행동·Assertion 구조화 계획만 생성합니다.
-- CP3는 Selector-행동 대응, Expected Result 1:1, 관찰 계층, 수치·모드 근거, 단계 순서와 복원을 검사합니다.
+- CP3는 Selector-행동 대응, Expected Result 1:1, 관찰 계층, 수치·모드 근거, 단계 순서와 초기값 복원 Action을 검사합니다. 컴파일러는 복원 후 UI·내부 온도를 재확인합니다.
 - 허용 목록 컴파일러가 Python Playwright 후보를 결정론적으로 생성합니다.
 - AST로 구문·import·Shell·파일 변경·skip·assert True와 Assertion 표식을 검사합니다.
 - 허용된 시스템 변수와 QA 대상·증거 경로만 전달한 임시 폴더에서 후보를 한 번 시험합니다.
@@ -131,19 +131,34 @@
 **검증된 테스트**
 
 - 모든 핵심 Expected Result의 Assertion 매핑
+- 무관한 Selector 누락은 허용하고 선택 TC 필수 Selector 누락은 차단
+- LOCAL·미지원 내부 상태 Assertion의 구조화된 `NOT_AUTOMATABLE`과 모델 미호출
 - 미관찰 Selector와 관찰됐지만 행동에 맞지 않는 Selector 차단
 - TC에 없는 수치 기대값과 Expected Result 누락 차단
+- 컴파일러가 지원하지 않는 `expected_text` 차단
+- 관찰됐더라도 Assertion 전략과 다른 Selector 차단
+- `target_device_id`와 `SELECT_DEVICE` Action 값 불일치·누락 차단
+- 차단 안내 기대 결과에 일반 표시 전략 사용 차단, 성공 Toast의 거짓 PASS 검출
 - Assertion 누락·assert True·금지 import·Shell·파일 변경 차단
 - UI 실제값과 `window.__vccs` 내부 실제값 대조
 - 시험 exit code·stdout·stderr 저장
 - 제품 불일치와 자동화·환경·Timeout 오류 분리
 - 시험 프로세스 환경변수 allowlist와 임의 토큰 차단
+- Trial UTF-8 stdout·stderr와 실패 Run 재사용 차단
+- 계획 재작업을 포함한 누적 토큰 사용량 계산
+- Trace ZIP의 경로·URI·JSON escape 치환과 비경로 증거 보존
 - Agent 2 산출물 해시 변조 시 Agent 3 시작 전 차단
 
 **현재 제한**
 
-- Agent 3 실제 모델 공개 Run은 아직 수행하지 않았습니다.
-- CENTRAL 제어 패널만 지원하며 LOCAL 경로는 별도 실제 UI 조사가 필요합니다.
+- Agent 3 진단 Live Run 3건은 수행했지만 실행에서 찾은 계약·Trace 경로·선택 장비 값·Toast 의미 문제의 보완 전 산출물이므로 공개하지 않았습니다.
+- `TC-CAND-003` 로컬 Preview에서 Eligibility `ELIGIBLE`, 관련 Selector 7개·하네스 키 2개, 대상 SHA-256 일치와 API 미호출·로컬 경로·HTML 원문·비밀 토큰 제외를 확인했습니다.
+- 진단 Live Run은 첫 계획 CP3 FAIL, 1회 재작업 후 CP3 PASS, Trial `PRODUCT_MISMATCH_CANDIDATE`였습니다. Project1 원본은 변경되지 않았고 두 호출 누적 사용량은 input 5,494·output 2,162·total 7,656 tokens입니다.
+- 첫 보완 뒤 두 번째 Run은 Action Selector와 `expected_text`를 준수했지만 내부 상태 Selector를 속성 경로로 확장해 1차 CP3 FAIL, 재작업 후 PASS였습니다. 누적 사용량은 input 5,648·output 1,580·total 7,228 tokens이며 최종 Trial 관찰은 동일했습니다.
+- `agent3-3.2` 세 번째 Run은 첫 계획 CP3 PASS, input 2,493·output 615·total 3,108 tokens, Trace 경로 0건이었습니다. 후속 감사에서 `SELECT_DEVICE value=null`을 발견해 현재 CP3는 대상 장비 값까지 검사합니다.
+- 세 번째 Screenshot의 성공 적용 Toast가 ER-007 차단 안내를 거짓 통과한 것을 발견했습니다. `agent3-3.4` 로컬 재시험은 ER-005·006과 함께 ER-007 Toast 의미 불일치도 기록했고 Trace 로컬 경로는 0건이었습니다.
+- 현재 `agent3-3.4` 공개 Live Run은 첫 계획 CP3 PASS, input 2,533·output 594·total 3,127 tokens를 기록했습니다. `SELECT_DEVICE value=1`과 `TOAST_BLOCKING` 계약을 준수했고 Trial은 ER-005·006·007을 `PRODUCT_MISMATCH_CANDIDATE`로 분류했습니다. 모든 인계 SHA-256과 Project1 대상 해시가 일치했으며 공개 텍스트와 Trace에서 비밀정보·로컬 경로 패턴은 탐지되지 않았습니다.
+- CENTRAL 제어 패널의 현재 Capability만 지원하며 LOCAL과 미지원 Assertion은 `NOT_AUTOMATABLE`로 기록합니다.
 - CP3 계획 실패는 최대 1회 재작성하지만, 시험 실행의 기술 오류 자동 수정은 구현하지 않았습니다.
 - 일반 Snapshot·Restore, 3회 반복 안정성, 결함 주입과 Self-Healing은 현재 MVP 완료 조건이 아닙니다.
 
@@ -164,7 +179,7 @@ Project1 conftest의 failure_reason에는 이미 의미 라벨이 들어 있으�
 
 | ID | 시나리오 | 기대 결과 | 상태 |
 |---|---|---|---|
-| E2E-001 | 명확한 MODIFIED 요청 | A1→CP1→A2→CP2→A3→CP3→시험→보고 | 부분 구현: A3 실제 모델 Run·보고 미완료 |
+| E2E-001 | 명확한 MODIFIED 요청 | A1→CP1→A2→CP2→A3→CP3→시험→보고 | 부분 구현: Orchestrator 세 중단 Live와 A1→A3·시험 정상 완료 Live 확인, 최종 보고 미완료 |
 | E2E-002 | SRS에 없는 Requirement | CP1 FAIL, 후속 미실행 | CP1 범위 구현 |
 | E2E-003 | 변경 전 값 불일치 | CP1 REVIEW 또는 FAIL | CP1 범위 구현 |
 | E2E-004 | 근거 없는 TC 기대값 | CP2 FAIL 또는 REVIEW | 계획 |
@@ -202,7 +217,7 @@ Change Request
 - created_at
 - 입력·출력 파일 SHA-256
 
-Agent 3는 UI 조사·계획·코드·Checkpoint·시험 파일을 `agent3_manifest.json`의 SHA-256으로 연결합니다. 다수 후보를 동시에 처리할 때 `artifact_id`와 `input_artifact_ids`를 검토합니다.
+Agent 1~3 Manifest는 재작업을 포함한 누적 토큰과 마지막 시도 토큰을 분리합니다. Agent 3는 Eligibility·UI 조사·계획·코드·Checkpoint·시험 파일을 `agent3_manifest.json`의 SHA-256으로 연결합니다. 오류 산출물이 있는 시도는 같은 폴더에서 재사용하지 않습니다. 다수 후보를 동시에 처리할 때 `artifact_id`와 `input_artifact_ids`를 검토합니다.
 
 현재 Agent 3는 Agent 2가 `PASS`이고 Agent 1·2 Manifest SHA-256 및 CP1·CP2 재계산 결과가 일치하는 Run만 입력으로 사용합니다.
 
@@ -215,7 +230,7 @@ Agent 3는 UI 조사·계획·코드·Checkpoint·시험 파일을 `agent3_manif
 - 사용 모델·Prompt 버전·토큰 사용량
 - Checkpoint Rule별 상태·메시지
 - Agent 1~3 입력·출력 SHA-256 체인
-- Agent 3 UI 조사·구조화 계획·코드 후보
+- Agent 3 Eligibility·UI 조사·구조화 계획·코드 후보
 - TC Expected Result·Assertion Mapping
 - 시험 exit code·stdout·stderr
 - Agent 3 시험 결과와 증거 완전성
@@ -242,17 +257,18 @@ API 키, 환경변수 원문, 인증 Header와 전체 로컬 절대경로는 Run
 - API 키가 코드와 Run 산출물에 포함되지 않습니다.
 - 자연어 의미와 조합 충분성은 사람의 마지막 검토 범위로 남깁니다.
 
-### Agent 3 실제 모델 Run 전 확인
+### Agent 3 공개 Live Run 확인 결과
 
-- `--preview-only`로 시스템 지침, 선택 TC, 관련 SRS와 UI 조사 JSON의 실제 전송 예정 값을 확인합니다.
-- API 키·로컬 절대경로·HTML 원문·Screenshot·Trace가 미리보기에 없는지 확인합니다.
-- 공개할 Run은 CP3 Rule·코드 후보·격리 시험 증거를 함께 보존합니다.
+- `agent3_eligibility.json`에서 `ELIGIBLE`, 관련 Selector 7개·하네스 키 2개와 모델 호출 허용을 확인했습니다.
+- API 키와 모델 Client를 생성하지 않는 `--preview-only`로 시스템 지침, 선택 TC, 관련 SRS와 선택 TC 범위 UI 조사 JSON의 실제 전송 예정 값을 확인했습니다.
+- API 키·로컬 절대경로·HTML 원문·Screenshot·Trace가 미리보기에 없음을 확인했습니다.
+- CP3 Rule·코드 후보·격리 시험·Screenshot·Trace를 `examples/results/agent1-agent2-agent3-auto-temperature/`에 함께 보존했습니다.
 
-### 다음 단계: 전체 Orchestrator·Agent 4
+### 다음 단계: 변경·기존 회귀 연결과 Agent 4
 
 ### V2 MVP
 
-- E2E-001 실제 Run이 완료됩니다.
+- 완료된 E2E-001 Agent 1~3 Run 뒤에 변경·기존 회귀와 최종 보고를 연결합니다.
 - Project1 회귀 후보와 Pipeline Fixture가 분리 집계됩니다.
 - 제품·자동화·환경·근거 부족을 구분합니다.
 - 실행 결과와 최종 보고 수치가 일치합니다.

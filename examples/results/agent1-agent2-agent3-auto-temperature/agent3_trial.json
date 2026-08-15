@@ -1,0 +1,10 @@
+{
+  "outcome": "PRODUCT_MISMATCH_CANDIDATE",
+  "exit_code": 1,
+  "duration_ms": 21422,
+  "stdout_file": "trial-stdout.txt",
+  "stderr_file": "trial-stderr.txt",
+  "screenshot_file": "trial-final.png",
+  "trace_file": "trial-trace.zip",
+  "evidence_complete": true
+}

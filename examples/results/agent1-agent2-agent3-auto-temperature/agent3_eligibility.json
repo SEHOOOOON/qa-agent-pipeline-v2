@@ -1,0 +1,35 @@
+{
+  "contract_version": "3.1",
+  "run_id": "RUN-20260813-125229-31EB5F",
+  "stage": "AGENT_3_ELIGIBILITY",
+  "source_agent2_manifest_sha256": "b3a38f92244629cf2d00fe27eb811eb1396f74c77dcd8e188c5586e6e6937367",
+  "source_agent2_design_sha256": "ff67d3ec44ea00e58ecb494563084de67dd78703a1b496ed32b1c5c16e0d3d8e",
+  "tc_id": "TC-CAND-003",
+  "status": "ELIGIBLE",
+  "candidate_status": null,
+  "required_capabilities": [
+    "APPLY_CENTRAL_COMMAND",
+    "ASSERT_INTERNAL_SET_TEMP",
+    "ASSERT_TOAST_BLOCKING",
+    "ASSERT_UI_TEMPERATURE",
+    "SELECT_PRIMARY_DEVICE",
+    "SET_MODE",
+    "SET_TEMPERATURE"
+  ],
+  "missing_capabilities": [],
+  "required_selectors": [
+    "#det-mode-auto",
+    "#det-temp-display",
+    "#det-temp-down-btn",
+    "#det-temp-up-btn",
+    "#device-card-1 .card-body-split",
+    "#global-toast",
+    ".btn-apply-cmd"
+  ],
+  "required_harness_keys": [
+    "devices",
+    "selectedUnitId"
+  ],
+  "model_call_allowed": true,
+  "created_at": "2026-08-15T05:49:59.917085+00:00"
+}
