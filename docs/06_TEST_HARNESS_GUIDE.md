@@ -109,33 +109,36 @@ Reset은 사용자 확인 후 해당 저장값을 지우고 페이지를 다시 
 ## 8. V2 Agent 3 사용 기준
 
 1. 실제 Project1 HTML 파일은 읽기 전용으로 열고 SHA-256을 기록합니다.
-2. 선택 TC를 현재 Capability로 표현할 수 있는지 먼저 판정하고 미지원이면 `NOT_AUTOMATABLE`로 종료합니다.
-3. 지원 TC에 필요한 허용 Selector와 필수 `window.__vccs` 키만 실제 존재하는지 확인합니다.
+2. 선택 TC가 기존의 검증된 빠른 확인 대상인지, 처음 보는 UI를 동적으로 확인할 대상인지 구분합니다.
+3. 기존 기능은 필요한 Selector와 `window.__vccs` 키만 확인하고, 신규 기능은 안정적인 ID·`data-testid`·접근성 이름을 가진 범용 UI와 읽기 가능한 내부 상태를 동적으로 확인합니다.
 4. Agent 3 모델은 선택 TC·관련 SRS·TC 범위 UI 조사 JSON으로 구조화 계획만 만듭니다.
 5. 모델이 Python 코드와 새 Selector·기대값·Requirement를 만들지 못하게 합니다.
-6. CP3가 행동-Selector, Expected Result 1:1, 관찰 계층, 값, 단계 순서와 초기값 복원 Action을 검사합니다.
-7. 허용 목록 컴파일러가 Playwright Python 후보를 생성하고 복원 후 UI·내부 `setTemp`도 재확인합니다.
+6. CP3가 행동-Selector, Expected Result 1:1, 관찰 계층, 값, 단계 순서와 초기값 복원 Action을 검사합니다. 알림은 Expected Result 전체 자연어 문장을 실제 UI 문구로 사용할 수 없습니다.
+7. 허용 목록 컴파일러가 Playwright Python 후보를 생성하고 복원 후 기존 온도와 범용 UI·내부 상태를 초기 관찰값과 다시 비교합니다.
 8. UI 실제값과 `window.__vccs.devices` 내부 실제값을 TC의 고정 기대값과 비교합니다.
 9. 후보는 원본과 분리된 임시 폴더에서 실행하고 Run 폴더에는 검토용 사본만 저장합니다.
 10. 시험 프로세스에는 allowlist의 시스템 변수와 QA 대상·증거 경로만 전달합니다.
-11. 현재는 조사된 CENTRAL 제어 패널 Capability만 지원하며 LOCAL 제어는 `NOT_AUTOMATABLE`로 기록합니다.
+11. 범용 클릭·입력·선택·체크/해제와 화면·내부 값 비교로 구현할 수 없으면 `AUTOMATION_SUPPORT_EXTENSION_REQUIRED`로 기록하고 코드를 만들지 않습니다.
 12. CP3 계획 실패만 최대 1회 재작성하고 시험 기술 오류 자동 수정은 하지 않습니다.
-13. 기대값·Assertion 의미·Requirement ID는 수정하지 않습니다.
+13. 기대값·검증 조건(Assertion)의 의미·Requirement ID는 수정하지 않습니다.
 14. 시험 `PASS`와 `PRODUCT_MISMATCH_CANDIDATE`는 파이프라인 정상 완료로 종료합니다.
 15. `NOT_AUTOMATABLE`, `AUTOMATION_ERROR`, `ENVIRONMENT_ERROR`, `TIMEOUT`, CP3 실패와 시험 미실행은 제품 판정 불가 상태이므로 CLI 실패 코드 `2`로 종료합니다.
+16. 후속 `execute`는 저장 후보와 현재 컴파일러 출력을 비교하고 다르면 모델 호출 없이 현재 후보를 다시 시험합니다.
+17. Project1 HTML과 기존 테스트를 임시 Workspace에 복사하고, 의미 분류 라벨을 주입하는 원본 `conftest.py` 대신 viewport만 고정한 중립 설정을 사용합니다.
+18. TC-ENV-000이 통과한 경우에만 Requirement ID로 연결된 재사용 가능 회귀를 실행합니다.
 
 Agent 3 API에는 시스템 지침, 선택 TC, 관련 SRS 행, 대상 파일명·SHA-256, 페이지 제목, **선택 TC에 필요한** Selector별 tag·text·visible·enabled·action_hint와 하네스 키만 전송합니다. API 키, 로컬 절대경로, HTML 원문, Screenshot과 Trace는 전송하지 않으며 API 키와 모델 Client를 요구하지 않는 `--preview-only` JSON으로 먼저 확인합니다.
 
-UI 조사는 모델 호출 전에 선택 TC에 필요한 Selector·표시·활성 상태와 하네스 인터페이스를 확인하는 Inventory 단계이며, 관련 없는 전체 UI 상태를 Gate로 사용하지 않습니다. 각 제어 동작의 의미를 실행해 추론하는 단계도 아닙니다. 실제 조작과 기대 결과는 Candidate Trial에서 검증합니다. Candidate Workspace는 임시 폴더·제한 환경변수·별도 subprocess를 사용하지만 네트워크 차단, 컨테이너 또는 OS 권한 분리를 제공하지 않습니다.
+UI 확인 목록은 Selector·표시·활성 상태·요소 역할과 읽기 가능한 내부 상태를 기록합니다. 기존 기능은 선택 TC 범위만 확인하고, 신규 기능만 범용 요소를 최대 120개까지 한 번 동적으로 확인하므로 매번 전체 UI를 조사하지 않습니다. 실제 조작과 기대 결과는 신규 자동화 후보 시험에서 검증합니다. 임시 시험 공간은 임시 폴더·제한 환경변수·별도 subprocess를 사용하지만 네트워크 차단, 컨테이너 또는 OS 권한 분리를 제공하지 않습니다.
 
-Trial 자식 Python은 Windows의 기존 site-package 인코딩과 호환되도록 locale 기반 시작을 유지하고, 캡처할 stdout·stderr만 UTF-8로 고정합니다. Playwright Trace는 사용자 홈·대상 파일·Trial Workspace·증거 폴더의 정확한 문자열, URI와 JSON escape 표현을 ZIP 내부에서 치환한 뒤 저장하며 Screenshot·DOM 등 다른 항목은 보존합니다. `agent3_error.json`이 생긴 실패 시도는 진단 증거로 보존하고 같은 Run 폴더에 성공 산출물을 덮어쓰지 않습니다. 재시도는 새 Candidate Workspace에서 실행합니다.
+신규 후보 시험의 자식 Python은 Windows의 기존 site-package 인코딩과 호환되도록 locale 기반 시작을 유지하고, 캡처할 stdout·stderr만 UTF-8로 고정합니다. Playwright Trace는 사용자 홈·대상 파일·임시 시험 공간·증거 폴더의 정확한 문자열, URI와 JSON escape 표현을 ZIP 내부에서 치환한 뒤 저장하며 Screenshot·DOM 등 다른 항목은 보존합니다. `agent3_error.json`이 생긴 실패 시도는 진단 증거로 보존하고 같은 Run 폴더에 성공 산출물을 덮어쓰지 않습니다. 재시도는 새 임시 시험 공간에서 실행합니다.
 
 ## 9. 증거 기록
 
 V2 시험 실행에서는 실제로 생성한 증거만 기록합니다.
 
 - 대상 파일명·SHA-256과 UI 조사 시각
-- Eligibility 지원·누락 Capability와 모델 호출 허용 여부
+- 자동화 가능성 사전 확인 결과와 범용 UI 동적 조사 필요 여부
 - API 전송 예정 미리보기 JSON
 - TC ID와 코드 후보 SHA-256
 - Agent 2 Manifest·TC 설계 SHA-256
@@ -144,5 +147,7 @@ V2 시험 실행에서는 실제로 생성한 증거만 기록합니다.
 - 시험 결과와 증거 완전성
 - 모든 계획 시도 누적 토큰과 마지막 시도 토큰
 - 실제 생성된 Screenshot·Trace 파일명
+- 후속 검증의 후보 재사용 여부, 환경 사전 점검과 관련 기존 회귀 결과
+- Project1 대상·테스트 소스 SHA-256과 실행 후 불변 여부
 
 stdout·stderr의 로컬 절대경로와 `file://` 주소를 마스킹하고 Trace ZIP의 알려진 로컬 경로도 치환합니다. 저장하지 않은 Screenshot·Trace나 구현하지 않은 Restore 결과를 보고서에 표시하지 않습니다.

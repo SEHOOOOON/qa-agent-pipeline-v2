@@ -1,6 +1,6 @@
 # QA Agent Pipeline 전체 작업 인수인계
 
-최종 갱신: 2026-08-15
+최종 갱신: 2026-08-17
 사용자: 오세훈
 현재 주 작업: `qa-agent-pipeline-v2`
 
@@ -73,13 +73,13 @@ Agent 2 — 제품 기능 TC 후보 설계
   ↓
 CP2 — 구조·추적성·테스트 데이터·Double-Assert·자동화 가능성 검사
   ↓
-Agent 3 — 실제 UI Inventory + 제한된 자동화 실행 계획 생성
+Agent 3 — 실제 UI 확인 목록 + AI의 실행 가능한 코드 의도 생성
   ↓
 허용 목록 컴파일러 — Playwright Python 후보 생성
   ↓
 CP3 — 계획·코드 추적성·금지 패턴 검사
   ↓
-Candidate Workspace — 후보 1회 시험
+임시 시험 공간 — 신규 자동화 후보 1회 시험
   ↓
 변경 검증 + 기존 검증 가능 회귀 실행
   ↓
@@ -99,14 +99,14 @@ Agent 4 — 규칙 기반 결과 분류와 보고
 | CP1 | 10개 결정론 규칙으로 구조·근거·인계 판단 | 구현 |
 | Agent 2 | CP1 통과 분석을 기반으로 제품 기능 TC 후보 생성 | 실제 OpenAI API 연결 구현 |
 | CP2 | 11개 결정론 규칙으로 TC 품질·추적성 검사 | 구현 |
-| Agent 3 | 실제 UI Inventory를 참고해 제한된 행동·Assertion 계획 생성 | 구현, `agent3-3.4` 공개 Live 확인 |
+| Agent 3 | 기존 기능의 좁은 UI 확인 또는 신규 기능 범용 UI 동적 조사 뒤 실행 가능한 코드 의도 생성 | `agent3-3.7` 구현, 범용 선택·적용 Live와 브라우저 시험 PASS |
 | Compiler | Agent 3 계획을 허용 목록 기반 Playwright Python으로 변환 | 구현 |
 | CP3 | 계획·코드 추적성과 금지 패턴 검사 | 구현 |
-| Candidate Trial | 원본과 분리된 임시 위치에서 후보 1회 시험 | 구현 |
-| 최소 Orchestrator | Agent 1→2→3·CP1→3·Candidate Trial을 한 명령으로 실행 | 구현·세 중단 Live와 정상 완료 Live 확인 |
+| 신규 자동화 후보 시험(Candidate Trial) | 원본과 분리된 임시 위치에서 신규 후보 1회 시험 | 구현 |
+| 최소 Orchestrator | Agent 1→2→3·CP1→3·신규 자동화 후보 시험을 한 명령으로 실행 | 구현·세 중단 Live와 정상 완료 Live 확인 |
 | 조건부 검토 재개 | REVIEW 답변 후 중단 단계에서 재개 | 미구현 |
-| 변경·회귀 실행 | 검증 후보와 기존 회귀 TC 실행 연결 | 미구현 |
-| Agent 4 V2 | V2 중립 결과 계약을 분류·보고 | 미구현 |
+| 변경·회귀 실행 | 현재 후보 재검증·환경 Gate·관련 기존 회귀 격리 실행 | 구현·기존 정상 Run에서 무API 확인 |
+| Agent 4 V2 | 구현된 V2 중립 결과 계약을 분류·보고 | 분석·보고 미구현 |
 | 최종 등록 승인 | SRS·TC·자동화를 공식 재사용 자산으로 저장 | 미구현 |
 
 ## 5. 현재 코드와 파일 구조
@@ -151,10 +151,11 @@ qa-agent-pipeline-v2/
 
 ### Agent 3
 
-- 구현됨: CP2 PASS TC의 Capability 사전 판정, 선택 TC 범위 UI Inventory, API 입력 Preview, 구조화 계획, 결정론적 코드 컴파일, CP3, Candidate Trial
-- 공개 증거: `examples/results/agent1-agent2-agent3-auto-temperature/`에 `agent3-3.4` 실제 모델 계획·CP3·Candidate Trial과 Screenshot·Trace 보존
-- 현재 지원 범위: 조사된 CENTRAL 제어 패널의 모드·온도·적용과 온도 UI·내부 `setTemp`·Toast·온도 비활성 표시 Capability
-- LOCAL 또는 현재 Assertion으로 표현할 수 없는 TC: UI 조사·API 호출 전에 `NOT_AUTOMATABLE`과 누락 Capability 기록
+- 구현됨: CP2 PASS TC의 자동화 가능성 사전 확인, 기존 기능의 선택 TC 범위 UI 확인, 신규 기능의 범용 UI·내부 상태 동적 조사, API 입력 Preview, AI 구조화 코드 의도, 결정론적 코드 컴파일, CP3, 신규 자동화 후보 시험
+- 공개 증거: `examples/results/agent1-agent2-agent3-auto-temperature/`에 `agent3-3.4` 실제 모델 계획·CP3·신규 자동화 후보 시험과 Screenshot·Trace 보존
+- 현재 지원 범위: 기존 온도 제어의 검증된 전용 조작과 범용 `CLICK`, `FILL`, `SELECT_OPTION`, `CHECK`, `UNCHECK`, 화면 텍스트·값·체크·활성 상태 및 실제 발견한 읽기 전용 내부 값 비교
+- 범용 조작으로 표현할 수 없는 TC: AI가 `AUTOMATION_SUPPORT_EXTENSION_REQUIRED`와 기술 사유를 반환하고 CP3 REVIEW, 코드 미생성
+- 특정 제품 기능 예시는 설명용이며 Prompt·Requirement ID·지원 목록에 고정하지 않음
 - 2026-08-15 로컬 Preview 확인: `TC-CAND-003` `ELIGIBLE`, 관련 Selector 7개·하네스 키 2개만 포함, 대상 SHA-256 일치, API 호출 없음, 로컬 절대경로·HTML 원문·비밀 토큰 없음
 - 2026-08-15 진단 Live 확인: `gpt-5.6-terra`, 1차 계획 CP3 FAIL(온도 Action Selector 불일치), 1회 재작업 후 CP3 PASS, Trial `PRODUCT_MISMATCH_CANDIDATE`, Screenshot·Trace 생성, Project1 SHA-256 불변
 - 관찰값: AUTO에서 17°C 요청 후 UI `17.0`, 내부 `setTemp=17`, Toast 표시. 변경 요청의 18°C 하한 기대와 다르지만 최종 제품 결함 확정은 아님
@@ -174,10 +175,10 @@ qa-agent-pipeline-v2/
 
 ### 테스트
 
-- 2026-08-15 확인 결과: `python -m pytest -q` **71 passed**
-- 테스트 범위: Product SRS 파서, Agent 1~3 Adapter, CP1~3, SHA-256 인계, Capability 사전 판정, 선택 TC 범위 UI 조사, 금지 패턴, 실제 브라우저 Candidate Trial, CLI 종료 코드, 비지원 `expected_text`, 전략별 Assertion Selector, 선택 장비 값, 차단 Toast 의미, Agent 1~3 누적/마지막 시도 토큰, 실패 Run 재사용 차단, UTF-8 로그, Trace 경로 치환, 최소 Orchestrator 순서·중단·Manifest 해시·모델 호출 전 대상 검사
+- 2026-08-17 확인 결과: `python -m pytest -q` **83 passed**
+- 테스트 범위: 기존 범위에 특정 제품 기능명을 코드에 고정하지 않은 신규 UI의 동적 발견→AI 코드 의도 계약→CP3→Python 생성→브라우저 시험→복원, 비 HVAC 상태값 분기, 한국어 조사 의미 연결, 알림 문장 전체 오사용 차단과 자동화 지원 범위 확장 필요 분기를 추가
 
-71개 테스트 통과와 `agent3-3.4` 공개 Agent 3 Live Run은 각각 코드 회귀와 실제 A1→A3·시험 연결 증거입니다. 최소 Orchestrator는 CP1 PAUSE·Agent 3 비지원 후보·재작업 후 CP2 FAIL의 세 중단 경로와 `RUN-20260815-092107-0C075E`의 CP1·2·3·Trial PASS를 Live로 확인했습니다. Agent 4와 최종 보고가 없어 전체 End-to-End 완성을 의미하지 않습니다.
+83개 테스트와 기존 `agent3-3.4` 공개 Live Run은 각각 현재 코드 회귀와 기존 A1→A3 연결 증거입니다. 로컬 `RUN-20260817-022106-8E97FC` 재시도는 `agent3-3.7` 범용 선택·적용 계획, CP3, Python 후보, 시험과 UI·내부 상태 복원 PASS를 확인했습니다. 진단 실패와 재시도까지 전체 실제 모델 사용량은 44,334 tokens이며 아직 공개 산출물로 복사하지 않았습니다. Agent 4와 최종 보고가 없어 전체 End-to-End 완성을 의미하지 않습니다.
 
 ## 7. 로컬 실행 방법
 
@@ -225,6 +226,9 @@ python -m pytest -q
 - `agent3_trial.json`
 - `agent3_manifest.json`
 - `orchestrator_manifest.json` (한 명령 실행 시 단계 종료 코드·중단 위치·단계 Manifest SHA-256)
+- `validation_candidate_trial.json` (현재 컴파일러 후보를 다시 시험한 경우)
+- `validation_execution.json` (신규 후보·환경 사전 점검·관련 기존 회귀 중립 결과)
+- `validation_manifest.json` (Agent 3·현재 후보·Project1 기준·실행 결과 SHA-256)
 
 Agent 2와 Agent 3는 앞 단계 Manifest와 산출물 SHA-256을 재검증합니다. Agent 3 Manifest는 Eligibility SHA-256, 모든 계획 시도의 누적 토큰과 마지막 시도 토큰도 기록합니다. `agent3_error.json`이 생긴 시도는 같은 폴더에서 재사용하지 않습니다. 원본이 변경되면 다음 단계가 시작되어서는 안 됩니다.
 
@@ -232,57 +236,31 @@ Agent 2와 Agent 3는 앞 단계 Manifest와 산출물 SHA-256을 재검증합�
 
 - 브랜치: `main`
 - 원격: `https://github.com/SEHOOOOON/qa-agent-pipeline-v2.git`
-- 마지막 커밋: `9c29405 Agent 3 자동화 후보 생성과 격리 검증 구현`
-- 2026-08-15 현재 미커밋 변경 32개 파일(추적 8, 미추적 24):
-  - `.gitignore`
-  - `README.md`
-  - `docs/02_V2_MVP_DESIGN.md`
-  - `docs/03_AGENT_AND_CHECKPOINT_SPEC.md`
-  - `docs/04_TEST_AND_TRACEABILITY_PLAN.md`
-  - `docs/06_TEST_HARNESS_GUIDE.md`
-  - `src/qa_pipeline_v2.py`
-  - `tests/test_pipeline.py`
-  - `AGENTS.md` (미추적)
-  - `DECISION_LOG.md` (미추적)
-  - `PROJECT_HANDOFF.md` (미추적)
-  - `examples/results/agent1-agent2-agent3-auto-temperature/` 공개 Run 21개 파일 (미추적)
+- 마지막 커밋: `5dd5dad` (원격 `origin/main`과 일치)
+- 2026-08-16 작업 시작 시 Git은 깨끗했습니다.
+- 현재 미커밋 변경은 사용자 승인 아래 진행 중인 변경 검증·관련 기존 회귀 실행 계약과 용어·문서 정합화입니다. 임의로 되돌리지 않습니다.
 
-미커밋 변경의 핵심은 Agent 3 CLI 결과 의미와 모델 호출 전 지원 경계를 명확히 한 것입니다.
+이번 미커밋 변경의 핵심은 다음과 같습니다.
 
-- `PASS`, `PRODUCT_MISMATCH_CANDIDATE` → 정상 완료 `exit code 0`
-- `NOT_AUTOMATABLE`, `AUTOMATION_ERROR`, `ENVIRONMENT_ERROR`, `TIMEOUT`, CP3 실패, 시험 미실행 → 제품 판정 불가이므로 `exit code 2`
-- 선택 TC Capability만 UI 조사·모델 입력에 사용하고 무관한 Selector 누락은 차단하지 않음
-- LOCAL·미지원 Assertion은 API 호출 전에 누락 Capability와 함께 구조화 기록
-- 기존 Agent 3 기술 보완 범위 65개에 최소 Orchestrator 4개와 복원 계약 2개를 추가해 전체 71개 통과
-- UI Inventory와 Candidate Workspace의 실제 한계를 문서에 명시
-- 진단 Live에서 확인한 Action Selector 프롬프트, 비지원 `expected_text`, 누적 토큰, 실패 시도 불변성, Windows UTF-8 로그 문제 보완
-- 두 번째 진단에서 확인한 Assertion 전략별 Selector와 Trace 로컬 경로 치환 보완
-- 세 번째 진단에서 확인한 대상 장비 ID와 `SELECT_DEVICE` Action 값 일치 검사 보완
-- 세 번째 Screenshot에서 확인한 성공 Toast의 차단 안내 거짓 PASS를 `TOAST_BLOCKING`으로 보완
-- 현재 `agent3-3.4` 공개 Live Run과 감사 산출물 21개를 `examples/results/`에 추가
-- 최소 Orchestrator가 같은 Run ID로 Agent 1→2→3을 순차 실행하고, 비정상 종료 시 후속 Agent를 차단하며 단계 Manifest 해시를 요약하도록 구현
-- 실제 Orchestrator `RUN-20260815-062606-E36A76`: 자리표시자 요청으로 CP1 `PASS + PAUSE`, Agent 1 3,865 tokens, Agent 2·3 미호출, 모든 입력·산출물·요약 Manifest 해시 일치, 비밀정보·로컬 경로 0건, Project1 불변
-- 구체 요청 Orchestrator `RUN-20260815-063800-3B624C`: Agent 1·2 PASS, Agent 1 1회·Agent 2 2회·실제 누적 total 34,814 tokens, 지정 `TC-CAND-003`이 새 Run에서는 LOCAL이라 Agent 3 API 전 `NOT_AUTOMATABLE`, 모든 해시 일치·Project1 불변
-- Run 간 TC ID 재사용을 제거하기 위해 `pipeline --tc-id AUTO`를 기본화하고 현재 CP2 후보에서 적격 TC를 결정론적으로 선택. 적격 후보가 없으면 전체 누락 Capability를 기록하고 Agent 3 API 전 중단
-- Agent 2 Prompt `agent2-2.3`에 CENTRAL 변경 검증의 `PRIMARY_TEST_DEVICE` 자동화 후보 최소 1건을 명시하되 LOCAL·복수 장비 TC는 보존
-- 보완 후 Orchestrator `RUN-20260815-090130-F023B1`: Agent 1 PASS, Agent 2 첫 시도 CP2 중복·추적 FAIL, 재작업 후 LOCAL 직접 변경 Requirement 누락으로 최종 CP2 FAIL, 실제 누적 total 30,227 tokens, Agent 3 미호출, 모든 해시 일치·Project1 불변
-- 비용 감사에서 Agent 1·2 Manifest 최상위 `usage`의 마지막 시도만 기록하는 문제를 확인. 계약 2.3부터 모든 시도 누적과 `final_attempt_usage`를 분리
-- Agent 2 재작업 입력을 실패 메시지만 전달하던 방식에서 CP2 전체 `rule_id + PASS/FAIL + message` 전달로 바꾸고 PASS 규칙 보존·새 FAIL 금지를 명시. 최대 1회 재작업은 유지
-- 정상 완료 Orchestrator `RUN-20260815-092107-0C075E`: Agent 1·2·3과 CP1·2·3 PASS, AUTO `TC-CAND-001`, Trial PASS, Agent 1 5,607·Agent 2 누적 27,752·Agent 3 3,194로 총 36,553 tokens, 모든 Manifest 해시 일치·Project1 불변·텍스트/Trace 민감정보 및 로컬 경로 0건
-- 후속 감사에서 복원 절차가 초기 온도를 적용만 하고 재확인하지 않던 틈을 확인. CP3가 변경된 초기값과 CENTRAL 복원 적용을 검사하고 컴파일러가 복원 후 UI·내부 `setTemp`를 확인하도록 보완했으며, 같은 TC·계획의 무API 재시험 PASS
-- Chromium이 생성하는 루트 `debug.log`는 테스트 부산물로 Git에서 제외
-
-이 변경은 사용자 작업으로 보존해야 하며 임의로 되돌리면 안 됩니다. `AGENTS.md`, `PROJECT_HANDOFF.md`, `DECISION_LOG.md`도 인수인계 작업에서 새로 추가된 미커밋 파일입니다.
+- 신규 후보·환경 사전 점검·기존 회귀에 공통으로 쓰는 중립 실행 결과 계약
+- 저장된 Agent 3 인계·해시·시험 증거 재검증
+- 저장 후보와 현재 결정론적 컴파일러 출력이 같을 때만 시험 결과 재사용, 다르면 무API 재시험
+- Project1 기존 13건 중 재사용 가능한 제품 회귀 6건을 명시하고 Requirement ID로 관련 TC만 선택
+- TC-ENV-000을 먼저 실행하고 미통과 시 관련 회귀 차단
+- Project1 HTML·테스트를 임시 Workspace에 복사하고 의미 라벨이 포함된 기존 `conftest.py`를 제외한 중립 실행
+- `RUN-20260815-092107-0C075E`에서 현재 후보 재시험, TC-ENV-000, TC-MODE-001, TC-TEMP-001 모두 PASS
+- Project1 대상·테스트 소스 실행 전후 해시 일치, Project1 Git 불변
+- 자동 테스트 83건 통과
+- Agent 3 통제·유연성 보완: 제품별 고정 지원 목록을 범용 UI 동적 조사와 지원 범위 확장 필요 분기로 보완. 특정 기능명은 고정하지 않음
 
 ## 10. 현재 부족한 부분
 
 P0 수준의 즉시 붕괴 문제라기보다 MVP를 완성하기 위해 남은 연결입니다.
 
 1. CP의 REVIEW·PAUSE 이후 사용자 답변을 저장하고 해당 단계부터 재개하는 기능이 없습니다.
-2. Agent 3 후보가 검증된 뒤 변경 검증과 기존 회귀 TC를 실행하는 연결이 없습니다.
-3. Agent 4가 V2의 중립 실행 결과를 받아 제품·자동화·환경 문제를 분류하는 계약이 없습니다.
-4. 최종 보고와 정식 QA 자산 등록 승인 기록이 없습니다.
-5. 서로 다른 변경 요청 최소 2건으로 동적 결과 차이를 End-to-End 검증하지 않았습니다.
+2. Agent 4가 V2의 중립 실행 결과를 받아 제품·자동화·환경 문제를 분류하고 보고하는 구현이 없습니다.
+3. 최종 보고와 정식 QA 자산 등록 승인 기록이 없습니다.
+4. 서로 다른 변경 요청 최소 2건으로 동적 결과 차이를 End-to-End 검증하지 않았습니다.
 
 ## 11. 다음 권장 순서
 
@@ -291,7 +269,7 @@ P0 수준의 즉시 붕괴 문제라기보다 MVP를 완성하기 위해 남은 
 ### 1단계 — Agent 3 공개 후보 Live Run — 완료
 
 - `--preview-only` 전송 데이터 검사
-- `agent3-3.4` 실제 모델 계획·Compiler·CP3·Candidate Trial
+- `agent3-3.4` 실제 모델 계획·Compiler·CP3·신규 자동화 후보 시험
 - 선택 장비 값·차단 Toast 의미·Trace·비용·비밀정보 감사
 - 공개 가능한 Run을 `examples/results/`에 복사
 
@@ -303,16 +281,17 @@ P0 수준의 즉시 붕괴 문제라기보다 MVP를 완성하기 위해 남은 
 
 ### 3단계 — 최소 Orchestrator 정상 완료 Live 재검증 — 완료
 
-- 구체 변경값이 있는 요청과 AUTO TC 선택으로 `pipeline` 한 명령 Agent 1→3 실제 모델 호출과 Candidate Trial 실행
+- 구체 변경값이 있는 요청과 AUTO TC 선택으로 `pipeline` 한 명령 Agent 1→3 실제 모델 호출과 신규 자동화 후보 시험 실행
 - 단계별 토큰·Checkpoint·Manifest SHA-256·Project1 불변 감사
 - 실패 시 중단 위치와 후속 API 미호출 확인
 - `RUN-20260815-092107-0C075E` 정상 완료와 후속 복원 재확인 무API Trial PASS
 
-### 4단계 — 변경 검증과 기존 회귀 연결
+### 4단계 — 변경 검증과 기존 회귀 연결 — 구현·실행 확인 완료
 
 - 검증된 Candidate 자동화만 변경 검증에 사용
 - 프로젝트 1의 재사용 가능한 기존 회귀 TC 실행
 - 환경 신뢰성이 깨졌을 때만 후속 실행 중단
+- 현재 컴파일러 후보 재시험과 관련 회귀 2건 PASS, Project1 불변 확인
 
 ### 5단계 — Agent 4·최종 보고
 

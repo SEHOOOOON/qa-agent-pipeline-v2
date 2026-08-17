@@ -232,6 +232,11 @@ class AutomationActionType(str, Enum):
     SET_MODE = "SET_MODE"
     SET_TEMPERATURE = "SET_TEMPERATURE"
     APPLY_COMMANDS = "APPLY_COMMANDS"
+    CLICK = "CLICK"
+    FILL = "FILL"
+    SELECT_OPTION = "SELECT_OPTION"
+    CHECK = "CHECK"
+    UNCHECK = "UNCHECK"
 
 
 class AssertionStrategy(str, Enum):
@@ -241,6 +246,11 @@ class AssertionStrategy(str, Enum):
     TOAST_BLOCKING = "TOAST_BLOCKING"
     CONTROLS_DISABLED = "CONTROLS_DISABLED"
     DISABLED_TEMPERATURE_TEXT = "DISABLED_TEMPERATURE_TEXT"
+    UI_TEXT_CONTAINS = "UI_TEXT_CONTAINS"
+    UI_VALUE_EQUALS = "UI_VALUE_EQUALS"
+    UI_CHECKED_EQUALS = "UI_CHECKED_EQUALS"
+    UI_ENABLED_EQUALS = "UI_ENABLED_EQUALS"
+    INTERNAL_VALUE_EQUALS = "INTERNAL_VALUE_EQUALS"
 
 
 class AutomationCandidateStatus(str, Enum):
@@ -249,11 +259,13 @@ class AutomationCandidateStatus(str, Enum):
     REVISION_REQUIRED = "REVISION_REQUIRED"
     TRIAL_FAILED = "TRIAL_FAILED"
     NOT_AUTOMATABLE = "NOT_AUTOMATABLE"
+    AUTOMATION_SUPPORT_EXTENSION_REQUIRED = "AUTOMATION_SUPPORT_EXTENSION_REQUIRED"
     BLOCKED = "BLOCKED"
 
 
 class Agent3EligibilityStatus(str, Enum):
     ELIGIBLE = "ELIGIBLE"
+    DISCOVERY_REQUIRED = "DISCOVERY_REQUIRED"
     NOT_AUTOMATABLE = "NOT_AUTOMATABLE"
 
 
@@ -266,6 +278,8 @@ class Agent3EligibilityResult(StrictModel):
     required_selectors: list[NonEmptyStr]
     required_harness_keys: list[NonEmptyStr]
     model_call_allowed: bool
+    generic_discovery_required: bool = False
+    extension_reasons: list[NonEmptyStr] = Field(default_factory=list)
 
 
 class TrialOutcome(str, Enum):
@@ -283,6 +297,11 @@ class ObservedUiElement(StrictModel):
     visible: bool
     enabled: bool
     action_hint: NonEmptyStr
+    role: str | None = None
+    input_type: str | None = None
+    accessible_name: str | None = None
+    value: str | None = None
+    checked: bool | None = None
 
 
 class UiObservation(StrictModel):
@@ -290,7 +309,11 @@ class UiObservation(StrictModel):
     target_sha256: NonEmptyStr
     page_title: NonEmptyStr
     elements: list[ObservedUiElement] = Field(min_length=1)
-    harness_keys: list[NonEmptyStr] = Field(min_length=1)
+    harness_keys: list[NonEmptyStr] = Field(default_factory=list)
+    harness_values: dict[NonEmptyStr, str | float | int | bool | None] = Field(
+        default_factory=dict
+    )
+    generic_discovery: bool = False
     observed_at: NonEmptyStr
     observer: str = "python-playwright"
 
@@ -300,7 +323,7 @@ class AutomationAction(StrictModel):
     phase: AutomationPhase
     action_type: AutomationActionType
     selector: NonEmptyStr
-    value: str | float | int | None = None
+    value: str | float | int | bool | None = None
     source_text: NonEmptyStr
 
 
@@ -311,15 +334,37 @@ class AutomationAssertion(StrictModel):
     selector: NonEmptyStr
     expected_number: float | None = None
     expected_text: str | None = None
+    expected_value: str | float | int | bool | None = None
+
+
+class Agent3PlanningStatus(str, Enum):
+    READY = "READY"
+    AUTOMATION_SUPPORT_EXTENSION_REQUIRED = "AUTOMATION_SUPPORT_EXTENSION_REQUIRED"
 
 
 class Agent3AutomationPlan(StrictModel):
     tc_id: Annotated[str, StringConstraints(pattern=r"^TC-CAND-\d{3}$")]
     target_device_id: int = Field(ge=1, le=16)
     summary: NonEmptyStr
-    actions: list[AutomationAction] = Field(min_length=1)
-    assertions: list[AutomationAssertion] = Field(min_length=1)
+    planning_status: Agent3PlanningStatus = Agent3PlanningStatus.READY
+    actions: list[AutomationAction] = Field(default_factory=list)
+    assertions: list[AutomationAssertion] = Field(default_factory=list)
+    extension_reasons: list[NonEmptyStr] = Field(default_factory=list)
     technical_notes: list[NonEmptyStr] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def ready_plan_or_grounded_extension(self) -> "Agent3AutomationPlan":
+        if self.planning_status == Agent3PlanningStatus.READY:
+            if not self.actions or not self.assertions:
+                raise ValueError("READY 자동화 계획에는 동작과 검증 조건이 필요합니다.")
+            if self.extension_reasons:
+                raise ValueError("READY 자동화 계획에는 지원 범위 확장 사유를 넣지 않습니다.")
+        else:
+            if self.actions or self.assertions:
+                raise ValueError("지원 범위 확장 요청에는 실행 동작이나 검증 조건을 넣지 않습니다.")
+            if not self.extension_reasons:
+                raise ValueError("지원 범위 확장 요청에는 구체적인 사유가 필요합니다.")
+        return self
 
 
 class Checkpoint3Result(StrictModel):
@@ -338,6 +383,106 @@ class Agent3TrialResult(StrictModel):
     screenshot_file: str | None = None
     trace_file: str | None = None
     evidence_complete: bool
+
+
+class ExecutionSource(str, Enum):
+    NEW_AUTOMATION_CANDIDATE = "NEW_AUTOMATION_CANDIDATE"
+    ENVIRONMENT_PRECHECK = "ENVIRONMENT_PRECHECK"
+    EXISTING_REGRESSION = "EXISTING_REGRESSION"
+
+
+class NeutralExecutionStatus(str, Enum):
+    PASSED = "PASSED"
+    ASSERTION_FAILED = "ASSERTION_FAILED"
+    EXECUTION_ERROR = "EXECUTION_ERROR"
+    TIMEOUT = "TIMEOUT"
+    SKIPPED = "SKIPPED"
+
+
+class ValidationStageStatus(str, Enum):
+    COMPLETED = "COMPLETED"
+    BLOCKED = "BLOCKED"
+
+
+class NeutralExecutionResult(StrictModel):
+    test_id: NonEmptyStr
+    source: ExecutionSource
+    requirement_ids: list[RequirementId] = Field(default_factory=list)
+    status: NeutralExecutionStatus
+    source_outcome: NonEmptyStr
+    exit_code: int | None
+    duration_ms: int = Field(ge=0)
+    test_file: NonEmptyStr
+    test_sha256: NonEmptyStr
+    target_sha256: NonEmptyStr
+    reused: bool = False
+    stdout_file: str | None = None
+    stderr_file: str | None = None
+    evidence_files: list[NonEmptyStr] = Field(default_factory=list)
+    evidence_sha256: dict[str, NonEmptyStr] = Field(default_factory=dict)
+    evidence_complete: bool
+    exception_type: str | None = None
+    raw_message: str | None = None
+
+
+class ValidationExecutionBundle(StrictModel):
+    contract_version: str = "1.0"
+    run_id: NonEmptyStr
+    stage: str = "VALIDATION_EXECUTION"
+    status: ValidationStageStatus
+    candidate_result: NeutralExecutionResult
+    environment_precheck: NeutralExecutionResult
+    selected_regression_ids: list[NonEmptyStr]
+    regression_results: list[NeutralExecutionResult]
+    blocked_reason: str | None = None
+    created_at: NonEmptyStr
+
+
+@dataclass(frozen=True)
+class ExistingRegressionSpec:
+    tc_id: str
+    test_function: str
+    requirement_ids: tuple[str, ...]
+
+
+EXISTING_REGRESSION_CATALOG = (
+    ExistingRegressionSpec(
+        tc_id="TC-MODE-001",
+        test_function="test_tc_mode_001_heat_mode_and_temp_apply",
+        requirement_ids=("REQ-CONTROL-001", "REQ-MODE-001", "REQ-STATE-001"),
+    ),
+    ExistingRegressionSpec(
+        tc_id="TC-MODE-002",
+        test_function="test_tc_mode_002_fan_mode_temp_disabled",
+        requirement_ids=("REQ-MODE-002",),
+    ),
+    ExistingRegressionSpec(
+        tc_id="TC-MODE-003",
+        test_function="test_tc_mode_003_dry_mode_then_cool_reactivation",
+        requirement_ids=("REQ-MODE-001", "REQ-MODE-002"),
+    ),
+    ExistingRegressionSpec(
+        tc_id="TC-LOCK-001",
+        test_function="test_tc_lock_001_all_devices_full_inspection",
+        requirement_ids=("REQ-LOCK-001",),
+    ),
+    ExistingRegressionSpec(
+        tc_id="TC-ERR-001",
+        test_function="test_tc_err_001_ch05_fault_injection_control_block",
+        requirement_ids=("REQ-ERROR-001",),
+    ),
+    ExistingRegressionSpec(
+        tc_id="TC-TEMP-001",
+        test_function="test_tc_temp_001_upper_limit_boundary",
+        requirement_ids=("REQ-TEMP-001",),
+    ),
+)
+
+ENVIRONMENT_PRECHECK = ExistingRegressionSpec(
+    tc_id="TC-ENV-000",
+    test_function="test_tc_env_000_pre_environment_check",
+    requirement_ids=("REQ-ENV-001",),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -550,6 +695,21 @@ def _terms(value: str) -> set[str]:
         token.casefold()
         for token in re.findall(r"[가-힣A-Za-z0-9°%._~+·-]{2,}", value)
     }
+
+
+def _has_textual_link(left: str, right: str) -> bool:
+    """Match a shared term while tolerating Korean particles and inflections."""
+    left_terms = _terms(left)
+    right_terms = _terms(right)
+    if left_terms & right_terms:
+        return True
+    left_normalized = _normalize(left)
+    right_normalized = _normalize(right)
+    return any(
+        len(term) >= 2 and term in right_normalized for term in left_terms
+    ) or any(
+        len(term) >= 2 and term in left_normalized for term in right_terms
+    )
 
 
 def _temperature_ranges(value: str) -> set[tuple[float, float]]:
@@ -1248,22 +1408,36 @@ You are an Automation Engineer translating an approved product test case into a 
 Rules:
 1. Never change or invent the TC purpose, preconditions, steps, expected results, values, or Requirement IDs.
 2. Use only selectors and window.__vccs interfaces present in the supplied UI Observation.
-3. Map PRIMARY_TEST_DEVICE and CENTRAL_COMMAND_ALLOWED_ROLE to target_device_id=1 for this MVP,
-   and set every SELECT_DEVICE action value to the same integer 1.
-4. PRECONDITION actions establish the target, initial mode, initial temperature, and applied state.
-5. TEST actions implement only the approved TC steps. Never assume a blocked request changes the value.
-6. Create RESTORE actions only when restore_required=true and use only the approved restore values.
-7. Map every Expected Result exactly once without changing result_id or observation_layer.
-8. Use UI_TEMPERATURE and INTERNAL_SET_TEMP for their corresponding observations.
-   Use TOAST_BLOCKING when the approved Expected Result requires a blocking Toast.
-9. Use CONTROLS_DISABLED and DISABLED_TEMPERATURE_TEXT for FAN or DRY disabled states.
-10. Return only the structured plan. Do not write Python code.
-11. Do not propose external URLs, shell commands, file changes, arbitrary waits, skip, or ignored exceptions.
-12. Use these action targets exactly: SELECT_DEVICE=#device-card-1 .card-body-split;
+3. First decide whether the observed UI can implement every approved step and Expected Result with the allowed actions and assertions.
+   If not, return planning_status=AUTOMATION_SUPPORT_EXTENSION_REQUIRED, no actions or assertions,
+   and concrete extension_reasons based only on the missing interaction or observation technique.
+4. For a READY plan, map PRIMARY_TEST_DEVICE and CENTRAL_COMMAND_ALLOWED_ROLE to target_device_id=1.
+   If a SELECT_DEVICE action is actually needed, set its value to the same integer 1. A generic single-target page
+   whose observed accessible context already identifies PRIMARY_TEST_DEVICE does not need a legacy SELECT_DEVICE action.
+5. PRECONDITION actions establish only states explicitly required by the approved TC. A precondition already satisfied
+   by the observed page context or initial UI/state values needs no action; never demand an unobserved legacy selector for it.
+6. TEST actions implement only the approved TC steps. Never assume a blocked request changes the value.
+7. Create RESTORE actions only when restore_required=true and use only the approved restore values.
+8. Map every Expected Result exactly once without changing result_id or observation_layer.
+9. Generic UI actions are CLICK, FILL, SELECT_OPTION, CHECK, and UNCHECK. Use only an observed selector whose tag,
+   role, input_type, enabled state, and action_hint support the selected action.
+10. Generic UI assertions are UI_TEXT_CONTAINS, UI_VALUE_EQUALS, UI_CHECKED_EQUALS, and UI_ENABLED_EQUALS.
+    INTERNAL_VALUE_EQUALS may use only an exact path present in ui_observation.harness_values.
+    When a NOTIFICATION Expected Result specifies that a result is announced but does not fix the whole message,
+    UI_TEXT_CONTAINS may verify a short meaningful phrase that occurs verbatim in that Expected Result. Do not invent a full
+    message and do not use the entire natural-language Expected Result sentence as expected_text.
+11. Generic action values must occur in the approved precondition, step, or restore text. Generic assertion values
+    must occur in the matching Expected Result. Do not translate a product meaning into an ungrounded boolean or value.
+12. Keep source_text as the exact approved precondition, step, or restore line implemented by the action.
+13. For the existing temperature controller, use UI_TEMPERATURE and INTERNAL_SET_TEMP for their corresponding observations,
+   TOAST_BLOCKING for a blocking Toast, and CONTROLS_DISABLED or DISABLED_TEMPERATURE_TEXT for disabled states.
+14. Return only the structured plan, which is the executable code intent consumed by the guarded compiler. Do not write free-form Python.
+15. Do not propose external URLs, shell commands, file changes, arbitrary waits, skip, or ignored exceptions.
+16. Only for an observed existing temperature-controller flow, use these action targets exactly: SELECT_DEVICE=#device-card-1 .card-body-split;
     SET_MODE=the selector matching the requested mode; SET_TEMPERATURE=#det-temp-display;
-    APPLY_COMMANDS=.btn-apply-cmd. The compiler operates the temperature buttons itself.
-13. Leave expected_text null. The current compiler does not implement text-expectation comparison.
-14. Use these assertion targets exactly: UI_TEMPERATURE=#det-temp-display;
+    APPLY_COMMANDS=.btn-apply-cmd. Never require these legacy selectors when they are absent from the supplied UI Observation.
+    The compiler operates the temperature buttons itself.
+17. For legacy assertion strategies, use these targets exactly: UI_TEMPERATURE=#det-temp-display;
     INTERNAL_SET_TEMP=window.__vccs.devices; TOAST_VISIBLE=#global-toast;
     TOAST_BLOCKING=#global-toast;
     CONTROLS_DISABLED=#det-temp-down-btn; DISABLED_TEMPERATURE_TEXT=#det-temp-display.
@@ -1403,8 +1577,9 @@ def inspect_target_ui(
     *,
     required_selectors: set[str] | None = None,
     required_harness_keys: set[str] | None = None,
+    discover_generic: bool = False,
 ) -> UiObservation:
-    """Inspect only the interfaces required by the selected approved TC."""
+    """Inspect known TC interfaces or discover generic, stable UI interfaces."""
     target = target_html.resolve()
     if not target.is_file() or target.suffix.casefold() != ".html":
         raise Agent3Error("--target-html must point to an existing local HTML file.")
@@ -1442,7 +1617,7 @@ def inspect_target_ui(
         page.goto(target.as_uri(), wait_until="domcontentloaded")
         page.evaluate("() => localStorage.clear()")
         page.reload(wait_until="domcontentloaded")
-        page.wait_for_selector("#device-card-1", timeout=5000)
+        page.wait_for_selector("body", timeout=5000)
         for selector, hint in _UI_SELECTOR_INVENTORY.items():
             if selector not in selectors_to_observe:
                 continue
@@ -1459,10 +1634,101 @@ def inspect_target_ui(
                     action_hint=hint,
                 )
             )
+        if discover_generic:
+            generic_items = page.evaluate(
+                r"""() => {
+                    const escapeAttr = value => String(value)
+                        .replace(/\\/g, '\\\\')
+                        .replace(/"/g, '\\"');
+                    const stableSelector = element => {
+                        if (element.id) return `#${CSS.escape(element.id)}`;
+                        const testId = element.getAttribute('data-testid');
+                        if (testId) return `[data-testid="${escapeAttr(testId)}"]`;
+                        const aria = element.getAttribute('aria-label');
+                        if (aria) return `${element.tagName.toLowerCase()}[aria-label="${escapeAttr(aria)}"]`;
+                        const name = element.getAttribute('name');
+                        if (name) return `${element.tagName.toLowerCase()}[name="${escapeAttr(name)}"]`;
+                        return null;
+                    };
+                    const candidates = document.querySelectorAll(
+                        'button,input,select,textarea,[role="button"],[role="switch"],'
+                        + '[role="checkbox"],[aria-live],[data-testid],[id]'
+                    );
+                    const result = [];
+                    const seen = new Set();
+                    for (const element of candidates) {
+                        const selector = stableSelector(element);
+                        if (!selector || seen.has(selector)) continue;
+                        const style = getComputedStyle(element);
+                        const rect = element.getBoundingClientRect();
+                        const visible = style.display !== 'none' && style.visibility !== 'hidden'
+                            && rect.width > 0 && rect.height > 0;
+                        if (!visible) continue;
+                        seen.add(selector);
+                        const tag = element.tagName.toLowerCase();
+                        const role = element.getAttribute('role');
+                        const inputType = tag === 'input' ? (element.getAttribute('type') || 'text') : null;
+                        let hint = 'READ_STATE';
+                        if (tag === 'select') hint = 'SELECT_OPTION';
+                        else if (tag === 'textarea' || (tag === 'input' && !['checkbox','radio','button','submit'].includes(inputType))) hint = 'FILL';
+                        else if (inputType === 'checkbox' || role === 'switch' || role === 'checkbox') hint = 'CHECK_OR_UNCHECK';
+                        else if (tag === 'button' || role === 'button') hint = 'CLICK';
+                        result.push({
+                            selector,
+                            tag,
+                            text: (element.innerText || element.textContent || '').trim().slice(0, 300),
+                            visible,
+                            enabled: !element.disabled && element.getAttribute('aria-disabled') !== 'true',
+                            action_hint: hint,
+                            role,
+                            input_type: inputType,
+                            accessible_name: (element.getAttribute('aria-label')
+                                || (element.labels ? Array.from(element.labels).map(label => label.innerText).join(' ') : '')
+                                || element.innerText || element.getAttribute('name') || '').trim().slice(0, 200) || null,
+                            value: 'value' in element ? String(element.value) : null,
+                            checked: 'checked' in element ? Boolean(element.checked) : null,
+                        });
+                        if (result.length >= 120) break;
+                    }
+                    return result;
+                }"""
+            )
+            known = {item.selector for item in elements}
+            for item in generic_items:
+                if item["selector"] not in known:
+                    elements.append(ObservedUiElement.model_validate(item))
+                    known.add(item["selector"])
         available_harness_keys = set(
             page.evaluate("() => window.__vccs ? Object.keys(window.__vccs) : []")
         )
         harness_keys = sorted(harness_to_observe & available_harness_keys)
+        harness_values: dict[str, str | float | int | bool | None] = {}
+        if discover_generic:
+            harness_values = page.evaluate(
+                """() => {
+                    const output = {};
+                    const seen = new WeakSet();
+                    const walk = (value, path, depth) => {
+                        if (value === null || ['string','number','boolean'].includes(typeof value)) {
+                            output[path] = value;
+                            return;
+                        }
+                        if (typeof value !== 'object' || depth >= 4 || seen.has(value)) return;
+                        seen.add(value);
+                        if (Array.isArray(value)) {
+                            value.slice(0, 20).forEach((item, index) => walk(item, `${path}[${index}]`, depth + 1));
+                        } else {
+                            Object.keys(value).slice(0, 80).forEach(key => {
+                                if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key)) {
+                                    walk(value[key], `${path}.${key}`, depth + 1);
+                                }
+                            });
+                        }
+                    };
+                    if (window.__vccs) walk(window.__vccs, 'window.__vccs', 0);
+                    return output;
+                }"""
+            )
         title = page.title()
         context.close()
         browser.close()
@@ -1483,6 +1749,8 @@ def inspect_target_ui(
         page_title=title,
         elements=elements,
         harness_keys=harness_keys,
+        harness_values=harness_values,
+        generic_discovery=discover_generic,
         observed_at=datetime.now(timezone.utc).isoformat(),
     )
 
@@ -1499,13 +1767,6 @@ _MODE_SELECTOR = {
 _SUPPORTED_AGENT3_TARGET_ROLES = {
     "PRIMARY_TEST_DEVICE",
     "CENTRAL_COMMAND_ALLOWED_ROLE",
-}
-_SUPPORTED_AGENT3_REQUIREMENT_IDS = {
-    "REQ-CONTROL-001",
-    "REQ-MODE-002",
-    "REQ-NOTIFY-001",
-    "REQ-STATE-001",
-    "REQ-TEMP-001",
 }
 _TEMPERATURE_TERMS = ("temperature", "degree", "settemp", "온도", "°")
 _DISABLED_TERMS = ("disabled", "비활성", "조작할 수 없", "사용할 수 없")
@@ -1541,24 +1802,15 @@ def _contains_any(value: str, terms: tuple[str, ...]) -> bool:
 def evaluate_agent3_eligibility(
     test_case: ProductTestCaseCandidate,
 ) -> Agent3EligibilityResult:
-    """Determine supported capabilities before UI inspection or a model call."""
-    required_capabilities = {"SELECT_PRIMARY_DEVICE"}
+    """Choose targeted inspection or generic discovery before a model call."""
+    required_capabilities: set[str] = set()
     missing_capabilities: set[str] = set()
-    required_selectors = {"#device-card-1 .card-body-split"}
-    required_harness_keys = {"selectedUnitId"}
+    required_selectors: set[str] = set()
+    required_harness_keys: set[str] = set()
+    generic_discovery_required = False
 
     if not test_case.automation_candidate:
         missing_capabilities.add("CP2_AUTOMATION_CANDIDATE")
-    if test_case.control_path == ControlPath.CENTRAL:
-        required_capabilities.add("APPLY_CENTRAL_COMMAND")
-        required_selectors.add(".btn-apply-cmd")
-    else:
-        missing_capabilities.add(f"CONTROL_PATH_{test_case.control_path.value}")
-    if test_case.target_role not in _SUPPORTED_AGENT3_TARGET_ROLES:
-        missing_capabilities.add(f"TARGET_ROLE:{test_case.target_role}")
-    for requirement_id in test_case.requirement_ids:
-        if requirement_id not in _SUPPORTED_AGENT3_REQUIREMENT_IDS:
-            missing_capabilities.add(f"REQUIREMENT:{requirement_id}")
 
     modes = {
         value
@@ -1568,15 +1820,6 @@ def evaluate_agent3_eligibility(
         )
         if value
     }
-    if modes:
-        required_capabilities.add("SET_MODE")
-    for mode in modes:
-        selector = _MODE_SELECTOR.get(mode)
-        if selector is None:
-            missing_capabilities.add(f"SET_MODE:{mode}")
-        else:
-            required_selectors.add(selector)
-
     temperature_values = {
         float(value)
         for value in (
@@ -1585,13 +1828,40 @@ def evaluate_agent3_eligibility(
         )
         if value is not None
     }
+    non_hvac_modes = modes - set(_MODE_SELECTOR)
+    legacy_controller_flow = bool(modes or temperature_values) and not non_hvac_modes
+    if legacy_controller_flow:
+        required_capabilities.add("SELECT_PRIMARY_DEVICE")
+        required_selectors.add("#device-card-1 .card-body-split")
+        required_harness_keys.add("selectedUnitId")
+        if test_case.control_path == ControlPath.CENTRAL:
+            required_capabilities.add("APPLY_CENTRAL_COMMAND")
+            required_selectors.add(".btn-apply-cmd")
+        else:
+            generic_discovery_required = True
+            required_capabilities.add("DISCOVER_CONTROL_PATH")
+    else:
+        generic_discovery_required = True
+        required_capabilities.add("DISCOVER_GENERIC_UI")
+
+    if test_case.target_role not in _SUPPORTED_AGENT3_TARGET_ROLES:
+        generic_discovery_required = True
+        required_capabilities.add("DISCOVER_TARGET_CONTROL")
+
+    if legacy_controller_flow and modes:
+        required_capabilities.add("SET_MODE")
+    for mode in modes if legacy_controller_flow else set():
+        selector = _MODE_SELECTOR.get(mode)
+        if selector is not None:
+            required_selectors.add(selector)
+
     if temperature_values:
         required_capabilities.add("SET_TEMPERATURE")
         required_selectors.update(
             {"#det-temp-display", "#det-temp-down-btn", "#det-temp-up-btn"}
         )
 
-    disabled_mode = bool(modes) and modes <= {"FAN", "DRY"}
+    disabled_mode = legacy_controller_flow and bool(modes) and modes <= {"FAN", "DRY"}
     for result in test_case.expected_results:
         statement = result.statement
         if result.observation_layer == ObservationLayer.UI:
@@ -1608,17 +1878,18 @@ def evaluate_agent3_eligibility(
                     required_capabilities.add("ASSERT_DISABLED_TEMPERATURE_TEXT")
                     required_selectors.add("#det-temp-display")
                 else:
-                    missing_capabilities.add(f"ASSERT_UI:{result.result_id}")
+                    generic_discovery_required = True
+                    required_capabilities.add("ASSERT_GENERIC_UI_STATE")
             else:
-                missing_capabilities.add(f"ASSERT_UI:{result.result_id}")
+                generic_discovery_required = True
+                required_capabilities.add("ASSERT_GENERIC_UI_STATE")
         elif result.observation_layer == ObservationLayer.INTERNAL_STATE:
             if temperature_values and _contains_any(statement, _TEMPERATURE_TERMS):
                 required_capabilities.add("ASSERT_INTERNAL_SET_TEMP")
                 required_harness_keys.add("devices")
             else:
-                missing_capabilities.add(
-                    f"ASSERT_INTERNAL_STATE:{result.result_id}"
-                )
+                generic_discovery_required = True
+                required_capabilities.add("DISCOVER_INTERNAL_STATE")
         elif result.observation_layer == ObservationLayer.NOTIFICATION:
             if _contains_any(statement, _TOAST_TERMS) and _contains_any(
                 statement, _VISIBLE_TERMS
@@ -1626,15 +1897,18 @@ def evaluate_agent3_eligibility(
                 required_capabilities.add("ASSERT_TOAST_BLOCKING")
                 required_selectors.add("#global-toast")
             else:
-                missing_capabilities.add(f"ASSERT_NOTIFICATION:{result.result_id}")
+                generic_discovery_required = True
+                required_capabilities.add("ASSERT_GENERIC_NOTIFICATION")
 
     supported = not missing_capabilities
     return Agent3EligibilityResult(
         tc_id=test_case.tc_id,
         status=(
-            Agent3EligibilityStatus.ELIGIBLE
-            if supported
-            else Agent3EligibilityStatus.NOT_AUTOMATABLE
+            Agent3EligibilityStatus.NOT_AUTOMATABLE
+            if not supported
+            else Agent3EligibilityStatus.DISCOVERY_REQUIRED
+            if generic_discovery_required
+            else Agent3EligibilityStatus.ELIGIBLE
         ),
         candidate_status=(
             None if supported else AutomationCandidateStatus.NOT_AUTOMATABLE
@@ -1644,6 +1918,7 @@ def evaluate_agent3_eligibility(
         required_selectors=sorted(required_selectors),
         required_harness_keys=sorted(required_harness_keys),
         model_call_allowed=supported,
+        generic_discovery_required=generic_discovery_required,
     )
 
 
@@ -1656,9 +1931,43 @@ _ASSERTION_SELECTOR = {
     AssertionStrategy.DISABLED_TEMPERATURE_TEXT: "#det-temp-display",
 }
 
+_GENERIC_ACTION_TYPES = {
+    AutomationActionType.CLICK,
+    AutomationActionType.FILL,
+    AutomationActionType.SELECT_OPTION,
+    AutomationActionType.CHECK,
+    AutomationActionType.UNCHECK,
+}
+_GENERIC_ASSERTION_STRATEGIES = {
+    AssertionStrategy.UI_TEXT_CONTAINS,
+    AssertionStrategy.UI_VALUE_EQUALS,
+    AssertionStrategy.UI_CHECKED_EQUALS,
+    AssertionStrategy.UI_ENABLED_EQUALS,
+    AssertionStrategy.INTERNAL_VALUE_EQUALS,
+}
+_HARNESS_VALUE_PATH = re.compile(
+    r"^window\.__vccs(?:\.[A-Za-z_$][A-Za-z0-9_$]*|\[\d+\])+$"
+)
 
-def _expected_selector_for_assertion(assertion: AutomationAssertion) -> str:
-    return _ASSERTION_SELECTOR[assertion.strategy]
+
+def _expected_selector_for_assertion(assertion: AutomationAssertion) -> str | None:
+    return _ASSERTION_SELECTOR.get(assertion.strategy)
+
+
+def _scalar_value_is_grounded(
+    value: str | float | int | bool | None, source_text: str
+) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        positive = ("true", "on", "checked", "enabled", "활성", "켜", "선택")
+        negative = ("false", "off", "unchecked", "disabled", "비활성", "꺼", "해제")
+        return _contains_any(source_text, positive if value else negative)
+    if isinstance(value, (int, float)):
+        return float(value) in {
+            float(item) for item in re.findall(r"-?\d+(?:\.\d+)?", source_text)
+        }
+    return _contains(source_text, str(value))
 
 
 def evaluate_checkpoint3_plan(
@@ -1666,12 +1975,34 @@ def evaluate_checkpoint3_plan(
     plan: Agent3AutomationPlan,
     observation: UiObservation,
 ) -> Checkpoint3Result:
+    if (
+        plan.planning_status
+        == Agent3PlanningStatus.AUTOMATION_SUPPORT_EXTENSION_REQUIRED
+    ):
+        return Checkpoint3Result(
+            status=CheckStatus.REVIEW,
+            candidate_status=(
+                AutomationCandidateStatus.AUTOMATION_SUPPORT_EXTENSION_REQUIRED
+            ),
+            checks=[
+                CheckResult(
+                    rule_id="CP3-000",
+                    status=CheckStatus.REVIEW,
+                    message=(
+                        "현재 범용 조작과 관찰만으로 TC를 구현할 수 없어 "
+                        "자동화 지원 범위 확장이 필요합니다: "
+                        + " / ".join(plan.extension_reasons)
+                    ),
+                )
+            ],
+        )
     checks: list[CheckResult] = []
 
     def add(rule_id: str, status: CheckStatus, message: str) -> None:
         checks.append(CheckResult(rule_id=rule_id, status=status, message=message))
 
     observed_selectors = {item.selector for item in observation.elements}
+    observed_by_selector = {item.selector: item for item in observation.elements}
     if plan.tc_id == test_case.tc_id and plan.target_device_id == 1:
         add(
             "CP3-001",
@@ -1708,6 +2039,58 @@ def evaluate_checkpoint3_plan(
             action_errors.append(f"{item.action_id}: invalid temperature target")
         elif item.action_type == AutomationActionType.APPLY_COMMANDS and item.selector != ".btn-apply-cmd":
             action_errors.append(f"{item.action_id}: invalid apply selector")
+        elif item.action_type in _GENERIC_ACTION_TYPES:
+            observed = observed_by_selector.get(item.selector)
+            if observed is None:
+                continue
+            if not observed.visible or not observed.enabled:
+                action_errors.append(
+                    f"{item.action_id}: generic action target is not visible and enabled"
+                )
+            elif item.action_type == AutomationActionType.CLICK and observed.action_hint != "CLICK":
+                action_errors.append(f"{item.action_id}: observed element does not support CLICK")
+            elif item.action_type == AutomationActionType.FILL and observed.action_hint != "FILL":
+                action_errors.append(f"{item.action_id}: observed element does not support FILL")
+            elif item.action_type == AutomationActionType.SELECT_OPTION and observed.action_hint != "SELECT_OPTION":
+                action_errors.append(
+                    f"{item.action_id}: observed element does not support SELECT_OPTION"
+                )
+            elif item.action_type in {
+                AutomationActionType.CHECK,
+                AutomationActionType.UNCHECK,
+            } and observed.action_hint != "CHECK_OR_UNCHECK":
+                action_errors.append(
+                    f"{item.action_id}: observed element does not support checkbox or switch control"
+                )
+            observed_meaning = " ".join(
+                part
+                for part in (
+                    observed.selector.replace("-", " ").replace("_", " "),
+                    observed.text,
+                    observed.accessible_name or "",
+                )
+                if part
+            )
+            if not _has_textual_link(observed_meaning, item.source_text):
+                action_errors.append(
+                    f"{item.action_id}: observed element has no textual link to the approved TC step"
+                )
+            if item.action_type in {
+                AutomationActionType.FILL,
+                AutomationActionType.SELECT_OPTION,
+            } and not _scalar_value_is_grounded(item.value, item.source_text):
+                action_errors.append(
+                    f"{item.action_id}: generic action value is not grounded in source_text"
+                )
+            approved_source = {
+                AutomationPhase.PRECONDITION: test_case.preconditions,
+                AutomationPhase.TEST: test_case.steps,
+                AutomationPhase.RESTORE: test_case.restore_steps,
+            }[item.phase]
+            if not any(_normalize(item.source_text) == _normalize(text) for text in approved_source):
+                action_errors.append(
+                    f"{item.action_id}: source_text is not an exact approved TC line"
+                )
 
     if len(action_ids) == len(set(action_ids)) and not unobserved and not action_errors:
         add("CP3-002", CheckStatus.PASS, "Action IDs are unique and every selector was observed.")
@@ -1741,24 +2124,52 @@ def evaluate_checkpoint3_plan(
             continue
         if assertion.observation_layer != result.observation_layer:
             fidelity_errors.append(f"{assertion.result_id}: observation layer changed")
-        if assertion.selector != _expected_selector_for_assertion(assertion):
+        fixed_selector = _expected_selector_for_assertion(assertion)
+        if fixed_selector is not None and assertion.selector != fixed_selector:
             fidelity_errors.append(f"{assertion.result_id}: invalid observation target")
         allowed_strategies = {
             ObservationLayer.UI: {
                 AssertionStrategy.UI_TEMPERATURE,
                 AssertionStrategy.CONTROLS_DISABLED,
                 AssertionStrategy.DISABLED_TEMPERATURE_TEXT,
+                AssertionStrategy.UI_TEXT_CONTAINS,
+                AssertionStrategy.UI_VALUE_EQUALS,
+                AssertionStrategy.UI_CHECKED_EQUALS,
+                AssertionStrategy.UI_ENABLED_EQUALS,
             },
-            ObservationLayer.INTERNAL_STATE: {AssertionStrategy.INTERNAL_SET_TEMP},
+            ObservationLayer.INTERNAL_STATE: {
+                AssertionStrategy.INTERNAL_SET_TEMP,
+                AssertionStrategy.INTERNAL_VALUE_EQUALS,
+            },
             ObservationLayer.NOTIFICATION: (
-                {AssertionStrategy.TOAST_BLOCKING}
+                {
+                    AssertionStrategy.TOAST_BLOCKING,
+                    AssertionStrategy.UI_TEXT_CONTAINS,
+                }
                 if _contains_any(result.statement, _BLOCKING_EXPECTATION_TERMS)
-                else {AssertionStrategy.TOAST_VISIBLE}
+                else {
+                    AssertionStrategy.TOAST_VISIBLE,
+                    AssertionStrategy.UI_TEXT_CONTAINS,
+                }
             ),
         }
         if assertion.strategy not in allowed_strategies[result.observation_layer]:
             fidelity_errors.append(f"{assertion.result_id}: assertion strategy changed the observation meaning")
-        if assertion.expected_text is not None:
+        if assertion.strategy == AssertionStrategy.UI_TEXT_CONTAINS:
+            if not assertion.expected_text or not _contains(
+                result.statement, assertion.expected_text
+            ):
+                fidelity_errors.append(
+                    f"{assertion.result_id}: expected text is not grounded in the Expected Result"
+                )
+            elif (
+                result.observation_layer == ObservationLayer.NOTIFICATION
+                and len(_terms(assertion.expected_text)) >= len(_terms(result.statement))
+            ):
+                fidelity_errors.append(
+                    f"{assertion.result_id}: notification expected_text must be a meaningful phrase, not the whole Expected Result sentence"
+                )
+        elif assertion.expected_text is not None:
             fidelity_errors.append(
                 f"{assertion.result_id}: expected_text is unsupported by the current compiler"
             )
@@ -1769,8 +2180,51 @@ def evaluate_checkpoint3_plan(
                 statement_numbers = {float(item) for item in re.findall(r"\d+(?:\.\d+)?", result.statement)}
                 if statement_numbers and float(assertion.expected_number) not in statement_numbers:
                     fidelity_errors.append(f"{assertion.result_id}: numeric expectation is not grounded in the Expected Result")
-        if assertion.selector != "window.__vccs.devices" and assertion.selector not in observed_selectors:
+        if assertion.strategy in {
+            AssertionStrategy.UI_VALUE_EQUALS,
+            AssertionStrategy.UI_CHECKED_EQUALS,
+            AssertionStrategy.UI_ENABLED_EQUALS,
+            AssertionStrategy.INTERNAL_VALUE_EQUALS,
+        }:
+            if not _scalar_value_is_grounded(assertion.expected_value, result.statement):
+                fidelity_errors.append(
+                    f"{assertion.result_id}: expected value is not grounded in the Expected Result"
+                )
+        elif assertion.expected_value is not None:
+            fidelity_errors.append(
+                f"{assertion.result_id}: expected_value is not used by the selected strategy"
+            )
+        if assertion.strategy == AssertionStrategy.INTERNAL_VALUE_EQUALS:
+            if (
+                not _HARNESS_VALUE_PATH.fullmatch(assertion.selector)
+                or assertion.selector not in observation.harness_values
+            ):
+                fidelity_errors.append(
+                    f"{assertion.result_id}: internal state path was not observed"
+                )
+            path_meaning = re.sub(r"[^가-힣A-Za-z0-9]+", " ", assertion.selector)
+            if not _has_textual_link(path_meaning, result.statement):
+                fidelity_errors.append(
+                    f"{assertion.result_id}: internal state path has no textual link to the Expected Result"
+                )
+        elif assertion.selector != "window.__vccs.devices" and assertion.selector not in observed_selectors:
             fidelity_errors.append(f"{assertion.result_id}: selector was not observed")
+        elif assertion.strategy in _GENERIC_ASSERTION_STRATEGIES:
+            observed = observed_by_selector.get(assertion.selector)
+            if observed is not None:
+                observed_meaning = " ".join(
+                    part
+                    for part in (
+                        observed.selector.replace("-", " ").replace("_", " "),
+                        observed.text,
+                        observed.accessible_name or "",
+                    )
+                    if part
+                )
+                if not _has_textual_link(observed_meaning, result.statement):
+                    fidelity_errors.append(
+                        f"{assertion.result_id}: observed element has no textual link to the Expected Result"
+                    )
     if fidelity_errors:
         add("CP3-004", CheckStatus.FAIL, " / ".join(fidelity_errors))
     else:
@@ -1821,27 +2275,40 @@ def evaluate_checkpoint3_plan(
             for item in plan.actions
         )
 
-    if not has_action(AutomationPhase.PRECONDITION, AutomationActionType.SELECT_DEVICE):
-        sequence_errors.append("target device selection is missing")
-    if data.initial_mode and not has_action(AutomationPhase.PRECONDITION, AutomationActionType.SET_MODE, data.initial_mode):
-        sequence_errors.append("initial mode setup is missing")
-    if data.initial_temperature_c is not None and not has_action(AutomationPhase.PRECONDITION, AutomationActionType.SET_TEMPERATURE, data.initial_temperature_c):
-        sequence_errors.append("initial temperature setup is missing")
-    if not has_action(AutomationPhase.PRECONDITION, AutomationActionType.APPLY_COMMANDS):
-        sequence_errors.append("initial state apply is missing")
-    if data.requested_mode and not has_action(AutomationPhase.TEST, AutomationActionType.SET_MODE, data.requested_mode):
-        sequence_errors.append("requested mode action is missing")
-    if data.requested_temperature_c is not None and not has_action(AutomationPhase.TEST, AutomationActionType.SET_TEMPERATURE, data.requested_temperature_c):
-        sequence_errors.append("requested temperature action is missing")
-    if test_case.control_path == ControlPath.CENTRAL and not has_action(AutomationPhase.TEST, AutomationActionType.APPLY_COMMANDS):
-        sequence_errors.append("central command apply is missing")
+    generic_plan = any(
+        item.action_type in _GENERIC_ACTION_TYPES for item in plan.actions
+    ) or any(
+        item.strategy in _GENERIC_ASSERTION_STRATEGIES for item in plan.assertions
+    )
+    if generic_plan:
+        if not any(item.phase == AutomationPhase.TEST for item in plan.actions):
+            sequence_errors.append("generic plan has no TEST action")
+        if test_case.restore_required and not any(
+            item.phase == AutomationPhase.RESTORE for item in plan.actions
+        ):
+            sequence_errors.append("generic plan is missing approved restore actions")
+    else:
+        if not has_action(AutomationPhase.PRECONDITION, AutomationActionType.SELECT_DEVICE):
+            sequence_errors.append("target device selection is missing")
+        if data.initial_mode and not has_action(AutomationPhase.PRECONDITION, AutomationActionType.SET_MODE, data.initial_mode):
+            sequence_errors.append("initial mode setup is missing")
+        if data.initial_temperature_c is not None and not has_action(AutomationPhase.PRECONDITION, AutomationActionType.SET_TEMPERATURE, data.initial_temperature_c):
+            sequence_errors.append("initial temperature setup is missing")
+        if not has_action(AutomationPhase.PRECONDITION, AutomationActionType.APPLY_COMMANDS):
+            sequence_errors.append("initial state apply is missing")
+        if data.requested_mode and not has_action(AutomationPhase.TEST, AutomationActionType.SET_MODE, data.requested_mode):
+            sequence_errors.append("requested mode action is missing")
+        if data.requested_temperature_c is not None and not has_action(AutomationPhase.TEST, AutomationActionType.SET_TEMPERATURE, data.requested_temperature_c):
+            sequence_errors.append("requested temperature action is missing")
+        if test_case.control_path == ControlPath.CENTRAL and not has_action(AutomationPhase.TEST, AutomationActionType.APPLY_COMMANDS):
+            sequence_errors.append("central command apply is missing")
     add("CP3-006A", CheckStatus.FAIL if sequence_errors else CheckStatus.PASS, " / ".join(sequence_errors) if sequence_errors else "Action sequence implements the approved setup and test steps.")
 
     restore_actions = [item for item in plan.actions if item.phase == AutomationPhase.RESTORE]
     restore_errors: list[str] = []
     if bool(restore_actions) != test_case.restore_required:
         restore_errors.append("restore action presence does not match restore_required")
-    elif test_case.restore_required:
+    elif test_case.restore_required and not generic_plan:
         if (
             data.initial_mode is not None
             and data.requested_mode is not None
@@ -1905,6 +2372,25 @@ def compile_automation_candidate(
 ) -> str:
     """Compile a constrained plan into deterministic pytest + Playwright code."""
     blocked_request = any(item.observation_layer == ObservationLayer.NOTIFICATION for item in test_case.expected_results)
+    generic_plan = any(
+        item.action_type in _GENERIC_ACTION_TYPES for item in plan.actions
+    ) or any(
+        item.strategy in _GENERIC_ASSERTION_STRATEGIES for item in plan.assertions
+    )
+    ready_selector = "body" if generic_plan else "#device-card-1"
+    restore_actions = [
+        action for action in plan.actions if action.phase == AutomationPhase.RESTORE
+    ]
+    restore_assertions = (
+        [
+            assertion
+            for assertion in plan.assertions
+            if assertion.strategy in _GENERIC_ASSERTION_STRATEGIES
+            and assertion.observation_layer != ObservationLayer.NOTIFICATION
+        ]
+        if generic_plan and restore_actions
+        else []
+    )
     lines = [
         "from __future__ import annotations",
         "",
@@ -1958,9 +2444,33 @@ def compile_automation_candidate(
         "            page.goto(TARGET_URL, wait_until='domcontentloaded')",
         "            page.evaluate('() => localStorage.clear()')",
         "            page.reload(wait_until='domcontentloaded')",
-        "            page.wait_for_selector('#device-card-1', timeout=5000)",
+        f"            page.wait_for_selector({_py_literal(ready_selector)}, timeout=5000)",
     ]
     indent = "            "
+    restore_baselines: list[tuple[str, AutomationAssertion]] = []
+    for index, assertion in enumerate(restore_assertions):
+        variable = f"restore_baseline_{index}"
+        restore_baselines.append((variable, assertion))
+        if assertion.strategy == AssertionStrategy.UI_TEXT_CONTAINS:
+            lines.append(
+                f"{indent}{variable} = page.locator({_py_literal(assertion.selector)}).inner_text()"
+            )
+        elif assertion.strategy == AssertionStrategy.UI_VALUE_EQUALS:
+            lines.append(
+                f"{indent}{variable} = page.locator({_py_literal(assertion.selector)}).input_value()"
+            )
+        elif assertion.strategy == AssertionStrategy.UI_CHECKED_EQUALS:
+            lines.append(
+                f"{indent}{variable} = page.locator({_py_literal(assertion.selector)}).is_checked()"
+            )
+        elif assertion.strategy == AssertionStrategy.UI_ENABLED_EQUALS:
+            lines.append(
+                f"{indent}{variable} = page.locator({_py_literal(assertion.selector)}).is_enabled()"
+            )
+        elif assertion.strategy == AssertionStrategy.INTERNAL_VALUE_EQUALS:
+            lines.append(
+                f"{indent}{variable} = page.evaluate({_py_literal('() => ' + assertion.selector)})"
+            )
     for action in [item for item in plan.actions if item.phase != AutomationPhase.RESTORE]:
         lines.append(f"{indent}# {action.action_id} {action.phase.value}: {_safe_comment(action.source_text)}")
         if action.action_type == AutomationActionType.SELECT_DEVICE:
@@ -1976,6 +2486,20 @@ def compile_automation_candidate(
         elif action.action_type == AutomationActionType.APPLY_COMMANDS:
             lines.append(f"{indent}page.locator({_py_literal(action.selector)}).click()")
             lines.append(f"{indent}page.wait_for_timeout(100)")
+        elif action.action_type == AutomationActionType.CLICK:
+            lines.append(f"{indent}page.locator({_py_literal(action.selector)}).click()")
+        elif action.action_type == AutomationActionType.FILL:
+            lines.append(
+                f"{indent}page.locator({_py_literal(action.selector)}).fill(str({_py_literal(action.value)}))"
+            )
+        elif action.action_type == AutomationActionType.SELECT_OPTION:
+            lines.append(
+                f"{indent}page.locator({_py_literal(action.selector)}).select_option(str({_py_literal(action.value)}))"
+            )
+        elif action.action_type == AutomationActionType.CHECK:
+            lines.append(f"{indent}page.locator({_py_literal(action.selector)}).check()")
+        elif action.action_type == AutomationActionType.UNCHECK:
+            lines.append(f"{indent}page.locator({_py_literal(action.selector)}).uncheck()")
 
     for assertion in plan.assertions:
         marker = f"{indent}# EXPECTED_RESULT: {assertion.result_id}"
@@ -2029,6 +2553,46 @@ def compile_automation_candidate(
                     f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + ': disabled text missing')",
                 ]
             )
+        elif assertion.strategy == AssertionStrategy.UI_TEXT_CONTAINS:
+            lines.extend(
+                [
+                    f"{indent}actual = page.locator({_py_literal(assertion.selector)}).inner_text()",
+                    f"{indent}if {_py_literal(assertion.expected_text)} not in actual:",
+                    f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + f': expected text missing: {{actual}}')",
+                ]
+            )
+        elif assertion.strategy == AssertionStrategy.UI_VALUE_EQUALS:
+            lines.extend(
+                [
+                    f"{indent}actual = page.locator({_py_literal(assertion.selector)}).input_value()",
+                    f"{indent}if actual != str({_py_literal(assertion.expected_value)}):",
+                    f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + f': UI value={{actual}}')",
+                ]
+            )
+        elif assertion.strategy == AssertionStrategy.UI_CHECKED_EQUALS:
+            lines.extend(
+                [
+                    f"{indent}actual = page.locator({_py_literal(assertion.selector)}).is_checked()",
+                    f"{indent}if actual != {_py_literal(assertion.expected_value)}:",
+                    f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + f': checked={{actual}}')",
+                ]
+            )
+        elif assertion.strategy == AssertionStrategy.UI_ENABLED_EQUALS:
+            lines.extend(
+                [
+                    f"{indent}actual = page.locator({_py_literal(assertion.selector)}).is_enabled()",
+                    f"{indent}if actual != {_py_literal(assertion.expected_value)}:",
+                    f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + f': enabled={{actual}}')",
+                ]
+            )
+        elif assertion.strategy == AssertionStrategy.INTERNAL_VALUE_EQUALS:
+            lines.extend(
+                [
+                    f"{indent}actual = page.evaluate({_py_literal('() => ' + assertion.selector)})",
+                    f"{indent}if actual != {_py_literal(assertion.expected_value)}:",
+                    f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + f': internal value={{actual}}')",
+                ]
+            )
 
     lines.extend(
         [
@@ -2038,9 +2602,6 @@ def compile_automation_candidate(
             "        finally:",
         ]
     )
-    restore_actions = [
-        action for action in plan.actions if action.phase == AutomationPhase.RESTORE
-    ]
     if restore_actions:
         lines.extend(
             [
@@ -2056,14 +2617,73 @@ def compile_automation_candidate(
             AutomationActionType.SELECT_DEVICE,
             AutomationActionType.SET_MODE,
             AutomationActionType.APPLY_COMMANDS,
+            AutomationActionType.CLICK,
         }:
             lines.append(
                 f"                page.locator({_py_literal(action.selector)}).click()"
             )
             if action.action_type == AutomationActionType.APPLY_COMMANDS:
                 lines.append("                page.wait_for_timeout(100)")
+        elif action.action_type == AutomationActionType.FILL:
+            lines.append(
+                f"                page.locator({_py_literal(action.selector)}).fill(str({_py_literal(action.value)}))"
+            )
+        elif action.action_type == AutomationActionType.SELECT_OPTION:
+            lines.append(
+                f"                page.locator({_py_literal(action.selector)}).select_option(str({_py_literal(action.value)}))"
+            )
+        elif action.action_type == AutomationActionType.CHECK:
+            lines.append(
+                f"                page.locator({_py_literal(action.selector)}).check()"
+            )
+        elif action.action_type == AutomationActionType.UNCHECK:
+            lines.append(
+                f"                page.locator({_py_literal(action.selector)}).uncheck()"
+            )
         else:
             lines.append(f"                _set_temperature(page, {float(action.value)})")
+    for action in restore_actions:
+        if action.action_type in {
+            AutomationActionType.FILL,
+            AutomationActionType.SELECT_OPTION,
+        }:
+            lines.extend(
+                [
+                    f"                restore_control_value = page.locator({_py_literal(action.selector)}).input_value()",
+                    f"                if restore_control_value != str({_py_literal(action.value)}):",
+                    f"                    restore_mismatches.append({_py_literal(action.selector)} + f' value={{restore_control_value}}')",
+                ]
+            )
+        elif action.action_type in {
+            AutomationActionType.CHECK,
+            AutomationActionType.UNCHECK,
+        }:
+            expected_checked = action.action_type == AutomationActionType.CHECK
+            lines.extend(
+                [
+                    f"                restore_control_checked = page.locator({_py_literal(action.selector)}).is_checked()",
+                    f"                if restore_control_checked != {_py_literal(expected_checked)}:",
+                    f"                    restore_mismatches.append({_py_literal(action.selector)} + f' checked={{restore_control_checked}}')",
+                ]
+            )
+    for variable, assertion in restore_baselines:
+        if assertion.strategy == AssertionStrategy.UI_TEXT_CONTAINS:
+            actual = f"page.locator({_py_literal(assertion.selector)}).inner_text()"
+        elif assertion.strategy == AssertionStrategy.UI_VALUE_EQUALS:
+            actual = f"page.locator({_py_literal(assertion.selector)}).input_value()"
+        elif assertion.strategy == AssertionStrategy.UI_CHECKED_EQUALS:
+            actual = f"page.locator({_py_literal(assertion.selector)}).is_checked()"
+        elif assertion.strategy == AssertionStrategy.UI_ENABLED_EQUALS:
+            actual = f"page.locator({_py_literal(assertion.selector)}).is_enabled()"
+        else:
+            actual = f"page.evaluate({_py_literal('() => ' + assertion.selector)})"
+        lines.extend(
+            [
+                f"                restore_actual = {actual}",
+                f"                if restore_actual != {variable}:",
+                f"                    restore_mismatches.append({_py_literal(assertion.selector)} + f' baseline={{{variable}}}, actual={{restore_actual}}')",
+            ]
+        )
     if restore_actions and test_case.test_data.initial_temperature_c is not None:
         initial_temperature = float(test_case.test_data.initial_temperature_c)
         lines.extend(
@@ -2756,7 +3376,7 @@ def run_agent3(args: argparse.Namespace) -> int:
     _write_json(
         eligibility_file,
         {
-            "contract_version": "3.1",
+            "contract_version": "3.2",
             "run_id": args.run_id,
             "stage": "AGENT_3_ELIGIBILITY",
             "source_agent2_manifest_sha256": _sha256_file(
@@ -2771,9 +3391,9 @@ def run_agent3(args: argparse.Namespace) -> int:
     )
     if not eligibility.model_call_allowed:
         print(f"Run ID: {args.run_id}")
-        print(f"Candidate status: {AutomationCandidateStatus.NOT_AUTOMATABLE.value}")
+        print("자동화 후보 상태: 현재 TC가 자동화 후보로 승인되지 않음")
         print("Agent 3 model call: NOT EXECUTED")
-        print("Missing capabilities: " + ", ".join(eligibility.missing_capabilities))
+        print("자동화 불가 사유: " + ", ".join(eligibility.missing_capabilities))
         print(f"Artifacts: {run_dir}")
         return 2
 
@@ -2783,6 +3403,7 @@ def run_agent3(args: argparse.Namespace) -> int:
             target_html,
             required_selectors=set(eligibility.required_selectors),
             required_harness_keys=set(eligibility.required_harness_keys),
+            discover_generic=eligibility.generic_discovery_required,
         )
         observation_file = run_dir / "agent3_ui_observation.json"
         _write_json(observation_file, observation.model_dump(mode="json"))
@@ -2850,8 +3471,8 @@ def run_agent3(args: argparse.Namespace) -> int:
             _write_json(run_dir / "agent3_trial.json", trial.model_dump(mode="json"))
 
         manifest_payload = {
-            "contract_version": "3.3",
-            "prompt_version": "agent3-3.4",
+            "contract_version": "3.4",
+            "prompt_version": "agent3-3.7",
             "run_id": args.run_id,
             "source_stage": "AGENT_2_CP2",
             "stage": "AGENT_3_CP3_TRIAL",
@@ -2894,13 +3515,557 @@ def run_agent3(args: argparse.Namespace) -> int:
         return 1
 
     print(f"Run ID: {args.run_id}")
-    print(f"Agent 3 model: {response.model}")
-    print(f"Checkpoint 3: {checkpoint.status.value}")
-    print(f"Candidate status: {checkpoint.candidate_status.value}")
+    print(f"Agent 3 모델: {response.model}")
+    print(f"검증 단계 3: {checkpoint.status.value}")
+    print(f"자동화 후보 상태: {checkpoint.candidate_status.value}")
     if trial is not None:
-        print(f"Trial outcome: {trial.outcome.value}")
+        print(f"신규 자동화 후보 시험 결과: {trial.outcome.value}")
     print(f"Artifacts: {run_dir}")
     return _agent3_cli_exit_code(checkpoint, trial)
+
+
+def select_existing_regressions(
+    requirement_ids: list[str] | set[str] | tuple[str, ...],
+) -> list[ExistingRegressionSpec]:
+    """Select only reusable Project1 regressions related to the approved TC."""
+    approved = set(requirement_ids)
+    return [
+        spec
+        for spec in EXISTING_REGRESSION_CATALOG
+        if approved.intersection(spec.requirement_ids)
+    ]
+
+
+def _safe_artifact_child(parent: Path, name: str, label: str) -> Path:
+    if Path(name).name != name:
+        raise ValueError(f"{label} 파일명은 하위 경로를 포함할 수 없습니다.")
+    path = (parent / name).resolve()
+    try:
+        path.relative_to(parent.resolve())
+    except ValueError as exc:
+        raise ValueError(f"{label} 파일이 허용된 폴더 밖을 가리킵니다.") from exc
+    if not path.is_file():
+        raise ValueError(f"{label} 파일을 찾을 수 없습니다: {name}")
+    return path
+
+
+def _last_output_line(stdout: str, stderr: str) -> str | None:
+    lines = [line.strip() for line in (stdout + "\n" + stderr).splitlines() if line.strip()]
+    return lines[-1][-1000:] if lines else None
+
+
+def _exception_type_from_output(stdout: str, stderr: str) -> str | None:
+    combined = stdout + "\n" + stderr
+    match = re.search(
+        r"\b(AssertionError|SimulatorTimeoutError|TimeoutError|PlaywrightError|Error)\b",
+        combined,
+    )
+    return match.group(1) if match else None
+
+
+def _candidate_execution_record(
+    run_dir: Path,
+    run_id: str,
+    target_html: Path,
+) -> tuple[NeutralExecutionResult, ProductTestCaseCandidate, dict[str, Any]]:
+    _, _, _, design, _, agent2_manifest = _load_verified_agent2_run(run_dir, run_id)
+    agent2_manifest_file = run_dir / "agent2_manifest.json"
+    agent3_manifest_file = run_dir / "agent3_manifest.json"
+    agent3_manifest = _read_json_payload(agent3_manifest_file)
+    if agent3_manifest.get("run_id") != run_id:
+        raise ValueError("Agent 3 Manifest의 Run ID가 현재 Run과 다릅니다.")
+    if agent3_manifest.get("stage") != "AGENT_3_CP3_TRIAL":
+        raise ValueError("Agent 3 Manifest 단계가 신규 자동화 후보 시험이 아닙니다.")
+    if agent3_manifest.get("status") != CheckStatus.PASS.value:
+        raise ValueError("Agent 3가 PASS 상태가 아니어서 실행 결과를 인계할 수 없습니다.")
+    _verify_sha256(
+        agent2_manifest_file,
+        agent3_manifest.get("source_agent2_manifest_sha256"),
+        "Agent 2 Manifest",
+    )
+    if agent3_manifest.get("source_agent2_design_sha256") != agent2_manifest.get(
+        "agent2_design_sha256"
+    ):
+        raise ValueError("Agent 3가 참조한 Agent 2 설계 해시가 현재 Manifest와 다릅니다.")
+
+    tc_id = agent3_manifest.get("tc_id")
+    test_case = next((item for item in design.test_cases if item.tc_id == tc_id), None)
+    if test_case is None:
+        raise ValueError("Agent 3 선택 TC가 현재 Agent 2 설계에 없습니다.")
+
+    artifact_hashes = (
+        ("agent3_eligibility.json", "eligibility_sha256", "Agent 3 Eligibility"),
+        ("agent3_ui_observation.json", "ui_observation_sha256", "UI Observation"),
+        ("agent3_automation_plan.json", "automation_plan_sha256", "Agent 3 계획"),
+        ("checkpoint3.json", "checkpoint3_sha256", "Checkpoint 3"),
+        ("agent3_trial.json", "trial_sha256", "Agent 3 시험 결과"),
+    )
+    for filename, key, label in artifact_hashes:
+        _verify_sha256(run_dir / filename, agent3_manifest.get(key), label)
+
+    checkpoint3 = _read_json_model(run_dir / "checkpoint3.json", Checkpoint3Result)
+    if checkpoint3.status != CheckStatus.PASS:
+        raise ValueError("Checkpoint 3가 PASS가 아니어서 실행 결과를 인계할 수 없습니다.")
+    trial = _read_json_model(run_dir / "agent3_trial.json", Agent3TrialResult)
+    if trial.outcome not in {
+        TrialOutcome.PASS,
+        TrialOutcome.PRODUCT_MISMATCH_CANDIDATE,
+    }:
+        raise ValueError("신규 자동화 후보 시험이 신뢰 가능한 제품 관찰로 끝나지 않았습니다.")
+    if not trial.evidence_complete:
+        raise ValueError("신규 자동화 후보 시험 증거가 완전하지 않습니다.")
+
+    target_html = target_html.resolve()
+    if not target_html.is_file():
+        raise ValueError("검증 대상 HTML을 찾을 수 없습니다.")
+    target_sha256 = _sha256_file(target_html)
+    if target_html.name != agent3_manifest.get("target_file"):
+        raise ValueError("검증 대상 파일명이 Agent 3 Manifest와 다릅니다.")
+    if target_sha256 != agent3_manifest.get("target_sha256"):
+        raise ValueError("검증 대상 HTML이 신규 자동화 후보 시험 후 변경됐습니다.")
+    if agent3_manifest.get("project1_modified") is not False:
+        raise ValueError("Agent 3 실행에서 Project1 불변을 확인하지 못했습니다.")
+
+    candidate_name = agent3_manifest.get("candidate_file")
+    if not isinstance(candidate_name, str):
+        raise ValueError("Agent 3 Candidate 파일명이 없습니다.")
+    candidate_file = _safe_artifact_child(
+        run_dir / "candidates", candidate_name, "Agent 3 Candidate"
+    )
+    _verify_sha256(
+        candidate_file,
+        agent3_manifest.get("candidate_sha256"),
+        "Agent 3 Candidate",
+    )
+
+    evidence_dir = run_dir / "evidence" / test_case.tc_id
+    evidence_names = [trial.stdout_file, trial.stderr_file]
+    if trial.screenshot_file:
+        evidence_names.append(trial.screenshot_file)
+    if trial.trace_file:
+        evidence_names.append(trial.trace_file)
+    evidence_files = [
+        _safe_artifact_child(evidence_dir, name, "신규 후보 시험 증거")
+        for name in evidence_names
+    ]
+    evidence_paths = [path.relative_to(run_dir).as_posix() for path in evidence_files]
+    evidence_hashes = {
+        relative: _sha256_file(path)
+        for relative, path in zip(evidence_paths, evidence_files, strict=True)
+    }
+    stdout = (evidence_dir / trial.stdout_file).read_text(encoding="utf-8")
+    stderr = (evidence_dir / trial.stderr_file).read_text(encoding="utf-8")
+    status = (
+        NeutralExecutionStatus.PASSED
+        if trial.outcome == TrialOutcome.PASS
+        else NeutralExecutionStatus.ASSERTION_FAILED
+    )
+    return (
+        NeutralExecutionResult(
+            test_id=test_case.tc_id,
+            source=ExecutionSource.NEW_AUTOMATION_CANDIDATE,
+            requirement_ids=test_case.requirement_ids,
+            status=status,
+            source_outcome=trial.outcome.value,
+            exit_code=trial.exit_code,
+            duration_ms=trial.duration_ms,
+            test_file=candidate_file.name,
+            test_sha256=_sha256_file(candidate_file),
+            target_sha256=target_sha256,
+            reused=True,
+            stdout_file=(evidence_dir / trial.stdout_file).relative_to(run_dir).as_posix(),
+            stderr_file=(evidence_dir / trial.stderr_file).relative_to(run_dir).as_posix(),
+            evidence_files=evidence_paths,
+            evidence_sha256=evidence_hashes,
+            evidence_complete=True,
+            exception_type=(
+                "AssertionError"
+                if trial.outcome == TrialOutcome.PRODUCT_MISMATCH_CANDIDATE
+                else None
+            ),
+            raw_message=_last_output_line(stdout, stderr),
+        ),
+        test_case,
+        agent3_manifest,
+    )
+
+
+def _current_candidate_execution_record(
+    run_dir: Path,
+    run_id: str,
+    target_html: Path,
+    test_case: ProductTestCaseCandidate,
+    stored_result: NeutralExecutionResult,
+    *,
+    timeout_seconds: int,
+) -> NeutralExecutionResult:
+    """Reuse an identical candidate or recompile and retrial without a model call."""
+    plan = _read_json_model(
+        run_dir / "agent3_automation_plan.json", Agent3AutomationPlan
+    )
+    current_code = compile_automation_candidate(run_id, test_case, plan)
+    stored_candidate_file = run_dir / "candidates" / Path(stored_result.test_file).name
+    if (
+        stored_candidate_file.is_file()
+        and _sha256_file(stored_candidate_file) == stored_result.test_sha256
+        and stored_candidate_file.read_text(encoding="utf-8") == current_code
+    ):
+        return stored_result
+
+    candidate_dir = run_dir / "validation_candidates"
+    candidate_dir.mkdir(parents=True, exist_ok=False)
+    candidate_file = candidate_dir / f"test_{test_case.tc_id.lower().replace('-', '_')}.py"
+    _write_text_atomic(candidate_file, current_code)
+    evidence_dir = run_dir / "validation_evidence" / test_case.tc_id
+    trial = run_candidate_trial(
+        candidate_file,
+        target_html,
+        evidence_dir,
+        timeout_seconds=timeout_seconds,
+    )
+    trial_file = run_dir / "validation_candidate_trial.json"
+    _write_json(trial_file, trial.model_dump(mode="json"))
+    if trial.outcome not in {
+        TrialOutcome.PASS,
+        TrialOutcome.PRODUCT_MISMATCH_CANDIDATE,
+    }:
+        raise ValueError("현재 컴파일러의 신규 자동화 후보 시험이 신뢰 가능한 관찰로 끝나지 않았습니다.")
+    if not trial.evidence_complete:
+        raise ValueError("현재 컴파일러의 신규 자동화 후보 시험 증거가 완전하지 않습니다.")
+
+    evidence_names = [trial.stdout_file, trial.stderr_file]
+    if trial.screenshot_file:
+        evidence_names.append(trial.screenshot_file)
+    if trial.trace_file:
+        evidence_names.append(trial.trace_file)
+    evidence_files = [
+        _safe_artifact_child(evidence_dir, name, "현재 Candidate 시험 증거")
+        for name in evidence_names
+    ]
+    evidence_paths = [path.relative_to(run_dir).as_posix() for path in evidence_files]
+    stdout = (evidence_dir / trial.stdout_file).read_text(encoding="utf-8")
+    stderr = (evidence_dir / trial.stderr_file).read_text(encoding="utf-8")
+    return NeutralExecutionResult(
+        test_id=test_case.tc_id,
+        source=ExecutionSource.NEW_AUTOMATION_CANDIDATE,
+        requirement_ids=test_case.requirement_ids,
+        status=(
+            NeutralExecutionStatus.PASSED
+            if trial.outcome == TrialOutcome.PASS
+            else NeutralExecutionStatus.ASSERTION_FAILED
+        ),
+        source_outcome=trial.outcome.value,
+        exit_code=trial.exit_code,
+        duration_ms=trial.duration_ms,
+        test_file=candidate_file.relative_to(run_dir).as_posix(),
+        test_sha256=_sha256_file(candidate_file),
+        target_sha256=_sha256_file(target_html),
+        reused=False,
+        stdout_file=(evidence_dir / trial.stdout_file).relative_to(run_dir).as_posix(),
+        stderr_file=(evidence_dir / trial.stderr_file).relative_to(run_dir).as_posix(),
+        evidence_files=evidence_paths,
+        evidence_sha256={
+            relative: _sha256_file(path)
+            for relative, path in zip(evidence_paths, evidence_files, strict=True)
+        },
+        evidence_complete=True,
+        exception_type=(
+            "AssertionError"
+            if trial.outcome == TrialOutcome.PRODUCT_MISMATCH_CANDIDATE
+            else None
+        ),
+        raw_message=_last_output_line(stdout, stderr),
+    )
+
+
+_BASELINE_VIEWPORT_CONFTEST = """import pytest
+
+@pytest.fixture(scope=\"session\")
+def browser_context_args(browser_context_args):
+    return {**browser_context_args, \"viewport\": {\"width\": 1600, \"height\": 900}}
+"""
+
+
+def run_existing_regression(
+    spec: ExistingRegressionSpec,
+    baseline_test_file: Path,
+    target_html: Path,
+    evidence_root: Path,
+    *,
+    timeout_seconds: int,
+    source: ExecutionSource = ExecutionSource.EXISTING_REGRESSION,
+) -> NeutralExecutionResult:
+    """Run one allowlisted Project1 test from a copied, neutral workspace."""
+    baseline_test_file = baseline_test_file.resolve()
+    target_html = target_html.resolve()
+    evidence_dir = evidence_root / spec.tc_id
+    evidence_dir.mkdir(parents=True, exist_ok=False)
+    stdout_file = evidence_dir / "stdout.txt"
+    stderr_file = evidence_dir / "stderr.txt"
+    started = time.monotonic()
+    exit_code: int | None = None
+    stdout = ""
+    stderr = ""
+    status = NeutralExecutionStatus.EXECUTION_ERROR
+    source_outcome = "PYTEST_ERROR"
+
+    def redact(value: str, *paths: Path) -> str:
+        redacted = value
+        for path in paths:
+            resolved = path.resolve()
+            redacted = redacted.replace(str(resolved), "<LOCAL_PATH>")
+            redacted = redacted.replace(resolved.as_uri(), "<LOCAL_FILE_URL>")
+        return redacted
+
+    with tempfile.TemporaryDirectory(prefix="qa-regression-") as temp_name:
+        temp_root = Path(temp_name)
+        tests_dir = temp_root / "tests"
+        tests_dir.mkdir()
+        isolated_test = tests_dir / "test_controller.py"
+        isolated_target = temp_root / "virtual-controller.html"
+        shutil.copy2(baseline_test_file, isolated_test)
+        shutil.copy2(target_html, isolated_target)
+        _write_text_atomic(tests_dir / "conftest.py", _BASELINE_VIEWPORT_CONFTEST)
+        env = {
+            name: os.environ[name]
+            for name in _AGENT3_TRIAL_ENV_ALLOWLIST
+            if name in os.environ
+        }
+        env["PYTHONUTF8"] = "0"
+        env["PYTHONIOENCODING"] = "utf-8"
+        try:
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pytest",
+                    f"tests/test_controller.py::{spec.test_function}",
+                    "-q",
+                    "--browser",
+                    "chromium",
+                    "-p",
+                    "no:cacheprovider",
+                ],
+                cwd=temp_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout_seconds,
+                shell=False,
+            )
+            exit_code = completed.returncode
+            stdout = redact(
+                completed.stdout[-20000:],
+                temp_root,
+                baseline_test_file,
+                target_html,
+                evidence_dir,
+                Path.home(),
+            )
+            stderr = redact(
+                completed.stderr[-20000:],
+                temp_root,
+                baseline_test_file,
+                target_html,
+                evidence_dir,
+                Path.home(),
+            )
+            combined = stdout + "\n" + stderr
+            if exit_code == 0 and re.search(r"\bskipped\b", combined, re.IGNORECASE):
+                status = NeutralExecutionStatus.SKIPPED
+                source_outcome = "PYTEST_SKIPPED"
+            elif exit_code == 0:
+                status = NeutralExecutionStatus.PASSED
+                source_outcome = "PYTEST_PASSED"
+            elif "AssertionError" in combined:
+                status = NeutralExecutionStatus.ASSERTION_FAILED
+                source_outcome = "PYTEST_FAILED"
+            else:
+                status = NeutralExecutionStatus.EXECUTION_ERROR
+                source_outcome = "PYTEST_ERROR"
+        except subprocess.TimeoutExpired as exc:
+            stdout = redact(
+                (exc.stdout or "")[-20000:] if isinstance(exc.stdout, str) else "",
+                temp_root,
+                baseline_test_file,
+                target_html,
+                evidence_dir,
+                Path.home(),
+            )
+            stderr = redact(
+                (exc.stderr or "")[-20000:] if isinstance(exc.stderr, str) else "",
+                temp_root,
+                baseline_test_file,
+                target_html,
+                evidence_dir,
+                Path.home(),
+            )
+            status = NeutralExecutionStatus.TIMEOUT
+            source_outcome = "PYTEST_TIMEOUT"
+
+    _write_text_atomic(stdout_file, stdout)
+    _write_text_atomic(stderr_file, stderr)
+    evidence_paths = [
+        stdout_file.relative_to(evidence_root.parent).as_posix(),
+        stderr_file.relative_to(evidence_root.parent).as_posix(),
+    ]
+    return NeutralExecutionResult(
+        test_id=spec.tc_id,
+        source=source,
+        requirement_ids=list(spec.requirement_ids),
+        status=status,
+        source_outcome=source_outcome,
+        exit_code=exit_code,
+        duration_ms=int((time.monotonic() - started) * 1000),
+        test_file=baseline_test_file.name,
+        test_sha256=_sha256_file(baseline_test_file),
+        target_sha256=_sha256_file(target_html),
+        reused=False,
+        stdout_file=evidence_paths[0],
+        stderr_file=evidence_paths[1],
+        evidence_files=evidence_paths,
+        evidence_sha256={
+            evidence_paths[0]: _sha256_file(stdout_file),
+            evidence_paths[1]: _sha256_file(stderr_file),
+        },
+        evidence_complete=stdout_file.is_file() and stderr_file.is_file(),
+        exception_type=_exception_type_from_output(stdout, stderr),
+        raw_message=_last_output_line(stdout, stderr),
+    )
+
+
+def run_validation_execution(args: argparse.Namespace) -> int:
+    """Reuse the trusted new-candidate trial and run related baseline regressions."""
+    run_dir = _resolve_run_dir(Path(args.runs_root), args.run_id)
+    target_html = Path(args.target_html).resolve()
+    baseline_test_file = (
+        Path(args.baseline_tests).resolve()
+        if args.baseline_tests
+        else target_html.parent / "tests" / "test_controller.py"
+    )
+    if not target_html.is_file():
+        raise ValueError("검증 대상 HTML을 찾을 수 없습니다.")
+    if not baseline_test_file.is_file():
+        raise ValueError("Project1 기존 테스트 파일을 찾을 수 없습니다.")
+    final_outputs = (
+        run_dir / "validation_execution.json",
+        run_dir / "validation_manifest.json",
+        run_dir / "validation_error.json",
+        run_dir / "validation_evidence",
+        run_dir / "validation_candidates",
+        run_dir / "validation_candidate_trial.json",
+    )
+    if any(path.exists() for path in final_outputs):
+        raise ValueError("이 Run에는 이미 검증 실행 산출물이 있습니다. 기존 증거를 덮어쓸 수 없습니다.")
+
+    target_before = _sha256_file(target_html)
+    baseline_before = _sha256_file(baseline_test_file)
+    try:
+        stored_candidate_result, test_case, _ = _candidate_execution_record(
+            run_dir, args.run_id, target_html
+        )
+        candidate_result = _current_candidate_execution_record(
+            run_dir,
+            args.run_id,
+            target_html,
+            test_case,
+            stored_candidate_result,
+            timeout_seconds=args.timeout,
+        )
+        selected = select_existing_regressions(test_case.requirement_ids)
+        evidence_root = run_dir / "validation_evidence"
+        precheck = run_existing_regression(
+            ENVIRONMENT_PRECHECK,
+            baseline_test_file,
+            target_html,
+            evidence_root,
+            timeout_seconds=args.timeout,
+            source=ExecutionSource.ENVIRONMENT_PRECHECK,
+        )
+        regression_results: list[NeutralExecutionResult] = []
+        blocked_reason: str | None = None
+        if precheck.status == NeutralExecutionStatus.PASSED:
+            for spec in selected:
+                regression_results.append(
+                    run_existing_regression(
+                        spec,
+                        baseline_test_file,
+                        target_html,
+                        evidence_root,
+                        timeout_seconds=args.timeout,
+                    )
+                )
+            stage_status = ValidationStageStatus.COMPLETED
+        else:
+            stage_status = ValidationStageStatus.BLOCKED
+            blocked_reason = "ENVIRONMENT_PRECHECK_NOT_PASSED"
+
+        if _sha256_file(target_html) != target_before:
+            raise RuntimeError("검증 실행 중 Project1 대상 HTML이 변경됐습니다.")
+        if _sha256_file(baseline_test_file) != baseline_before:
+            raise RuntimeError("검증 실행 중 Project1 기존 테스트 파일이 변경됐습니다.")
+
+        bundle = ValidationExecutionBundle(
+            run_id=args.run_id,
+            status=stage_status,
+            candidate_result=candidate_result,
+            environment_precheck=precheck,
+            selected_regression_ids=[item.tc_id for item in selected],
+            regression_results=regression_results,
+            blocked_reason=blocked_reason,
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+        execution_file = run_dir / "validation_execution.json"
+        _write_json(execution_file, bundle.model_dump(mode="json"))
+        agent3_manifest_file = run_dir / "agent3_manifest.json"
+        _write_json(
+            run_dir / "validation_manifest.json",
+            {
+                "contract_version": "1.0",
+                "run_id": args.run_id,
+                "stage": "VALIDATION_EXECUTION",
+                "status": stage_status.value,
+                "source_agent3_manifest_sha256": _sha256_file(agent3_manifest_file),
+                "source_agent3_trial_sha256": _sha256_file(run_dir / "agent3_trial.json"),
+                "candidate_reused": candidate_result.reused,
+                "validation_candidate_sha256": candidate_result.test_sha256,
+                "validation_candidate_trial_sha256": (
+                    _sha256_file(run_dir / "validation_candidate_trial.json")
+                    if (run_dir / "validation_candidate_trial.json").is_file()
+                    else None
+                ),
+                "baseline_test_file": baseline_test_file.name,
+                "baseline_test_sha256": baseline_before,
+                "target_file": target_html.name,
+                "target_sha256": target_before,
+                "validation_execution_sha256": _sha256_file(execution_file),
+                "project1_modified": False,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+    except Exception as exc:
+        _write_json(
+            run_dir / "validation_error.json",
+            {
+                "run_id": args.run_id,
+                "stage": "VALIDATION_EXECUTION",
+                "error_type": type(exc).__name__,
+                "message": str(exc),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        raise
+
+    print(f"Run ID: {args.run_id}")
+    print(f"Validation execution: {stage_status.value}")
+    print(f"Candidate result: {candidate_result.test_id}")
+    print(f"Candidate trial reused: {candidate_result.reused}")
+    print(f"Related regressions selected: {len(selected)}")
+    print(f"Related regressions executed: {len(regression_results)}")
+    print(f"Artifacts: {run_dir}")
+    return 0 if stage_status == ValidationStageStatus.COMPLETED else 2
 
 
 def _write_orchestrator_manifest(
@@ -2964,7 +4129,7 @@ def _orchestrator_status(exit_code: int) -> str:
 def _select_agent3_tc(
     design: Agent2TestDesign,
 ) -> tuple[str | None, list[dict[str, Any]]]:
-    """Choose a current-Run TC by capability, never by a previous Run's ID."""
+    """Choose a current-Run TC by automation support, never by a previous ID."""
     candidates: list[tuple[ProductTestCaseCandidate, Agent3EligibilityResult]] = []
     summaries: list[dict[str, Any]] = []
     for test_case in design.test_cases:
@@ -2978,6 +4143,9 @@ def _select_agent3_tc(
                 "target_role": test_case.target_role,
                 "status": eligibility.status.value,
                 "missing_capabilities": eligibility.missing_capabilities,
+                "generic_discovery_required": (
+                    eligibility.generic_discovery_required
+                ),
             }
         )
         if eligibility.model_call_allowed:
@@ -2988,9 +4156,10 @@ def _select_agent3_tc(
     def priority(
         item: tuple[ProductTestCaseCandidate, Agent3EligibilityResult],
     ) -> tuple[Any, ...]:
-        test_case = item[0]
+        test_case, eligibility = item
         layers = {result.observation_layer for result in test_case.expected_results}
         return (
+            eligibility.status != Agent3EligibilityStatus.ELIGIBLE,
             test_case.purpose != TcPurpose.CHANGE_VALIDATION,
             ObservationLayer.NOTIFICATION not in layers,
             test_case.restore_required,
@@ -3201,6 +4370,29 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--model", default=None, help="OpenAI model ID shared by Agent 1→3")
     pipeline.add_argument("--timeout", type=int, default=30, help="Isolated trial timeout in seconds")
     pipeline.set_defaults(handler=run_pipeline)
+
+    execute = subparsers.add_parser(
+        "execute",
+        help="신규 자동화 후보 시험 결과를 재사용하고 관련 기존 회귀 TC 실행",
+    )
+    execute.add_argument("--run-id", required=True, help="Agent 3 시험이 완료된 Run ID")
+    execute.add_argument(
+        "--target-html",
+        required=True,
+        help="읽기 전용 Project1 virtual-controller.html 경로",
+    )
+    execute.add_argument(
+        "--baseline-tests",
+        default=None,
+        help="Project1 tests/test_controller.py 경로. 생략 시 대상 HTML 옆 tests 폴더 사용",
+    )
+    execute.add_argument(
+        "--runs-root", default=str(DEFAULT_RUNS_ROOT), help="실행 결과 저장 폴더"
+    )
+    execute.add_argument(
+        "--timeout", type=int, default=60, help="기존 TC 한 건당 제한 시간(초)"
+    )
+    execute.set_defaults(handler=run_validation_execution)
     return parser
 
 

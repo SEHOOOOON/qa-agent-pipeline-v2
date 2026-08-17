@@ -119,7 +119,7 @@
 | GAP-TEMP-001 | 화면 정책은 16°C 하한이지만 중앙·현장 온도 코드가 15°C까지 허용 | SRS와 구현 불일치 | 정상 기대값은 16°C로 유지하고 결함으로 기록 |
 | GAP-BATCH-001 | TC-INT-002가 선택 3대만 확인하고 비대상 13대 불변을 검증하지 않음 | REQ-BATCH-002 증거 부족 | 보완 전 회귀 세트 제외 |
 | GAP-LOCAL-001 | 오프라인 현장 조작 로그는 작동을 표현하지만 실제 상태는 변경되지 않음 | 메시지와 실제 동작 불일치 | 제품 기대 결과 확정 보류 |
-| GAP-GATE-001 | TC-ENV-000 실패가 후속 테스트를 자동 차단하지 않음 | 사전 점검을 실행 Gate로 주장할 수 없음 | V2 Orchestrator에서 별도 구현 전까지 사례로만 표현 |
+| GAP-GATE-001 | Project1 자체에서는 TC-ENV-000 실패가 후속 테스트를 자동 차단하지 않음 | Project1 단독 실행을 Gate로 주장할 수 없음 | V2 `execute`가 복사 Workspace에서 TC-ENV-000을 먼저 실행하고 미통과 시 관련 회귀를 차단 |
 | GAP-EVIDENCE-001 | 기존 결과의 evidence_path가 빈 값 | Screenshot·Trace 완전성 근거 없음 | 존재하는 증거만 보고 |
 | GAP-CLASS-001 | conftest가 예외 유형을 의미 라벨 failure_reason으로 먼저 작성하고 Agent 4가 이를 다시 분류 | 독립 분류 정확도 평가 불가 | V2는 중립 신호와 Gold Label을 분리 |
 | GAP-CP4-001 | Project1 Agent 4는 검증 차단 여부 확인 전에 요약·포트폴리오 동기화를 수행 | Fail-closed 보장 부족 | V2에서는 검증 통과 뒤에만 후속 쓰기 |

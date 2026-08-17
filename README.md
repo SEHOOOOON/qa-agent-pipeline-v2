@@ -2,7 +2,7 @@
 
 운영 중인 가상 중앙제어 시스템에 **MODIFIED 변경 요청 1건**이 들어왔을 때, 실제 모델이 변경점을 분석하고 제품 기능 TC와 실제 UI 근거 기반 Playwright 자동화 후보를 만드는 흐름을 구현하는 MVP입니다.
 
-> 현재 저장소는 **Agent 1·CP1 → Agent 2·CP2 → Agent 3·CP3·격리 시험과 최소 Orchestrator 구현 단계**입니다. Agent 1·2 v2.2 Live Run에서 TC 후보 12건과 CP2 PASS를 확인했습니다. 현재 Prompt `agent3-3.4` 공개 Live Run은 첫 계획에서 CP3 PASS했고, Candidate Trial이 ER-005·006·007의 `PRODUCT_MISMATCH_CANDIDATE`를 기록했습니다. 한 명령 Orchestrator는 세 중단 경로와 `RUN-20260815-092107-0C075E`의 A1→A3 정상 완료·Trial PASS를 확인했으며 코드 회귀 테스트 71건이 통과합니다. Agent 4와 최종 보고 연결은 아직 구현하지 않았습니다.
+> 현재 저장소는 **Agent 1·CP1 → Agent 2·CP2 → Agent 3·CP3·신규 자동화 후보 시험 → 변경 검증·관련 기존 회귀 실행 단계**입니다. 기존 온도 제어는 필요한 UI만 확인하고, 처음 보는 기능은 버튼·입력·선택·체크·상태 표시 같은 범용 UI 구조를 동적으로 조사합니다. AI는 실제로 관찰한 요소로 실행 가능한 코드 의도를 만들며, 범용 조작으로 부족할 때는 자동화 지원 범위 확장 필요를 기록합니다. 코드 회귀 테스트 83건과 범용 선택·적용 Live 시험이 통과했으며 Agent 4와 최종 보고 연결은 아직 구현하지 않았습니다.
 
 ## 해결하려는 문제
 
@@ -20,14 +20,15 @@ V2는 다음 세 연결만 우선 증명합니다.
 |---|---|
 | 가상 중앙제어기 | 프로젝트 1에 구현됨 |
 | 기존 Playwright 제품 기능 TC | 7건 후보 중 6건 재사용 가능, TC-INT-002 보완 필요 |
-| 환경 사전 점검 | TC-ENV-000 존재, 후속 차단 Gate는 미구현 |
-| 분류·보고 | 프로젝트 1의 규칙 엔진 존재, V2 입력 계약 연동 필요 |
+| 환경 사전 점검 | V2 `execute`가 TC-ENV-000을 먼저 실행하고 미통과 시 기존 회귀를 차단 |
+| 변경 검증·관련 기존 회귀 | 현재 컴파일러 후보를 재검증·필요 시 무API 재시험하고 Requirement ID로 기존 회귀 6건 중 관련 TC만 선택·격리 실행 |
+| 분류·보고 | 프로젝트 1의 규칙 엔진 존재, V2 중립 실행 결과 계약은 구현, Agent 4 분석·보고 연동 필요 |
 | Product SRS | 실제 화면·코드 기준 초기 제품 기준 문서 작성 |
 | Agent 1 Live 모델 호출·CP1 | 구조화 분석, CP1 10개 규칙, CONTINUE·PAUSE·BLOCKED 인계, 실패 시 최대 1회 재작업 구현 |
 | Agent 2 Live 모델 호출 | CP1 PASS+CONTINUE Run만 입력, 변경 요청·고정 SRS·Agent 1 분석으로 제품 TC 후보 생성, 실패 시 최대 1회 재작업 구현 |
-| Agent 3 코드 후보 생성 | CP2 PASS TC의 지원 Capability 사전 판정, 필요한 UI만 조사, 모델의 구조화 실행 계획, 결정론적 Playwright 코드 컴파일 구현 |
+| Agent 3 코드 후보 생성 | 기존 기능은 필요한 UI만 확인하고 신규 기능은 범용 UI를 동적 조사. AI가 관찰 근거 기반 실행 계획을 만들고 검증된 컴파일러가 Playwright 코드로 변환 |
 | CP1·CP2·CP3·Run Orchestrator | 단계별 CLI·SHA-256 인계·CP3·격리 시험과 A1→A3 순차 실행·현재 Run의 적격 TC 자동 선택·중단·요약 Manifest 구현. 세 중단 Live와 정상 완료 Live 확인 |
-| 조건부 검토·정식 QA 자산 등록 승인·최종 보고 | 미구현 |
+| Agent 4·조건부 검토·정식 QA 자산 등록 승인·최종 보고 | 미구현 |
 
 ## MVP 프로세스
 
@@ -62,6 +63,7 @@ V2는 다음 세 연결만 우선 증명합니다.
 
 - **제품 기능 TC**: Agent 2가 만드는 조건·행동·기대 결과
 - **자동화 코드 후보**: Agent 3가 Checkpoint를 통과한 TC를 Playwright Python으로 구현한 검증 전 코드
+- **신규 자동화 후보 시험(Candidate Trial)**: Agent 3가 만든 자동화 코드 후보를 실제 화면에서 한 번 실행해 코드 동작·제품 관찰·복원·증거 생성을 확인하는 절차. 기존 관련 회귀 TC 실행과는 구분합니다.
 - **초기 제품 기준 문서**: 화면 정책과 확인 가능한 제품 근거로 정리한 기대 동작으로, 현재 코드와 다르면 감사 문서에 구현 불일치를 남기는 변경 전 출발점
 - **기존 기준 자동화 코드**: 프로젝트 1에서 사람이 작성했고 기존 회귀 검증에 재사용하는 Playwright 코드
 - **제품 기능 회귀 후보**: 기존 7건 중 파이프라인 검증용 고정 사례와 근거 부족 TC를 제외한 테스트
@@ -70,6 +72,11 @@ V2는 다음 세 연결만 우선 증명합니다.
 - **Checkpoint 통과**: 사람이 승인했다는 뜻이 아니라, 미리 정한 자동 검사 규칙을 충족했다는 뜻
 - **조건부 검토**: 자동 검사만으로 의미를 확정할 수 없는 REVIEW 항목이 생겼을 때만 사람이 확인하는 절차
 - **정식 QA 자산 등록**: 검증이 끝난 SRS·TC·Playwright 코드를 다음 변경에서도 재사용할 공식 버전으로 저장하는 작업
+- **자동화 지원 범위**: 코드가 현재 수행할 수 있는 범용 조작·관찰 목록. 내부 JSON의 기존 필드명 `capabilities`는 호환을 위해 유지합니다.
+- **자동화 가능성 사전 확인**: TC가 기존 기능의 빠른 확인 대상인지, 처음 보는 UI를 동적으로 조사해야 하는지, 자동화 후보가 아닌지를 나누는 단계. 내부 파일명은 `agent3_eligibility.json`입니다.
+- **검증 조건(Assertion)**: 실제 관찰값과 TC 기대 결과를 비교하는 코드입니다.
+- **UI 확인 목록**: 실제 화면에서 찾은 Selector·표시·활성 상태·역할 정보입니다. 기존 문서의 UI Inventory와 같은 뜻입니다.
+- **임시 시험 공간**: 원본과 분리해 신규 코드를 실행하는 폴더입니다. 컨테이너나 OS 보안 격리는 아닙니다.
 
 ## MVP 포함
 
@@ -106,7 +113,7 @@ V2는 다음 세 연결만 우선 증명합니다.
 - Agent 4는 규칙 기반 분석기로 표시합니다.
 - 기존 13건의 8 Pass·3 Fail·2 Skipped는 제품 회귀 성공률이 아니라 분류 데모 Dataset입니다.
 - Register는 실제 프로토콜 레지스터가 아니라 HTML 시뮬레이터입니다.
-- TC-ENV-000은 현재 사전 점검 사례이며 후속 차단 Gate가 아닙니다.
+- Project1 원본의 TC-ENV-000은 일반 테스트지만 V2 `execute` 단계에서는 이를 별도 사전 점검 Gate로 실행합니다.
 - 정식 QA 자산 등록 승인 전 기존 SRS·TC·자동화를 덮어쓰지 않습니다.
 - Project1은 Fixture 기반 Workflow Prototype이며, Agent 1·2 Live 생성과 Agent 3 코드 생성은 V2에서 보완합니다.
 - 제품 SRS와 QA 하네스·기존 구현 감사 내용을 별도 문서로 관리합니다.
@@ -119,7 +126,7 @@ V2는 다음 세 연결만 우선 증명합니다.
 4. 실제 화면 확인 자료·Agent 3·CP3·격리 시험 — 구현
 5. Agent 1→2→3 최소 Orchestrator — 구현, 중단·정상 완료 Live 검증 완료
 6. 조건부 HUMAN_REVIEW 분기와 재개 기록
-7. 변경 검증·기존 회귀 후보 실행
+7. 변경 검증·기존 회귀 후보 실행 — 구현, 기존 정상 Run에서 무API 실행 확인
 8. Agent 4 입력 정합화·최종 보고
 9. 정식 QA 자산 등록 승인 기록
 10. 서로 다른 변경 요청 2건으로 End-to-End 재검증
@@ -132,7 +139,7 @@ qa-agent-pipeline-v2/
 ├─ examples/
 │  └─ results/                  # API 키를 제외한 공개 실행 결과
 ├─ src/
-│  └─ qa_pipeline_v2.py         # 데이터 계약·Agent 1/2/3·CP1/2/3·CLI·격리 시험
+│  └─ qa_pipeline_v2.py         # 데이터 계약·Agent 1/2/3·CP1/2/3·CLI·후보/회귀 격리 실행
 ├─ tests/
 │  └─ test_pipeline.py          # SRS·Agent·Checkpoint·실제 브라우저 격리 시험 회귀 테스트
 ├─ runs/                        # 로컬 원본 실행 결과(Git 제외)
@@ -144,9 +151,9 @@ qa-agent-pipeline-v2/
 
 v2.2 Agent 1·2 공개 Live 산출물은 [examples/results/agent1-agent2-auto-temperature](examples/results/agent1-agent2-auto-temperature/)에서 확인할 수 있습니다. Agent 2의 1차 반려와 재작업 결과도 함께 보존했습니다.
 
-현재 `agent3-3.4`까지 연결한 공개 Live 산출물은 [examples/results/agent1-agent2-agent3-auto-temperature](examples/results/agent1-agent2-agent3-auto-temperature/)에서 확인할 수 있습니다. Agent 3 계획은 첫 시도에 CP3 PASS했고 input 2,533·output 594·total 3,127 tokens를 사용했습니다. Candidate Trial은 UI `17.0°C`, 내부 `setTemp=17`, 성공 적용 Toast를 관찰해 ER-005·006·007을 `PRODUCT_MISMATCH_CANDIDATE`로 기록했습니다. 모든 인계 SHA-256과 Project1 대상 해시가 일치했고, 공개 텍스트와 Trace에서 비밀정보·로컬 경로 패턴은 탐지되지 않았습니다.
+현재 `agent3-3.4`까지 연결한 공개 Live 산출물은 [examples/results/agent1-agent2-agent3-auto-temperature](examples/results/agent1-agent2-agent3-auto-temperature/)에서 확인할 수 있습니다. Agent 3 계획은 첫 시도에 CP3 PASS했고 input 2,533·output 594·total 3,127 tokens를 사용했습니다. 신규 자동화 후보 시험은 UI `17.0°C`, 내부 `setTemp=17`, 성공 적용 Toast를 관찰해 ER-005·006·007을 `PRODUCT_MISMATCH_CANDIDATE`로 기록했습니다. 모든 인계 SHA-256과 Project1 대상 해시가 일치했고, 공개 텍스트와 Trace에서 비밀정보·로컬 경로 패턴은 탐지되지 않았습니다.
 
-2026-08-15 Agent 3 진단 Live Run에서는 `TC-CAND-003`의 첫 계획이 잘못된 온도 Action Selector로 CP3 FAIL, 두 번째 계획이 CP3 PASS가 된 뒤 Candidate Trial이 `PRODUCT_MISMATCH_CANDIDATE`를 반환했습니다. Project1의 기존 16~30°C 구현에서 17°C가 UI와 내부 `setTemp`에 반영돼 변경 요청의 18°C 하한 기대와 달랐고, Toast는 표시됐습니다. 이는 제품 결함 확정이 아니라 기대 결과 차이 후보입니다. 두 모델 호출의 실제 누적 사용량은 input 5,494·output 2,162·total 7,656 tokens였습니다. 이 Run은 연결 실패 오류 파일, 보완 전 `expected_text`, 마지막 시도만 집계한 Manifest가 함께 있어 공개하지 않습니다.
+2026-08-15 Agent 3 진단 Live Run에서는 `TC-CAND-003`의 첫 계획이 잘못된 온도 Action Selector로 CP3 FAIL, 두 번째 계획이 CP3 PASS가 된 뒤 신규 자동화 후보 시험이 `PRODUCT_MISMATCH_CANDIDATE`를 반환했습니다. Project1의 기존 16~30°C 구현에서 17°C가 UI와 내부 `setTemp`에 반영돼 변경 요청의 18°C 하한 기대와 달랐고, Toast는 표시됐습니다. 이는 제품 결함 확정이 아니라 기대 결과 차이 후보입니다. 두 모델 호출의 실제 누적 사용량은 input 5,494·output 2,162·total 7,656 tokens였습니다. 이 Run은 연결 실패 오류 파일, 보완 전 `expected_text`, 마지막 시도만 집계한 Manifest가 함께 있어 공개하지 않습니다.
 
 첫 보완 뒤 두 번째 진단 Live Run도 최종 CP3 PASS와 동일한 제품 불일치 후보를 재현했습니다. Action Selector와 `expected_text`는 바로 준수했지만 1차 계획이 내부 상태 대상을 `window.__vccs.devices[1].setTemp`로 확장해 CP3에서 차단됐고, 1회 재작업을 포함해 input 5,648·output 1,580·total 7,228 tokens를 사용했습니다. 이 결과를 반영해 Assertion 전략별 Selector를 고정하고, Trace ZIP의 사용자 홈·대상 파일·Trial Workspace 경로도 저장 전에 치환합니다. 두 진단 Run은 보완 전 증거이므로 공개하지 않습니다.
 
@@ -166,10 +173,15 @@ python -m qa_pipeline_v2 agent3 --run-id "Agent 2가 완료된 RUN-..." --tc-id 
 
 # 현재 CP2 결과에서 실행 가능한 TC를 자동 선택해 Agent 1→3을 한 번에 실행
 python -m qa_pipeline_v2 pipeline --request "구체 변경 요청 JSON 경로" --target-html "프로젝트1 virtual-controller.html 경로"
+
+# 완료된 Agent 3 Run의 현재 후보와 관련 기존 회귀를 실행(API 미호출)
+python -m qa_pipeline_v2 execute --run-id "Agent 3가 완료된 RUN-..." --target-html "프로젝트1 virtual-controller.html 경로"
 ~~~
 
 기본 모델은 `gpt-5.6-terra`입니다. 다른 모델을 시험할 때만 `--model` 또는 `OPENAI_MODEL`을 사용합니다.
-`pipeline` 명령은 대상 HTML 존재를 모델 호출 전에 확인하고 Agent 1→2→3을 같은 Run ID로 순차 실행합니다. 각 단계의 비정상 종료 시 후속 Agent를 호출하지 않으며 `orchestrator_manifest.json`에 단계별 종료 코드와 기존 Manifest SHA-256을 기록합니다. `--tc-id`를 생략하면 **현재 Run의** CP2 후보를 Agent 3 Capability로 평가해 CHANGE_VALIDATION·NOTIFICATION·무복원·BOUNDARY 순으로 적격 후보를 결정론적으로 선택하고 `agent3_selection.json`에 전체 후보 판정을 남깁니다. 이전 Run의 임시 TC ID를 재사용하지 않습니다.
+`pipeline` 명령은 대상 HTML 존재를 모델 호출 전에 확인하고 Agent 1→2→3을 같은 Run ID로 순차 실행합니다. 각 단계의 비정상 종료 시 후속 Agent를 호출하지 않으며 `orchestrator_manifest.json`에 단계별 종료 코드와 기존 Manifest SHA-256을 기록합니다. `--tc-id`를 생략하면 **현재 Run의** CP2 후보를 자동화 가능성 사전 확인으로 평가합니다. 기존 지원 범위에 맞는 후보를 먼저 선택하고, 없으면 범용 UI 동적 조사가 필요한 후보를 선택합니다. 이전 Run의 임시 TC ID는 재사용하지 않습니다.
+
+`execute`는 모델을 호출하지 않습니다. Agent 3 인계·해시·증거를 다시 확인하고, 저장 후보가 현재 결정론적 컴파일러 출력과 같을 때만 기존 시험 결과를 재사용합니다. 다르면 `validation_candidates/`에서 현재 후보를 다시 시험합니다. 이후 복사한 Project1 HTML·테스트와 중립 `conftest.py`를 임시 폴더에 두고 TC-ENV-000을 먼저 실행하며, 통과한 경우에만 Requirement ID로 선택한 기존 회귀를 실행합니다. Project1 원본 파일은 수정하지 않습니다.
 
 이 명령은 여러 실제 모델 호출을 연속 수행하므로 API 승인과 비용 확인 후 사용합니다. `examples/change_request.example.json`은 `after_value`가 자리표시자이므로 실제 Live에서 CP1 `PASS + PAUSE`가 되었고 Agent 2·3은 호출되지 않았습니다. 구체 요청 Run `RUN-20260815-063800-3B624C`은 Agent 1·2까지 PASS했지만 당시 지정한 `TC-CAND-003`이 새 Run에서는 LOCAL TC여서 Agent 3 API 전에 `NOT_AUTOMATABLE`로 중단됐습니다. Agent 1 1회·Agent 2 2회의 실제 누적 사용량은 total 34,814 tokens였고 Project1은 변경되지 않았습니다. 이 결과를 반영해 Agent 2 Prompt `agent2-2.3`은 CENTRAL 변경 검증에 단일 장비 자동화 후보를 최소 한 건 포함하도록 명시하고, Orchestrator는 현재 Run에서 적격 TC를 자동 선택합니다.
 
@@ -177,16 +189,19 @@ python -m qa_pipeline_v2 pipeline --request "구체 변경 요청 JSON 경로" -
 
 Agent 2 재작업에는 실패 규칙만 보내던 방식도 보완했습니다. 현재는 CP2 전체 `rule_id + PASS/FAIL + message`를 전달하고 PASS 규칙과 근거를 보존해 새 FAIL을 만들지 않도록 명시합니다. 재작업 횟수는 최대 1회로 유지합니다.
 
-네 번째 Orchestrator `RUN-20260815-092107-0C075E`은 Agent 1·2·3과 CP1·2·3을 모두 통과하고 AUTO가 `TC-CAND-001`을 선택해 Candidate Trial `PASS`로 완료됐습니다. Agent 1 total 5,607, Agent 2 두 시도 누적 27,752, Agent 3 total 3,194로 전체 36,553 tokens를 사용했습니다. 모든 단계·선택·시험 Manifest SHA-256과 Project1 대상 해시가 일치했고, 텍스트·Trace에서 비밀정보와 로컬 경로 패턴은 탐지되지 않았습니다. 후속 감사에서 복원 명령만 실행하고 초기 온도를 재확인하지 않던 틈을 발견해 CP3가 초기값 복원 Action을 검사하고 컴파일러가 복원 후 UI·내부 `setTemp`를 확인하도록 보완했으며, 동일 계획의 무API 로컬 재시험도 PASS했습니다.
+네 번째 Orchestrator `RUN-20260815-092107-0C075E`은 Agent 1·2·3과 CP1·2·3을 모두 통과하고 AUTO가 `TC-CAND-001`을 선택해 신규 자동화 후보 시험 `PASS`로 완료됐습니다. Agent 1 total 5,607, Agent 2 두 시도 누적 27,752, Agent 3 total 3,194로 전체 36,553 tokens를 사용했습니다. 모든 단계·선택·시험 Manifest SHA-256과 Project1 대상 해시가 일치했고, 텍스트·Trace에서 비밀정보와 로컬 경로 패턴은 탐지되지 않았습니다. 후속 감사에서 복원 명령만 실행하고 초기 온도를 재확인하지 않던 틈을 발견해 CP3가 초기값 복원 Action을 검사하고 컴파일러가 복원 후 UI·내부 `setTemp`를 확인하도록 보완했으며, 동일 계획의 무API 로컬 재시험도 PASS했습니다.
+
+2026-08-17 범용 전원 선택·적용 진단은 기존 SRS의 `REQ-POWER-001`과 일회성 개발 UI를 사용해 Agent 1→2→3 실제 연결을 실행했습니다. Agent 1은 첫 시도 PASS, Agent 2는 중복·추적 실패를 1회 재작업해 PASS했습니다. Agent 3 Live에서 비 HVAC 상태값 오인, 한국어 조사 의미 연결, 알림 문장 전체 오사용과 범용 복원 미확인을 찾아 `agent3-3.7`까지 보완했습니다. 최종 호출은 첫 계획에서 CP3 10개 규칙, 결정론적 Python, 브라우저 시험과 선택값·화면 상태·내부 `status`의 STOP 복원을 모두 PASS했고 4,391 tokens를 사용했습니다. 연결 오류와 진단 재시도를 포함한 실제 모델 누적은 44,334 tokens입니다. 이 Run은 로컬 진단 증거이며 아직 `examples/results/`에 공개 복사하지 않았습니다.
+
 Agent 3 모델 호출에는 시스템 지침, 선택한 CP2 TC, 관련 SRS 행, 대상 파일명·SHA-256, 페이지 제목, **해당 TC에 필요한** Selector별 tag·text·visible·enabled·action_hint와 하네스 키만 전송됩니다. API 키, 로컬 절대경로, HTML 원문, Screenshot과 Trace는 보내지 않습니다. 먼저 `--preview-only`로 `agent3_model_input_preview.json`을 확인해야 합니다. Preview는 API 키와 모델 Client를 요구하지 않으며 실제 API를 호출하지 않습니다.
 
-현재 Agent 3 MVP는 실제로 조사한 **CENTRAL 제어 패널의 모드·온도·적용과 온도 UI·내부 `setTemp`·Toast·온도 비활성 표시 Capability**만 지원합니다. LOCAL 또는 현재 Assertion으로 표현할 수 없는 TC는 UI 조사와 API 호출 전에 `agent3_eligibility.json`에 `NOT_AUTOMATABLE`과 누락 Capability를 기록합니다. 원본과 분리된 Candidate Workspace 시험의 `PRODUCT_MISMATCH_DETECTED`는 자동화가 기대와 다른 제품 상태를 관찰했다는 후보 판정이며, 그 자체로 최종 제품 결함 확정을 뜻하지 않습니다.
+현재 Agent 3는 기존 온도 제어에는 검증된 전용 조작을 재사용하고, 처음 보는 기능에는 `CLICK`, `FILL`, `SELECT_OPTION`, `CHECK`, `UNCHECK`와 범용 화면·내부 상태 검증을 사용합니다. 실제 UI 확인 목록에 있는 요소만 AI 계획에서 사용할 수 있고, TC 단계와 요소 명칭의 연결 및 Expected Result와 기대값 근거를 CP3가 검사합니다. 드래그·Canvas처럼 새로운 기술이 필요하면 억지 코드를 만들지 않고 `AUTOMATION_SUPPORT_EXTENSION_REQUIRED`로 사람 검토에 넘깁니다.
 
 Agent 3 CLI는 시험 `PASS`와 `PRODUCT_MISMATCH_CANDIDATE`만 정상 완료(`exit code 0`)로 반환합니다. `NOT_AUTOMATABLE`, `AUTOMATION_ERROR`, `ENVIRONMENT_ERROR`, `TIMEOUT`, CP3 실패와 시험 미실행은 제품 판정에 사용할 수 없으므로 실패 종료(`exit code 2`)합니다. CP3 계획 위반은 최대 한 번 재작성하지만 시험 실행의 기술 오류 자동 수정은 아직 구현하지 않았습니다.
 
-현재 컴파일러가 사용하지 않는 `expected_text`는 `null`만 허용하며 CP3가 비지원 값을 차단합니다. Action과 Assertion 전략별 Selector도 컴파일러와 같은 계약으로 검사합니다. 복원이 필요한 TC는 CP3가 변경된 모드·온도의 초기값 복원과 CENTRAL 적용 Action을 검사하고, 컴파일러가 복원 후 UI·내부 `setTemp`를 재확인합니다. 모델 호출 실패로 `agent3_error.json`이 생성된 Run은 종료된 시도로 간주하므로 재실행에는 새 Candidate Workspace가 필요합니다. Trial 자식 Python은 Windows 시작 호환성을 유지한 채 stdout·stderr를 UTF-8로 고정하고, Trace ZIP은 알려진 로컬 경로의 문자열·URI·JSON escape 표현을 원자적으로 치환합니다.
+기존 온도 전용 검증은 CP3가 행동·검증 전략별 Selector를 계속 고정합니다. 신규 범용 검증은 실제 UI 확인 목록의 Selector와 읽기 전용 내부 상태 경로만 사용합니다. 모델 호출 실패로 `agent3_error.json`이 생성된 Run은 종료된 시도로 간주하므로 재실행에는 새 임시 시험 공간이 필요합니다. 시험 자식 Python은 Windows 시작 호환성을 유지한 채 stdout·stderr를 UTF-8로 고정하고, Trace ZIP은 알려진 로컬 경로 표현을 원자적으로 치환합니다.
 
-현재 UI 조사는 선택 TC의 지원 Capability에서 계산한 Selector의 존재·표시·활성 상태와 필요한 `window.__vccs` 인터페이스만 확인하는 Inventory 단계입니다. 무관한 모드 Selector 누락은 해당 TC를 차단하지 않습니다. 제어 동작과 기대 결과는 이후 Trial에서 실제로 검증합니다. Candidate Workspace는 임시 폴더·제한 환경변수·별도 subprocess를 사용하지만, 네트워크 차단이나 컨테이너·OS 권한 분리를 제공하는 보안 Sandbox는 아닙니다.
+현재 UI 조사는 두 경로입니다. 이미 아는 기능은 선택 TC에 필요한 요소만 좁게 확인하고, 처음 보는 기능은 안정적인 ID·`data-testid`·접근성 이름을 가진 범용 조작·상태 요소를 최대 120개까지 한 번 동적으로 확인합니다. 전체 HTML은 모델에 보내지 않습니다. 실제 제어 동작과 기대 결과는 이후 신규 자동화 후보 시험에서 검증합니다. 임시 시험 공간은 제한 환경변수·별도 subprocess를 사용하지만 네트워크 차단이나 컨테이너·OS 권한 분리를 제공하는 보안 Sandbox는 아닙니다.
 
 
 결과는 Git에서 제외되는 `runs/RUN-.../`에 저장됩니다.
@@ -198,15 +213,18 @@ Agent 3 CLI는 시험 `PASS`와 `PRODUCT_MISMATCH_CANDIDATE`만 정상 완료(`e
 - `agent2_test_design.json`: Agent 2가 만든 제품 기능 TC 후보
 - `checkpoint2.json`: CP2 규칙별 판정
 - `agent2_manifest.json`: Agent 2 상태·누적/마지막 시도 토큰과 앞 단계·Agent 2·CP2 SHA-256 체인
-- `agent3_selection.json`: Orchestrator 자동 선택 시 현재 CP2 후보별 Eligibility와 선택 결과
-- `agent3_eligibility.json`: 지원 Capability, 누락 Capability, 필요한 Selector·하네스와 모델 호출 허용 여부
+- `agent3_selection.json`: 전체 실행 조정기의 현재 CP2 후보별 자동화 가능성 사전 확인과 선택 결과
+- `agent3_eligibility.json`: 자동화 가능성 사전 확인 결과. 기존 빠른 경로·범용 UI 동적 조사 필요·자동화 후보 아님을 구분
 - `agent3_model_input_preview.json`: 실제 API 전송 예정 데이터와 제외 항목
 - `agent3_ui_observation.json`: 파일명·SHA-256과 실제 확인 Selector·하네스 목록
-- `agent3_automation_plan.json`: 모델이 만든 제한된 행동·Assertion 계획
+- `agent3_automation_plan.json`: 모델이 만든 실행 가능한 코드 의도. 범용 조작으로 부족하면 자동화 지원 범위 확장 사유만 기록
 - `candidates/test_<tc-id>.py`: 허용 목록 컴파일러가 만든 Playwright 후보
 - `checkpoint3.json`: 계획·코드 추적성과 금지 패턴 검사 결과
 - `agent3_trial.json`: 격리 시험 결과와 증거 완전성
-- `agent3_manifest.json`: Agent 2 입력 체인·Eligibility·UI·계획·코드·시험 SHA-256, 모든 계획 시도의 누적 토큰과 마지막 시도 토큰
+- `agent3_manifest.json`: Agent 2 입력 체인·자동화 가능성 사전 확인·UI·코드 의도·코드·시험 SHA-256과 모델 사용량
+- `validation_candidate_trial.json`: 현재 컴파일러 출력이 달라졌을 때 수행한 무API 후보 재시험 결과
+- `validation_execution.json`: 신규 후보·환경 사전 점검·선택된 기존 회귀의 중립 실행 결과
+- `validation_manifest.json`: Agent 3 입력, 현재 후보·재시험, Project1 기준 파일과 실행 결과 SHA-256
 
 예시 JSON의 변경 내용은 연결 확인용이며 대표 요구사항으로 고정하지 않습니다.
 

@@ -2,7 +2,7 @@
 
 ## 1. 목적과 상태
 
-V2 Agent 1~3, 기존 규칙 기반 Agent 4와 Checkpoint의 최소 계약을 정의합니다. **Agent 1·CP1과 Agent 2·CP2는 v2.2 Live Run에서 최종 PASS와 TC 후보 12건을 확인했습니다. 현재 `agent3-3.4` 공개 Live Run은 첫 계획 CP3 PASS와 ER-005·006·007의 제품 불일치 후보 Trial을 확인했습니다. 최소 Orchestrator는 세 중단 경로와 `RUN-20260815-092107-0C075E`의 CP1·2·3·Trial PASS 정상 완료 경로를 확인했고 전체 자동 테스트 71건을 통과했습니다. Agent 4와 최종 보고는 미구현입니다.**
+V2 Agent 1~3, 기존 규칙 기반 Agent 4와 검증 단계의 최소 계약을 정의합니다. **기존 정상 전체 실행과 후속 회귀는 PASS했습니다. Agent 3 `agent3-3.7`은 기존 기능의 좁은 UI 확인과 처음 보는 기능의 범용 UI 동적 조사를 분리하고, AI가 관찰 근거 기반 코드 의도 또는 자동화 지원 범위 확장 필요를 반환합니다. 범용 선택·적용 실제 API 시험과 자동 테스트 83건을 통과했습니다. Agent 4 분석과 최종 보고는 미구현입니다.**
 
 다음 단계에는 화면 문구나 자유 형식 Markdown이 아니라 Schema 검증을 통과한 JSON만 전달합니다.
 
@@ -36,9 +36,11 @@ Agent 1~3 현재 구현은 별도 Artifact ID 대신 파일 이름과 SHA-256으
 - 저장된 CP1과 재계산 결과가 다르거나 `PASS + CONTINUE`가 아니면 Agent 2를 실행하지 않습니다.
 - 모델명·Prompt 버전·토큰 사용량은 Manifest에 기록하되 API 키와 인증 값은 저장하지 않습니다.
 - 계약 2.3부터 Agent 1·2 Manifest의 `usage`는 모든 모델 시도의 누적 토큰이고 `final_attempt_usage`는 마지막 시도 토큰입니다. 이전 공개 계약 2.2 산출물은 변경하지 않습니다.
-- Agent 3는 Eligibility·UI·계획·코드·Checkpoint·시험 파일의 SHA-256을 Manifest에 연결합니다. 다수 후보를 동시에 처리할 때 `artifact_id`와 `input_artifact_ids` 도입을 검토합니다.
+- Agent 3는 자동화 가능성 사전 확인·UI 확인 목록·코드 의도·코드·검증 단계·시험 파일의 SHA-256을 Manifest에 연결합니다. 내부 JSON 필드명 `eligibility`, `capabilities`는 기존 산출물 호환을 위해 유지합니다.
+- 검증 실행은 Agent 3 해시·증거와 현재 컴파일러 출력을 다시 확인합니다. 저장 후보와 현재 출력이 같을 때만 기존 시험 결과를 재사용하고, 다르면 모델 호출 없이 현재 후보를 다시 시험합니다.
+- TC-ENV-000이 `PASSED`일 때만 Requirement ID로 선택한 재사용 가능 기존 회귀를 실행합니다. Project1 테스트와 HTML은 임시 Workspace로 복사하며 의미 라벨이 있는 기존 `conftest.py`는 사용하지 않습니다.
 - 최소 Orchestrator는 대상 HTML 존재를 Agent 1 호출 전에 확인하고 같은 Run ID로 Agent 1→2→3을 실행합니다. 단계 종료 코드가 0이 아니면 즉시 중단하며 `orchestrator_manifest.json`에 완료 단계·중단 단계·각 단계 Manifest SHA-256을 기록합니다. `PRODUCT_MISMATCH_CANDIDATE`는 유효한 QA 관찰이므로 Agent 3·Orchestrator 정상 완료로 취급합니다.
-- `pipeline --tc-id AUTO`가 기본값입니다. CP2가 확정된 뒤 현재 Run의 모든 TC를 Agent 3 Eligibility로 평가하고 CHANGE_VALIDATION, NOTIFICATION, 복원 불필요, BOUNDARY, TC ID 순으로 적격 후보를 선택합니다. 전체 판정은 `agent3_selection.json`에 저장하며 적격 후보가 없으면 Agent 3 모델을 호출하지 않습니다. 명시적 `--tc-id`는 같은 Run의 CP2 결과를 확인한 경우에만 사용합니다.
+- `pipeline --tc-id AUTO`가 기본값입니다. CP2가 확정된 뒤 현재 Run의 모든 TC를 자동화 가능성 사전 확인으로 평가합니다. 기존에 검증된 빠른 경로 후보를 범용 UI 동적 조사 후보보다 먼저 선택하고, 그 안에서 CHANGE_VALIDATION·NOTIFICATION·복원 불필요·BOUNDARY·TC ID 순서를 사용합니다.
 - Agent 2 Prompt `agent2-2.3`은 CENTRAL 변경 검증에 `PRIMARY_TEST_DEVICE` 자동화 후보를 최소 한 건 포함하도록 요청합니다. 이는 LOCAL·복수 장비 제품 TC를 제거하지 않고 현재 Agent 3 MVP와 연결할 단일 후보를 추가하기 위한 지침입니다.
 
 ## 3. 상태와 판정
@@ -219,10 +221,10 @@ CP2 PASS는 구조·ID·명시적 추적 규칙 통과를 뜻합니다. 자연�
 
 ### 입력
 
-- CP2 `PASS`인 자동화 후보 TC 한 건과 결정론적 Capability 사전 판정
+- CP2 `PASS`인 자동화 후보 TC 한 건과 자동화 가능성 사전 확인
 - 해당 TC의 Requirement ID와 연결된 Product SRS 행
 - 사전 판정을 통과한 TC에 필요한 실제 Project1 Selector·`window.__vccs` 목록
-- 허용 행동·Assertion·컴파일·격리 정책
+- 허용 행동·검증 조건·컴파일·임시 시험 정책
 
 ### 출력 최소형
 
@@ -253,19 +255,22 @@ CP2 PASS는 구조·ID·명시적 추적 규칙 통과를 뜻합니다. 자연�
 }
 ~~~
 
-이 JSON은 Python 코드가 아니라 자동화 **계획**입니다. 허용 목록 컴파일러가 CP3 PASS 계획을 `candidates/test_<tc-id>.py`로 변환하고, 코드의 `# EXPECTED_RESULT: <result_id>` 표식으로 TC 기대 결과를 Assertion에 연결합니다.
+이 JSON은 Python 코드가 아니라 AI가 만든 실행 가능한 **코드 의도**입니다. Selector 선택, 조작 순서, 검증 조건과 복원 계획에는 AI가 참여하고, 검증된 컴파일러가 CP3 PASS 결과를 `candidates/test_<tc-id>.py`로 변환합니다. 코드의 `# EXPECTED_RESULT: <result_id>` 표식으로 TC 기대 결과를 검증 조건에 연결합니다.
 
 ### 권한과 금지
 
 - 모델은 TC의 사전조건·행동·기대 결과를 제한된 계획으로만 옮깁니다.
 - 모델은 Python, 새 테스트 목적, 경계값, Selector와 Requirement를 만들 수 없습니다.
-- Action Selector와 Assertion 전략별 Selector는 컴파일러의 허용 대상에 고정하며 `window.__vccs` 인터페이스에 인덱스·속성·표현식을 덧붙일 수 없습니다. 현재 컴파일러가 비교하지 않는 `expected_text`는 `null`이어야 합니다.
-- 컴파일러는 허용된 행동·Assertion 코드 조각만 조합합니다.
-- Assertion 삭제·약화, `assert True`, 무조건 skip, 예외 전체 무시를 금지합니다.
+- 기존 온도 기능은 행동·검증 전략별 고정 대상을 유지합니다. 신규 기능은 실제 UI 확인 목록의 안정적인 Selector와 실제로 발견한 읽기 전용 내부 상태 경로만 사용할 수 있습니다.
+- 범용 UI 동작은 `CLICK`, `FILL`, `SELECT_OPTION`, `CHECK`, `UNCHECK`이며 요소의 tag·role·input type·활성 상태가 동작과 맞아야 합니다. 범용 검증은 텍스트·입력값·체크·활성 상태와 읽기 전용 내부 값 비교입니다.
+- 동작의 `source_text`는 승인 TC의 사전조건·단계·복원 원문과 정확히 같아야 하고, 요소 이름과 TC 원문 사이에 텍스트 연결이 있어야 합니다. 기대값도 해당 Expected Result에서 근거를 찾을 수 있어야 합니다.
+- 검증 조건 삭제·약화, `assert True`, 무조건 skip, 예외 전체 무시를 금지합니다.
 - 외부 URL, Shell, 임의 파일 삭제와 원본 프로젝트 수정을 금지합니다.
 - CP3 계획 실패만 최대 1회 재작성하며 시험 실행의 기술 오류 자동 수정은 아직 구현하지 않았습니다.
 
-지원 Gate는 UI 조사와 모델 호출 전에 제어 경로·대상 역할·모드·행동·기대 결과를 현재 자동화 Capability로 표현할 수 있는지 판정합니다. 미지원 TC는 `agent3_eligibility.json`에 `NOT_AUTOMATABLE`, 누락 Capability와 `model_call_allowed=false`를 기록하고 CLI 코드 `2`로 종료합니다.
+자동화 가능성 사전 확인은 `ELIGIBLE`, `DISCOVERY_REQUIRED`, `NOT_AUTOMATABLE`을 구분합니다. 기존 기능은 `ELIGIBLE`로 필요한 요소만 확인하고, 처음 보는 기능은 `DISCOVERY_REQUIRED`로 안정적인 ID·`data-testid`·접근성 이름이 있는 범용 UI와 읽기 가능한 내부 상태를 동적으로 확인합니다. CP2가 자동화 후보로 승인하지 않은 TC만 모델 호출 전에 `NOT_AUTOMATABLE`로 종료합니다.
+
+동적 확인 뒤에도 드래그·Canvas처럼 현재 범용 조작으로 구현할 수 없으면 Agent 3는 `planning_status=AUTOMATION_SUPPORT_EXTENSION_REQUIRED`, 구체적인 `extension_reasons`, 빈 actions/assertions를 반환합니다. CP3는 이를 REVIEW로 기록하고 코드를 생성하지 않습니다.
 
 UI 조사기는 사전 판정을 통과한 TC에 필요한 허용 Selector와 `window.__vccs` 키만 실제 로컬 화면에서 확인합니다. 존재·가시성·활성 상태를 기록하며 Project1 파일을 수정하지 않습니다. 관련 없는 Selector 누락은 선택 TC를 차단하지 않습니다.
 
@@ -273,20 +278,20 @@ Agent 3 모델에는 시스템 지침, 선택 TC, 관련 SRS 행과 **TC 관련 
 
 MVP의 실제 실행기는 Python Playwright입니다. 생성·검증을 마친 코드는 파일로 저장하고 이후 재실행에서는 모델을 다시 호출하지 않습니다. Playwright MCP는 현재 필수 의존성이 아니며 향후 조사 보조 수단으로만 봅니다.
 
-## 9. Checkpoint 3과 격리 시험
+## 9. Checkpoint 3과 신규 자동화 후보 시험(Candidate Trial)
 
 ### 자동 검사
 
 - CP3-001: 승인 TC ID와 MVP 대상 장비 ID 보존
-- CP3-002: Action ID 유일성, 실제 확인 Selector, 행동 유형·Selector·선택 장비 값 일치
+- CP3-002: Action ID 유일성, 실제 확인 Selector, 행동 유형·요소 역할·선택 장비 값 일치, 범용 요소와 TC 단계의 텍스트 연결
 - CP3-003: 모든 Expected Result와 Assertion의 정확한 1:1 매핑
-- CP3-004: UI·내부 상태·알림 관찰 계층과 Assertion 전략·대상·기대 수치 근거 보존, 차단 기대 결과의 `TOAST_BLOCKING` 강제, 비지원 `expected_text` 차단
+- CP3-004: UI·내부 상태·알림 관찰 계층과 검증 전략·대상·기대값 근거 보존, 한국어 조사·어미를 허용한 범용 UI/내부 상태와 Expected Result의 핵심어 연결, 알림 자연어 문장 전체의 UI 문구 오사용 차단, 차단 기대 결과의 `TOAST_BLOCKING` 강제
 - CP3-005: TC에 없는 모드·온도 값 추가 금지
-- CP3-006·006A: PRECONDITION→TEST→RESTORE 순서, 변경된 모드·온도의 초기값 복원과 CENTRAL 적용 계약. 컴파일러는 복원 후 UI 온도와 내부 `setTemp`를 재확인
+- CP3-006·006A: PRECONDITION→TEST→RESTORE 순서, 변경된 값의 초기 상태 복원과 CENTRAL 적용 계약. 컴파일러는 기존 온도와 범용 UI·내부 상태의 복원 전후 값을 재확인
 - CP3-007: Python 구문과 테스트 함수
 - CP3-008: 허용 import, Shell·파일 변경·동적 실행·skip·assert True 금지
 - CP3-009: 모든 Expected Result의 코드 Assertion 표식
-- LOCAL 또는 현재 행동·Assertion Capability로 표현할 수 없는 TC는 UI 조사·API 호출 전에 `NOT_AUTOMATABLE`로 종료
+- 현재 범용 조작으로 표현할 수 없는 TC는 지원 범위 확장 필요 REVIEW로 종료하고 코드를 생성하지 않음
 
 ### 실제 확인
 
@@ -296,12 +301,12 @@ MVP의 실제 실행기는 Python Playwright입니다. 생성·검증을 마친 
 - stdout·stderr의 로컬 절대경로와 `file://` 주소를 마스킹합니다.
 - 자식 Python의 locale 기반 시작은 유지하고 stdout·stderr 인코딩만 UTF-8로 고정합니다.
 - Trace ZIP의 사용자 홈·대상 파일·Trial Workspace·증거 폴더 경로는 문자열·URI·JSON escape 형태까지 치환한 뒤 Manifest 해시를 계산합니다.
-- `agent3_error.json`이 생성된 실패 시도는 종료 상태이며, 후속 재시도는 새 Candidate Workspace에서 실행합니다.
+- `agent3_error.json`이 생성된 실패 시도는 종료 상태이며, 후속 재시도는 새 임시 시험 공간에서 실행합니다.
 - Manifest `usage`는 모든 계획 시도의 누적 토큰, `final_attempt_usage`는 마지막 시도 토큰입니다.
 - 기대 불일치는 `PRODUCT_MISMATCH_CANDIDATE`, 코드 오류는 `AUTOMATION_ERROR`, 브라우저·페이지 문제는 `ENVIRONMENT_ERROR`, 시간 초과는 `TIMEOUT`으로 분리합니다.
 - 일반 Snapshot/Restore와 결함 주입 검증은 MVP 완료 조건이 아닙니다.
 
-후보 상태는 `READY_FOR_EXECUTION`, `PRODUCT_MISMATCH_DETECTED`, `REVISION_REQUIRED`, `TRIAL_FAILED`, `NOT_AUTOMATABLE`, `BLOCKED` 중 하나입니다. Capability 사전 판정 실패는 `NOT_AUTOMATABLE`, CP3 PASS와 시험 PASS는 `READY_FOR_EXECUTION`, CP3 PASS와 제품 기대 불일치는 `PRODUCT_MISMATCH_DETECTED`입니다.
+후보 상태에는 `AUTOMATION_SUPPORT_EXTENSION_REQUIRED`가 추가됩니다. 이는 제품 실패나 TC 실패가 아니라 새로운 자동화 기술을 검토해야 한다는 뜻입니다. CP3 PASS와 시험 PASS는 `READY_FOR_EXECUTION`, CP3 PASS와 제품 기대 불일치는 `PRODUCT_MISMATCH_DETECTED`입니다.
 
 `PRODUCT_MISMATCH_DETECTED`는 자동화 후보가 제품 기대 불일치를 재현했다는 뜻이며 최종 제품 결함 확정은 아닙니다. CP3 PASS는 코드가 TC를 충실히 구현했음을 뜻하지만 제품 동작의 정당성을 보장하지 않습니다.
 
@@ -333,10 +338,12 @@ Agent 4는 생성형 모델이 아니라 규칙 기반 Python 분석기입니다
 
 ### 입력
 
-- 현재 Run의 변경 검증·기존 회귀 결과
-- TC·Requirement 연결
-- exit code, phase, exception type, raw message
-- UI·내부 상태 Assertion 결과
+- `validation_execution.json`의 단일 `run_id`
+- `candidate_result`, `environment_precheck`, `regression_results`
+- 각 결과의 `source`, `status`, `source_outcome`, Requirement ID, exit code, exception type, message와 증거 경로
+- `validation_manifest.json`의 Agent 3·후보·Project1 기준·실행 결과 SHA-256
+
+현재 중립 상태는 `PASSED`, `ASSERTION_FAILED`, `EXECUTION_ERROR`, `TIMEOUT`, `SKIPPED`입니다. 출처는 `NEW_AUTOMATION_CANDIDATE`, `ENVIRONMENT_PRECHECK`, `EXISTING_REGRESSION`으로 분리합니다. Agent 4는 이 입력을 분석하며 테스트를 다시 실행하지 않습니다.
 
 ### 출력
 

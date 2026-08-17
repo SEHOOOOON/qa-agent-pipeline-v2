@@ -1,6 +1,6 @@
 # QA Agent Pipeline 의사결정 기록
 
-최종 갱신: 2026-08-15
+최종 갱신: 2026-08-17
 사용자: 오세훈
 
 ## 1. 이 문서의 목적
@@ -87,16 +87,26 @@ Agent 2 TC
 → Agent 3 모델이 제한된 행동·Assertion 계획 생성
 → 허용 목록 컴파일러가 Playwright Python 생성
 → CP3 정적 검사
-→ Candidate Trial
+→ 신규 자동화 후보 시험(Candidate Trial)
 ```
 
 모델은 구현 계획을 판단하고 컴파일러는 허용된 동작만 코드로 만듭니다. 화면 조사는 Selector 현실성을 높이지만 제품 기대 결과의 정확성을 보장하지 않습니다. 기대 결과는 SRS와 Agent 2 TC에서 고정됩니다.
 
 Checkpoint는 계약·ID·출처·근거·Double-Assert·코드 추적성·금지 패턴·SHA-256 인계를 검사합니다. 자연어 의미를 완벽히 판단한다고 주장하지 않으며, 자동 결정이 어려운 문제는 `REVIEW` 또는 `PAUSE`로 남깁니다.
 
-Agent 3 실행 전에 선택 TC를 현재 행동·Assertion Capability로 표현할 수 있는지 결정론적으로 판정합니다. 미지원 TC는 모델에 억지 계획을 요청하지 않고 `NOT_AUTOMATABLE`과 누락 Capability를 기록합니다. UI Inventory도 전체 허용 목록을 공통 Gate로 사용하지 않고 선택 TC에 필요한 Selector와 하네스만 확인합니다. Candidate Trial은 코드 후보마다 계속 실행하며 UI Observation 캐시는 실제 실행 비용이 문제가 될 때 검토합니다.
+초기 Agent 3는 실행 전에 선택 TC를 고정 행동·검증 조건으로 표현할 수 있는지 결정론적으로 판정하고, 미지원 TC를 모델 호출 전에 `NOT_AUTOMATABLE`로 종료했습니다. 전체 허용 목록을 매번 조사하지 않고 선택 TC에 필요한 Selector와 하네스만 확인한 점은 유지하되, 아래 유연성 보완으로 미지원 처리 방식을 확장했습니다.
+
+### Agent 3 통제와 유연성 사이에서 확인한 핵심 어려움
+
+AI의 환각, 기대값 변경과 불안정한 코드를 막기 위해 제품별 허용 행동과 Selector를 강하게 고정했지만, 이 방식은 품질 통제를 높이는 대신 새로운 관제점이나 유사 기능이 추가될 때 사전 등록되지 않았다는 이유만으로 자동화를 중단시키는 한계가 있었습니다. 이는 프로젝트에서 실제로 겪은 핵심 설계 어려움이며 이후 회고·면접 설명에서 반드시 보존합니다.
+
+해결 원칙은 **변경하면 안 되는 QA 기준**과 **확장할 수 있어야 하는 자동화 기술**을 분리하는 것입니다. SRS 기대값, Requirement ID, Expected Result, 검증 조건 삭제 금지와 증거 규칙은 계속 고정합니다. 반면 UI Locator, 클릭·입력·선택·체크 방식과 읽기 전용 상태 관찰은 실제 화면 근거 안에서 AI가 유연하게 구성할 수 있게 합니다. 특정 기능 예시는 설명용일 뿐 Prompt·Requirement 목록·코드에 제품 고정값으로 추가하지 않습니다.
+
+`agent3-3.5`부터 기존 온도 기능은 필요한 UI만 좁게 확인하고, 처음 보는 기능은 안정적인 ID·`data-testid`·접근성 이름을 가진 범용 UI와 읽기 가능한 내부 상태를 동적으로 확인합니다. AI는 실제 관찰 요소로 실행 가능한 구조화 코드 의도를 만들며, 컴파일러는 이를 안전한 Python으로 변환합니다. 범용 조작으로 표현할 수 없으면 `AUTOMATION_SUPPORT_EXTENSION_REQUIRED`와 기술 사유를 남기고 코드를 생성하지 않습니다. 내부 JSON의 `Capability`, `Eligibility`, `Assertion` 같은 기존 영문 필드는 호환을 위해 유지하되 사용자 문서에서는 각각 자동화 지원 범위, 자동화 가능성 사전 확인, 검증 조건으로 설명합니다.
 
 2026-08-15 진단 Live Run에서 행동과 Selector의 대응을 프롬프트에 더 명시해야 불필요한 CP3 재작업을 줄일 수 있음을 확인했습니다. 컴파일러가 사용하지 않는 `expected_text`는 모델 자유 입력으로 남기지 않고 CP3에서 차단합니다. 토큰 비용은 마지막 호출이 아니라 모든 계획 시도의 누적으로 기록하고, 오류 산출물이 생긴 시도는 불변 진단 기록으로 보존해 재시도와 섞지 않습니다.
+
+2026-08-17 범용 전원 선택·적용 Live에서는 공용 `requested_mode`의 OPERATION·STOP을 HVAC 모드로 오인한 사전 판정, 한국어 조사 때문에 `적용`과 `적용을`·`status`와 `status가`를 연결하지 못한 CP3, Expected Result 문장 전체를 실제 알림 문구로 사용한 계획, 범용 복원 후 상태 미재확인을 발견했습니다. `agent3-3.7`은 HVAC 고정값과 그 밖의 상태값을 분리하고, 2글자 이상 핵심어의 조사·어미 포함 연결을 허용하며, 알림 검증에는 Expected Result의 짧은 근거 구절만 허용합니다. 컴파일러는 범용 복원 전 UI·내부 상태를 저장하고 복원 Action 후 초기값과 직접 비교합니다. 실패 Run은 삭제하지 않고 재시도별 진단 증거로 보존했습니다.
 
 첫 보완 후 두 번째 진단 Live Run에서는 Action Selector 문제가 사라졌지만 모델이 내부 상태 인터페이스에 인덱스와 속성을 덧붙여 다시 CP3 재작업이 발생했습니다. 이에 Action뿐 아니라 Assertion 전략별 Selector도 프롬프트와 CP3에서 동일하게 고정했습니다. 또한 Playwright Trace 내부에는 stdout 마스킹과 별개로 로컬 URL·stack/source 경로가 남으므로, 알려진 로컬 경로의 문자열·URI·JSON escape 형태를 ZIP 내부에서 치환한 뒤 Manifest 해시를 계산하기로 했습니다.
 
@@ -104,7 +114,7 @@ Agent 3 실행 전에 선택 TC를 현재 행동·Assertion Capability로 표현
 
 같은 Run의 Screenshot에서 “성공적으로 적용되었습니다” Toast가 표시됐는데 기존 `TOAST_VISIBLE`은 ER-007 “차단 안내 Toast”를 통과시켰습니다. 정확한 전체 문구를 고정하지 않는 SRS 원칙은 유지하되, `agent3-3.4`부터 차단 기대 결과는 `TOAST_BLOCKING` 전략과 제한된 차단 의미 신호를 사용합니다. 로컬 재시험에서 성공 Toast가 ER-007 불일치로 추가 기록되는 것을 확인했습니다.
 
-현재 `agent3-3.4` 공개 Live Run은 첫 계획에서 CP3 PASS했고 input 2,533·output 594·total 3,127 tokens를 사용했습니다. `SELECT_DEVICE value=1`과 `TOAST_BLOCKING` 계약을 준수한 Candidate Trial은 ER-005·006·007의 `PRODUCT_MISMATCH_CANDIDATE`를 기록했습니다. 모든 인계 SHA-256과 Project1 대상 해시가 일치하고 공개 텍스트와 Trace의 로컬 경로·비밀정보 검사도 통과했으므로, 이 Run을 현재 Agent 3 공개 증거로 채택합니다.
+현재 `agent3-3.4` 공개 Live Run은 첫 계획에서 CP3 PASS했고 input 2,533·output 594·total 3,127 tokens를 사용했습니다. `SELECT_DEVICE value=1`과 `TOAST_BLOCKING` 계약을 준수한 신규 자동화 후보 시험은 ER-005·006·007의 `PRODUCT_MISMATCH_CANDIDATE`를 기록했습니다. 모든 인계 SHA-256과 Project1 대상 해시가 일치하고 공개 텍스트와 Trace의 로컬 경로·비밀정보 검사도 통과했으므로, 이 Run을 현재 Agent 3 공개 증거로 채택합니다.
 
 최소 Orchestrator는 기존 Agent 함수와 단계별 Manifest를 다시 구현하지 않고 같은 Run ID로 조합합니다. 대상 HTML을 첫 모델 호출 전에 확인하고, 단계 종료 코드가 0이 아니면 후속 Agent를 호출하지 않으며, 별도 `orchestrator_manifest.json`에는 종료 코드·중단 단계·기존 Manifest SHA-256만 기록합니다. `PRODUCT_MISMATCH_CANDIDATE`는 제품 판정 후보를 얻은 정상 Pipeline 완료로 유지합니다. 실제 `RUN-20260815-062606-E36A76`에서 자리표시자 `after_value`를 Agent 1이 정보 부족으로 판정해 CP1 `PASS + PAUSE`가 되었고 Agent 2·3 호출 없이 중단됐습니다. 이 Run은 중단 계약의 Live 증거지만 A1→A3 정상 완료 증거는 아닙니다.
 
@@ -132,7 +142,7 @@ Agent 3 실행 전에 선택 TC를 현재 행동·Assertion Capability로 표현
 - **실패 원인 분리**: 제품 불일치, 자동화 계획·코드 문제, 실행 오류, 환경·복원 문제, 요구사항 불명확과 증거 부족을 구분합니다.
 - **자동화 신뢰성**: 실행 가능성, TC 의도 충실성, 반복 안정성과 대표 오류 검출을 분리해 봅니다.
 
-현재 V2는 Candidate Trial 1회까지 구현했습니다. 정상 3회 반복과 대표 오류 검출은 후속이며 완료로 표현하지 않습니다.
+현재 V2는 신규 자동화 후보 시험 1회와 후속 현재 후보 재검증·관련 기존 회귀 실행까지 구현했습니다. 정상 3회 반복과 대표 오류 검출은 후속이며 완료로 표현하지 않습니다.
 
 ## 8. 사실성·비용·보안 원칙
 
@@ -160,9 +170,9 @@ API 키는 로컬 환경변수로만 사용합니다. GitHub 방문자는 공개
 
 ## 10. 현재 위치와 판단 우선순위
 
-현재 Agent 1·2 OpenAI 구조화 호출, CP1·CP2, SHA-256 인계와 최대 1회 재작업을 구현했고 Live Run에서 TC 후보 12건과 CP2 PASS를 확인했습니다. Agent 3는 Capability 사전 판정, 선택 TC 범위 UI Inventory, API 키 없는 Preview, 구조화 계획, 결정론적 컴파일러, CP3와 Candidate Trial을 구현했습니다. 현재 `agent3-3.4` 공개 Live Run은 첫 계획 CP3 PASS와 ER-005·006·007의 제품 불일치 후보를 기록했고 보안·해시 감사를 통과했습니다. 최소 A1→A3 Orchestrator는 세 중단 경로와 정상 완료 Live를 확인했으며 회귀 테스트 71개가 통과합니다.
+현재 Agent 1·2 OpenAI 구조화 호출, CP1·CP2, SHA-256 인계와 최대 1회 재작업을 구현했습니다. Agent 3는 기존 기능의 좁은 UI 확인, 신규 기능의 범용 UI 동적 조사, AI 구조화 코드 의도, 결정론적 컴파일러, CP3와 신규 자동화 후보 시험을 구현했습니다. 특정 제품 기능명을 코드에 고정하지 않은 범용 전원 선택·적용 Live에서 Agent 1·2·3 실제 모델 인계, 동적 발견, 코드 생성, 브라우저 시험과 UI·내부 상태 복원 PASS를 확인했고 자동 테스트 83개가 통과합니다. 이 진단의 전체 실제 모델 사용량은 44,334 tokens이며 최종 `agent3-3.7` 호출은 4,391 tokens였습니다.
 
-다음 우선순위는 검증된 Candidate와 기존 회귀 실행 연결, Agent 4 V2와 최종 보고입니다. 조건부 검토 재개와 서로 다른 변경 요청 반복 검증도 아직 남아 있습니다.
+다음 우선순위는 이 중립 실행 결과를 입력으로 사용하는 규칙 기반 Agent 4와 최종 보고입니다. Agent 4는 시험을 다시 실행하지 않고 제품 불일치 후보·자동화 오류·환경 오류·근거 부족을 분류하고 결과 수치를 정리합니다. 조건부 검토 재개와 서로 다른 변경 요청 반복 검증도 아직 남아 있습니다.
 
 선택이 충돌하면 다음 순서로 판단합니다.
 

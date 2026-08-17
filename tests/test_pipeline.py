@@ -1272,6 +1272,43 @@ def agent3_test_case() -> ProductTestCaseCandidate:
     )
 
 
+def generic_new_control_test_case() -> ProductTestCaseCandidate:
+    """Feature-neutral fixture for a newly added control point."""
+    return ProductTestCaseCandidate.model_validate(
+        {
+            "tc_id": "TC-CAND-090",
+            "title": "Enable a newly added control and verify state",
+            "purpose": "CHANGE_VALIDATION",
+            "test_type": "STATE_CONSISTENCY",
+            "requirement_ids": ["REQ-NEW-001", "REQ-STATE-002"],
+            "source_condition_ids": ["COND-090"],
+            "control_path": "CENTRAL",
+            "target_role": "NEW_CONTROL_POINT",
+            "test_data": {},
+            "preconditions": ["새 제어 스위치는 꺼짐 상태다."],
+            "steps": ["새 제어 스위치를 켠다."],
+            "expected_results": [
+                {
+                    "result_id": "ER-090",
+                    "statement": "새 제어 스위치는 켜짐 상태다.",
+                    "observation_layer": "UI",
+                    "source_condition_ids": ["COND-090"],
+                },
+                {
+                    "result_id": "ER-091",
+                    "statement": "내부 enabled 값은 true다.",
+                    "observation_layer": "INTERNAL_STATE",
+                    "source_condition_ids": ["COND-090"],
+                },
+            ],
+            "restore_required": True,
+            "restore_steps": ["새 제어 스위치를 끈다."],
+            "automation_candidate": True,
+            "automation_reason": "The new control is expected to expose UI and state evidence.",
+        }
+    )
+
+
 def agent3_observation() -> UiObservation:
     selectors = [
         "#device-card-1 .card-body-split",
@@ -1337,11 +1374,15 @@ def test_agent3_uses_structured_plan_api() -> None:
     assert responses.kwargs["store"] is False
     instructions = responses.kwargs["input"][0]["content"]
     assert "SET_TEMPERATURE=#det-temp-display" in instructions
-    assert "Leave expected_text null" in instructions
+    assert "Generic UI actions are CLICK, FILL, SELECT_OPTION, CHECK, and UNCHECK" in instructions
+    assert "AUTOMATION_SUPPORT_EXTENSION_REQUIRED" in instructions
     assert "INTERNAL_SET_TEMP=window.__vccs.devices" in instructions
     assert "Do not append indexes, properties, or expressions" in instructions
-    assert "SELECT_DEVICE action value to the same integer 1" in instructions
-    assert "Use TOAST_BLOCKING" in instructions
+    assert "If a SELECT_DEVICE action is actually needed" in instructions
+    assert "does not need a legacy SELECT_DEVICE action" in instructions
+    assert "UI_TEXT_CONTAINS may verify a short meaningful phrase" in instructions
+    assert "do not use the entire natural-language Expected Result sentence" in instructions
+    assert "TOAST_BLOCKING" in instructions
 
 
 def test_agent3_model_input_preview_is_minimal_and_has_no_local_path() -> None:
@@ -1412,7 +1453,7 @@ def test_agent3_scoped_inventory_still_blocks_a_required_selector(tmp_path: Path
         )
 
 
-def test_agent3_eligibility_rejects_an_unsupported_internal_assertion() -> None:
+def test_agent3_unknown_internal_state_uses_generic_discovery() -> None:
     payload = agent3_test_case().model_dump(mode="json")
     payload["requirement_ids"].append("REQ-LOCK-001")
     payload["expected_results"][1]["statement"] = "Internal locked state remains true."
@@ -1421,14 +1462,200 @@ def test_agent3_eligibility_rejects_an_unsupported_internal_assertion() -> None:
         ProductTestCaseCandidate.model_validate(payload)
     )
 
-    assert eligibility.status == Agent3EligibilityStatus.NOT_AUTOMATABLE
-    assert eligibility.candidate_status == AutomationCandidateStatus.NOT_AUTOMATABLE
-    assert eligibility.model_call_allowed is False
-    assert "REQUIREMENT:REQ-LOCK-001" in eligibility.missing_capabilities
-    assert "ASSERT_INTERNAL_STATE:ER-006" in eligibility.missing_capabilities
+    assert eligibility.status == Agent3EligibilityStatus.DISCOVERY_REQUIRED
+    assert eligibility.candidate_status is None
+    assert eligibility.model_call_allowed is True
+    assert eligibility.generic_discovery_required is True
+    assert "DISCOVER_INTERNAL_STATE" in eligibility.required_capabilities
+    assert eligibility.missing_capabilities == []
 
 
-def test_agent3_unsupported_tc_records_not_automatable_before_ui_or_model(
+def test_agent3_non_hvac_mode_values_use_generic_discovery() -> None:
+    payload = agent3_test_case().model_dump(mode="json")
+    payload["test_data"] = {
+        "initial_mode": "STOP",
+        "requested_mode": "OPERATION",
+        "initial_temperature_c": None,
+        "requested_temperature_c": None,
+    }
+    payload["expected_results"] = [
+        {
+            "result_id": "ER-005",
+            "statement": "화면 상태가 OPERATION으로 변경된다.",
+            "observation_layer": "UI",
+            "source_condition_ids": ["COND-001"],
+        },
+        {
+            "result_id": "ER-006",
+            "statement": "내부 status가 OPERATION으로 변경된다.",
+            "observation_layer": "INTERNAL_STATE",
+            "source_condition_ids": ["COND-001"],
+        },
+    ]
+
+    eligibility = evaluate_agent3_eligibility(
+        ProductTestCaseCandidate.model_validate(payload)
+    )
+
+    assert eligibility.status == Agent3EligibilityStatus.DISCOVERY_REQUIRED
+    assert eligibility.generic_discovery_required is True
+    assert eligibility.required_selectors == []
+    assert eligibility.required_harness_keys == []
+    assert "DISCOVER_GENERIC_UI" in eligibility.required_capabilities
+    assert "SET_MODE" not in eligibility.required_capabilities
+
+
+def test_agent3_textual_link_tolerates_korean_particles() -> None:
+    assert pipeline._has_textual_link("적용", "적용을 실행한다.")
+    assert pipeline._has_textual_link(
+        "window vccs primaryTestDevice status",
+        "PRIMARY_TEST_DEVICE의 내부 status가 OPERATION으로 변경된다.",
+    )
+    assert not pipeline._has_textual_link("삭제 버튼", "적용을 실행한다.")
+
+
+def test_agent3_notification_rejects_the_whole_expected_result_as_ui_text() -> None:
+    payload = agent3_plan().model_dump(mode="json")
+    payload["assertions"][2] = {
+        "result_id": "ER-007",
+        "observation_layer": "NOTIFICATION",
+        "strategy": "UI_TEXT_CONTAINS",
+        "selector": "#global-toast",
+        "expected_text": "A blocking Toast is visible.",
+    }
+
+    checkpoint = evaluate_checkpoint3_plan(
+        agent3_test_case(),
+        Agent3AutomationPlan.model_validate(payload),
+        agent3_observation(),
+    )
+
+    assert any(
+        item.rule_id == "CP3-004"
+        and item.status == CheckStatus.FAIL
+        and "not the whole Expected Result sentence" in item.message
+        for item in checkpoint.checks
+    )
+
+
+def test_agent3_generic_discovery_compiles_and_runs_a_new_control(
+    tmp_path: Path,
+) -> None:
+    test_case = generic_new_control_test_case()
+    eligibility = evaluate_agent3_eligibility(test_case)
+    assert eligibility.status == Agent3EligibilityStatus.DISCOVERY_REQUIRED
+    assert eligibility.generic_discovery_required is True
+
+    target = tmp_path / "new-control.html"
+    target.write_text(
+        """<!doctype html><html><head><title>New Control</title></head><body>
+<label for="new-feature-toggle">새 제어</label>
+<input id="new-feature-toggle" type="checkbox">
+<span id="new-feature-status">꺼짐</span>
+<script>
+window.__vccs = {feature: {enabled: false}};
+const toggle = document.getElementById('new-feature-toggle');
+toggle.addEventListener('change', () => {
+  window.__vccs.feature.enabled = toggle.checked;
+  document.getElementById('new-feature-status').textContent = toggle.checked ? '켜짐' : '꺼짐';
+});
+</script></body></html>""",
+        encoding="utf-8",
+    )
+    observation = inspect_target_ui(
+        target,
+        required_selectors=set(),
+        required_harness_keys=set(),
+        discover_generic=True,
+    )
+    elements = {item.selector: item for item in observation.elements}
+    assert elements["#new-feature-toggle"].action_hint == "CHECK_OR_UNCHECK"
+    assert observation.harness_values["window.__vccs.feature.enabled"] is False
+
+    plan = Agent3AutomationPlan.model_validate(
+        {
+            "tc_id": test_case.tc_id,
+            "target_device_id": 1,
+            "summary": "Use the newly observed generic switch and verify both layers.",
+            "actions": [
+                {
+                    "action_id": "ACT-090",
+                    "phase": "TEST",
+                    "action_type": "CHECK",
+                    "selector": "#new-feature-toggle",
+                    "source_text": "새 제어 스위치를 켠다.",
+                },
+                {
+                    "action_id": "ACT-091",
+                    "phase": "RESTORE",
+                    "action_type": "UNCHECK",
+                    "selector": "#new-feature-toggle",
+                    "source_text": "새 제어 스위치를 끈다.",
+                },
+            ],
+            "assertions": [
+                {
+                    "result_id": "ER-090",
+                    "observation_layer": "UI",
+                    "strategy": "UI_CHECKED_EQUALS",
+                    "selector": "#new-feature-toggle",
+                    "expected_value": True,
+                },
+                {
+                    "result_id": "ER-091",
+                    "observation_layer": "INTERNAL_STATE",
+                    "strategy": "INTERNAL_VALUE_EQUALS",
+                    "selector": "window.__vccs.feature.enabled",
+                    "expected_value": True,
+                },
+            ],
+        }
+    )
+    checkpoint = evaluate_checkpoint3_plan(test_case, plan, observation)
+    assert checkpoint.status == CheckStatus.PASS
+
+    code = compile_automation_candidate("RUN-20260816-NEW001-ABCDEF", test_case, plan)
+    assert "restore_baseline_0" in code
+    assert "restore_control_checked" in code
+    assert all(
+        item.status == CheckStatus.PASS
+        for item in evaluate_compiled_candidate(test_case, code)
+    )
+    candidate = tmp_path / "test_new_control.py"
+    candidate.write_text(code, encoding="utf-8")
+    trial = run_candidate_trial(
+        candidate,
+        target,
+        tmp_path / "new-control-evidence",
+        timeout_seconds=30,
+    )
+    assert trial.outcome == TrialOutcome.PASS
+
+
+def test_agent3_records_support_extension_without_generating_code() -> None:
+    plan = Agent3AutomationPlan.model_validate(
+        {
+            "tc_id": "TC-CAND-090",
+            "target_device_id": 1,
+            "summary": "The observed control requires an unsupported interaction.",
+            "planning_status": "AUTOMATION_SUPPORT_EXTENSION_REQUIRED",
+            "extension_reasons": [
+                "The approved step requires a drag interaction that is not in the generic action set."
+            ],
+        }
+    )
+    checkpoint = evaluate_checkpoint3_plan(
+        generic_new_control_test_case(), plan, agent3_observation()
+    )
+    assert checkpoint.status == CheckStatus.REVIEW
+    assert (
+        checkpoint.candidate_status
+        == AutomationCandidateStatus.AUTOMATION_SUPPORT_EXTENSION_REQUIRED
+    )
+    assert checkpoint.checks[0].rule_id == "CP3-000"
+
+
+def test_agent3_non_candidate_records_not_automatable_before_ui_or_model(
     tmp_path: Path, monkeypatch
 ) -> None:
     run_id = "RUN-20260815-120000-ABCDEF"
@@ -1436,9 +1663,10 @@ def test_agent3_unsupported_tc_records_not_automatable_before_ui_or_model(
     run_dir.mkdir()
     (run_dir / "agent2_manifest.json").write_text("{}", encoding="utf-8")
     payload = agent3_test_case().model_dump(mode="json")
-    payload["control_path"] = "LOCAL"
-    local_tc = ProductTestCaseCandidate.model_validate(payload)
-    design = SimpleNamespace(test_cases=[local_tc])
+    payload["automation_candidate"] = False
+    payload["automation_reason"] = "CP2 did not approve automation."
+    non_candidate = ProductTestCaseCandidate.model_validate(payload)
+    design = SimpleNamespace(test_cases=[non_candidate])
     monkeypatch.setattr(
         pipeline,
         "_load_verified_agent2_run",
@@ -1460,7 +1688,7 @@ def test_agent3_unsupported_tc_records_not_automatable_before_ui_or_model(
     args = SimpleNamespace(
         runs_root=str(tmp_path),
         run_id=run_id,
-        tc_id=local_tc.tc_id,
+        tc_id=non_candidate.tc_id,
         target_html=str(tmp_path / "unused.html"),
         model=None,
         timeout=30,
@@ -1473,7 +1701,7 @@ def test_agent3_unsupported_tc_records_not_automatable_before_ui_or_model(
     assert result["candidate_status"] == "NOT_AUTOMATABLE"
     assert result["model_call_allowed"] is False
     assert result["source_agent2_design_sha256"] == "b" * 64
-    assert "CONTROL_PATH_LOCAL" in result["missing_capabilities"]
+    assert "CP2_AUTOMATION_CANDIDATE" in result["missing_capabilities"]
     assert not (run_dir / "agent3_model_input_preview.json").exists()
     assert not (run_dir / "agent3_error.json").exists()
 
@@ -2015,18 +2243,17 @@ def test_pipeline_parser_exposes_one_command_agent1_to_agent3() -> None:
     )
     assert selected == eligible.tc_id
     assert len(summaries) == 2
-    assert summaries[0]["status"] == "NOT_AUTOMATABLE"
-    missing, unsupported_summaries = pipeline._select_agent3_tc(
+    assert summaries[0]["status"] == "DISCOVERY_REQUIRED"
+    discovered, unsupported_summaries = pipeline._select_agent3_tc(
         Agent2TestDesign(
             request_id="CR-TEST-001",
             test_cases=[unsupported],
             coverage_summary="No eligible candidate fixture",
         )
     )
-    assert missing is None
-    assert unsupported_summaries[0]["missing_capabilities"] == [
-        "TARGET_ROLE:MULTIPLE_ALLOWED_TEST_DEVICES"
-    ]
+    assert discovered == unsupported.tc_id
+    assert unsupported_summaries[0]["generic_discovery_required"] is True
+    assert unsupported_summaries[0]["missing_capabilities"] == []
 
 
 def test_pipeline_runs_stages_in_order_and_hashes_manifests(
@@ -2153,3 +2380,396 @@ def test_pipeline_rejects_missing_target_before_any_model_stage(
 
     with pytest.raises(ValueError, match="target HTML does not exist"):
         pipeline.run_pipeline(args)
+
+
+# Validation execution: trusted new candidate + related existing regressions
+def _neutral_execution_result(
+    test_id: str,
+    source: pipeline.ExecutionSource,
+    status: pipeline.NeutralExecutionStatus = pipeline.NeutralExecutionStatus.PASSED,
+) -> pipeline.NeutralExecutionResult:
+    return pipeline.NeutralExecutionResult(
+        test_id=test_id,
+        source=source,
+        requirement_ids=["REQ-ENV-001"] if test_id == "TC-ENV-000" else ["REQ-TEMP-001"],
+        status=status,
+        source_outcome="PYTEST_PASSED" if status == pipeline.NeutralExecutionStatus.PASSED else "PYTEST_ERROR",
+        exit_code=0 if status == pipeline.NeutralExecutionStatus.PASSED else 1,
+        duration_ms=1,
+        test_file="test_controller.py",
+        test_sha256="a" * 64,
+        target_sha256="b" * 64,
+        reused=source == pipeline.ExecutionSource.NEW_AUTOMATION_CANDIDATE,
+        stdout_file="evidence/stdout.txt",
+        stderr_file="evidence/stderr.txt",
+        evidence_files=["evidence/stdout.txt", "evidence/stderr.txt"],
+        evidence_sha256={
+            "evidence/stdout.txt": "c" * 64,
+            "evidence/stderr.txt": "d" * 64,
+        },
+        evidence_complete=True,
+    )
+
+
+def test_related_regression_selection_is_grounded_and_excludes_demo_cases() -> None:
+    selected = pipeline.select_existing_regressions(
+        ["REQ-TEMP-001", "REQ-CONTROL-001", "REQ-STATE-001"]
+    )
+
+    assert [item.tc_id for item in selected] == ["TC-MODE-001", "TC-TEMP-001"]
+    assert "TC-INT-002" not in {item.tc_id for item in pipeline.EXISTING_REGRESSION_CATALOG}
+    assert all(not item.tc_id.startswith("TC-PIPE-") for item in selected)
+    assert all(item.tc_id != "TC-TEMP-002" for item in selected)
+
+
+def test_existing_regression_runs_from_a_copied_neutral_workspace(
+    tmp_path: Path, monkeypatch
+) -> None:
+    baseline = tmp_path / "project1" / "tests" / "test_controller.py"
+    baseline.parent.mkdir(parents=True)
+    baseline.write_text("def test_placeholder():\n    pass\n", encoding="utf-8")
+    target = tmp_path / "project1" / "virtual-controller.html"
+    target.write_text("<!doctype html>", encoding="utf-8")
+    baseline_hash = _sha256_file(baseline)
+    target_hash = _sha256_file(target)
+    captured: dict[str, object] = {}
+
+    def fake_run(command, **kwargs):
+        workspace = Path(kwargs["cwd"])
+        captured["command"] = command
+        captured["env"] = kwargs["env"]
+        assert (workspace / "tests" / "test_controller.py").is_file()
+        assert (workspace / "tests" / "conftest.py").is_file()
+        assert (workspace / "virtual-controller.html").is_file()
+        return SimpleNamespace(returncode=0, stdout=". [100%]\n1 passed\n", stderr="")
+
+    monkeypatch.setenv("OPENAI_API_KEY", "must-not-reach-regression")
+    monkeypatch.setattr(pipeline.subprocess, "run", fake_run)
+    spec = next(
+        item for item in pipeline.EXISTING_REGRESSION_CATALOG if item.tc_id == "TC-TEMP-001"
+    )
+
+    result = pipeline.run_existing_regression(
+        spec,
+        baseline,
+        target,
+        tmp_path / "run" / "validation_evidence",
+        timeout_seconds=10,
+    )
+
+    assert result.status == pipeline.NeutralExecutionStatus.PASSED
+    assert result.source == pipeline.ExecutionSource.EXISTING_REGRESSION
+    assert result.test_id == "TC-TEMP-001"
+    assert "OPENAI_API_KEY" not in captured["env"]
+    assert captured["command"][-2:] == ["-p", "no:cacheprovider"]
+    assert _sha256_file(baseline) == baseline_hash
+    assert _sha256_file(target) == target_hash
+    assert result.evidence_complete is True
+
+
+def _build_candidate_execution_handoff(
+    tmp_path: Path, monkeypatch
+) -> tuple[Path, Path, str]:
+    run_id = "RUN-20260816-010000-ABCDEF"
+    run_dir = tmp_path / "runs" / run_id
+    evidence_dir = run_dir / "evidence" / "TC-CAND-003"
+    candidate_dir = run_dir / "candidates"
+    evidence_dir.mkdir(parents=True)
+    candidate_dir.mkdir()
+    target = tmp_path / "virtual-controller.html"
+    target.write_text("<!doctype html>", encoding="utf-8")
+    tc = agent3_test_case()
+    agent2_manifest = {"agent2_design_sha256": "b" * 64}
+    _write_json(run_dir / "agent2_manifest.json", {"run_id": run_id})
+    _write_json(run_dir / "agent3_eligibility.json", {})
+    _write_json(run_dir / "agent3_ui_observation.json", {})
+    _write_json(run_dir / "agent3_automation_plan.json", {})
+    _write_json(
+        run_dir / "checkpoint3.json",
+        _checkpoint3(CheckStatus.PASS).model_dump(mode="json"),
+    )
+    trial = _trial(TrialOutcome.PASS).model_copy(
+        update={
+            "exit_code": 0,
+            "evidence_complete": True,
+            "screenshot_file": "trial-final.png",
+            "trace_file": "trial-trace.zip",
+        }
+    )
+    _write_json(run_dir / "agent3_trial.json", trial.model_dump(mode="json"))
+    candidate = candidate_dir / "test_tc_cand_003.py"
+    candidate.write_text("def test_tc_cand_003():\n    assert True\n", encoding="utf-8")
+    (evidence_dir / "trial-stdout.txt").write_text("1 passed\n", encoding="utf-8")
+    (evidence_dir / "trial-stderr.txt").write_text("", encoding="utf-8")
+    (evidence_dir / "trial-final.png").write_bytes(b"png")
+    (evidence_dir / "trial-trace.zip").write_bytes(b"zip")
+    _write_json(
+        run_dir / "agent3_manifest.json",
+        {
+            "run_id": run_id,
+            "stage": "AGENT_3_CP3_TRIAL",
+            "status": "PASS",
+            "tc_id": tc.tc_id,
+            "source_agent2_manifest_sha256": _sha256_file(run_dir / "agent2_manifest.json"),
+            "source_agent2_design_sha256": "b" * 64,
+            "eligibility_sha256": _sha256_file(run_dir / "agent3_eligibility.json"),
+            "ui_observation_sha256": _sha256_file(run_dir / "agent3_ui_observation.json"),
+            "automation_plan_sha256": _sha256_file(run_dir / "agent3_automation_plan.json"),
+            "checkpoint3_sha256": _sha256_file(run_dir / "checkpoint3.json"),
+            "candidate_file": candidate.name,
+            "candidate_sha256": _sha256_file(candidate),
+            "trial_sha256": _sha256_file(run_dir / "agent3_trial.json"),
+            "target_file": target.name,
+            "target_sha256": _sha256_file(target),
+            "project1_modified": False,
+        },
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_load_verified_agent2_run",
+        lambda _run_dir, _run_id: (
+            None,
+            None,
+            None,
+            SimpleNamespace(test_cases=[tc]),
+            None,
+            agent2_manifest,
+        ),
+    )
+    return run_dir, target, run_id
+
+
+def test_candidate_trial_is_reused_only_after_hash_and_evidence_checks(
+    tmp_path: Path, monkeypatch
+) -> None:
+    run_dir, target, run_id = _build_candidate_execution_handoff(tmp_path, monkeypatch)
+
+    result, test_case, _ = pipeline._candidate_execution_record(
+        run_dir, run_id, target
+    )
+
+    assert result.test_id == test_case.tc_id == "TC-CAND-003"
+    assert result.status == pipeline.NeutralExecutionStatus.PASSED
+    assert result.reused is True
+    assert len(result.evidence_files) == 4
+    assert result.evidence_complete is True
+
+    target.write_text("changed", encoding="utf-8")
+    with pytest.raises(ValueError, match="HTML이 신규 자동화 후보 시험 후 변경"):
+        pipeline._candidate_execution_record(run_dir, run_id, target)
+
+
+def test_current_compiler_reuses_identical_code_and_retrials_stale_code(
+    tmp_path: Path, monkeypatch
+) -> None:
+    run_id = "RUN-20260816-015000-ABCDEF"
+    run_dir = tmp_path / run_id
+    run_dir.mkdir()
+    target = tmp_path / "virtual-controller.html"
+    target.write_text("<!doctype html>", encoding="utf-8")
+    test_case = agent3_test_case()
+    plan = agent3_plan()
+    _write_json(
+        run_dir / "agent3_automation_plan.json", plan.model_dump(mode="json")
+    )
+    current_code = compile_automation_candidate(run_id, test_case, plan)
+    stored_candidate = run_dir / "candidates" / "test_tc_cand_003.py"
+    stored_candidate.parent.mkdir()
+    stored_candidate.write_text(current_code, encoding="utf-8")
+    current_hash = _sha256_file(stored_candidate)
+    stored = _neutral_execution_result(
+        test_case.tc_id, pipeline.ExecutionSource.NEW_AUTOMATION_CANDIDATE
+    ).model_copy(
+        update={
+            "test_file": stored_candidate.name,
+            "test_sha256": current_hash,
+        }
+    )
+
+    monkeypatch.setattr(
+        pipeline,
+        "run_candidate_trial",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("identical code must reuse the stored trial")
+        ),
+    )
+    assert pipeline._current_candidate_execution_record(
+        run_dir,
+        run_id,
+        target,
+        test_case,
+        stored,
+        timeout_seconds=10,
+    ) is stored
+
+    def fake_trial(candidate_file, _target, evidence_dir, *, timeout_seconds):
+        assert timeout_seconds == 10
+        assert candidate_file.read_text(encoding="utf-8") == current_code
+        evidence_dir.mkdir(parents=True)
+        (evidence_dir / "trial-stdout.txt").write_text("1 passed\n", encoding="utf-8")
+        (evidence_dir / "trial-stderr.txt").write_text("", encoding="utf-8")
+        (evidence_dir / "trial-final.png").write_bytes(b"png")
+        (evidence_dir / "trial-trace.zip").write_bytes(b"zip")
+        return _trial(TrialOutcome.PASS).model_copy(
+            update={
+                "exit_code": 0,
+                "evidence_complete": True,
+                "screenshot_file": "trial-final.png",
+                "trace_file": "trial-trace.zip",
+            }
+        )
+
+    monkeypatch.setattr(pipeline, "run_candidate_trial", fake_trial)
+    refreshed = pipeline._current_candidate_execution_record(
+        run_dir,
+        run_id,
+        target,
+        test_case,
+        stored.model_copy(update={"test_sha256": "f" * 64}),
+        timeout_seconds=10,
+    )
+
+    assert refreshed.reused is False
+    assert refreshed.test_sha256 == _sha256_file(
+        run_dir / "validation_candidates" / "test_tc_cand_003.py"
+    )
+    assert refreshed.status == pipeline.NeutralExecutionStatus.PASSED
+    assert (run_dir / "validation_candidate_trial.json").is_file()
+
+
+def _validation_execution_args(
+    tmp_path: Path, run_id: str, target: Path, baseline: Path
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        run_id=run_id,
+        runs_root=str(tmp_path / "runs"),
+        target_html=str(target),
+        baseline_tests=str(baseline),
+        timeout=10,
+    )
+
+
+def test_validation_execution_reuses_candidate_and_runs_related_regressions(
+    tmp_path: Path, monkeypatch
+) -> None:
+    run_id = "RUN-20260816-020000-ABCDEF"
+    run_dir = tmp_path / "runs" / run_id
+    run_dir.mkdir(parents=True)
+    target = tmp_path / "project1" / "virtual-controller.html"
+    baseline = tmp_path / "project1" / "tests" / "test_controller.py"
+    baseline.parent.mkdir(parents=True)
+    target.write_text("<!doctype html>", encoding="utf-8")
+    baseline.write_text("def test_placeholder():\n    pass\n", encoding="utf-8")
+    _write_json(run_dir / "agent3_manifest.json", {"run_id": run_id})
+    _write_json(run_dir / "agent3_trial.json", {"outcome": "PASS"})
+    candidate = _neutral_execution_result(
+        "TC-CAND-003", pipeline.ExecutionSource.NEW_AUTOMATION_CANDIDATE
+    )
+    test_case = agent3_test_case()
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        pipeline,
+        "_candidate_execution_record",
+        lambda _run_dir, _run_id, _target: (candidate, test_case, {}),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_current_candidate_execution_record",
+        lambda _run_dir, _run_id, _target, _test_case, stored, **_kwargs: stored,
+    )
+
+    def fake_regression(spec, *_args, source=pipeline.ExecutionSource.EXISTING_REGRESSION, **_kwargs):
+        calls.append(spec.tc_id)
+        return _neutral_execution_result(spec.tc_id, source)
+
+    monkeypatch.setattr(pipeline, "run_existing_regression", fake_regression)
+
+    assert pipeline.run_validation_execution(
+        _validation_execution_args(tmp_path, run_id, target, baseline)
+    ) == 0
+    assert calls == ["TC-ENV-000", "TC-TEMP-001"]
+    bundle = pipeline.ValidationExecutionBundle.model_validate_json(
+        (run_dir / "validation_execution.json").read_text(encoding="utf-8")
+    )
+    manifest = json.loads(
+        (run_dir / "validation_manifest.json").read_text(encoding="utf-8")
+    )
+    assert bundle.status == pipeline.ValidationStageStatus.COMPLETED
+    assert bundle.candidate_result.reused is True
+    assert bundle.selected_regression_ids == ["TC-TEMP-001"]
+    assert [item.test_id for item in bundle.regression_results] == ["TC-TEMP-001"]
+    assert manifest["validation_execution_sha256"] == _sha256_file(
+        run_dir / "validation_execution.json"
+    )
+    assert manifest["project1_modified"] is False
+
+
+def test_validation_execution_stops_regressions_when_precheck_is_not_passed(
+    tmp_path: Path, monkeypatch
+) -> None:
+    run_id = "RUN-20260816-030000-ABCDEF"
+    run_dir = tmp_path / "runs" / run_id
+    run_dir.mkdir(parents=True)
+    target = tmp_path / "project1" / "virtual-controller.html"
+    baseline = tmp_path / "project1" / "tests" / "test_controller.py"
+    baseline.parent.mkdir(parents=True)
+    target.write_text("<!doctype html>", encoding="utf-8")
+    baseline.write_text("def test_placeholder():\n    pass\n", encoding="utf-8")
+    _write_json(run_dir / "agent3_manifest.json", {"run_id": run_id})
+    _write_json(run_dir / "agent3_trial.json", {"outcome": "PASS"})
+    monkeypatch.setattr(
+        pipeline,
+        "_candidate_execution_record",
+        lambda _run_dir, _run_id, _target: (
+            _neutral_execution_result(
+                "TC-CAND-003", pipeline.ExecutionSource.NEW_AUTOMATION_CANDIDATE
+            ),
+            agent3_test_case(),
+            {},
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_current_candidate_execution_record",
+        lambda _run_dir, _run_id, _target, _test_case, stored, **_kwargs: stored,
+    )
+    calls: list[str] = []
+
+    def failed_precheck(spec, *_args, source=pipeline.ExecutionSource.EXISTING_REGRESSION, **_kwargs):
+        calls.append(spec.tc_id)
+        return _neutral_execution_result(
+            spec.tc_id,
+            source,
+            pipeline.NeutralExecutionStatus.EXECUTION_ERROR,
+        )
+
+    monkeypatch.setattr(pipeline, "run_existing_regression", failed_precheck)
+
+    assert pipeline.run_validation_execution(
+        _validation_execution_args(tmp_path, run_id, target, baseline)
+    ) == 2
+    bundle = pipeline.ValidationExecutionBundle.model_validate_json(
+        (run_dir / "validation_execution.json").read_text(encoding="utf-8")
+    )
+    assert calls == ["TC-ENV-000"]
+    assert bundle.status == pipeline.ValidationStageStatus.BLOCKED
+    assert bundle.selected_regression_ids == ["TC-TEMP-001"]
+    assert bundle.regression_results == []
+    assert bundle.blocked_reason == "ENVIRONMENT_PRECHECK_NOT_PASSED"
+
+
+def test_execute_parser_exposes_validation_execution_command() -> None:
+    args = pipeline.build_parser().parse_args(
+        [
+            "execute",
+            "--run-id",
+            "RUN-20260816-010000-ABCDEF",
+            "--target-html",
+            "virtual-controller.html",
+        ]
+    )
+
+    assert args.handler is pipeline.run_validation_execution
+    assert args.baseline_tests is None
+    assert args.timeout == 60
