@@ -2,7 +2,7 @@
 
 운영 중인 가상 중앙제어 시스템에 **MODIFIED 변경 요청 1건**이 들어왔을 때, 실제 모델이 변경점을 분석하고 제품 기능 TC와 실제 UI 근거 기반 Playwright 자동화 후보를 만드는 흐름을 구현하는 MVP입니다.
 
-> 현재 저장소는 **Agent 1·CP1 → Agent 2·CP2 → Agent 3·CP3·신규 자동화 후보 시험 → 변경 검증·관련 기존 회귀 실행 단계**입니다. 기존 온도 제어는 필요한 UI만 확인하고, 처음 보는 기능은 버튼·입력·선택·체크·상태 표시 같은 범용 UI 구조를 동적으로 조사합니다. AI는 실제로 관찰한 요소로 실행 가능한 코드 의도를 만들며, 범용 조작으로 부족할 때는 자동화 지원 범위 확장 필요를 기록합니다. 코드 회귀 테스트 83건과 범용 선택·적용 Live 시험이 통과했으며 Agent 4와 최종 보고 연결은 아직 구현하지 않았습니다.
+> 현재 저장소는 **Agent 1·CP1 → Agent 2·CP2 → Agent 3·CP3·신규 자동화 후보 시험 → 변경 검증·관련 기존 회귀 실행 → Agent 4·CP4·최종 보고**까지 연결합니다. 기존 온도 제어는 필요한 UI만 확인하고, 처음 보는 기능은 버튼·입력·선택·체크·상태 표시 같은 범용 UI 구조를 동적으로 조사합니다. AI는 실제로 관찰한 요소로 실행 가능한 코드 의도를 만들며, 범용 조작으로 부족할 때는 자동화 지원 범위 확장 필요를 기록합니다. Agent 4는 API 호출이나 재실행 없이 검증 결과와 SHA-256을 규칙으로 확인해 보고를 만듭니다.
 
 ## 해결하려는 문제
 
@@ -22,13 +22,14 @@ V2는 다음 세 연결만 우선 증명합니다.
 | 기존 Playwright 제품 기능 TC | 7건 후보 중 6건 재사용 가능, TC-INT-002 보완 필요 |
 | 환경 사전 점검 | V2 `execute`가 TC-ENV-000을 먼저 실행하고 미통과 시 기존 회귀를 차단 |
 | 변경 검증·관련 기존 회귀 | 현재 컴파일러 후보를 재검증·필요 시 무API 재시험하고 Requirement ID로 기존 회귀 6건 중 관련 TC만 선택·격리 실행 |
-| 분류·보고 | 프로젝트 1의 규칙 엔진 존재, V2 중립 실행 결과 계약은 구현, Agent 4 분석·보고 연동 필요 |
+| 분류·보고 | V2 Agent 4가 중립 실행 결과·Manifest SHA-256을 확인하고 제품 불일치 후보·자동화 실행·환경·근거 부족을 규칙 기반으로 분류해 CP4·최종 보고 JSON 생성 |
 | Product SRS | 실제 화면·코드 기준 초기 제품 기준 문서 작성 |
 | Agent 1 Live 모델 호출·CP1 | 구조화 분석, CP1 10개 규칙, CONTINUE·PAUSE·BLOCKED 인계, 실패 시 최대 1회 재작업 구현 |
 | Agent 2 Live 모델 호출 | CP1 PASS+CONTINUE Run만 입력, 변경 요청·고정 SRS·Agent 1 분석으로 제품 TC 후보 생성, 실패 시 최대 1회 재작업 구현 |
 | Agent 3 코드 후보 생성 | 기존 기능은 필요한 UI만 확인하고 신규 기능은 범용 UI를 동적 조사. AI가 관찰 근거 기반 실행 계획을 만들고 검증된 컴파일러가 Playwright 코드로 변환 |
 | CP1·CP2·CP3·Run Orchestrator | 단계별 CLI·SHA-256 인계·CP3·격리 시험과 A1→A3 순차 실행·현재 Run의 적격 TC 자동 선택·중단·요약 Manifest 구현. 세 중단 Live와 정상 완료 Live 확인 |
-| Agent 4·조건부 검토·정식 QA 자산 등록 승인·최종 보고 | 미구현 |
+| Agent 4·CP4·최종 보고 | 구현: 실행 재시작이나 API 호출 없이 결과·해시·중복·근거·집계 정합성을 검사하고 JSON 보고 생성 |
+| 조건부 검토·정식 QA 자산 등록 승인 | 미구현 |
 
 ## MVP 프로세스
 
@@ -56,6 +57,7 @@ V2는 다음 세 연결만 우선 증명합니다.
 | [V2 MVP 설계](docs/02_V2_MVP_DESIGN.md) | 구현 범위, 단계와 종료선 |
 | [Agent·Checkpoint 명세](docs/03_AGENT_AND_CHECKPOINT_SPEC.md) | 입출력 계약과 최소 판정 규칙 |
 | [테스트·추적성 계획](docs/04_TEST_AND_TRACEABILITY_PLAN.md) | V2 단계별 검증·증거·완료 기준 |
+| [자동 테스트 카탈로그](docs/07_TEST_CATALOG.md) | 현재 수집되는 95개 자동 테스트의 이름·목적·수량 구조 |
 | [Project1 기준 자산 감사](docs/05_PROJECT1_BASELINE_AUDIT.md) | 기존 구현·13개 TC·Coverage·알려진 한계 |
 | [QA 하네스 가이드](docs/06_TEST_HARNESS_GUIDE.md) | QA Drawer·Register·window.__vccs 사용 경계 |
 
@@ -127,7 +129,7 @@ V2는 다음 세 연결만 우선 증명합니다.
 5. Agent 1→2→3 최소 Orchestrator — 구현, 중단·정상 완료 Live 검증 완료
 6. 조건부 HUMAN_REVIEW 분기와 재개 기록
 7. 변경 검증·기존 회귀 후보 실행 — 구현, 기존 정상 Run에서 무API 실행 확인
-8. Agent 4 입력 정합화·최종 보고
+8. Agent 4 입력 정합화·최종 보고 — 구현, 저장된 실제 Agent 1~3·회귀 Run 재연결과 새 API 전체 Run `RUN-20260817-054536-678B65`에서 CP4·최종 보고 PASS 확인
 9. 정식 QA 자산 등록 승인 기록
 10. 서로 다른 변경 요청 2건으로 End-to-End 재검증
 
@@ -176,6 +178,9 @@ python -m qa_pipeline_v2 pipeline --request "구체 변경 요청 JSON 경로" -
 
 # 완료된 Agent 3 Run의 현재 후보와 관련 기존 회귀를 실행(API 미호출)
 python -m qa_pipeline_v2 execute --run-id "Agent 3가 완료된 RUN-..." --target-html "프로젝트1 virtual-controller.html 경로"
+
+# 위 실행 결과를 규칙 기반으로 분석하고 CP4·최종 보고 생성(API 미호출, 테스트 재실행 없음)
+python -m qa_pipeline_v2 agent4 --run-id "검증 실행이 완료된 RUN-..."
 ~~~
 
 기본 모델은 `gpt-5.6-terra`입니다. 다른 모델을 시험할 때만 `--model` 또는 `OPENAI_MODEL`을 사용합니다.
@@ -195,11 +200,11 @@ Agent 2 재작업에는 실패 규칙만 보내던 방식도 보완했습니다.
 
 Agent 3 모델 호출에는 시스템 지침, 선택한 CP2 TC, 관련 SRS 행, 대상 파일명·SHA-256, 페이지 제목, **해당 TC에 필요한** Selector별 tag·text·visible·enabled·action_hint와 하네스 키만 전송됩니다. API 키, 로컬 절대경로, HTML 원문, Screenshot과 Trace는 보내지 않습니다. 먼저 `--preview-only`로 `agent3_model_input_preview.json`을 확인해야 합니다. Preview는 API 키와 모델 Client를 요구하지 않으며 실제 API를 호출하지 않습니다.
 
-현재 Agent 3는 기존 온도 제어에는 검증된 전용 조작을 재사용하고, 처음 보는 기능에는 `CLICK`, `FILL`, `SELECT_OPTION`, `CHECK`, `UNCHECK`와 범용 화면·내부 상태 검증을 사용합니다. 실제 UI 확인 목록에 있는 요소만 AI 계획에서 사용할 수 있고, TC 단계와 요소 명칭의 연결 및 Expected Result와 기대값 근거를 CP3가 검사합니다. 드래그·Canvas처럼 새로운 기술이 필요하면 억지 코드를 만들지 않고 `AUTOMATION_SUPPORT_EXTENSION_REQUIRED`로 사람 검토에 넘깁니다.
+현재 Agent 3는 기존 온도 제어에는 검증된 전용 조작을 재사용하고, 처음 보는 기능에는 `CLICK`, `FILL`, `SELECT_OPTION`, `CHECK`, `UNCHECK`와 범용 화면·내부 상태 검증을 사용합니다. 장비 내부 상태는 UI 조사에서 실제로 확인한 스칼라 필드명만 목록으로 전송하며, TC Expected Result에 그 필드명과 값이 함께 있는 경우에만 `INTERNAL_DEVICE_FIELDS_EQUALS`가 `[{"field_name":"mode","expected_value":"AUTO"}]` 같은 고정 항목 목록으로 대상 장비의 해당 필드를 함께 비교합니다. 모델은 임의 JavaScript·경로·필드를 만들 수 없습니다. TC 단계와 요소 명칭의 연결 및 Expected Result와 기대값 근거를 CP3가 검사합니다. 드래그·Canvas처럼 새로운 기술이 필요하면 억지 코드를 만들지 않고 `AUTOMATION_SUPPORT_EXTENSION_REQUIRED`로 사람 검토에 넘깁니다.
 
 Agent 3 CLI는 시험 `PASS`와 `PRODUCT_MISMATCH_CANDIDATE`만 정상 완료(`exit code 0`)로 반환합니다. `NOT_AUTOMATABLE`, `AUTOMATION_ERROR`, `ENVIRONMENT_ERROR`, `TIMEOUT`, CP3 실패와 시험 미실행은 제품 판정에 사용할 수 없으므로 실패 종료(`exit code 2`)합니다. CP3 계획 위반은 최대 한 번 재작성하지만 시험 실행의 기술 오류 자동 수정은 아직 구현하지 않았습니다.
 
-기존 온도 전용 검증은 CP3가 행동·검증 전략별 Selector를 계속 고정합니다. 신규 범용 검증은 실제 UI 확인 목록의 Selector와 읽기 전용 내부 상태 경로만 사용합니다. 모델 호출 실패로 `agent3_error.json`이 생성된 Run은 종료된 시도로 간주하므로 재실행에는 새 임시 시험 공간이 필요합니다. 시험 자식 Python은 Windows 시작 호환성을 유지한 채 stdout·stderr를 UTF-8로 고정하고, Trace ZIP은 알려진 로컬 경로 표현을 원자적으로 치환합니다.
+기존 온도 전용 검증은 CP3가 행동·검증 전략별 Selector를 계속 고정합니다. 복합 장비 상태는 고정된 `window.__vccs.devices` 대상과 UI 조사에서 확인된 필드명으로만 비교합니다. 신규 범용 검증은 실제 UI 확인 목록의 Selector와 읽기 전용 내부 상태 경로만 사용합니다. 모델 호출 실패로 `agent3_error.json`이 생성된 Run은 종료된 시도로 간주하므로 재실행에는 새 임시 시험 공간이 필요합니다. 시험 자식 Python은 Windows 시작 호환성을 유지한 채 stdout·stderr를 UTF-8로 고정하고, Trace ZIP은 알려진 로컬 경로 표현을 원자적으로 치환합니다.
 
 현재 UI 조사는 두 경로입니다. 이미 아는 기능은 선택 TC에 필요한 요소만 좁게 확인하고, 처음 보는 기능은 안정적인 ID·`data-testid`·접근성 이름을 가진 범용 조작·상태 요소를 최대 120개까지 한 번 동적으로 확인합니다. 전체 HTML은 모델에 보내지 않습니다. 실제 제어 동작과 기대 결과는 이후 신규 자동화 후보 시험에서 검증합니다. 임시 시험 공간은 제한 환경변수·별도 subprocess를 사용하지만 네트워크 차단이나 컨테이너·OS 권한 분리를 제공하는 보안 Sandbox는 아닙니다.
 
@@ -225,6 +230,9 @@ Agent 3 CLI는 시험 `PASS`와 `PRODUCT_MISMATCH_CANDIDATE`만 정상 완료(`e
 - `validation_candidate_trial.json`: 현재 컴파일러 출력이 달라졌을 때 수행한 무API 후보 재시험 결과
 - `validation_execution.json`: 신규 후보·환경 사전 점검·선택된 기존 회귀의 중립 실행 결과
 - `validation_manifest.json`: Agent 3 입력, 현재 후보·재시험, Project1 기준 파일과 실행 결과 SHA-256
+- `agent4_analysis.json`: 중립 결과 집계와 규칙 기반 Finding
+- `checkpoint4.json`: Run ID·해시·중복 TC·실패 근거·제품/고정 사례 분리 검사
+- `final_report.json`: CP4와 일치하는 실행 합계·Finding·PASS/HOLD/HUMAN_REVIEW 권고
 
 예시 JSON의 변경 내용은 연결 확인용이며 대표 요구사항으로 고정하지 않습니다.
 

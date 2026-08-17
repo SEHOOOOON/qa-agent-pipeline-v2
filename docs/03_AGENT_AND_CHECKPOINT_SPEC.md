@@ -2,7 +2,7 @@
 
 ## 1. 목적과 상태
 
-V2 Agent 1~3, 기존 규칙 기반 Agent 4와 검증 단계의 최소 계약을 정의합니다. **기존 정상 전체 실행과 후속 회귀는 PASS했습니다. Agent 3 `agent3-3.7`은 기존 기능의 좁은 UI 확인과 처음 보는 기능의 범용 UI 동적 조사를 분리하고, AI가 관찰 근거 기반 코드 의도 또는 자동화 지원 범위 확장 필요를 반환합니다. 범용 선택·적용 실제 API 시험과 자동 테스트 83건을 통과했습니다. Agent 4 분석과 최종 보고는 미구현입니다.**
+V2 Agent 1~4와 검증 단계의 최소 계약을 정의합니다. **기존 정상 전체 실행과 후속 회귀는 PASS했습니다. Agent 3 `agent3-3.7`은 기존 기능의 좁은 UI 확인과 처음 보는 기능의 범용 UI 동적 조사를 분리하고, AI가 관찰 근거 기반 코드 의도 또는 자동화 지원 범위 확장 필요를 반환합니다. 현재 자동 테스트 95건을 통과했습니다. Agent 4는 검증 결과를 다시 실행하지 않는 규칙 기반 분석·CP4·최종 보고를 구현했고, 2026-08-17 새 API Run `RUN-20260817-054536-678B65`은 Agent 1~4 Checkpoint PASS, 복합 내부 `mode`·`setTemp` 검증, 후보·환경·관련 회귀 4건 PASS와 최종 PASS 권고까지 확인했습니다.**
 
 다음 단계에는 화면 문구나 자유 형식 Markdown이 아니라 Schema 검증을 통과한 JSON만 전달합니다.
 
@@ -41,7 +41,7 @@ Agent 1~3 현재 구현은 별도 Artifact ID 대신 파일 이름과 SHA-256으
 - TC-ENV-000이 `PASSED`일 때만 Requirement ID로 선택한 재사용 가능 기존 회귀를 실행합니다. Project1 테스트와 HTML은 임시 Workspace로 복사하며 의미 라벨이 있는 기존 `conftest.py`는 사용하지 않습니다.
 - 최소 Orchestrator는 대상 HTML 존재를 Agent 1 호출 전에 확인하고 같은 Run ID로 Agent 1→2→3을 실행합니다. 단계 종료 코드가 0이 아니면 즉시 중단하며 `orchestrator_manifest.json`에 완료 단계·중단 단계·각 단계 Manifest SHA-256을 기록합니다. `PRODUCT_MISMATCH_CANDIDATE`는 유효한 QA 관찰이므로 Agent 3·Orchestrator 정상 완료로 취급합니다.
 - `pipeline --tc-id AUTO`가 기본값입니다. CP2가 확정된 뒤 현재 Run의 모든 TC를 자동화 가능성 사전 확인으로 평가합니다. 기존에 검증된 빠른 경로 후보를 범용 UI 동적 조사 후보보다 먼저 선택하고, 그 안에서 CHANGE_VALIDATION·NOTIFICATION·복원 불필요·BOUNDARY·TC ID 순서를 사용합니다.
-- Agent 2 Prompt `agent2-2.3`은 CENTRAL 변경 검증에 `PRIMARY_TEST_DEVICE` 자동화 후보를 최소 한 건 포함하도록 요청합니다. 이는 LOCAL·복수 장비 제품 TC를 제거하지 않고 현재 Agent 3 MVP와 연결할 단일 후보를 추가하기 위한 지침입니다.
+- Agent 2 Prompt `agent2-2.4`는 CENTRAL 변경 검증에 `PRIMARY_TEST_DEVICE` 자동화 후보를 최소 한 건 포함하도록 요청하고, TC·Condition·Expected Result 추적성과 요청 모드 TestData를 제출 전 점검하게 합니다. 이는 LOCAL·복수 장비 제품 TC를 제거하지 않고 현재 Agent 3 MVP와 연결할 단일 후보를 추가하기 위한 지침입니다.
 
 ## 3. 상태와 판정
 
@@ -261,7 +261,7 @@ CP2 PASS는 구조·ID·명시적 추적 규칙 통과를 뜻합니다. 자연�
 
 - 모델은 TC의 사전조건·행동·기대 결과를 제한된 계획으로만 옮깁니다.
 - 모델은 Python, 새 테스트 목적, 경계값, Selector와 Requirement를 만들 수 없습니다.
-- 기존 온도 기능은 행동·검증 전략별 고정 대상을 유지합니다. 신규 기능은 실제 UI 확인 목록의 안정적인 Selector와 실제로 발견한 읽기 전용 내부 상태 경로만 사용할 수 있습니다.
+- 기존 온도 기능은 행동·검증 전략별 고정 대상을 유지합니다. `INTERNAL_DEVICE_FIELDS_EQUALS`는 UI 조사에서 확인한 대상 장비의 스칼라 필드명과 동일 Expected Result에 명시된 필드·값만 `field_name`·`expected_value` 목록으로 함께 비교합니다. 가변 객체가 아닌 목록 계약이므로 OpenAI 구조화 출력 Schema와 호환되며, 모델은 필드 경로나 JavaScript를 작성하지 않습니다. 신규 기능은 실제 UI 확인 목록의 안정적인 Selector와 실제로 발견한 읽기 전용 내부 상태 경로만 사용할 수 있습니다.
 - 범용 UI 동작은 `CLICK`, `FILL`, `SELECT_OPTION`, `CHECK`, `UNCHECK`이며 요소의 tag·role·input type·활성 상태가 동작과 맞아야 합니다. 범용 검증은 텍스트·입력값·체크·활성 상태와 읽기 전용 내부 값 비교입니다.
 - 동작의 `source_text`는 승인 TC의 사전조건·단계·복원 원문과 정확히 같아야 하고, 요소 이름과 TC 원문 사이에 텍스트 연결이 있어야 합니다. 기대값도 해당 Expected Result에서 근거를 찾을 수 있어야 합니다.
 - 검증 조건 삭제·약화, `assert True`, 무조건 skip, 예외 전체 무시를 금지합니다.
@@ -285,7 +285,7 @@ MVP의 실제 실행기는 Python Playwright입니다. 생성·검증을 마친 
 - CP3-001: 승인 TC ID와 MVP 대상 장비 ID 보존
 - CP3-002: Action ID 유일성, 실제 확인 Selector, 행동 유형·요소 역할·선택 장비 값 일치, 범용 요소와 TC 단계의 텍스트 연결
 - CP3-003: 모든 Expected Result와 Assertion의 정확한 1:1 매핑
-- CP3-004: UI·내부 상태·알림 관찰 계층과 검증 전략·대상·기대값 근거 보존, 한국어 조사·어미를 허용한 범용 UI/내부 상태와 Expected Result의 핵심어 연결, 알림 자연어 문장 전체의 UI 문구 오사용 차단, 차단 기대 결과의 `TOAST_BLOCKING` 강제
+- CP3-004: UI·내부 상태·알림 관찰 계층과 검증 전략·대상·기대값 근거 보존, 복합 장비 내부 검사의 필드명·값·관찰 목록 일치, 한국어 조사·어미를 허용한 범용 UI/내부 상태와 Expected Result의 핵심어 연결, 알림 자연어 문장 전체의 UI 문구 오사용 차단, 차단 기대 결과의 `TOAST_BLOCKING` 강제
 - CP3-005: TC에 없는 모드·온도 값 추가 금지
 - CP3-006·006A: PRECONDITION→TEST→RESTORE 순서, 변경된 값의 초기 상태 복원과 CENTRAL 적용 계약. 컴파일러는 기존 온도와 범용 UI·내부 상태의 복원 전후 값을 재확인
 - CP3-007: Python 구문과 테스트 함수
@@ -350,13 +350,15 @@ Agent 4는 생성형 모델이 아니라 규칙 기반 Python 분석기입니다
 - 실행 합계와 실패 분류
 - Finding과 근거
 - PASS·HOLD·HUMAN_REVIEW 권고
-- 최종 보고 JSON
+- `agent4_analysis.json`, `checkpoint4.json`, `final_report.json`
+
+Assertion 실패는 `PRODUCT_MISMATCH_CANDIDATE`로만 기록하며 제품 결함을 확정하지 않습니다. `EXECUTION_ERROR`와 `TIMEOUT`은 자동화 실행 문제, 환경 사전 점검 미통과는 환경 문제와 후속 회귀 근거 부족으로 보수적으로 분류합니다.
 
 ### Checkpoint 4 최소 검사
 
 - 단일 Run ID, 중복 TC 없음
 - 결과 수와 합계 일치
-- 실패 근거 존재
+- 실패 근거 존재와 증거 경로·파일 SHA-256 일치
 - 제품 TC와 파이프라인 검증용 고정 사례 분리
 - 보고 JSON과 표시 수치 일치
 

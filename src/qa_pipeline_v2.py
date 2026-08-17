@@ -242,6 +242,7 @@ class AutomationActionType(str, Enum):
 class AssertionStrategy(str, Enum):
     UI_TEMPERATURE = "UI_TEMPERATURE"
     INTERNAL_SET_TEMP = "INTERNAL_SET_TEMP"
+    INTERNAL_DEVICE_FIELDS_EQUALS = "INTERNAL_DEVICE_FIELDS_EQUALS"
     TOAST_VISIBLE = "TOAST_VISIBLE"
     TOAST_BLOCKING = "TOAST_BLOCKING"
     CONTROLS_DISABLED = "CONTROLS_DISABLED"
@@ -313,6 +314,7 @@ class UiObservation(StrictModel):
     harness_values: dict[NonEmptyStr, str | float | int | bool | None] = Field(
         default_factory=dict
     )
+    device_state_fields: list[NonEmptyStr] = Field(default_factory=list)
     generic_discovery: bool = False
     observed_at: NonEmptyStr
     observer: str = "python-playwright"
@@ -327,6 +329,11 @@ class AutomationAction(StrictModel):
     source_text: NonEmptyStr
 
 
+class DeviceFieldExpectation(StrictModel):
+    field_name: NonEmptyStr
+    expected_value: str | float | int | bool
+
+
 class AutomationAssertion(StrictModel):
     result_id: Annotated[str, StringConstraints(pattern=r"^ER-\d{3}$")]
     observation_layer: ObservationLayer
@@ -335,6 +342,9 @@ class AutomationAssertion(StrictModel):
     expected_number: float | None = None
     expected_text: str | None = None
     expected_value: str | float | int | bool | None = None
+    expected_fields: list[DeviceFieldExpectation] = Field(
+        default_factory=list
+    )
 
 
 class Agent3PlanningStatus(str, Enum):
@@ -404,6 +414,20 @@ class ValidationStageStatus(str, Enum):
     BLOCKED = "BLOCKED"
 
 
+class Agent4FindingCategory(str, Enum):
+    PRODUCT_MISMATCH_CANDIDATE = "PRODUCT_MISMATCH_CANDIDATE"
+    AUTOMATION_EXECUTION_ISSUE = "AUTOMATION_EXECUTION_ISSUE"
+    ENVIRONMENT_ISSUE = "ENVIRONMENT_ISSUE"
+    INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
+    NOT_EXECUTED = "NOT_EXECUTED"
+
+
+class FinalRecommendation(str, Enum):
+    PASS = "PASS"
+    HOLD = "HOLD"
+    HUMAN_REVIEW = "HUMAN_REVIEW"
+
+
 class NeutralExecutionResult(StrictModel):
     test_id: NonEmptyStr
     source: ExecutionSource
@@ -435,6 +459,52 @@ class ValidationExecutionBundle(StrictModel):
     selected_regression_ids: list[NonEmptyStr]
     regression_results: list[NeutralExecutionResult]
     blocked_reason: str | None = None
+    created_at: NonEmptyStr
+
+
+class Agent4Finding(StrictModel):
+    finding_id: Annotated[str, StringConstraints(pattern=r"^FIND-\d{3}$")]
+    category: Agent4FindingCategory
+    test_id: NonEmptyStr | None = None
+    source: ExecutionSource | None = None
+    requirement_ids: list[RequirementId] = Field(default_factory=list)
+    status: NeutralExecutionStatus | None = None
+    evidence_files: list[NonEmptyStr] = Field(default_factory=list)
+    rationale: NonEmptyStr
+
+
+class Agent4Analysis(StrictModel):
+    contract_version: str = "1.0"
+    run_id: NonEmptyStr
+    stage: str = "AGENT_4_ANALYSIS"
+    validation_execution_sha256: NonEmptyStr
+    total_results: int = Field(ge=0)
+    status_counts: dict[NeutralExecutionStatus, int]
+    product_result_count: int = Field(ge=0)
+    pipeline_fixture_result_count: int = Field(ge=0)
+    findings: list[Agent4Finding] = Field(default_factory=list)
+    recommendation: FinalRecommendation
+    created_at: NonEmptyStr
+
+
+class Checkpoint4Result(StrictModel):
+    checkpoint: str = "CP4"
+    status: CheckStatus
+    handoff_status: HandoffStatus
+    checks: list[CheckResult] = Field(min_length=1)
+
+
+class FinalReport(StrictModel):
+    contract_version: str = "1.0"
+    run_id: NonEmptyStr
+    stage: str = "FINAL_REPORT"
+    analysis_sha256: NonEmptyStr
+    checkpoint4_sha256: NonEmptyStr
+    total_results: int = Field(ge=0)
+    status_counts: dict[NeutralExecutionStatus, int]
+    findings: list[Agent4Finding] = Field(default_factory=list)
+    recommendation: FinalRecommendation
+    checkpoint_status: CheckStatus
     created_at: NonEmptyStr
 
 
@@ -1048,6 +1118,8 @@ AGENT2_SYSTEM_INSTRUCTIONS = """
 3. MODIFIED는 변경 동작 검증, UPDATE_REQUIRED는 변경으로 문구 수정이 필요한 연관 기준 검증, VERIFY는 기존 동작 회귀 검증으로 해석합니다.
 4. 모든 confirmed_condition을 최소 한 개 TC의 source_condition_ids로 반영합니다.
 5. 모든 기대 결과는 source_condition_ids로 근거를 연결합니다. 근거에 없는 수치·시간·문구·UI 동작을 추가하지 않습니다.
+5-1. 제출 전 각 TC를 자체 점검합니다. (a) TC의 requirement_ids는 그 TC의 source_condition_ids가 함께 근거를 가져야 하고, (b) TC의 모든 source_condition_ids는 기대 결과들 중 최소 한 건에 다시 포함해야 하며, (c) 각 기대 결과의 source_condition_ids는 그 TC의 source_condition_ids 범위 안에 있어야 합니다. 특히 UI·내부 상태 이중 검증 TC는 각 결과에 필요한 Condition ID를 빠뜨리지 않습니다.
+5-2. 모드가 사전조건·단계의 실행 상태인 경계·예외·상태 TC는 initial_mode와 같더라도 requested_mode를 null로 두지 않습니다. 실행할 모드 값을 requested_mode에 명시해 Agent 3가 필요한 모드 설정 행동을 계획할 수 있게 합니다.
 6. CHANGE_VALIDATION은 실제로 변경된 동작에만 사용하고 유지되는 기존 동작은 RELATED_REGRESSION으로 분류합니다.
 6-1. 범위 변경은 변경된 경계뿐 아니라 변경 후 범위의 하한과 상한을 각각 검증합니다.
 6-2. Agent 1이 CENTRAL과 LOCAL Requirement를 모두 활성 범위로 전달했다면 두 제어 경로에 각각 target_requirement_id를 포함한 CHANGE_VALIDATION TC를 만듭니다.
@@ -1359,11 +1431,19 @@ def evaluate_checkpoint2(
         and tc.test_data.requested_mode is None
         and tc.test_data.requested_temperature_c is None
     ]
+    missing_mode_data = [
+        tc.tc_id
+        for tc in design.test_cases
+        if tc.test_type in {TcType.BOUNDARY, TcType.EXCEPTION, TcType.STATE_CONSISTENCY}
+        and tc.test_data.initial_mode is not None
+        and tc.test_data.requested_mode is None
+    ]
+    test_data_errors = sorted(set(test_data_errors) | set(missing_mode_data))
     if test_data_errors:
         add(
             "CP2-010",
             CheckStatus.FAIL,
-            "경계·예외·상태 TC의 구조화된 요청 시험 데이터가 없습니다: "
+            "경계·예외·상태 TC의 구조화된 요청 모드 또는 시험 데이터가 없습니다: "
             + ", ".join(test_data_errors),
         )
     else:
@@ -1423,13 +1503,18 @@ Rules:
    role, input_type, enabled state, and action_hint support the selected action.
 10. Generic UI assertions are UI_TEXT_CONTAINS, UI_VALUE_EQUALS, UI_CHECKED_EQUALS, and UI_ENABLED_EQUALS.
     INTERNAL_VALUE_EQUALS may use only an exact path present in ui_observation.harness_values.
+    INTERNAL_DEVICE_FIELDS_EQUALS may compare one or more fields of the approved target device only. Its selector is
+    window.__vccs.devices and every expected_fields[].field_name must occur in ui_observation.device_state_fields and be named
+    verbatim in the matching INTERNAL_STATE Expected Result. Do not add fields or values not present in that Expected Result.
     When a NOTIFICATION Expected Result specifies that a result is announced but does not fix the whole message,
     UI_TEXT_CONTAINS may verify a short meaningful phrase that occurs verbatim in that Expected Result. Do not invent a full
     message and do not use the entire natural-language Expected Result sentence as expected_text.
 11. Generic action values must occur in the approved precondition, step, or restore text. Generic assertion values
     must occur in the matching Expected Result. Do not translate a product meaning into an ungrounded boolean or value.
 12. Keep source_text as the exact approved precondition, step, or restore line implemented by the action.
-13. For the existing temperature controller, use UI_TEMPERATURE and INTERNAL_SET_TEMP for their corresponding observations,
+13. For the existing temperature controller, use UI_TEMPERATURE and INTERNAL_SET_TEMP for their corresponding observations.
+    When one INTERNAL_STATE Expected Result explicitly contains multiple registered target-device fields (for example mode
+    and setTemp), use INTERNAL_DEVICE_FIELDS_EQUALS instead of splitting or weakening that Expected Result.
    TOAST_BLOCKING for a blocking Toast, and CONTROLS_DISABLED or DISABLED_TEMPERATURE_TEXT for disabled states.
 14. Return only the structured plan, which is the executable code intent consumed by the guarded compiler. Do not write free-form Python.
 15. Do not propose external URLs, shell commands, file changes, arbitrary waits, skip, or ignored exceptions.
@@ -1438,7 +1523,7 @@ Rules:
     APPLY_COMMANDS=.btn-apply-cmd. Never require these legacy selectors when they are absent from the supplied UI Observation.
     The compiler operates the temperature buttons itself.
 17. For legacy assertion strategies, use these targets exactly: UI_TEMPERATURE=#det-temp-display;
-    INTERNAL_SET_TEMP=window.__vccs.devices; TOAST_VISIBLE=#global-toast;
+    INTERNAL_SET_TEMP=window.__vccs.devices; INTERNAL_DEVICE_FIELDS_EQUALS=window.__vccs.devices; TOAST_VISIBLE=#global-toast;
     TOAST_BLOCKING=#global-toast;
     CONTROLS_DISABLED=#det-temp-down-btn; DISABLED_TEMPERATURE_TEXT=#det-temp-display.
     Do not append indexes, properties, or expressions to a window.__vccs interface.
@@ -1603,7 +1688,7 @@ def inspect_target_ui(
             details.append("window.__vccs=" + ", ".join(sorted(unknown_harness)))
         raise Agent3Error("Unknown Agent 3 inspection capability: " + " / ".join(details))
     try:
-        from playwright.sync_api import sync_playwright
+        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError, sync_playwright
     except ImportError as exc:
         raise Agent3Error(
             "Agent 3 UI inspection requires Playwright. Run pip install -e .[agent3]."
@@ -1618,6 +1703,16 @@ def inspect_target_ui(
         page.evaluate("() => localStorage.clear()")
         page.reload(wait_until="domcontentloaded")
         page.wait_for_selector("body", timeout=5000)
+        if selectors_to_observe:
+            try:
+                page.wait_for_function(
+                    "selectors => selectors.every(selector => document.querySelector(selector))",
+                    arg=sorted(selectors_to_observe),
+                    timeout=5000,
+                )
+            except PlaywrightTimeoutError:
+                # Preserve the existing precise missing-interface error below.
+                pass
         for selector, hint in _UI_SELECTOR_INVENTORY.items():
             if selector not in selectors_to_observe:
                 continue
@@ -1703,6 +1798,25 @@ def inspect_target_ui(
         )
         harness_keys = sorted(harness_to_observe & available_harness_keys)
         harness_values: dict[str, str | float | int | bool | None] = {}
+        device_state_fields: list[str] = []
+        if "devices" in available_harness_keys:
+            device_state_fields = page.evaluate(
+                """() => {
+                    const devices = window.__vccs && Array.isArray(window.__vccs.devices)
+                        ? window.__vccs.devices : [];
+                    const fields = new Set();
+                    for (const device of devices) {
+                        if (!device || typeof device !== 'object') continue;
+                        for (const [key, value] of Object.entries(device)) {
+                            if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key)
+                                && (value === null || ['string', 'number', 'boolean'].includes(typeof value))) {
+                                fields.add(key);
+                            }
+                        }
+                    }
+                    return Array.from(fields).sort();
+                }"""
+            )
         if discover_generic:
             harness_values = page.evaluate(
                 """() => {
@@ -1750,6 +1864,7 @@ def inspect_target_ui(
         elements=elements,
         harness_keys=harness_keys,
         harness_values=harness_values,
+        device_state_fields=device_state_fields,
         generic_discovery=discover_generic,
         observed_at=datetime.now(timezone.utc).isoformat(),
     )
@@ -1769,6 +1884,7 @@ _SUPPORTED_AGENT3_TARGET_ROLES = {
     "CENTRAL_COMMAND_ALLOWED_ROLE",
 }
 _TEMPERATURE_TERMS = ("temperature", "degree", "settemp", "온도", "°")
+_MODE_TERMS = ("mode", "모드")
 _DISABLED_TERMS = ("disabled", "비활성", "조작할 수 없", "사용할 수 없")
 _CONTROL_TERMS = ("control", "button", "버튼", "조작")
 _DISPLAY_TERMS = ("display", "text", "표시")
@@ -1884,7 +2000,17 @@ def evaluate_agent3_eligibility(
                 generic_discovery_required = True
                 required_capabilities.add("ASSERT_GENERIC_UI_STATE")
         elif result.observation_layer == ObservationLayer.INTERNAL_STATE:
-            if temperature_values and _contains_any(statement, _TEMPERATURE_TERMS):
+            has_temperature = temperature_values and _contains_any(
+                statement, _TEMPERATURE_TERMS
+            )
+            has_mode = bool(modes) and _contains_any(statement, _MODE_TERMS)
+            if legacy_controller_flow and (has_temperature or has_mode):
+                if has_temperature:
+                    required_capabilities.add("ASSERT_INTERNAL_SET_TEMP")
+                if has_mode:
+                    required_capabilities.add("ASSERT_INTERNAL_DEVICE_FIELDS")
+                required_harness_keys.add("devices")
+            elif temperature_values and _contains_any(statement, _TEMPERATURE_TERMS):
                 required_capabilities.add("ASSERT_INTERNAL_SET_TEMP")
                 required_harness_keys.add("devices")
             else:
@@ -1925,6 +2051,7 @@ def evaluate_agent3_eligibility(
 _ASSERTION_SELECTOR = {
     AssertionStrategy.UI_TEMPERATURE: "#det-temp-display",
     AssertionStrategy.INTERNAL_SET_TEMP: "window.__vccs.devices",
+    AssertionStrategy.INTERNAL_DEVICE_FIELDS_EQUALS: "window.__vccs.devices",
     AssertionStrategy.TOAST_VISIBLE: "#global-toast",
     AssertionStrategy.TOAST_BLOCKING: "#global-toast",
     AssertionStrategy.CONTROLS_DISABLED: "#det-temp-down-btn",
@@ -2139,6 +2266,7 @@ def evaluate_checkpoint3_plan(
             },
             ObservationLayer.INTERNAL_STATE: {
                 AssertionStrategy.INTERNAL_SET_TEMP,
+                AssertionStrategy.INTERNAL_DEVICE_FIELDS_EQUALS,
                 AssertionStrategy.INTERNAL_VALUE_EQUALS,
             },
             ObservationLayer.NOTIFICATION: (
@@ -2193,6 +2321,35 @@ def evaluate_checkpoint3_plan(
         elif assertion.expected_value is not None:
             fidelity_errors.append(
                 f"{assertion.result_id}: expected_value is not used by the selected strategy"
+            )
+        if assertion.strategy == AssertionStrategy.INTERNAL_DEVICE_FIELDS_EQUALS:
+            if not assertion.expected_fields:
+                fidelity_errors.append(
+                    f"{assertion.result_id}: target-device expected_fields are missing"
+                )
+            field_names = [item.field_name for item in assertion.expected_fields]
+            if len(field_names) != len(set(field_names)):
+                fidelity_errors.append(
+                    f"{assertion.result_id}: target-device field names are duplicated"
+                )
+            for expected_field in assertion.expected_fields:
+                field_name = expected_field.field_name
+                expected_value = expected_field.expected_value
+                if field_name not in observation.device_state_fields:
+                    fidelity_errors.append(
+                        f"{assertion.result_id}: target-device field was not observed: {field_name}"
+                    )
+                if field_name not in result.statement:
+                    fidelity_errors.append(
+                        f"{assertion.result_id}: target-device field is not named in the Expected Result: {field_name}"
+                    )
+                if not _scalar_value_is_grounded(expected_value, result.statement):
+                    fidelity_errors.append(
+                        f"{assertion.result_id}: target-device field value is not grounded in the Expected Result: {field_name}"
+                    )
+        elif assertion.expected_fields:
+            fidelity_errors.append(
+                f"{assertion.result_id}: expected_fields are only valid for INTERNAL_DEVICE_FIELDS_EQUALS"
             )
         if assertion.strategy == AssertionStrategy.INTERNAL_VALUE_EQUALS:
             if (
@@ -2256,6 +2413,25 @@ def evaluate_checkpoint3_plan(
             float(value) for value in allowed_numbers
         }:
             value_errors.append(f"{assertion.result_id}: expected temperature not present in TC")
+        if assertion.strategy == AssertionStrategy.INTERNAL_DEVICE_FIELDS_EQUALS:
+            for expected_field in assertion.expected_fields:
+                field_name = expected_field.field_name
+                expected_value = expected_field.expected_value
+                if field_name == "mode" and expected_value not in {
+                    value for value in (data.initial_mode, data.requested_mode) if value
+                }:
+                    value_errors.append(
+                        f"{assertion.result_id}: expected mode not present in TC"
+                    )
+                if field_name == "setTemp" and (
+                    not isinstance(expected_value, (int, float))
+                    or float(expected_value) not in {
+                        float(value) for value in allowed_numbers
+                    }
+                ):
+                    value_errors.append(
+                        f"{assertion.result_id}: expected setTemp not present in TC"
+                    )
     if value_errors:
         add("CP3-005", CheckStatus.FAIL, " / ".join(value_errors))
     else:
@@ -2518,6 +2694,25 @@ def compile_automation_candidate(
                     f"{indent}actual = page.evaluate(\"id => window.__vccs.devices.find(d => d.id === id).setTemp\", {plan.target_device_id})",
                     f"{indent}if actual != {float(assertion.expected_number)}:",
                     f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + f': internal setTemp={{actual}}')",
+                ]
+            )
+        elif assertion.strategy == AssertionStrategy.INTERNAL_DEVICE_FIELDS_EQUALS:
+            expected_fields = {
+                item.field_name: item.expected_value
+                for item in assertion.expected_fields
+            }
+            lines.extend(
+                [
+                    f"{indent}actual = page.evaluate(\"({{id, fields}}) => {{ const device = window.__vccs.devices.find(d => d.id === id); return Object.fromEntries(fields.map(field => [field, device ? device[field] : null])); }}\", "
+                    + _py_literal(
+                        {
+                            "id": plan.target_device_id,
+                            "fields": sorted(expected_fields),
+                        }
+                    )
+                    + ")",
+                    f"{indent}if actual != {_py_literal(expected_fields)}:",
+                    f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + f': internal device fields={{actual}}')",
                 ]
             )
         elif assertion.strategy == AssertionStrategy.TOAST_BLOCKING:
@@ -3006,17 +3201,34 @@ def _load_verified_agent1_run(run_dir: Path, run_id: str) -> tuple[
 
 def run_agent2(args: argparse.Namespace) -> int:
     run_dir = _resolve_run_dir(Path(args.runs_root), args.run_id)
+    reservation_file = run_dir / "agent2_in_progress.json"
     immutable_outputs = [
         run_dir / "agent2_test_design.json",
         run_dir / "checkpoint2.json",
         run_dir / "agent2_manifest.json",
+        reservation_file,
     ]
     if any(path.exists() for path in immutable_outputs):
-        raise ValueError("이 Run에는 Agent 2 최종 산출물이 이미 존재합니다. 새 Agent 1 Run을 사용하세요.")
-
+        raise ValueError("이 Run에는 Agent 2 산출물 또는 진행 표시가 이미 존재합니다. 새 Agent 1 Run을 사용하세요.")
     request, requirements, analysis, _, source_manifest = _load_verified_agent1_run(
         run_dir, args.run_id
     )
+    try:
+        with reservation_file.open("x", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "run_id": args.run_id,
+                    "stage": "AGENT_2_CP2",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                },
+                handle,
+                ensure_ascii=False,
+                indent=2,
+            )
+            handle.write("\n")
+    except FileExistsError as exc:
+        raise ValueError("이 Run의 Agent 2가 이미 진행 중입니다. 새 Agent 1 Run을 사용하세요.") from exc
+
     agent = OpenAIAgent2(model=args.model)
     try:
         response = agent.design(request, analysis, requirements)
@@ -3070,7 +3282,7 @@ def run_agent2(args: argparse.Namespace) -> int:
             run_dir / "agent2_manifest.json",
             {
                 "contract_version": "2.3",
-                "prompt_version": "agent2-2.3",
+                "prompt_version": "agent2-2.4",
                 "run_id": args.run_id,
                 "source_stage": "AGENT_1_CP1",
                 "stage": "AGENT_2_CP2",
@@ -3089,6 +3301,7 @@ def run_agent2(args: argparse.Namespace) -> int:
                 "created_at": datetime.now(timezone.utc).isoformat(),
             },
         )
+        reservation_file.unlink()
     except Exception as exc:
         _write_json(
             run_dir / "agent2_error.json",
@@ -4068,6 +4281,257 @@ def run_validation_execution(args: argparse.Namespace) -> int:
     return 0 if stage_status == ValidationStageStatus.COMPLETED else 2
 
 
+def _validation_results(bundle: ValidationExecutionBundle) -> list[NeutralExecutionResult]:
+    return [bundle.candidate_result, bundle.environment_precheck, *bundle.regression_results]
+
+
+def _agent4_finding_for_result(
+    result: NeutralExecutionResult, finding_number: int
+) -> Agent4Finding | None:
+    if result.status == NeutralExecutionStatus.PASSED:
+        return None
+    if result.source == ExecutionSource.ENVIRONMENT_PRECHECK:
+        category = Agent4FindingCategory.ENVIRONMENT_ISSUE
+        rationale = "환경 사전 점검이 통과하지 않아 제품 회귀 결과를 신뢰할 수 없습니다."
+    elif result.status == NeutralExecutionStatus.ASSERTION_FAILED:
+        category = Agent4FindingCategory.PRODUCT_MISMATCH_CANDIDATE
+        rationale = "기대 결과와 관찰 결과가 달라 제품 불일치 후보로 분류합니다. 제품 결함 확정은 아닙니다."
+    elif result.status in {
+        NeutralExecutionStatus.EXECUTION_ERROR,
+        NeutralExecutionStatus.TIMEOUT,
+    }:
+        category = Agent4FindingCategory.AUTOMATION_EXECUTION_ISSUE
+        rationale = "실행 기술 오류 또는 시간 초과로 제품 결과를 판정할 수 없습니다."
+    else:
+        category = Agent4FindingCategory.NOT_EXECUTED
+        rationale = "이 TC는 실행되지 않았으므로 제품 결과 근거가 부족합니다."
+    return Agent4Finding(
+        finding_id=f"FIND-{finding_number:03d}",
+        category=category,
+        test_id=result.test_id,
+        source=result.source,
+        requirement_ids=result.requirement_ids,
+        status=result.status,
+        evidence_files=result.evidence_files,
+        rationale=rationale,
+    )
+
+
+def _agent4_recommendation(
+    findings: list[Agent4Finding], checkpoint_status: CheckStatus
+) -> FinalRecommendation:
+    if checkpoint_status != CheckStatus.PASS:
+        return FinalRecommendation.HOLD
+    if any(
+        finding.category == Agent4FindingCategory.PRODUCT_MISMATCH_CANDIDATE
+        for finding in findings
+    ):
+        return FinalRecommendation.HUMAN_REVIEW
+    if findings:
+        return FinalRecommendation.HOLD
+    return FinalRecommendation.PASS
+
+
+def _agent4_evidence_issues(
+    run_dir: Path, results: list[NeutralExecutionResult]
+) -> list[str]:
+    issues: list[str] = []
+    for result in results:
+        if result.status != NeutralExecutionStatus.PASSED and (
+            not result.evidence_complete or not result.evidence_files
+        ):
+            issues.append(f"{result.test_id}: 실패 또는 미실행 증거가 없습니다")
+        for relative_name in result.evidence_files:
+            relative_path = Path(relative_name)
+            if relative_path.is_absolute() or ".." in relative_path.parts:
+                issues.append(f"{result.test_id}: 증거 경로가 Run 폴더 밖을 가리킵니다")
+                continue
+            evidence_file = (run_dir / relative_path).resolve()
+            try:
+                evidence_file.relative_to(run_dir.resolve())
+            except ValueError:
+                issues.append(f"{result.test_id}: 증거 경로가 Run 폴더 밖을 가리킵니다")
+                continue
+            expected_hash = result.evidence_sha256.get(relative_name)
+            if not evidence_file.is_file():
+                issues.append(f"{result.test_id}: 증거 파일이 없습니다: {relative_name}")
+            elif expected_hash is None or _sha256_file(evidence_file) != expected_hash:
+                issues.append(f"{result.test_id}: 증거 SHA-256이 일치하지 않습니다: {relative_name}")
+    return issues
+
+
+def run_agent4(args: argparse.Namespace) -> int:
+    """Analyze one verified validation bundle without rerunning tests or calling a model."""
+    run_dir = _resolve_run_dir(Path(args.runs_root), args.run_id)
+    outputs = (
+        run_dir / "agent4_analysis.json",
+        run_dir / "checkpoint4.json",
+        run_dir / "final_report.json",
+        run_dir / "agent4_error.json",
+    )
+    if any(path.exists() for path in outputs):
+        raise ValueError("이 Run에는 이미 Agent 4 보고 산출물이 있습니다. 기존 증거를 덮어쓸 수 없습니다.")
+    try:
+        execution_file = run_dir / "validation_execution.json"
+        bundle = _read_json_model(execution_file, ValidationExecutionBundle)
+        manifest = _read_json_payload(run_dir / "validation_manifest.json")
+        checks: list[CheckResult] = []
+        manifest_hash = manifest.get("validation_execution_sha256")
+        hash_matches = (
+            isinstance(manifest_hash, str)
+            and manifest_hash == _sha256_file(execution_file)
+        )
+        checks.append(
+            CheckResult(
+                rule_id="CP4-001",
+                status=CheckStatus.PASS if bundle.run_id == args.run_id and manifest.get("run_id") == args.run_id else CheckStatus.FAIL,
+                message="단일 Run ID가 실행 결과와 Manifest에 일치합니다."
+                if bundle.run_id == args.run_id and manifest.get("run_id") == args.run_id
+                else "실행 결과 또는 Manifest의 Run ID가 요청 Run ID와 다릅니다.",
+            )
+        )
+        checks.append(
+            CheckResult(
+                rule_id="CP4-002",
+                status=CheckStatus.PASS if hash_matches else CheckStatus.FAIL,
+                message="validation_execution.json SHA-256이 Manifest와 일치합니다."
+                if hash_matches
+                else "validation_execution.json SHA-256이 Manifest와 일치하지 않습니다.",
+            )
+        )
+        results = _validation_results(bundle)
+        test_ids = [result.test_id for result in results]
+        duplicate_ids = sorted({test_id for test_id in test_ids if test_ids.count(test_id) > 1})
+        checks.append(
+            CheckResult(
+                rule_id="CP4-003",
+                status=CheckStatus.PASS if not duplicate_ids else CheckStatus.FAIL,
+                message="실행 결과에 중복 TC가 없습니다."
+                if not duplicate_ids
+                else f"실행 결과에 중복 TC가 있습니다: {', '.join(duplicate_ids)}",
+            )
+        )
+        source_contract_ok = (
+            bundle.candidate_result.source == ExecutionSource.NEW_AUTOMATION_CANDIDATE
+            and bundle.environment_precheck.source == ExecutionSource.ENVIRONMENT_PRECHECK
+            and all(
+                result.source == ExecutionSource.EXISTING_REGRESSION
+                for result in bundle.regression_results
+            )
+        )
+        checks.append(
+            CheckResult(
+                rule_id="CP4-004",
+                status=CheckStatus.PASS if source_contract_ok else CheckStatus.FAIL,
+                message="후보·환경 사전 점검·기존 회귀의 결과 출처가 계약과 일치합니다."
+                if source_contract_ok
+                else "실행 결과 출처가 후보·환경 사전 점검·기존 회귀 계약과 일치하지 않습니다.",
+            )
+        )
+        regression_ids = [result.test_id for result in bundle.regression_results]
+        regression_execution_ok = (
+            (bundle.status == ValidationStageStatus.COMPLETED and regression_ids == bundle.selected_regression_ids)
+            or (
+                bundle.status == ValidationStageStatus.BLOCKED
+                and not regression_ids
+                and bundle.blocked_reason == "ENVIRONMENT_PRECHECK_NOT_PASSED"
+            )
+        )
+        checks.append(
+            CheckResult(
+                rule_id="CP4-005",
+                status=CheckStatus.PASS if regression_execution_ok else CheckStatus.FAIL,
+                message="선택된 기존 회귀의 실행 수와 차단 상태가 실행 결과와 일치합니다."
+                if regression_execution_ok
+                else "선택된 기존 회귀의 실행 결과 또는 차단 상태가 일치하지 않습니다.",
+            )
+        )
+        evidence_issues = _agent4_evidence_issues(run_dir, results)
+        checks.append(
+            CheckResult(
+                rule_id="CP4-006",
+                status=CheckStatus.PASS if not evidence_issues else CheckStatus.FAIL,
+                message="실행 증거 파일의 경로·존재·SHA-256이 계약과 일치합니다."
+                if not evidence_issues
+                else f"실행 증거 검증 실패: {'; '.join(evidence_issues)}",
+            )
+        )
+        fixture_ids = [result.test_id for result in results if result.test_id.startswith("TC-PIPE-")]
+        checks.append(
+            CheckResult(
+                rule_id="CP4-007",
+                status=CheckStatus.PASS,
+                message=(
+                    "제품 TC와 파이프라인 고정 사례를 분리했습니다. "
+                    f"고정 사례 {len(fixture_ids)}건, 제품 TC {len(results) - len(fixture_ids)}건입니다."
+                ),
+            )
+        )
+        checkpoint_status = (
+            CheckStatus.PASS
+            if all(check.status == CheckStatus.PASS for check in checks)
+            else CheckStatus.FAIL
+        )
+        checkpoint = Checkpoint4Result(
+            status=checkpoint_status,
+            handoff_status=(HandoffStatus.CONTINUE if checkpoint_status == CheckStatus.PASS else HandoffStatus.BLOCKED),
+            checks=checks,
+        )
+        findings: list[Agent4Finding] = []
+        for result in results:
+            finding = _agent4_finding_for_result(result, len(findings) + 1)
+            if finding is not None:
+                findings.append(finding)
+        if bundle.status == ValidationStageStatus.BLOCKED:
+            findings.append(
+                Agent4Finding(
+                    finding_id=f"FIND-{len(findings) + 1:03d}",
+                    category=Agent4FindingCategory.INSUFFICIENT_EVIDENCE,
+                    rationale="환경 사전 점검 차단으로 선택된 관련 회귀가 실행되지 않았습니다.",
+                )
+            )
+        status_counts = {status: sum(result.status == status for result in results) for status in NeutralExecutionStatus}
+        analysis = Agent4Analysis(
+            run_id=args.run_id,
+            validation_execution_sha256=_sha256_file(execution_file),
+            total_results=len(results),
+            status_counts=status_counts,
+            product_result_count=len(results) - len(fixture_ids),
+            pipeline_fixture_result_count=len(fixture_ids),
+            findings=findings,
+            recommendation=_agent4_recommendation(findings, checkpoint_status),
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+        analysis_file = run_dir / "agent4_analysis.json"
+        checkpoint_file = run_dir / "checkpoint4.json"
+        _write_json(analysis_file, analysis.model_dump(mode="json"))
+        _write_json(checkpoint_file, checkpoint.model_dump(mode="json"))
+        report = FinalReport(
+            run_id=args.run_id,
+            analysis_sha256=_sha256_file(analysis_file),
+            checkpoint4_sha256=_sha256_file(checkpoint_file),
+            total_results=analysis.total_results,
+            status_counts=analysis.status_counts,
+            findings=analysis.findings,
+            recommendation=analysis.recommendation,
+            checkpoint_status=checkpoint.status,
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+        _write_json(run_dir / "final_report.json", report.model_dump(mode="json"))
+    except Exception as exc:
+        _write_json(
+            run_dir / "agent4_error.json",
+            {"run_id": args.run_id, "stage": "AGENT_4_ANALYSIS", "error_type": type(exc).__name__, "message": str(exc), "created_at": datetime.now(timezone.utc).isoformat()},
+        )
+        raise
+    print(f"Run ID: {args.run_id}")
+    print(f"Checkpoint 4: {checkpoint.status.value}")
+    print(f"Recommendation: {report.recommendation.value}")
+    print(f"Findings: {len(report.findings)}")
+    print(f"Artifacts: {run_dir}")
+    return 0 if checkpoint.status == CheckStatus.PASS else 2
+
+
 def _write_orchestrator_manifest(
     run_dir: Path,
     run_id: str,
@@ -4393,6 +4857,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--timeout", type=int, default=60, help="기존 TC 한 건당 제한 시간(초)"
     )
     execute.set_defaults(handler=run_validation_execution)
+    agent4 = subparsers.add_parser(
+        "agent4",
+        help="검증 실행 결과를 재실행 없이 규칙 기반으로 분류하고 최종 보고 생성",
+    )
+    agent4.add_argument("--run-id", required=True, help="검증 실행이 완료된 Run ID")
+    agent4.add_argument(
+        "--runs-root", default=str(DEFAULT_RUNS_ROOT), help="실행 결과 저장 폴더"
+    )
+    agent4.set_defaults(handler=run_agent4)
     return parser
 
 

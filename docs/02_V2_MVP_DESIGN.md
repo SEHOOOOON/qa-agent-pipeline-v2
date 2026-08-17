@@ -18,13 +18,12 @@
 
 - 구조화된 기존 TC 목록과 Agent 2의 NEW·UPDATED·REGRESSION 비교
 - 조건부 검토 UI와 정식 QA 자산 등록 승인 기록
-- Agent 4의 V2 중립 결과 분석과 Run 단위 최종 보고
 
 ## 현재 구현 경계
 
-- 구현 완료: Product SRS·연관 요구사항 파서, Agent 1·2 OpenAI Adapter, Agent 3 자동화 가능성 사전 확인·기존 기능의 선택 TC 범위 UI 확인·신규 기능의 범용 UI 동적 조사·구조화된 코드 의도 Adapter·결정론적 코드 컴파일러, CP1 10개·CP2 11개·CP3 계획/코드 규칙, 격리 시험, 요청·SRS·단계 산출물 SHA-256 고정, A1→A3 최소 전체 실행 조정기, 중립 실행 결과 계약, 현재 후보 재검증·필요 시 무API 재시험, 환경 사전 점검과 관련 기존 회귀 격리 실행
-- 실행 확인: 기존 전체 실행 `RUN-20260815-092107-0C075E`과 후속 회귀는 모두 PASS했습니다. `agent3-3.7`은 특정 제품 기능명을 코드에 고정하지 않은 범용 선택·적용 Live에서 동적 UI 발견→AI 코드 의도→CP3→Python 생성→브라우저 시험→UI·내부 상태 복원을 PASS했고 전체 자동 테스트 83건을 통과했습니다.
-- 미구현·미확인: 기존 TC 자산의 NEW·UPDATED 비교, 조건부 검토 재개 UI, Agent 4 분석·최종 보고와 정식 자산 등록 기록
+- 구현 완료: Product SRS·연관 요구사항 파서, Agent 1·2 OpenAI Adapter, Agent 3 자동화 가능성 사전 확인·기존 기능의 선택 TC 범위 UI 확인·신규 기능의 범용 UI 동적 조사·구조화된 코드 의도 Adapter·결정론적 코드 컴파일러, CP1 10개·CP2 11개·CP3 계획/코드 규칙, 격리 시험, 요청·SRS·단계 산출물 SHA-256 고정, A1→A3 최소 전체 실행 조정기, 중립 실행 결과 계약, 현재 후보 재검증·필요 시 무API 재시험, 환경 사전 점검과 관련 기존 회귀 격리 실행, Agent 4 규칙 기반 분석·CP4·최종 보고 JSON
+- 실행 확인: 기존 전체 실행 `RUN-20260815-092107-0C075E`과 후속 회귀는 모두 PASS했습니다. `agent3-3.7`은 특정 제품 기능명을 코드에 고정하지 않은 범용 선택·적용 Live에서 동적 UI 발견→AI 코드 의도→CP3→Python 생성→브라우저 시험→UI·내부 상태 복원을 PASS했습니다. 이후 새 API 전체 Run `RUN-20260817-054536-678B65`은 Agent 1~4 Checkpoint, 후보·환경·관련 회귀 4건, 최종 PASS 권고까지 통과했고 전체 자동 테스트 95건을 통과했습니다.
+- 미구현·미확인: 기존 TC 자산의 NEW·UPDATED 비교, 조건부 검토 재개 UI, 정식 자산 등록 기록
 - Project1 기존 구현 상태와 한계는 [Project1 기준 자산 감사](05_PROJECT1_BASELINE_AUDIT.md), 테스트 지원 인터페이스는 [QA 하네스 가이드](06_TEST_HARNESS_GUIDE.md)를 기준으로 합니다.
 
 ## 3. MVP 목표와 비목표
@@ -115,7 +114,7 @@ Checkpoint는 생성형 Agent가 아니라 결정론 검사기입니다. PASS �
 - 모델은 Python 코드를 직접 작성하지 않으며 새 테스트 목적, 기대값, Selector와 Requirement를 추가할 수 없습니다.
 - CP3는 행동 유형과 Selector의 대응, 모든 Expected Result의 1:1 검증 조건, 관찰 계층, 값, 단계 순서와 복원 계약을 검사합니다. 범용 알림은 자연어 Expected Result 전체 문장을 UI 문구로 사용할 수 없고, 컴파일러는 범용 UI·내부 상태도 복원 전후 값으로 재확인합니다.
 - 허용 목록 컴파일러가 CP3 PASS 계획을 Python Playwright 후보로 결정론적으로 만듭니다.
-- 내부 상태는 기존 `window.__vccs.devices` 읽기 인터페이스를 사용합니다.
+- 내부 상태는 기존 `window.__vccs.devices` 읽기 인터페이스를 사용합니다. 복합 장비 상태 검사는 UI 조사에서 실제로 확인한 스칼라 필드명과 TC Expected Result에 함께 명시된 필드·값만 고정 대상 장비에서 읽어 비교합니다.
 - 현재 범용 조작은 클릭·입력·선택·체크/해제이고, 범용 검증은 텍스트·입력값·체크·활성 상태와 실제로 발견한 읽기 전용 내부 값 비교입니다. 드래그·Canvas·파일 업로드처럼 새 기술이 필요한 경우는 자동화 지원 범위 확장 필요로 분리합니다.
 - 생성·검증을 마친 코드는 Run 폴더에 저장하며 이후 재실행에서는 모델을 다시 호출하지 않습니다.
 - Playwright MCP는 향후 조사 보조 도구일 뿐, 현재 구현의 실행 조건이나 품질 보장 근거가 아닙니다.
@@ -217,6 +216,9 @@ runs/RUN-<id>/
   validation_candidate_trial.json # 구현: 현재 후보 무API 재시험 결과(필요 시)
   validation_execution.json       # 구현: 신규 후보·사전 점검·관련 기존 회귀 중립 결과
   validation_manifest.json        # 구현: Agent 3·후보·Project1 기준·실행 결과 해시
+  agent4_analysis.json            # 구현: 규칙 기반 집계·Finding
+  checkpoint4.json                # 구현: Agent 4 입력·보고 정합성 검사
+  final_report.json               # 구현: Run 단위 최종 보고
   conditional_review.json        # REVIEW 재개 기능 계획
   asset_registration_decision.json
   final_report.json

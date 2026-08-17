@@ -110,12 +110,12 @@ Reset은 사용자 확인 후 해당 저장값을 지우고 페이지를 다시 
 
 1. 실제 Project1 HTML 파일은 읽기 전용으로 열고 SHA-256을 기록합니다.
 2. 선택 TC가 기존의 검증된 빠른 확인 대상인지, 처음 보는 UI를 동적으로 확인할 대상인지 구분합니다.
-3. 기존 기능은 필요한 Selector와 `window.__vccs` 키만 확인하고, 신규 기능은 안정적인 ID·`data-testid`·접근성 이름을 가진 범용 UI와 읽기 가능한 내부 상태를 동적으로 확인합니다.
+3. 기존 기능은 필요한 Selector와 `window.__vccs` 키 및 대상 장비에서 실제 확인한 스칼라 필드명만 확인하고, 신규 기능은 안정적인 ID·`data-testid`·접근성 이름을 가진 범용 UI와 읽기 가능한 내부 상태를 동적으로 확인합니다.
 4. Agent 3 모델은 선택 TC·관련 SRS·TC 범위 UI 조사 JSON으로 구조화 계획만 만듭니다.
 5. 모델이 Python 코드와 새 Selector·기대값·Requirement를 만들지 못하게 합니다.
 6. CP3가 행동-Selector, Expected Result 1:1, 관찰 계층, 값, 단계 순서와 초기값 복원 Action을 검사합니다. 알림은 Expected Result 전체 자연어 문장을 실제 UI 문구로 사용할 수 없습니다.
 7. 허용 목록 컴파일러가 Playwright Python 후보를 생성하고 복원 후 기존 온도와 범용 UI·내부 상태를 초기 관찰값과 다시 비교합니다.
-8. UI 실제값과 `window.__vccs.devices` 내부 실제값을 TC의 고정 기대값과 비교합니다.
+8. UI 실제값과 `window.__vccs.devices` 내부 실제값을 TC의 고정 기대값과 비교합니다. 복합 내부 검사는 UI 조사 목록과 TC Expected Result에 모두 있는 필드만 대상 장비에서 읽습니다.
 9. 후보는 원본과 분리된 임시 폴더에서 실행하고 Run 폴더에는 검토용 사본만 저장합니다.
 10. 시험 프로세스에는 allowlist의 시스템 변수와 QA 대상·증거 경로만 전달합니다.
 11. 범용 클릭·입력·선택·체크/해제와 화면·내부 값 비교로 구현할 수 없으면 `AUTOMATION_SUPPORT_EXTENSION_REQUIRED`로 기록하고 코드를 만들지 않습니다.

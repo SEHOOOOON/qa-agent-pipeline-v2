@@ -980,6 +980,25 @@ def test_structured_test_data_is_required_for_boundary_tc() -> None:
     assert result.status == CheckStatus.FAIL
     assert cp2_check(result, "CP2-010").status == CheckStatus.FAIL
 
+
+def test_boundary_tc_with_initial_mode_requires_requested_mode_for_agent3() -> None:
+    tc = cp2_valid_design().test_cases[0].model_copy(
+        update={
+            "test_data": StructuredTestData(
+                initial_mode="AUTO",
+                requested_mode=None,
+                initial_temperature_c=18,
+                requested_temperature_c=17,
+            )
+        }
+    )
+    design = cp2_valid_design().model_copy(update={"test_cases": [tc]})
+    result = evaluate_checkpoint2(
+        cp1_request(), cp2_analysis(), design, cp2_requirements()
+    )
+
+    assert cp2_check(result, "CP2-010").status == CheckStatus.FAIL
+
 def test_missing_condition_is_rejected() -> None:
     tc = cp2_valid_design().test_cases[0].model_copy(
         update={"source_condition_ids": ["COND-001", "COND-002"]}
@@ -1209,10 +1228,24 @@ def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
     assert pipeline.run_agent2(agent2_args) == 0
     assert (run_dir / "srs_snapshot.md").is_file()
     assert (run_dir / "agent2_test_design.json").is_file()
+    assert (run_dir / "agent2_in_progress.json").exists() is False
     manifest = json.loads((run_dir / "agent2_manifest.json").read_text(encoding="utf-8"))
     assert manifest["status"] == CheckStatus.PASS.value
     assert manifest["request_sha256"] == _sha256_file(run_dir / "request.json")
     assert manifest["srs_sha256"] == _sha256_file(run_dir / "srs_snapshot.md")
+
+
+def test_agent2_rejects_an_active_run_reservation(tmp_path: Path) -> None:
+    run_id = "RUN-20260817-040000-ABCDEF"
+    run_dir = tmp_path / "runs" / run_id
+    run_dir.mkdir(parents=True)
+    (run_dir / "agent2_in_progress.json").write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="진행 표시가 이미 존재"):
+        pipeline.run_agent2(
+            SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"), model=None)
+        )
+
 
 # Agent 3
 from qa_pipeline_v2 import (
@@ -1330,6 +1363,7 @@ def agent3_observation() -> UiObservation:
         page_title="Virtual Controller",
         elements=[ObservedUiElement(selector=item, tag="button", text="", visible=True, enabled=True, action_hint="observed") for item in selectors],
         harness_keys=["devices", "pendingState", "selectedUnitId", "selectUnit", "applyPanelCommands"],
+        device_state_fields=["id", "mode", "setTemp"],
         observed_at="2026-08-13T00:00:00+00:00",
     )
 
@@ -1377,12 +1411,14 @@ def test_agent3_uses_structured_plan_api() -> None:
     assert "Generic UI actions are CLICK, FILL, SELECT_OPTION, CHECK, and UNCHECK" in instructions
     assert "AUTOMATION_SUPPORT_EXTENSION_REQUIRED" in instructions
     assert "INTERNAL_SET_TEMP=window.__vccs.devices" in instructions
+    assert "INTERNAL_DEVICE_FIELDS_EQUALS=window.__vccs.devices" in instructions
     assert "Do not append indexes, properties, or expressions" in instructions
     assert "If a SELECT_DEVICE action is actually needed" in instructions
     assert "does not need a legacy SELECT_DEVICE action" in instructions
     assert "UI_TEXT_CONTAINS may verify a short meaningful phrase" in instructions
     assert "do not use the entire natural-language Expected Result sentence" in instructions
     assert "TOAST_BLOCKING" in instructions
+    assert "propertyNames" not in json.dumps(Agent3AutomationPlan.model_json_schema())
 
 
 def test_agent3_model_input_preview_is_minimal_and_has_no_local_path() -> None:
@@ -1431,6 +1467,7 @@ def test_agent3_eligibility_scopes_ui_inventory_to_selected_tc(tmp_path: Path) -
         eligibility.required_selectors
     )
     assert set(observation.harness_keys) == {"devices", "selectedUnitId"}
+    assert observation.device_state_fields == []
 
 
 def test_agent3_scoped_inventory_still_blocks_a_required_selector(tmp_path: Path) -> None:
@@ -1453,6 +1490,25 @@ def test_agent3_scoped_inventory_still_blocks_a_required_selector(tmp_path: Path
         )
 
 
+def test_agent3_inspection_waits_for_delayed_required_selector(tmp_path: Path) -> None:
+    target = tmp_path / "delayed-controller.html"
+    target.write_text(
+        """<!doctype html><title>Delayed Controller</title><body><script>
+setTimeout(() => document.body.insertAdjacentHTML('beforeend',
+  '<button id="det-mode-auto">AUTO</button>'), 100);
+</script></body>""",
+        encoding="utf-8",
+    )
+
+    observation = inspect_target_ui(
+        target,
+        required_selectors={"#det-mode-auto"},
+        required_harness_keys=set(),
+    )
+
+    assert [item.selector for item in observation.elements] == ["#det-mode-auto"]
+
+
 def test_agent3_unknown_internal_state_uses_generic_discovery() -> None:
     payload = agent3_test_case().model_dump(mode="json")
     payload["requirement_ids"].append("REQ-LOCK-001")
@@ -1468,6 +1524,60 @@ def test_agent3_unknown_internal_state_uses_generic_discovery() -> None:
     assert eligibility.generic_discovery_required is True
     assert "DISCOVER_INTERNAL_STATE" in eligibility.required_capabilities
     assert eligibility.missing_capabilities == []
+
+
+def test_agent3_registered_device_fields_are_grounded_and_compiled() -> None:
+    payload = agent3_test_case().model_dump(mode="json")
+    payload["expected_results"][1]["statement"] = (
+        "Internal mode is AUTO and setTemp remains at 18 degrees."
+    )
+    test_case = ProductTestCaseCandidate.model_validate(payload)
+    plan_payload = agent3_plan().model_dump(mode="json")
+    plan_payload["assertions"][1] = {
+        "result_id": "ER-006",
+        "observation_layer": "INTERNAL_STATE",
+        "strategy": "INTERNAL_DEVICE_FIELDS_EQUALS",
+        "selector": "window.__vccs.devices",
+        "expected_fields": [
+            {"field_name": "mode", "expected_value": "AUTO"},
+            {"field_name": "setTemp", "expected_value": 18},
+        ],
+    }
+    plan = Agent3AutomationPlan.model_validate(plan_payload)
+
+    eligibility = evaluate_agent3_eligibility(test_case)
+    checkpoint = evaluate_checkpoint3_plan(test_case, plan, agent3_observation())
+    code = compile_automation_candidate("RUN-20260817-FIELDS-ABCDEF", test_case, plan)
+
+    assert "ASSERT_INTERNAL_DEVICE_FIELDS" in eligibility.required_capabilities
+    assert checkpoint.status == CheckStatus.PASS
+    assert "internal device fields={actual}" in code
+    assert "Object.fromEntries(fields.map(field" in code
+
+
+def test_agent3_rejects_unobserved_or_ungrounded_device_fields() -> None:
+    payload = agent3_test_case().model_dump(mode="json")
+    payload["expected_results"][1]["statement"] = "Internal setTemp remains at 18 degrees."
+    test_case = ProductTestCaseCandidate.model_validate(payload)
+    plan_payload = agent3_plan().model_dump(mode="json")
+    plan_payload["assertions"][1] = {
+        "result_id": "ER-006",
+        "observation_layer": "INTERNAL_STATE",
+        "strategy": "INTERNAL_DEVICE_FIELDS_EQUALS",
+        "selector": "window.__vccs.devices",
+        "expected_fields": [
+            {"field_name": "mode", "expected_value": "AUTO"},
+            {"field_name": "unregistered", "expected_value": True},
+        ],
+    }
+    checkpoint = evaluate_checkpoint3_plan(
+        test_case, Agent3AutomationPlan.model_validate(plan_payload), agent3_observation()
+    )
+
+    cp3 = next(item for item in checkpoint.checks if item.rule_id == "CP3-004")
+    assert checkpoint.status == CheckStatus.FAIL
+    assert "field is not named in the Expected Result: mode" in cp3.message
+    assert "field was not observed: unregistered" in cp3.message
 
 
 def test_agent3_non_hvac_mode_values_use_generic_discovery() -> None:
@@ -1985,13 +2095,36 @@ window.__vccs={get devices(){return devices},get pendingState(){return pendingSt
     )
     observation = inspect_target_ui(target)
     assert observation.page_title == "Virtual Controller"
+    assert {"mode", "setTemp"} <= set(observation.device_state_fields)
+    test_case_payload = agent3_test_case().model_dump(mode="json")
+    test_case_payload["expected_results"][1]["statement"] = (
+        "Internal mode is AUTO and setTemp remains at 18 degrees."
+    )
+    test_case = ProductTestCaseCandidate.model_validate(test_case_payload)
+    plan_payload = agent3_plan().model_dump(mode="json")
+    plan_payload["assertions"][1] = {
+        "result_id": "ER-006",
+        "observation_layer": "INTERNAL_STATE",
+        "strategy": "INTERNAL_DEVICE_FIELDS_EQUALS",
+        "selector": "window.__vccs.devices",
+        "expected_fields": [
+            {"field_name": "mode", "expected_value": "AUTO"},
+            {"field_name": "setTemp", "expected_value": 18},
+        ],
+    }
+    plan = Agent3AutomationPlan.model_validate(plan_payload)
+    assert evaluate_checkpoint3_plan(test_case, plan, observation).status == CheckStatus.PASS
     candidate = tmp_path / "candidate.py"
-    candidate.write_text(compile_automation_candidate("RUN-20260813-120000-ABCDEF", agent3_test_case(), agent3_plan()), encoding="utf-8")
+    candidate.write_text(
+        compile_automation_candidate("RUN-20260813-120000-ABCDEF", test_case, plan),
+        encoding="utf-8",
+    )
     trial = run_candidate_trial(candidate, target, tmp_path / "evidence", timeout_seconds=20)
     assert trial.outcome == TrialOutcome.PRODUCT_MISMATCH_CANDIDATE
     assert trial.evidence_complete is True
     stdout = (tmp_path / "evidence" / "trial-stdout.txt").read_text(encoding="utf-8")
     assert "ER-007: toast does not indicate blocking: successfully applied" in stdout
+    assert "ER-006: internal device fields={'mode': 'AUTO', 'setTemp': 17}" in stdout
     with zipfile.ZipFile(tmp_path / "evidence" / "trial-trace.zip") as archive:
         trace_payload = b"".join(archive.read(name) for name in archive.namelist())
     assert str(tmp_path.resolve()).encode("utf-8") not in trace_payload
@@ -2773,3 +2906,195 @@ def test_execute_parser_exposes_validation_execution_command() -> None:
     assert args.handler is pipeline.run_validation_execution
     assert args.baseline_tests is None
     assert args.timeout == 60
+
+
+# Agent 4: verified neutral results -> rules-only findings and final report
+def _write_agent4_inputs(
+    tmp_path: Path,
+    *,
+    candidate_status: pipeline.NeutralExecutionStatus = pipeline.NeutralExecutionStatus.PASSED,
+    precheck_status: pipeline.NeutralExecutionStatus = pipeline.NeutralExecutionStatus.PASSED,
+) -> tuple[Path, str]:
+    run_id = "RUN-20260817-030000-ABCDEF"
+    run_dir = tmp_path / "runs" / run_id
+    run_dir.mkdir(parents=True)
+    candidate = _neutral_execution_result(
+        "TC-CAND-003", pipeline.ExecutionSource.NEW_AUTOMATION_CANDIDATE, candidate_status
+    )
+    precheck = _neutral_execution_result(
+        "TC-ENV-000", pipeline.ExecutionSource.ENVIRONMENT_PRECHECK, precheck_status
+    )
+    regressions = (
+        [_neutral_execution_result("TC-TEMP-001", pipeline.ExecutionSource.EXISTING_REGRESSION)]
+        if precheck_status == pipeline.NeutralExecutionStatus.PASSED
+        else []
+    )
+
+    def materialize_evidence(
+        result: pipeline.NeutralExecutionResult,
+    ) -> pipeline.NeutralExecutionResult:
+        hashes: dict[str, str] = {}
+        for relative_name in result.evidence_files:
+            evidence_file = run_dir / relative_name
+            evidence_file.parent.mkdir(parents=True, exist_ok=True)
+            evidence_file.write_text(
+                f"evidence:{relative_name}\n", encoding="utf-8"
+            )
+            hashes[relative_name] = _sha256_file(evidence_file)
+        return result.model_copy(update={"evidence_sha256": hashes})
+
+    candidate = materialize_evidence(candidate)
+    precheck = materialize_evidence(precheck)
+    regressions = [materialize_evidence(result) for result in regressions]
+    bundle = pipeline.ValidationExecutionBundle(
+        run_id=run_id,
+        status=(
+            pipeline.ValidationStageStatus.COMPLETED
+            if precheck_status == pipeline.NeutralExecutionStatus.PASSED
+            else pipeline.ValidationStageStatus.BLOCKED
+        ),
+        candidate_result=candidate,
+        environment_precheck=precheck,
+        selected_regression_ids=["TC-TEMP-001"],
+        regression_results=regressions,
+        blocked_reason=(
+            None
+            if precheck_status == pipeline.NeutralExecutionStatus.PASSED
+            else "ENVIRONMENT_PRECHECK_NOT_PASSED"
+        ),
+        created_at="2026-08-17T00:00:00+00:00",
+    )
+    execution_file = run_dir / "validation_execution.json"
+    _write_json(execution_file, bundle.model_dump(mode="json"))
+    _write_json(
+        run_dir / "validation_manifest.json",
+        {
+            "run_id": run_id,
+            "validation_execution_sha256": _sha256_file(execution_file),
+            "project1_modified": False,
+        },
+    )
+    return run_dir, run_id
+
+
+def test_agent4_writes_consistent_pass_report_without_rerunning_tests(tmp_path: Path) -> None:
+    run_dir, run_id = _write_agent4_inputs(tmp_path)
+
+    assert pipeline.run_agent4(
+        SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))
+    ) == 0
+
+    analysis = pipeline.Agent4Analysis.model_validate_json(
+        (run_dir / "agent4_analysis.json").read_text(encoding="utf-8")
+    )
+    checkpoint = pipeline.Checkpoint4Result.model_validate_json(
+        (run_dir / "checkpoint4.json").read_text(encoding="utf-8")
+    )
+    report = pipeline.FinalReport.model_validate_json(
+        (run_dir / "final_report.json").read_text(encoding="utf-8")
+    )
+    assert checkpoint.status == pipeline.CheckStatus.PASS
+    assert analysis.total_results == 3
+    assert analysis.status_counts[pipeline.NeutralExecutionStatus.PASSED] == 3
+    assert analysis.findings == []
+    assert report.recommendation == pipeline.FinalRecommendation.PASS
+    assert report.total_results == analysis.total_results
+    assert report.status_counts == analysis.status_counts
+
+
+def test_agent4_marks_assertion_failure_as_product_mismatch_candidate(tmp_path: Path) -> None:
+    run_dir, run_id = _write_agent4_inputs(
+        tmp_path, candidate_status=pipeline.NeutralExecutionStatus.ASSERTION_FAILED
+    )
+
+    assert pipeline.run_agent4(
+        SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))
+    ) == 0
+
+    report = pipeline.FinalReport.model_validate_json(
+        (run_dir / "final_report.json").read_text(encoding="utf-8")
+    )
+    assert report.recommendation == pipeline.FinalRecommendation.HUMAN_REVIEW
+    assert report.findings[0].category == pipeline.Agent4FindingCategory.PRODUCT_MISMATCH_CANDIDATE
+    assert "확정" in report.findings[0].rationale
+
+
+def test_agent4_holds_when_environment_precheck_blocks_regressions(tmp_path: Path) -> None:
+    run_dir, run_id = _write_agent4_inputs(
+        tmp_path, precheck_status=pipeline.NeutralExecutionStatus.EXECUTION_ERROR
+    )
+
+    assert pipeline.run_agent4(
+        SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))
+    ) == 0
+
+    report = pipeline.FinalReport.model_validate_json(
+        (run_dir / "final_report.json").read_text(encoding="utf-8")
+    )
+    assert report.recommendation == pipeline.FinalRecommendation.HOLD
+    assert {finding.category for finding in report.findings} == {
+        pipeline.Agent4FindingCategory.ENVIRONMENT_ISSUE,
+        pipeline.Agent4FindingCategory.INSUFFICIENT_EVIDENCE,
+    }
+
+
+def test_agent4_rejects_validation_execution_hash_mismatch(tmp_path: Path) -> None:
+    run_dir, run_id = _write_agent4_inputs(tmp_path)
+    manifest_file = run_dir / "validation_manifest.json"
+    manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+    manifest["validation_execution_sha256"] = "0" * 64
+    _write_json(manifest_file, manifest)
+
+    assert pipeline.run_agent4(
+        SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))
+    ) == 2
+    checkpoint = pipeline.Checkpoint4Result.model_validate_json(
+        (run_dir / "checkpoint4.json").read_text(encoding="utf-8")
+    )
+    assert checkpoint.status == pipeline.CheckStatus.FAIL
+    assert (run_dir / "agent4_error.json").exists() is False
+
+
+def test_agent4_rejects_mismatched_execution_source_contract(tmp_path: Path) -> None:
+    run_dir, run_id = _write_agent4_inputs(tmp_path)
+    execution_file = run_dir / "validation_execution.json"
+    execution = json.loads(execution_file.read_text(encoding="utf-8"))
+    execution["environment_precheck"]["source"] = "EXISTING_REGRESSION"
+    _write_json(execution_file, execution)
+    manifest_file = run_dir / "validation_manifest.json"
+    manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+    manifest["validation_execution_sha256"] = _sha256_file(execution_file)
+    _write_json(manifest_file, manifest)
+
+    assert pipeline.run_agent4(
+        SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))
+    ) == 2
+
+    checkpoint = pipeline.Checkpoint4Result.model_validate_json(
+        (run_dir / "checkpoint4.json").read_text(encoding="utf-8")
+    )
+    assert checkpoint.checks[3].rule_id == "CP4-004"
+    assert checkpoint.checks[3].status == pipeline.CheckStatus.FAIL
+
+
+def test_agent4_rejects_missing_or_changed_evidence_file(tmp_path: Path) -> None:
+    run_dir, run_id = _write_agent4_inputs(tmp_path)
+    (run_dir / "evidence" / "stdout.txt").unlink()
+
+    assert pipeline.run_agent4(
+        SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))
+    ) == 2
+
+    checkpoint = pipeline.Checkpoint4Result.model_validate_json(
+        (run_dir / "checkpoint4.json").read_text(encoding="utf-8")
+    )
+    assert checkpoint.checks[5].rule_id == "CP4-006"
+    assert checkpoint.checks[5].status == pipeline.CheckStatus.FAIL
+
+
+def test_agent4_parser_exposes_rules_only_report_command() -> None:
+    args = pipeline.build_parser().parse_args(
+        ["agent4", "--run-id", "RUN-20260817-030000-ABCDEF"]
+    )
+
+    assert args.handler is pipeline.run_agent4

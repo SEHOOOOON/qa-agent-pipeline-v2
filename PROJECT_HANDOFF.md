@@ -106,7 +106,7 @@ Agent 4 — 규칙 기반 결과 분류와 보고
 | 최소 Orchestrator | Agent 1→2→3·CP1→3·신규 자동화 후보 시험을 한 명령으로 실행 | 구현·세 중단 Live와 정상 완료 Live 확인 |
 | 조건부 검토 재개 | REVIEW 답변 후 중단 단계에서 재개 | 미구현 |
 | 변경·회귀 실행 | 현재 후보 재검증·환경 Gate·관련 기존 회귀 격리 실행 | 구현·기존 정상 Run에서 무API 확인 |
-| Agent 4 V2 | 구현된 V2 중립 결과 계약을 분류·보고 | 분석·보고 미구현 |
+| Agent 4 V2 | 구현된 V2 중립 결과 계약을 분류·보고 | 구현·단위 테스트, 저장된 실제 A1~3·회귀 Run 재분석과 새 API 전체 Run `RUN-20260817-054536-678B65` PASS |
 | 최종 등록 승인 | SRS·TC·자동화를 공식 재사용 자산으로 저장 | 미구현 |
 
 ## 5. 현재 코드와 파일 구조
@@ -123,7 +123,8 @@ qa-agent-pipeline-v2/
 │  ├─ 03_AGENT_AND_CHECKPOINT_SPEC.md # 입출력 계약·Checkpoint 규칙
 │  ├─ 04_TEST_AND_TRACEABILITY_PLAN.md# 테스트·증거·추적성
 │  ├─ 05_PROJECT1_BASELINE_AUDIT.md  # 프로젝트 1 자산·한계
-│  └─ 06_TEST_HARNESS_GUIDE.md       # UI 조사·QA 하네스 경계
+│  ├─ 06_TEST_HARNESS_GUIDE.md       # UI 조사·QA 하네스 경계
+│  └─ 07_TEST_CATALOG.md              # 현재 95개 자동 테스트 목록
 ├─ examples/
 │  ├─ change_request.example.json    # 고정 대표값이 아닌 연결 예시
 │  └─ results/                       # 비밀정보 제거한 공개 Run
@@ -175,10 +176,10 @@ qa-agent-pipeline-v2/
 
 ### 테스트
 
-- 2026-08-17 확인 결과: `python -m pytest -q` **83 passed**
+- 2026-08-17 현재 확인 결과: `python -m pytest -q` **95 passed**
 - 테스트 범위: 기존 범위에 특정 제품 기능명을 코드에 고정하지 않은 신규 UI의 동적 발견→AI 코드 의도 계약→CP3→Python 생성→브라우저 시험→복원, 비 HVAC 상태값 분기, 한국어 조사 의미 연결, 알림 문장 전체 오사용 차단과 자동화 지원 범위 확장 필요 분기를 추가
 
-83개 테스트와 기존 `agent3-3.4` 공개 Live Run은 각각 현재 코드 회귀와 기존 A1→A3 연결 증거입니다. 로컬 `RUN-20260817-022106-8E97FC` 재시도는 `agent3-3.7` 범용 선택·적용 계획, CP3, Python 후보, 시험과 UI·내부 상태 복원 PASS를 확인했습니다. 진단 실패와 재시도까지 전체 실제 모델 사용량은 44,334 tokens이며 아직 공개 산출물로 복사하지 않았습니다. Agent 4와 최종 보고가 없어 전체 End-to-End 완성을 의미하지 않습니다.
+95개 테스트와 기존 `agent3-3.4` 공개 Live Run은 각각 현재 코드 회귀와 기존 A1→A3 연결 증거입니다. 로컬 `RUN-20260817-022106-8E97FC` 재시도는 `agent3-3.7` 범용 선택·적용 계획, CP3, Python 후보, 시험과 UI·내부 상태 복원 PASS를 확인했습니다. Agent 4는 중립 실행 결과의 해시·중복·출처·근거·합계를 확인해 CP4와 최종 보고를 만드는 단위 테스트를 통과했고, 저장된 실제 `RUN-20260815-092107-0C075E` 감사 복사본에 연결해 결과 4건 PASSED·CP4 PASS·최종 PASS 권고와 증거 파일 SHA-256을 확인했습니다. 이전 새 API Run `RUN-20260817-045029-3DBBC9`은 Agent 3가 내부 mode+setTemp 복합 검증의 지원 범위 확장 필요를 REVIEW로 차단한 증거입니다. 이후 가변 필드 객체를 `field_name`·`expected_value` 목록으로 바꾼 새 API Run `RUN-20260817-054536-678B65`은 Agent 1~4 Checkpoint PASS, `mode=AUTO`·`setTemp=18` 복합 내부 검증, 후보·환경·관련 회귀 4건 PASS, Finding 0·최종 PASS 권고까지 완료했습니다.
 
 ## 7. 로컬 실행 방법
 
@@ -250,7 +251,7 @@ Agent 2와 Agent 3는 앞 단계 Manifest와 산출물 SHA-256을 재검증합�
 - Project1 HTML·테스트를 임시 Workspace에 복사하고 의미 라벨이 포함된 기존 `conftest.py`를 제외한 중립 실행
 - `RUN-20260815-092107-0C075E`에서 현재 후보 재시험, TC-ENV-000, TC-MODE-001, TC-TEMP-001 모두 PASS
 - Project1 대상·테스트 소스 실행 전후 해시 일치, Project1 Git 불변
-- 자동 테스트 83건 통과
+- 자동 테스트 95건 통과
 - Agent 3 통제·유연성 보완: 제품별 고정 지원 목록을 범용 UI 동적 조사와 지원 범위 확장 필요 분기로 보완. 특정 기능명은 고정하지 않음
 
 ## 10. 현재 부족한 부분
@@ -258,8 +259,8 @@ Agent 2와 Agent 3는 앞 단계 Manifest와 산출물 SHA-256을 재검증합�
 P0 수준의 즉시 붕괴 문제라기보다 MVP를 완성하기 위해 남은 연결입니다.
 
 1. CP의 REVIEW·PAUSE 이후 사용자 답변을 저장하고 해당 단계부터 재개하는 기능이 없습니다.
-2. Agent 4가 V2의 중립 실행 결과를 받아 제품·자동화·환경 문제를 분류하고 보고하는 구현이 없습니다.
-3. 최종 보고와 정식 QA 자산 등록 승인 기록이 없습니다.
+2. 조건부 검토 재개를 현재 코드로 실행한 증거가 없습니다.
+3. 정식 QA 자산 등록 승인 기록이 없습니다.
 4. 서로 다른 변경 요청 최소 2건으로 동적 결과 차이를 End-to-End 검증하지 않았습니다.
 
 ## 11. 다음 권장 순서
