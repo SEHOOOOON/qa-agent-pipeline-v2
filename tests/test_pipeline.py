@@ -360,6 +360,10 @@ def test_unverified_before_value_requires_review() -> None:
     result = evaluate_checkpoint1(changed_request, analysis, cp1_requirements())
 
     assert result.status == CheckStatus.REVIEW
+    assert result.handoff_status == HandoffStatus.CONTINUE
+    assert result.final_review_notes == [
+        "변경 전 값이 대상 SRS 행에서 직접 확인되지 않습니다."
+    ]
     assert cp1_check(result, "CP1-004").status == CheckStatus.REVIEW
 
 
@@ -481,7 +485,7 @@ def test_related_requirement_can_be_marked_update_required() -> None:
     assert result.status == CheckStatus.PASS
     assert result.handoff_status == HandoffStatus.CONTINUE
 
-def test_proceed_with_open_question_requires_review() -> None:
+def test_proceed_with_open_question_is_recorded_for_final_review() -> None:
     analysis = cp1_valid_analysis().model_copy(
         update={
             "information_gaps": ["경계값 적용 시점이 불명확함"],
@@ -492,7 +496,10 @@ def test_proceed_with_open_question_requires_review() -> None:
     result = evaluate_checkpoint1(cp1_request(), analysis, cp1_requirements())
 
     assert result.status == CheckStatus.REVIEW
-    assert result.handoff_status == HandoffStatus.PAUSE
+    assert result.handoff_status == HandoffStatus.CONTINUE
+    assert result.final_review_notes == [
+        "정보 부족 또는 질문이 있는데 PROCEED로 판정했습니다."
+    ]
     assert cp1_check(result, "CP1-010").status == CheckStatus.REVIEW
 
 # Agent 2
@@ -646,6 +653,8 @@ def test_agent2_uses_structured_responses_api() -> None:
     assert "Checkpoint 2 전체 판정" in rework_input
     assert "CP2-001 PASS" in rework_input
     assert "PASS인 규칙과 그 근거를 보존" in rework_input
+    assert "최종_확인_사항" in rework_input
+    assert "중단_확인_사항" in rework_input
 
 
 def test_agent2_missing_api_key_fails_before_network(monkeypatch) -> None:
@@ -842,7 +851,23 @@ def test_coverage_note_does_not_pause_checkpoint2() -> None:
 
     assert result.status == CheckStatus.PASS
     assert cp2_check(result, "CP2-011").status == CheckStatus.PASS
-    assert "차단 없는 참고 사항 1건" in cp2_check(result, "CP2-011").message
+
+
+def test_final_review_note_does_not_pause_checkpoint2() -> None:
+    design = cp2_valid_design().model_copy(
+        update={"final_review_notes": ["운영 적용 시점은 최종 보고에서 확인한다."]}
+    )
+
+    result = evaluate_checkpoint2(
+        cp1_request(), cp2_analysis(), design, cp2_requirements()
+    )
+
+    assert result.status == CheckStatus.PASS
+    assert cp2_check(result, "CP2-011").status == CheckStatus.PASS
+    assert "후속 자동 실행을 막지 않는 참고·최종 검토 사항 1건" in cp2_check(result, "CP2-011").message
+    schema_properties = pipeline.Agent2TestDesign.model_json_schema()["properties"]
+    assert "최종_확인_사항" in schema_properties
+    assert "중단_확인_사항" in schema_properties
 
 def test_control_requirement_cannot_use_local_path() -> None:
     condition = ConfirmedCondition(
@@ -2795,6 +2820,27 @@ def test_validation_execution_reuses_candidate_and_runs_related_regressions(
     baseline.write_text("def test_placeholder():\n    pass\n", encoding="utf-8")
     _write_json(run_dir / "agent3_manifest.json", {"run_id": run_id})
     _write_json(run_dir / "agent3_trial.json", {"outcome": "PASS"})
+    _write_json(
+        run_dir / "checkpoint1.json",
+        pipeline.Checkpoint1Result(
+            status=pipeline.CheckStatus.REVIEW,
+            handoff_status=pipeline.HandoffStatus.CONTINUE,
+            checks=[
+                pipeline.CheckResult(
+                    rule_id="CP1-004",
+                    status=pipeline.CheckStatus.REVIEW,
+                    message="변경 전 값의 SRS 근거를 최종 확인합니다.",
+                )
+            ],
+            final_review_notes=["변경 전 값의 SRS 근거를 최종 확인합니다."],
+        ).model_dump(mode="json"),
+    )
+    _write_json(
+        run_dir / "agent2_test_design.json",
+        cp2_valid_design()
+        .model_copy(update={"final_review_notes": ["운영 반영 시점을 최종 확인합니다."]})
+        .model_dump(mode="json"),
+    )
     candidate = _neutral_execution_result(
         "TC-CAND-003", pipeline.ExecutionSource.NEW_AUTOMATION_CANDIDATE
     )
@@ -2832,6 +2878,10 @@ def test_validation_execution_reuses_candidate_and_runs_related_regressions(
     assert bundle.candidate_result.reused is True
     assert bundle.selected_regression_ids == ["TC-TEMP-001"]
     assert [item.test_id for item in bundle.regression_results] == ["TC-TEMP-001"]
+    assert bundle.final_review_notes == [
+        "CP1: 변경 전 값의 SRS 근거를 최종 확인합니다.",
+        "CP2: 운영 반영 시점을 최종 확인합니다.",
+    ]
     assert manifest["validation_execution_sha256"] == _sha256_file(
         run_dir / "validation_execution.json"
     )
@@ -2914,6 +2964,7 @@ def _write_agent4_inputs(
     *,
     candidate_status: pipeline.NeutralExecutionStatus = pipeline.NeutralExecutionStatus.PASSED,
     precheck_status: pipeline.NeutralExecutionStatus = pipeline.NeutralExecutionStatus.PASSED,
+    final_review_notes: list[str] | None = None,
 ) -> tuple[Path, str]:
     run_id = "RUN-20260817-030000-ABCDEF"
     run_dir = tmp_path / "runs" / run_id
@@ -2962,6 +3013,7 @@ def _write_agent4_inputs(
             if precheck_status == pipeline.NeutralExecutionStatus.PASSED
             else "ENVIRONMENT_PRECHECK_NOT_PASSED"
         ),
+        final_review_notes=final_review_notes or [],
         created_at="2026-08-17T00:00:00+00:00",
     )
     execution_file = run_dir / "validation_execution.json"
@@ -3000,6 +3052,12 @@ def test_agent4_writes_consistent_pass_report_without_rerunning_tests(tmp_path: 
     assert report.recommendation == pipeline.FinalRecommendation.PASS
     assert report.total_results == analysis.total_results
     assert report.status_counts == analysis.status_counts
+    raw_analysis = json.loads((run_dir / "agent4_analysis.json").read_text(encoding="utf-8"))
+    raw_report = json.loads((run_dir / "final_report.json").read_text(encoding="utf-8"))
+    assert "검토_항목" in raw_analysis
+    assert "최종_확인_사항" in raw_analysis
+    assert "검토_항목" in raw_report
+    assert "최종_확인_사항" in raw_report
 
 
 def test_agent4_marks_assertion_failure_as_product_mismatch_candidate(tmp_path: Path) -> None:
@@ -3017,6 +3075,25 @@ def test_agent4_marks_assertion_failure_as_product_mismatch_candidate(tmp_path: 
     assert report.recommendation == pipeline.FinalRecommendation.HUMAN_REVIEW
     assert report.findings[0].category == pipeline.Agent4FindingCategory.PRODUCT_MISMATCH_CANDIDATE
     assert "확정" in report.findings[0].rationale
+
+
+def test_agent4_carries_non_blocking_review_notes_to_final_report(tmp_path: Path) -> None:
+    run_dir, run_id = _write_agent4_inputs(
+        tmp_path, final_review_notes=["CP1: 변경 전 값의 SRS 근거를 최종 확인한다."]
+    )
+
+    assert pipeline.run_agent4(
+        SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))
+    ) == 0
+
+    report = pipeline.FinalReport.model_validate_json(
+        (run_dir / "final_report.json").read_text(encoding="utf-8")
+    )
+
+    assert report.recommendation == pipeline.FinalRecommendation.PASS
+    assert report.final_review_notes == [
+        "CP1: 변경 전 값의 SRS 근거를 최종 확인한다."
+    ]
 
 
 def test_agent4_holds_when_environment_precheck_blocks_regressions(tmp_path: Path) -> None:

@@ -24,12 +24,12 @@ V2는 다음 세 연결만 우선 증명합니다.
 | 변경 검증·관련 기존 회귀 | 현재 컴파일러 후보를 재검증·필요 시 무API 재시험하고 Requirement ID로 기존 회귀 6건 중 관련 TC만 선택·격리 실행 |
 | 분류·보고 | V2 Agent 4가 중립 실행 결과·Manifest SHA-256을 확인하고 제품 불일치 후보·자동화 실행·환경·근거 부족을 규칙 기반으로 분류해 CP4·최종 보고 JSON 생성 |
 | Product SRS | 실제 화면·코드 기준 초기 제품 기준 문서 작성 |
-| Agent 1 Live 모델 호출·CP1 | 구조화 분석, CP1 10개 규칙, CONTINUE·PAUSE·BLOCKED 인계, 실패 시 최대 1회 재작업 구현 |
-| Agent 2 Live 모델 호출 | CP1 PASS+CONTINUE Run만 입력, 변경 요청·고정 SRS·Agent 1 분석으로 제품 TC 후보 생성, 실패 시 최대 1회 재작업 구현 |
+| Agent 1 Live 모델 호출·CP1 | 구조화 분석, CP1 10개 규칙, 실행 계속 가능 확인 사항의 최종 보고 이관과 CONTINUE·PAUSE·BLOCKED 인계, 실패 시 최대 1회 재작업 구현 |
+| Agent 2 Live 모델 호출 | CP1 PASS 또는 실행 계속 가능 확인 사항이 있어도 CONTINUE인 Run만 입력, 변경 요청·고정 SRS·Agent 1 분석으로 제품 TC 후보 생성, 실패 시 최대 1회 재작업 구현 |
 | Agent 3 코드 후보 생성 | 기존 기능은 필요한 UI만 확인하고 신규 기능은 범용 UI를 동적 조사. AI가 관찰 근거 기반 실행 계획을 만들고 검증된 컴파일러가 Playwright 코드로 변환 |
 | CP1·CP2·CP3·Run Orchestrator | 단계별 CLI·SHA-256 인계·CP3·격리 시험과 A1→A3 순차 실행·현재 Run의 적격 TC 자동 선택·중단·요약 Manifest 구현. 세 중단 Live와 정상 완료 Live 확인 |
 | Agent 4·CP4·최종 보고 | 구현: 실행 재시작이나 API 호출 없이 결과·해시·중복·근거·집계 정합성을 검사하고 JSON 보고 생성 |
-| 조건부 검토·정식 QA 자산 등록 승인 | 미구현 |
+| 조건부 검토·정식 QA 자산 등록 승인 | 최종 확인 사항의 최종 보고 이관 구현, 요구사항 미확정 PAUSE 재개와 정식 등록 기록은 미구현 |
 
 ## MVP 프로세스
 
@@ -46,7 +46,7 @@ V2는 다음 세 연결만 우선 증명합니다.
   -> Agent 4 규칙 기반 분류·보고
   -> 사람의 공식 SRS·TC·자동화 저장 승인 1회
 
-공통 분기: CP1·CP2의 REVIEW 또는 PAUSE와 CP3 FAIL은 후속 자동 실행을 중단합니다. 재개 UI는 아직 미구현입니다.
+공통 분기: CP1의 `PROCEED` 상태에서 나온 보완 확인과 Agent 2의 `최종_확인_사항`은 실행을 계속하고 최종 보고에 모읍니다. 기대 결과를 확정할 수 없는 `WAITING_FOR_USER`·`PARTIAL_PROCEED`, Agent 2의 `중단_확인_사항`, CP3 FAIL 또는 자동화 지원 범위 확장 REVIEW만 후속 자동 실행을 중단합니다. 중단 Run 재개 UI는 아직 미구현입니다.
 ~~~
 
 ## 문서
@@ -57,7 +57,7 @@ V2는 다음 세 연결만 우선 증명합니다.
 | [V2 MVP 설계](docs/02_V2_MVP_DESIGN.md) | 구현 범위, 단계와 종료선 |
 | [Agent·Checkpoint 명세](docs/03_AGENT_AND_CHECKPOINT_SPEC.md) | 입출력 계약과 최소 판정 규칙 |
 | [테스트·추적성 계획](docs/04_TEST_AND_TRACEABILITY_PLAN.md) | V2 단계별 검증·증거·완료 기준 |
-| [자동 테스트 카탈로그](docs/07_TEST_CATALOG.md) | 현재 수집되는 95개 자동 테스트의 이름·목적·수량 구조 |
+| [자동 테스트 카탈로그](docs/07_TEST_CATALOG.md) | 현재 수집되는 97개 자동 테스트의 이름·목적·수량 구조 |
 | [Project1 기준 자산 감사](docs/05_PROJECT1_BASELINE_AUDIT.md) | 기존 구현·13개 TC·Coverage·알려진 한계 |
 | [QA 하네스 가이드](docs/06_TEST_HARNESS_GUIDE.md) | QA Drawer·Register·window.__vccs 사용 경계 |
 
@@ -72,7 +72,9 @@ V2는 다음 세 연결만 우선 증명합니다.
 - **파이프라인 검증용 고정 사례**: 결과 분류·차단 흐름을 확인하기 위해 의도적으로 유지하는 사례
 - **실행 단위(Run)**: 변경 요청 한 건이 Agent 1부터 최종 보고까지 처리되는 한 번의 전체 실행
 - **Checkpoint 통과**: 사람이 승인했다는 뜻이 아니라, 미리 정한 자동 검사 규칙을 충족했다는 뜻
-- **조건부 검토**: 자동 검사만으로 의미를 확정할 수 없는 REVIEW 항목이 생겼을 때만 사람이 확인하는 절차
+- **최종 확인 사항**: 기대 결과와 실행 범위는 이미 확정되어 Run은 계속 진행하되, 정식 QA 자산으로 등록하기 전 사람이 마지막으로 살펴볼 메모입니다. 오류나 중단 사유가 아닙니다.
+- **중단 확인 사항**: 기대 결과·경계값·실행 범위를 확정할 수 없어 자동 실행을 멈추고 사람 답변을 기다려야 하는 항목입니다.
+- **조건부 검토**: 중단 확인 사항이 있을 때만 사람이 답변해 해당 단계부터 다시 진행하는 절차입니다.
 - **정식 QA 자산 등록**: 검증이 끝난 SRS·TC·Playwright 코드를 다음 변경에서도 재사용할 공식 버전으로 저장하는 작업
 - **자동화 지원 범위**: 코드가 현재 수행할 수 있는 범용 조작·관찰 목록. 내부 JSON의 기존 필드명 `capabilities`는 호환을 위해 유지합니다.
 - **자동화 가능성 사전 확인**: TC가 기존 기능의 빠른 확인 대상인지, 처음 보는 UI를 동적으로 조사해야 하는지, 자동화 후보가 아닌지를 나누는 단계. 내부 파일명은 `agent3_eligibility.json`입니다.
@@ -91,7 +93,7 @@ V2는 다음 세 연결만 우선 증명합니다.
 - CP1~3의 구조·근거·금지 패턴 검사
 - 임시 폴더에서 후보 코드 1회 시험
 - Checkpoint 통과 시 중간 승인 없이 자동 진행
-- REVIEW·근거 부족·정책 충돌에만 조건부 사람 검토
+- 실행 가능한 REVIEW는 최종 보고에 기록하고, 기대 결과를 확정할 수 없는 근거 부족·정책 충돌에만 조건부 사람 검토
 - 검증 후보 변경 실행과 기존 검증 가능 회귀 TC 실행
 - 규칙 기반 결과 분류와 Run 보고
 - 정식 QA 자산 등록 승인 1회
@@ -127,7 +129,7 @@ V2는 다음 세 연결만 우선 증명합니다.
 3. Agent 2 Adapter·CP2·자동 인계
 4. 실제 화면 확인 자료·Agent 3·CP3·격리 시험 — 구현
 5. Agent 1→2→3 최소 Orchestrator — 구현, 중단·정상 완료 Live 검증 완료
-6. 조건부 HUMAN_REVIEW 분기와 재개 기록
+6. 최종 확인 사항 최종 보고 이관 — 구현, 조건부 HUMAN_REVIEW 재개 기록은 미구현
 7. 변경 검증·기존 회귀 후보 실행 — 구현, 기존 정상 Run에서 무API 실행 확인
 8. Agent 4 입력 정합화·최종 보고 — 구현, 저장된 실제 Agent 1~3·회귀 Run 재연결과 새 API 전체 Run `RUN-20260817-054536-678B65`에서 CP4·최종 보고 PASS 확인
 9. 정식 QA 자산 등록 승인 기록
@@ -213,9 +215,9 @@ Agent 3 CLI는 시험 `PASS`와 `PRODUCT_MISMATCH_CANDIDATE`만 정상 완료(`e
 
 - `request.json`: 실제 입력과 SHA-256 검증 대상
 - `agent1_change_analysis.json`: 모델의 구조화 분석
-- `checkpoint1.json`: 규칙별 PASS·REVIEW·FAIL
+- `checkpoint1.json`: 규칙별 PASS·REVIEW·FAIL과 `최종_확인_사항`
 - `run_manifest.json`: 모델·Prompt 버전·상태·인계 상태, 누적/마지막 시도 토큰과 요청/SRS/Agent 1/CP1 SHA-256
-- `agent2_test_design.json`: Agent 2가 만든 제품 기능 TC 후보
+- `agent2_test_design.json`: Agent 2가 만든 제품 기능 TC 후보와 `최종_확인_사항`·`중단_확인_사항`
 - `checkpoint2.json`: CP2 규칙별 판정
 - `agent2_manifest.json`: Agent 2 상태·누적/마지막 시도 토큰과 앞 단계·Agent 2·CP2 SHA-256 체인
 - `agent3_selection.json`: 전체 실행 조정기의 현재 CP2 후보별 자동화 가능성 사전 확인과 선택 결과
@@ -230,9 +232,9 @@ Agent 3 CLI는 시험 `PASS`와 `PRODUCT_MISMATCH_CANDIDATE`만 정상 완료(`e
 - `validation_candidate_trial.json`: 현재 컴파일러 출력이 달라졌을 때 수행한 무API 후보 재시험 결과
 - `validation_execution.json`: 신규 후보·환경 사전 점검·선택된 기존 회귀의 중립 실행 결과
 - `validation_manifest.json`: Agent 3 입력, 현재 후보·재시험, Project1 기준 파일과 실행 결과 SHA-256
-- `agent4_analysis.json`: 중립 결과 집계와 규칙 기반 Finding
+- `agent4_analysis.json`: 중립 결과 집계와 규칙 기반 `검토_항목`
 - `checkpoint4.json`: Run ID·해시·중복 TC·실패 근거·제품/고정 사례 분리 검사
-- `final_report.json`: CP4와 일치하는 실행 합계·Finding·PASS/HOLD/HUMAN_REVIEW 권고
+- `final_report.json`: CP4와 일치하는 실행 합계·`검토_항목`·`최종_확인_사항`·PASS/HOLD/HUMAN_REVIEW 권고
 
 예시 JSON의 변경 내용은 연결 확인용이며 대표 요구사항으로 고정하지 않습니다.
 

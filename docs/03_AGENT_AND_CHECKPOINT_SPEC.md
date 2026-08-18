@@ -2,7 +2,7 @@
 
 ## 1. 목적과 상태
 
-V2 Agent 1~4와 검증 단계의 최소 계약을 정의합니다. **기존 정상 전체 실행과 후속 회귀는 PASS했습니다. Agent 3 `agent3-3.7`은 기존 기능의 좁은 UI 확인과 처음 보는 기능의 범용 UI 동적 조사를 분리하고, AI가 관찰 근거 기반 코드 의도 또는 자동화 지원 범위 확장 필요를 반환합니다. 현재 자동 테스트 95건을 통과했습니다. Agent 4는 검증 결과를 다시 실행하지 않는 규칙 기반 분석·CP4·최종 보고를 구현했고, 2026-08-17 새 API Run `RUN-20260817-054536-678B65`은 Agent 1~4 Checkpoint PASS, 복합 내부 `mode`·`setTemp` 검증, 후보·환경·관련 회귀 4건 PASS와 최종 PASS 권고까지 확인했습니다.**
+V2 Agent 1~4와 검증 단계의 최소 계약을 정의합니다. **기존 정상 전체 실행과 후속 회귀는 PASS했습니다. Agent 3 `agent3-3.7`은 기존 기능의 좁은 UI 확인과 처음 보는 기능의 범용 UI 동적 조사를 분리하고, AI가 관찰 근거 기반 코드 의도 또는 자동화 지원 범위 확장 필요를 반환합니다. 현재 자동 테스트 97건을 통과했습니다. Agent 4는 검증 결과를 다시 실행하지 않는 규칙 기반 분석·CP4·최종 보고를 구현했고, 최종 확인 사항을 최종 보고에 함께 기록합니다. 2026-08-17 새 API Run `RUN-20260817-054536-678B65`은 Agent 1~4 Checkpoint PASS, 복합 내부 `mode`·`setTemp` 검증, 후보·환경·관련 회귀 4건 PASS와 최종 PASS 권고까지 확인했습니다.**
 
 다음 단계에는 화면 문구나 자유 형식 Markdown이 아니라 Schema 검증을 통과한 JSON만 전달합니다.
 
@@ -49,12 +49,12 @@ Agent 1~3 현재 구현은 별도 Artifact ID 대신 파일 이름과 SHA-256으
 |---|---|
 | PASS | 자동 규칙 충족 |
 | FAIL | 명백한 계약·정책 위반 |
-| REVIEW | 사람의 의미 판단 필요 |
+| REVIEW | 보완 검토 필요. 실행 가능 여부는 `handoff_status`와 검토 종류로 별도 판단 |
 | ERROR | 모델·파서·실행 오류 |
 | BLOCKED | 선행 실패로 미실행 |
 | NOT_APPLICABLE | 적용 대상 아님 |
 
-Checkpoint의 `status`는 규칙 검사 결과이고, `handoff_status`는 다음 단계 실행 가능 여부입니다. `CONTINUE`만 자동 진행하고, `PAUSE`는 REVIEW·PARTIAL_PROCEED·WAITING_FOR_USER처럼 현재 MVP가 자동 재개할 수 없는 상태, `BLOCKED`는 FAIL·ERROR·BLOCKED 결정 상태입니다.
+Checkpoint의 `status`는 규칙 검사 결과이고, `handoff_status`는 다음 단계 실행 가능 여부입니다. `CONTINUE`는 PASS와 CP1 `PROCEED`의 실행 계속 가능 확인을 자동 진행합니다. `PAUSE`는 기대 결과를 확정할 수 없는 `PARTIAL_PROCEED`·`WAITING_FOR_USER`, `BLOCKED`는 FAIL·ERROR·BLOCKED 결정 상태입니다. 실행 계속 가능 확인은 `최종_확인_사항`으로 최종 보고에 전달합니다.
 
 Checkpoint는 구조와 명백한 근거 위반을 검사합니다. 간접 영향의 완전성, 자연어 의미와 제품 정책의 타당성을 완전 자동 판정한다고 주장하지 않습니다.
 
@@ -183,7 +183,8 @@ CP1은 확정 조건의 출처와 누락을 검사하지만 자연어 의미의 
   ],
   "coverage_summary": "...",
   "coverage_notes": [],
-  "human_review_notes": []
+  "최종_확인_사항": [],
+  "중단_확인_사항": []
 }
 ~~~
 
@@ -193,7 +194,7 @@ CP1은 확정 조건의 출처와 누락을 검사하지만 자연어 의미의 
 - 모든 Agent 1 확정 조건을 최소 한 개 TC와 기대 결과에 연결합니다.
 - 상태 정합성 TC는 UI·내부 상태를 함께 정의하고 알림 조건은 NOTIFICATION으로 구분합니다.
 - 제어 경로(CENTRAL·LOCAL), 대상 역할, 요청 모드·온도와 복원 필요 여부를 구조화합니다.
-- 현재 TC를 설계할 수 있는 문서 개정·표현 참고는 `coverage_notes`, 기대 결과를 확정할 수 없는 차단 사유만 `human_review_notes`에 남깁니다.
+- 현재 TC를 설계할 수 있는 문서 개정·표현 참고는 `coverage_notes`, 실행을 막지 않고 최종 보고에서 확인할 사항은 `최종_확인_사항`, 기대 결과를 확정할 수 없는 차단 사유만 `중단_확인_사항`에 남깁니다.
 - CP1 범위 밖 ID, 근거 없는 수치·문구, Playwright·Python 코드를 생성할 수 없습니다.
 - 기존 TC 비교 자산이 생기기 전에는 NEW·UPDATED·DEPRECATED를 주장하지 않습니다.
 
@@ -211,7 +212,7 @@ CP1은 확정 조건의 출처와 누락을 검사하지만 자연어 의미의 
 | CP2-008 | 활성 Requirement 범위, 대상 변경 검증, CENTRAL·LOCAL 각각의 직접 변경 검증 TC | FAIL |
 | CP2-009 | 제품 TC에 Playwright·Python·무효 Assertion 혼입 금지 | FAIL |
 | CP2-010 | 경계·예외·상태 TC의 구조화 요청 시험 데이터 존재 | FAIL |
-| CP2-011 | `coverage_notes`는 PASS 기록, `human_review_notes`만 REVIEW | PASS/REVIEW |
+| CP2-011 | `coverage_notes`·`최종_확인_사항`은 PASS 기록, 기대 결과를 확정할 수 없는 `중단_확인_사항`만 REVIEW | PASS/REVIEW |
 
 기준 미달 시 Rule ID와 실패 메시지만 제시해 최대 1회 재작업합니다. 재작업은 이전 전체 TC 세트를 반환해야 하며, Checkpoint가 삭제를 요구하지 않은 TC를 제거할 수 없습니다.
 
@@ -314,7 +315,7 @@ MVP의 실제 실행기는 Python Playwright입니다. 생성·검증을 마친 
 
 ## 10. 조건부 검토와 정식 QA 자산 등록 승인
 
-REVIEW가 발생한 경우에만 다음 기록을 생성합니다.
+요구사항 미확정으로 자동 실행을 중단한 REVIEW·PAUSE가 발생한 경우에만 다음 재개 기록을 생성합니다. 실행 가능한 확인 사항은 `최종_확인_사항`으로 최종 보고에만 기록합니다.
 
 ~~~json
 {
@@ -370,6 +371,6 @@ Assertion 실패는 `PRODUCT_MISMATCH_CANDIDATE`로만 기록하며 제품 결�
 - Agent 2는 SHA-256과 재계산 검증을 통과한 Agent 1 Run만 입력으로 사용합니다.
 - Run ID, 입력 파일 SHA-256 또는 재계산한 CP1이 저장 결과와 다르면 차단합니다.
 - CP1~3과 격리 시험을 통과한 후보만 현재 Run 제품 검증 세트에 넣습니다.
-- REVIEW가 발생하면 사람의 조건부 판정 전까지 해당 단계와 후속 단계를 중지합니다.
+- 기대 결과를 확정할 수 없는 REVIEW·PAUSE가 발생하면 사람의 조건부 판정 전까지 해당 단계와 후속 단계를 중지합니다. CP1 `PROCEED`의 보완 확인과 Agent 2 `최종_확인_사항`은 중지하지 않습니다.
 - 정식 QA 자산 등록 승인 전에는 기존 SRS·TC·자동화 자산을 덮어쓰지 않습니다.
 - 필수 필드 누락과 Agent 3의 기대값 변경이 실제 Checkpoint 테스트로 탐지되어야 합니다.

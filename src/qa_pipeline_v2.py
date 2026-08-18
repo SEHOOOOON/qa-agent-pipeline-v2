@@ -32,7 +32,8 @@ RequirementId = Annotated[str, StringConstraints(pattern=r"^REQ-[A-Z]+-\d{3}$")]
 
 
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # 저장 산출물은 한글 표시명을 쓰되, 이전 Run의 영문 키도 계속 읽습니다.
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
 class ChangeType(str, Enum):
@@ -136,6 +137,9 @@ class Checkpoint1Result(StrictModel):
     status: CheckStatus
     handoff_status: HandoffStatus
     checks: list[CheckResult] = Field(min_length=1)
+    final_review_notes: list[NonEmptyStr] = Field(
+        default_factory=list, alias="최종_확인_사항"
+    )
 
 
 
@@ -213,7 +217,12 @@ class Agent2TestDesign(StrictModel):
     test_cases: list[ProductTestCaseCandidate] = Field(min_length=1)
     coverage_summary: NonEmptyStr
     coverage_notes: list[NonEmptyStr] = Field(default_factory=list)
-    human_review_notes: list[NonEmptyStr] = Field(default_factory=list)
+    final_review_notes: list[NonEmptyStr] = Field(
+        default_factory=list, alias="최종_확인_사항"
+    )
+    human_review_notes: list[NonEmptyStr] = Field(
+        default_factory=list, alias="중단_확인_사항"
+    )
 
 
 class Checkpoint2Result(StrictModel):
@@ -459,6 +468,9 @@ class ValidationExecutionBundle(StrictModel):
     selected_regression_ids: list[NonEmptyStr]
     regression_results: list[NeutralExecutionResult]
     blocked_reason: str | None = None
+    final_review_notes: list[NonEmptyStr] = Field(
+        default_factory=list, alias="최종_확인_사항"
+    )
     created_at: NonEmptyStr
 
 
@@ -482,7 +494,10 @@ class Agent4Analysis(StrictModel):
     status_counts: dict[NeutralExecutionStatus, int]
     product_result_count: int = Field(ge=0)
     pipeline_fixture_result_count: int = Field(ge=0)
-    findings: list[Agent4Finding] = Field(default_factory=list)
+    findings: list[Agent4Finding] = Field(default_factory=list, alias="검토_항목")
+    final_review_notes: list[NonEmptyStr] = Field(
+        default_factory=list, alias="최종_확인_사항"
+    )
     recommendation: FinalRecommendation
     created_at: NonEmptyStr
 
@@ -502,7 +517,10 @@ class FinalReport(StrictModel):
     checkpoint4_sha256: NonEmptyStr
     total_results: int = Field(ge=0)
     status_counts: dict[NeutralExecutionStatus, int]
-    findings: list[Agent4Finding] = Field(default_factory=list)
+    findings: list[Agent4Finding] = Field(default_factory=list, alias="검토_항목")
+    final_review_notes: list[NonEmptyStr] = Field(
+        default_factory=list, alias="최종_확인_사항"
+    )
     recommendation: FinalRecommendation
     checkpoint_status: CheckStatus
     created_at: NonEmptyStr
@@ -1080,24 +1098,28 @@ def evaluate_checkpoint1(
         status = CheckStatus.REVIEW
     else:
         status = CheckStatus.PASS
+    blocking_decision = analysis.decision in {
+        AnalysisDecision.PARTIAL_PROCEED,
+        AnalysisDecision.WAITING_FOR_USER,
+    }
     if status in {CheckStatus.FAIL, CheckStatus.ERROR}:
         handoff_status = HandoffStatus.BLOCKED
-    elif status == CheckStatus.REVIEW:
+    elif blocking_decision:
         handoff_status = HandoffStatus.PAUSE
     elif analysis.decision == AnalysisDecision.PROCEED:
         handoff_status = HandoffStatus.CONTINUE
-    elif analysis.decision in {
-        AnalysisDecision.PARTIAL_PROCEED,
-        AnalysisDecision.WAITING_FOR_USER,
-    }:
-        # 현재 MVP는 승인 범위만 분리 실행하거나 사용자 답변 후 재개하는 기능이 없다.
-        handoff_status = HandoffStatus.PAUSE
     else:
         handoff_status = HandoffStatus.BLOCKED
+    final_review_notes = (
+        [check.message for check in checks if check.status == CheckStatus.REVIEW]
+        if handoff_status == HandoffStatus.CONTINUE
+        else []
+    )
     return Checkpoint1Result(
         status=status,
         handoff_status=handoff_status,
         checks=checks,
+        final_review_notes=final_review_notes,
     )
 
 # ---------------------------------------------------------------------------
@@ -1135,8 +1157,9 @@ AGENT2_SYSTEM_INSTRUCTIONS = """
 16. automation_candidate는 현재 가상 중앙제어 화면과 내부 상태 조회로 자동화 가능한지 판단한 후보 표시일 뿐이며 코드를 만들지 않습니다.
 16-1. CENTRAL 변경 검증에는 현재 단일 장비 MVP가 실행할 수 있도록 target_role=PRIMARY_TEST_DEVICE인 automation_candidate TC를 최소 한 건 포함합니다. 복수 장비 TC는 추가할 수 있지만 유일한 CENTRAL 후보로 만들지 않습니다.
 17. SRS 문구의 후속 개정 필요, 정확한 안내 문구 미지정처럼 기대 동작을 바꾸지 않고 현재 TC를 설계할 수 있는 참고 사항은 coverage_notes에 남깁니다.
-18. 서로 충돌하는 권한 입력, 기대 결과 미정처럼 TC 의미를 확정할 수 없어 후속 자동 진행을 중단해야 하는 항목만 human_review_notes에 남깁니다.
-19. UPDATE_REQUIRED 자체는 변경관리의 정상 결과이므로 그것만으로 human_review_notes를 만들지 않습니다.
+18. 현재 TC의 기대 결과와 실행 범위가 이미 근거로 확정됐지만 사람이 최종 보고에서 확인하면 좋은 사항은 `최종_확인_사항`에 남깁니다. 이 항목은 후속 자동 실행을 중단하지 않습니다.
+19. 서로 충돌하는 권한 입력, 기대 결과 미정처럼 TC 의미를 확정할 수 없어 후속 자동 진행을 중단해야 하는 항목만 `중단_확인_사항`에 남깁니다.
+20. UPDATE_REQUIRED 자체는 변경관리의 정상 결과이므로 그것만으로 `중단_확인_사항` 또는 `최종_확인_사항`을 만들지 않습니다.
 """.strip()
 
 
@@ -1185,7 +1208,7 @@ class OpenAIAgent2:
             feedback = "\n".join(f"- {item}" for item in (checkpoint_feedback or []))
             user_input += (
                 "\n\n[이전 TC 후보]\n"
-                f"{previous_design.model_dump_json(indent=2)}\n\n"
+                f"{previous_design.model_dump_json(indent=2, by_alias=True)}\n\n"
                 "[Checkpoint 2 전체 판정과 재작업 요청]\n"
                 f"{feedback}\n"
                 "근거와 검증 목적은 바꾸지 말고 실패한 품질 기준만 수정하세요. "
@@ -1453,15 +1476,17 @@ def evaluate_checkpoint2(
         add(
             "CP2-011",
             CheckStatus.REVIEW,
-            "사람이 최종 승인 전에 확인할 의미 판단 항목이 있습니다: "
+            "기대 결과를 확정할 수 없어 실행을 멈춘 확인 사항이 있습니다: "
             + " / ".join(design.human_review_notes),
         )
     else:
-        if design.coverage_notes:
+        note_count = len(design.coverage_notes) + len(design.final_review_notes)
+        if note_count:
             add(
                 "CP2-011",
                 CheckStatus.PASS,
-                f"차단 없는 참고 사항 {len(design.coverage_notes)}건을 기록했습니다.",
+                "후속 자동 실행을 막지 않는 참고·최종 검토 사항 "
+                f"{note_count}건을 기록했습니다.",
             )
         else:
             add("CP2-011", CheckStatus.PASS, "추가 의미 판단이 필요한 항목이 없습니다.")
@@ -3088,7 +3113,7 @@ def run_agent1(args: argparse.Namespace) -> int:
             )
             _write_json(
                 run_dir / "checkpoint1_attempt_1.json",
-                checkpoint.model_dump(mode="json"),
+                checkpoint.model_dump(mode="json", by_alias=True),
             )
             response = agent.analyze(
                 request,
@@ -3154,10 +3179,7 @@ def run_agent1(args: argparse.Namespace) -> int:
     print(f"Checkpoint 1: {checkpoint.status.value}")
     print(f"Agent 2 handoff: {checkpoint.handoff_status.value}")
     print(f"결과 위치: {run_dir}")
-    return 0 if (
-        checkpoint.status == CheckStatus.PASS
-        and checkpoint.handoff_status == HandoffStatus.CONTINUE
-    ) else 2
+    return 0 if checkpoint.handoff_status == HandoffStatus.CONTINUE else 2
 
 
 def _load_verified_agent1_run(run_dir: Path, run_id: str) -> tuple[
@@ -3171,7 +3193,10 @@ def _load_verified_agent1_run(run_dir: Path, run_id: str) -> tuple[
     manifest = _read_json_payload(manifest_file)
     if manifest.get("run_id") != run_id or manifest.get("stage") != "AGENT_1_CP1":
         raise ValueError("run_manifest가 요청한 Agent 1 Run과 일치하지 않습니다.")
-    if manifest.get("status") != CheckStatus.PASS.value:
+    if manifest.get("status") not in {
+        CheckStatus.PASS.value,
+        CheckStatus.REVIEW.value,
+    }:
         raise ValueError(f"Checkpoint 1이 {manifest.get('status')}이므로 Agent 2를 실행할 수 없습니다.")
     if manifest.get("handoff_status") != HandoffStatus.CONTINUE.value:
         raise ValueError(
@@ -3194,7 +3219,7 @@ def _load_verified_agent1_run(run_dir: Path, run_id: str) -> tuple[
     recomputed = evaluate_checkpoint1(request, analysis, requirements)
     if recomputed.model_dump(mode="json") != checkpoint.model_dump(mode="json"):
         raise ValueError("현재 CP1 규칙으로 재검증한 결과가 저장된 Checkpoint 1과 다릅니다.")
-    if checkpoint.status != CheckStatus.PASS or checkpoint.handoff_status != HandoffStatus.CONTINUE:
+    if checkpoint.status not in {CheckStatus.PASS, CheckStatus.REVIEW} or checkpoint.handoff_status != HandoffStatus.CONTINUE:
         raise ValueError("Checkpoint 1이 Agent 2 실행을 허용하지 않습니다.")
     return request, requirements, analysis, checkpoint, manifest
 
@@ -3246,7 +3271,7 @@ def run_agent2(args: argparse.Namespace) -> int:
         if checkpoint2.status == CheckStatus.FAIL:
             _write_json(
                 run_dir / "agent2_test_design_attempt_1.json",
-                response.design.model_dump(mode="json"),
+                response.design.model_dump(mode="json", by_alias=True),
             )
             _write_json(
                 run_dir / "checkpoint2_attempt_1.json",
@@ -3276,7 +3301,7 @@ def run_agent2(args: argparse.Namespace) -> int:
 
         design_file = run_dir / "agent2_test_design.json"
         checkpoint2_file = run_dir / "checkpoint2.json"
-        _write_json(design_file, response.design.model_dump(mode="json"))
+        _write_json(design_file, response.design.model_dump(mode="json", by_alias=True))
         _write_json(checkpoint2_file, checkpoint2.model_dump(mode="json"))
         _write_json(
             run_dir / "agent2_manifest.json",
@@ -4149,6 +4174,20 @@ def run_existing_regression(
     )
 
 
+def _final_review_notes_for_validation(run_dir: Path) -> list[str]:
+    """검증된 이전 단계의 최종 확인 사항만 수집합니다."""
+    notes: list[str] = []
+    checkpoint1_file = run_dir / "checkpoint1.json"
+    if checkpoint1_file.is_file():
+        checkpoint1 = _read_json_model(checkpoint1_file, Checkpoint1Result)
+        notes.extend(f"CP1: {note}" for note in checkpoint1.final_review_notes)
+    design_file = run_dir / "agent2_test_design.json"
+    if design_file.is_file():
+        design = _read_json_model(design_file, Agent2TestDesign)
+        notes.extend(f"CP2: {note}" for note in design.final_review_notes)
+    return list(dict.fromkeys(notes))
+
+
 def run_validation_execution(args: argparse.Namespace) -> int:
     """Reuse the trusted new-candidate trial and run related baseline regressions."""
     run_dir = _resolve_run_dir(Path(args.runs_root), args.run_id)
@@ -4228,10 +4267,11 @@ def run_validation_execution(args: argparse.Namespace) -> int:
             selected_regression_ids=[item.tc_id for item in selected],
             regression_results=regression_results,
             blocked_reason=blocked_reason,
+            final_review_notes=_final_review_notes_for_validation(run_dir),
             created_at=datetime.now(timezone.utc).isoformat(),
         )
         execution_file = run_dir / "validation_execution.json"
-        _write_json(execution_file, bundle.model_dump(mode="json"))
+        _write_json(execution_file, bundle.model_dump(mode="json", by_alias=True))
         agent3_manifest_file = run_dir / "agent3_manifest.json"
         _write_json(
             run_dir / "validation_manifest.json",
@@ -4499,13 +4539,14 @@ def run_agent4(args: argparse.Namespace) -> int:
             product_result_count=len(results) - len(fixture_ids),
             pipeline_fixture_result_count=len(fixture_ids),
             findings=findings,
+            final_review_notes=bundle.final_review_notes,
             recommendation=_agent4_recommendation(findings, checkpoint_status),
             created_at=datetime.now(timezone.utc).isoformat(),
         )
         analysis_file = run_dir / "agent4_analysis.json"
         checkpoint_file = run_dir / "checkpoint4.json"
-        _write_json(analysis_file, analysis.model_dump(mode="json"))
-        _write_json(checkpoint_file, checkpoint.model_dump(mode="json"))
+        _write_json(analysis_file, analysis.model_dump(mode="json", by_alias=True))
+        _write_json(checkpoint_file, checkpoint.model_dump(mode="json", by_alias=True))
         report = FinalReport(
             run_id=args.run_id,
             analysis_sha256=_sha256_file(analysis_file),
@@ -4513,11 +4554,12 @@ def run_agent4(args: argparse.Namespace) -> int:
             total_results=analysis.total_results,
             status_counts=analysis.status_counts,
             findings=analysis.findings,
+            final_review_notes=analysis.final_review_notes,
             recommendation=analysis.recommendation,
             checkpoint_status=checkpoint.status,
             created_at=datetime.now(timezone.utc).isoformat(),
         )
-        _write_json(run_dir / "final_report.json", report.model_dump(mode="json"))
+        _write_json(run_dir / "final_report.json", report.model_dump(mode="json", by_alias=True))
     except Exception as exc:
         _write_json(
             run_dir / "agent4_error.json",
@@ -4526,9 +4568,9 @@ def run_agent4(args: argparse.Namespace) -> int:
         raise
     print(f"Run ID: {args.run_id}")
     print(f"Checkpoint 4: {checkpoint.status.value}")
-    print(f"Recommendation: {report.recommendation.value}")
-    print(f"Findings: {len(report.findings)}")
-    print(f"Artifacts: {run_dir}")
+    print(f"최종 권고: {report.recommendation.value}")
+    print(f"검토 항목: {len(report.findings)}")
+    print(f"산출물 위치: {run_dir}")
     return 0 if checkpoint.status == CheckStatus.PASS else 2
 
 

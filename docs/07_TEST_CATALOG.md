@@ -1,7 +1,7 @@
 # 자동 테스트 카탈로그
 
-최종 확인: 2026-08-17
-실행 기준: `python -m pytest --collect-only -q` → **95건**
+최종 확인: 2026-08-18
+실행 기준: `python -m pytest --collect-only -q` → **97건**
 실제 정의 파일: `tests/test_pipeline.py`
 
 이 문서는 현재 수집되는 자동 테스트를 사람이 확인하기 쉽게 정리한 목록입니다. 실행의 기준은 항상 테스트 코드와 Pytest 수집 결과이며, 테스트를 추가·삭제할 때는 이 문서도 같은 변경에서 갱신합니다.
@@ -39,9 +39,9 @@
 | `test_partial_proceed_pauses_agent2_handoff` | PARTIAL_PROCEED의 Agent 2 중단 |
 | `test_blocked_decision_blocks_agent2_handoff` | BLOCKED의 후속 단계 차단 |
 | `test_related_requirement_can_be_marked_update_required` | 연관 Requirement UPDATE_REQUIRED 허용 |
-| `test_proceed_with_open_question_requires_review` | 열린 질문이 있는 PROCEED REVIEW |
+| `test_proceed_with_open_question_is_recorded_for_final_review` | PROCEED 보완 REVIEW의 최종 보고 이관 |
 
-## 2. Agent 2·Checkpoint 2·인계 (18건)
+## 2. Agent 2·Checkpoint 2·인계 (19건)
 
 | 테스트 | 확인 내용 |
 |---|---|
@@ -49,7 +49,8 @@
 | `test_agent2_missing_api_key_fails_before_network` | API 키 누락 시 사전 차단 |
 | `test_valid_design_passes_checkpoint2` | 유효 TC 설계의 CP2 통과 |
 | `test_human_review_note_pauses_checkpoint2` | 사람 검토 메모의 PAUSE |
-| `test_coverage_note_does_not_pause_checkpoint2` | 비차단 커버리지 메모 허용 |
+| `test_coverage_note_does_not_pause_checkpoint2` | 참고 메모 허용 |
+| `test_final_review_note_does_not_pause_checkpoint2` | 최종 확인 사항의 자동 진행 |
 | `test_control_requirement_cannot_use_local_path` | 중앙 제어 요구사항의 LOCAL 경로 차단 |
 | `test_active_central_path_requires_direct_change_validation` | 중앙 직접 변경 검증 강제 |
 | `test_structured_test_data_is_required_for_boundary_tc` | 경계 TC 구조화 시험 데이터 강제 |
@@ -129,12 +130,13 @@
 | `test_validation_execution_stops_regressions_when_precheck_is_not_passed` | 환경 점검 실패 시 회귀 차단 |
 | `test_execute_parser_exposes_validation_execution_command` | `execute` CLI Parser |
 
-## 6. Agent 4·CP4·최종 보고 (7건)
+## 6. Agent 4·CP4·최종 보고 (8건)
 
 | 테스트 | 확인 내용 |
 |---|---|
 | `test_agent4_writes_consistent_pass_report_without_rerunning_tests` | 무재실행 PASS 보고 정합성 |
 | `test_agent4_marks_assertion_failure_as_product_mismatch_candidate` | Assertion 실패의 제품 불일치 후보 분류 |
+| `test_agent4_carries_non_blocking_review_notes_to_final_report` | 최종 확인 사항의 최종 보고 전달 |
 | `test_agent4_holds_when_environment_precheck_blocks_regressions` | 환경 차단 시 HOLD 권고 |
 | `test_agent4_rejects_validation_execution_hash_mismatch` | 실행 결과 SHA 불일치 차단 |
 | `test_agent4_rejects_mismatched_execution_source_contract` | 실행 출처 계약 불일치 차단 |

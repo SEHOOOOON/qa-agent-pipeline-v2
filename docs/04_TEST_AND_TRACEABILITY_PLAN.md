@@ -15,7 +15,7 @@
 | 변경 검증·관련 기존 회귀 | 구현·무API 실행 확인 | 현재 후보 재검증/재시험, TC-ENV-000 Gate, Requirement 기반 회귀 선택, 복사 Workspace 실행, Project1 불변 확인 |
 | Agent 4 V2 연동 | 구현·단위/저장 Live/새 API Run 증거 확인 | V2 중립 계약과 Manifest 해시를 규칙 기반으로 분류·CP4·보고에 연결. 저장된 실제 A1~3·회귀 Run과 새 API 전체 Run `RUN-20260817-054536-678B65`에서 CP4 PASS |
 
-현재 자동 테스트는 기존 범위에 특정 제품 기능명을 코드에 고정하지 않은 신규 UI 동적 조사·범용 코드 생성/실행/복원·비 HVAC 상태값·한국어 조사 의미 연결·알림 문장 전체 오사용 차단·지원 범위 확장 필요 분기, UI 조사 장비 필드 목록과 TC 근거를 함께 확인하는 복합 내부 상태 검사, Agent 2 중복 실행·모드 TestData 차단, Agent 4 결과·해시·출처·증거 파일 SHA-256·보고 정합성 계약을 포함한 95건입니다. 개별 테스트의 이름·목적·파라미터 수량은 [자동 테스트 카탈로그](07_TEST_CATALOG.md)에서 확인합니다. 복합 필드 기대값은 OpenAI 구조화 출력 Schema와 호환되는 `field_name`·`expected_value` 목록으로 계약합니다. 2026-08-17 새 API Run `RUN-20260817-054536-678B65`은 이 계약으로 Agent 1~4, 후보·환경·관련 회귀 4건과 최종 PASS 권고까지 완료했습니다.
+현재 자동 테스트는 기존 범위에 특정 제품 기능명을 코드에 고정하지 않은 신규 UI 동적 조사·범용 코드 생성/실행/복원·비 HVAC 상태값·한국어 조사 의미 연결·알림 문장 전체 오사용 차단·지원 범위 확장 필요 분기, UI 조사 장비 필드 목록과 TC 근거를 함께 확인하는 복합 내부 상태 검사, Agent 2 중복 실행·모드 TestData 차단, 최종 확인 사항의 최종 보고 이관, Agent 4 결과·해시·출처·증거 파일 SHA-256·보고 정합성 계약을 포함한 97건입니다. 개별 테스트의 이름·목적·파라미터 수량은 [자동 테스트 카탈로그](07_TEST_CATALOG.md)에서 확인합니다. 복합 필드 기대값은 OpenAI 구조화 출력 Schema와 호환되는 `field_name`·`expected_value` 목록으로 계약합니다. 2026-08-17 새 API Run `RUN-20260817-054536-678B65`은 이 계약으로 Agent 1~4, 후보·환경·관련 회귀 4건과 최종 PASS 권고까지 완료했습니다.
 
 ## 2. 검증 원칙
 
@@ -68,7 +68,7 @@
 **현재 제한**
 
 - CP1은 영향 Requirement가 존재하는지는 확인하지만 영향 관계의 의미적 타당성을 보장하지 않습니다.
-- CP1 규칙 결과와 후속 인계를 분리해 PASS라도 WAITING_FOR_USER·PARTIAL_PROCEED는 PAUSE, BLOCKED 결정은 BLOCKED로 처리합니다.
+- CP1 규칙 결과와 후속 인계를 분리해 `PROCEED`의 보완 REVIEW는 CONTINUE·최종 보고 이관, WAITING_FOR_USER·PARTIAL_PROCEED는 PAUSE, BLOCKED 결정은 BLOCKED로 처리합니다.
 - Agent 1 결과를 한 입력으로 1회 공개 검증했으며 반복 일관성 평가는 아직 하지 않았습니다.
 - 현재 SRS의 모든 요구사항 행을 전달합니다.
 
@@ -93,7 +93,7 @@
 - 모든 확정 조건 및 MODIFIED·UPDATE_REQUIRED·VERIFY Requirement 반영을 검사합니다.
 - 상태 정합성 유형은 UI·내부 상태, 알림 조건은 NOTIFICATION 결과를 강제합니다.
 - 중앙·로컬 제어 경로, 대상 역할과 구조화 시험 데이터 누락을 검사합니다.
-- 비차단 참고는 `coverage_notes`에 기록하고, 기대 결과를 확정할 수 없는 `human_review_notes`만 CP2 REVIEW로 전환합니다.
+- 참고 메모는 `coverage_notes`, 최종 확인 사항은 `최종_확인_사항`에 기록하고, 기대 결과를 확정할 수 없는 `중단_확인_사항`만 CP2 REVIEW로 전환합니다.
 - 제품 TC에 Playwright·Python 코드가 섞이면 차단합니다.
 - CP2 FAIL 시 이전 전체 TC를 유지하며 최대 1회 재작업합니다.
 
@@ -107,7 +107,7 @@
 - 전체 유효 설계 PASS
 - WAITING_FOR_USER·PARTIAL_PROCEED 인계 PAUSE와 BLOCKED 인계 차단
 - 중앙 Requirement의 LOCAL 경로 오용 및 활성 CENTRAL·LOCAL 직접 변경 검증 누락 FAIL
-- 구조화 시험 데이터 누락 FAIL, 비차단 참고 PASS, 사람 검토 노트 REVIEW
+- 구조화 시험 데이터 누락 FAIL, 참고 메모·최종 확인 사항 PASS, 중단 확인 사항 REVIEW
 - Agent 1 산출물 해시 변조와 PAUSE Manifest의 Agent 2 인계 차단
 
 **현재 제한**
@@ -183,13 +183,13 @@ Project1 conftest의 failure_reason에는 이미 의미 라벨이 들어 있으�
 
 | ID | 시나리오 | 기대 결과 | 상태 |
 |---|---|---|---|
-| E2E-001 | 명확한 MODIFIED 요청 | A1→CP1→A2→CP2→A3→CP3→시험→보고 | 부분 구현: A1→A3·신규 후보·환경 사전 점검·관련 기존 회귀 실행 확인, Agent 4·최종 보고 미완료 |
+| E2E-001 | 명확한 MODIFIED 요청 | A1→CP1→A2→CP2→A3→CP3→시험→보고 | 구현·새 API 전체 Run `RUN-20260817-054536-678B65`에서 Agent 1~4·후보·환경·관련 회귀·최종 보고 PASS |
 | E2E-002 | SRS에 없는 Requirement | CP1 FAIL, 후속 미실행 | CP1 범위 구현 |
 | E2E-003 | 변경 전 값 불일치 | CP1 REVIEW 또는 FAIL | CP1 범위 구현 |
 | E2E-004 | 근거 없는 TC 기대값 | CP2 FAIL 또는 REVIEW | 계획 |
 | E2E-005 | 코드에서 Assertion 누락 | CP3 FAIL | 구현 |
 | E2E-006 | Locator·Fixture 기술 오류 | 제품 판정 보류 | 오류 분류 구현, 자동 수정 미구현 |
-| E2E-007 | REVIEW Finding | 조건부 사람 검토 후 재개·수정·종료 | 계획 |
+| E2E-007 | 최종 확인 사항 | 계속 실행·최종 보고 기록 | 구현·단위 테스트 |
 | E2E-008 | 정식 등록 반려 | Run 증거 보존, 기존 자산 불변 | 계획 |
 
 End-to-End 완료를 주장하려면 E2E-001이 현재 계약의 실제 Run 파일과 실행 결과로 확인되어야 합니다.
@@ -208,7 +208,7 @@ Change Request
   -> Deterministic Code Candidate
   -> CP3 Rules + Isolated Trial
   -> Neutral Candidate + Environment Precheck + Related Regression Results
-  -> Agent 4 Finding
+  -> Agent 4 검토 항목
   -> Final Report
   -> Asset Registration Decision
 ~~~
