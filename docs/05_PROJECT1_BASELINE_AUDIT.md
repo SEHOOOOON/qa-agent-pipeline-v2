@@ -13,6 +13,8 @@
 | 결과 분석 | portfolio_export/scripts/agent4_reporting.py |
 | 감사 성격 | 코드·화면·기존 결과의 정적 대조이며 회사 인증이나 운영 검증이 아님 |
 
+Project1의 Agent 4 보고 스크립트는 기본 Dry-run과 명시적 `--send`를 구분하고 Slack Webhook·Notion TC-ID Upsert를 수행합니다. V2도 이 외부 보고 순서를 복원하되, V2의 CP4·최종 보고 SHA-256을 전송 허용 조건으로 추가합니다.
+
 ## 2. Project1의 정확한 성격
 
 프로젝트 1은 QA 판단 기준, 가상 중앙제어기, 사람이 작성한 Playwright 테스트와 규칙 기반 결과 보고를 연결한 **Fixture 기반 Workflow Prototype**입니다.

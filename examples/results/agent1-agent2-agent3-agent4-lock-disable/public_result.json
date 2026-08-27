@@ -1,0 +1,85 @@
+{
+  "contract_version": "1.0",
+  "publication_kind": "SANITIZED_EVIDENCE_SUMMARY",
+  "run_id": "RUN-20260827-114925-507176",
+  "requirement_ids": [
+    "REQ-LOCK-001"
+  ],
+  "pipeline": {
+    "agent1": {
+      "checkpoint": "REVIEW",
+      "handoff": "CONTINUE",
+      "model": "gpt-5.6-terra",
+      "total_tokens": 6419
+    },
+    "agent2": {
+      "checkpoint": "PASS",
+      "model": "gpt-5.6-terra",
+      "total_tokens": 11119,
+      "new_candidate_count": 1,
+      "related_regression_count": 2
+    },
+    "agent3": {
+      "checkpoint": "PASS",
+      "model": "gpt-5.6-terra",
+      "total_tokens": 18589,
+      "executed_candidate_count": 1,
+      "automation_exclusion_count": 0
+    },
+    "agent4": {
+      "checkpoint": "PASS",
+      "implementation": "RULE_BASED_ANALYZER",
+      "recommendation": "HUMAN_REVIEW"
+    }
+  },
+  "validation": {
+    "total_results": 4,
+    "product_result_count": 3,
+    "environment_result_count": 1,
+    "status_counts": {
+      "PASSED": 3,
+      "ASSERTION_FAILED": 1,
+      "EXECUTION_ERROR": 0,
+      "TIMEOUT": 0,
+      "SKIPPED": 0
+    },
+    "existing_regressions": {
+      "TC-LOCK-001": "PASSED",
+      "TC-MODE-001": "PASSED"
+    }
+  },
+  "human_review": {
+    "status": "PENDING",
+    "finding_id": "FIND-001",
+    "category": "PRODUCT_MISMATCH_CANDIDATE",
+    "test_id": "TC-CAND-001",
+    "expected": "잠금 설정 시 온도 내림·올림 조작이 비활성화됨",
+    "observed": "내부 locked=true, 온도 내림·올림 버튼 enabled=True"
+  },
+  "external_reporting": {
+    "attempt_id": "ATTEMPT-20260827-120544-570581-57E798",
+    "slack": {
+      "status": "SENT",
+      "item_count": 1
+    },
+    "notion": {
+      "status": "SENT",
+      "item_count": 4
+    }
+  },
+  "source_sha256": {
+    "request": "d0b8cadad94528f6033cb5275cd13b6db32228997b5189af93cab19a667c81c1",
+    "agent1_analysis": "54da099c6704db56031b830bb4f469bd47e043ff6afa35de8f6e79c74b55afac",
+    "checkpoint1": "3830a1d467a8e55b422faf949eeea2b793e447b4b12c8cdaf266866326936dae",
+    "agent2_design": "695a679d7593caf6d43b78a29f082a7bfadf5da4fde61d3ad9329944cfa21656",
+    "checkpoint2": "2ce46394995ef761bb0ec004b6661df7921ce557a48b2d2aaf59444b4c8ea553",
+    "checkpoint3": "15388f7adf504a739b82a31f6abdda0c82481d6a9400aadc6fd9ea04acf146e2",
+    "target_html": "5d7649f401b1e721372e4abdb8fdc65e4a3bd2d4e0fd0bd9e2c7161c9aa9b93c",
+    "trial_stdout": "392e4030cd001dad12553f3f567c13bdbc1a22ff869aeb21d21cadf287564510",
+    "validation_execution": "0f5e8529bd764f8905592c90396551856fe76910b06641524f36dcfaec879b0e",
+    "agent4_analysis": "886a38fd5d3073b08b55d2b5f78c2c4faf91e36a631ff13a7b9cfbb597c5226d",
+    "checkpoint4": "38f1fa72c7f07f01cadf0a1ee9427267bc8ac54cdb7b91d7a16f62dd77b90606",
+    "final_report": "3fd2974b216f3b6c8554fff128137ba49830d3e0ce5f7eaaf28d6363519d2bba",
+    "generated_human_review": "4bd2a3c05538ee15e55aa3979eb315beb8f50381b35017a6526dd447f7164d7d"
+  }
+}

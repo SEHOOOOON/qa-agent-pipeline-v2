@@ -1,0 +1,20 @@
+Run ID: RUN-20260827-114925-507176
+TC ID: TC-CAND-001
+Requirement ID: REQ-LOCK-001
+
+Expected
+- ER-001: 잠금 설정 시 온도 내림 버튼 비활성화
+- ER-002: 잠금 설정 시 온도 올림 버튼 비활성화
+- ER-003: 선택 장비 내부 locked=true
+
+Observed
+- ER-001: enabled=True
+- ER-002: enabled=True
+- ER-003: mismatch 없음
+
+Trial outcome: PRODUCT_MISMATCH_CANDIDATE
+Agent 4 finding: FIND-001
+Human decision: PENDING
+
+원본 trial-stdout.txt SHA-256:
+392e4030cd001dad12553f3f567c13bdbc1a22ff869aeb21d21cadf287564510

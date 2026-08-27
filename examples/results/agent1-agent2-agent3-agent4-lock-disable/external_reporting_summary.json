@@ -1,0 +1,20 @@
+{
+  "contract_version": "1.0",
+  "publication_kind": "SANITIZED_EXTERNAL_REPORTING_SUMMARY",
+  "run_id": "RUN-20260827-114925-507176",
+  "mode": "SEND",
+  "attempt_id": "ATTEMPT-20260827-120544-570581-57E798",
+  "allowed": true,
+  "slack": {
+    "status": "SENT",
+    "item_count": 1
+  },
+  "notion": {
+    "status": "SENT",
+    "item_count": 4,
+    "operation": "TC_ID_UPSERT"
+  },
+  "source_external_reporting_sha256": "7e14317f7cfebaa815651ddb794aa884656f1cf412b959eec7f3c279b5221034",
+  "credentials_included": false,
+  "local_paths_included": false
+}

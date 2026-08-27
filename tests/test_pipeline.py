@@ -17,10 +17,10 @@ def test_loads_product_requirements_from_markdown() -> None:
     assert "범위 밖 요청" in requirements["REQ-TEMP-001"].acceptance_criteria
     assert set(requirements["REQ-TEMP-001"].related_requirement_ids) == {
         "REQ-CONTROL-001",
-        "REQ-LOCAL-002",
         "REQ-NOTIFY-001",
         "REQ-STATE-001",
     }
+    assert not any(item.startswith("REQ-LOCAL-") for item in requirements)
     assert "Toast" in requirements["REQ-NOTIFY-001"].acceptance_criteria
     assert "currentTemp" in requirements["REQ-MONITOR-001"].acceptance_criteria
 
@@ -128,14 +128,17 @@ def test_agent1_uses_structured_responses_api() -> None:
     assert result.response_id == "resp_test"
     assert result.usage["total_tokens"] == 150
     assert responses.kwargs["text_format"] is Agent1Analysis
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent1-2-6"
     assert responses.kwargs["store"] is False
     instructions = responses.kwargs["input"][0]["content"]
     assert "현재 SRS는 변경 전 제품 상태" in instructions
     assert "변경 후 정책의 권한 있는 입력" in instructions
-    assert "acceptance_notes의 모든 항목" in instructions
+    assert "acceptance_notes 중 제품의 긍정적인 판정 기준" in instructions
     assert "Agent 2가 TC의 판정 기준" in instructions
     assert "VERIFY, 이번 변경과 무관한 기준은 NO_IMPACT" in instructions
     assert "연관 항목을 조용히 생략하지 않습니다" in instructions
+    assert "자동화 구현 지원 여부를 이유로" in instructions
+    assert "TC 구성·기존 TC 선택·자동화 가능 여부" in instructions
     assert "MODIFIED, UPDATE_REQUIRED 또는 VERIFY로 분류한 모든 Requirement" in instructions
     assert "검증 조건 원문을 찾지 못하면" in instructions
     assert "테스트 절차나 Playwright 코드는 작성하지 않습니다" in instructions
@@ -231,11 +234,6 @@ def cp1_valid_analysis() -> Agent1Analysis:
                 requirement_id="REQ-CONTROL-001",
                 relation=RequirementRelation.NO_IMPACT,
                 reason="적용 명령 정책은 이번 단위 입력에서 변경하지 않는다.",
-            ),
-            RequirementEffect(
-                requirement_id="REQ-LOCAL-002",
-                relation=RequirementRelation.NO_IMPACT,
-                reason="현장 온도 정책은 이번 단위 입력에서 변경하지 않는다.",
             ),
             RequirementEffect(
                 requirement_id="REQ-NOTIFY-001",
@@ -402,6 +400,58 @@ def test_missing_requested_out_of_scope_is_rejected() -> None:
     assert cp1_check(result, "CP1-009").status == CheckStatus.FAIL
 
 
+def test_scope_limited_acceptance_note_is_only_excluded() -> None:
+    scope_note = "온도 표시값 변경은 이번 변경 범위에 포함하지 않는다."
+    request = cp1_request().model_copy(
+        update={
+            "acceptance_notes": [*cp1_request().acceptance_notes, scope_note],
+            "out_of_scope": [scope_note],
+        }
+    )
+    analysis = cp1_valid_analysis().model_copy(
+        update={
+            "excluded_scope": [*cp1_valid_analysis().excluded_scope, scope_note]
+        }
+    )
+
+    result = evaluate_checkpoint1(request, analysis, cp1_requirements())
+
+    assert cp1_check(result, "CP1-008").status == CheckStatus.PASS
+    assert cp1_check(result, "CP1-009").status == CheckStatus.PASS
+
+
+def test_scope_limited_acceptance_note_cannot_be_confirmed_condition() -> None:
+    scope_note = "온도 표시값 변경은 이번 변경 범위에 포함하지 않는다."
+    request = cp1_request().model_copy(
+        update={
+            "acceptance_notes": [*cp1_request().acceptance_notes, scope_note],
+            "out_of_scope": [scope_note],
+        }
+    )
+    scope_condition = ConfirmedCondition(
+        condition_id="COND-004",
+        statement=scope_note,
+        source_type=ConditionSource.CHANGE_REQUEST,
+        source_text=scope_note,
+        requirement_ids=["REQ-TEMP-001"],
+    )
+    analysis = cp1_valid_analysis().model_copy(
+        update={
+            "confirmed_conditions": [
+                *cp1_valid_analysis().confirmed_conditions,
+                scope_condition,
+            ],
+            "excluded_scope": [*cp1_valid_analysis().excluded_scope, scope_note],
+        }
+    )
+
+    result = evaluate_checkpoint1(request, analysis, cp1_requirements())
+
+    assert result.status == CheckStatus.FAIL
+    assert cp1_check(result, "CP1-009").status == CheckStatus.FAIL
+    assert "제외 조건" in cp1_check(result, "CP1-009").message
+
+
 def test_redundant_reconfirmation_requires_review() -> None:
     analysis = cp1_valid_analysis().model_copy(
         update={
@@ -435,15 +485,50 @@ def test_legitimate_missing_detail_question_passes_checkpoint() -> None:
     assert cp1_check(result, "CP1-010").status == CheckStatus.PASS
 
 
-def test_partial_proceed_pauses_agent2_handoff() -> None:
+def test_partial_proceed_continues_confirmed_scope_and_preserves_exclusions() -> None:
     analysis = cp1_valid_analysis().model_copy(
-        update={"decision": AnalysisDecision.PARTIAL_PROCEED}
+        update={
+            "decision": AnalysisDecision.PARTIAL_PROCEED,
+            "excluded_scope": ["기존 저장값의 소급 적용"],
+            "information_gaps": ["기존 저장값의 적용 시점이 정의되지 않음"],
+            "excluded_information_gaps": ["기존 저장값의 적용 시점이 정의되지 않음"],
+            "user_questions": ["기존 저장값에도 즉시 소급 적용합니까?"],
+        }
     )
 
     result = evaluate_checkpoint1(cp1_request(), analysis, cp1_requirements())
 
     assert result.status == CheckStatus.PASS
-    assert result.handoff_status == HandoffStatus.PAUSE
+    assert result.handoff_status == HandoffStatus.CONTINUE
+
+
+def test_partial_proceed_without_excluded_scope_is_rejected() -> None:
+    analysis = cp1_valid_analysis().model_copy(
+        update={
+            "decision": AnalysisDecision.PARTIAL_PROCEED,
+            "excluded_scope": [],
+            "information_gaps": ["적용 시점이 정의되지 않음"],
+            "excluded_information_gaps": ["적용 시점이 정의되지 않음"],
+            "user_questions": ["언제 적용합니까?"],
+        }
+    )
+
+    result = evaluate_checkpoint1(cp1_request(), analysis, cp1_requirements())
+
+    assert result.status == CheckStatus.FAIL
+    assert result.handoff_status == HandoffStatus.BLOCKED
+    assert cp1_check(result, "CP1-010").status == CheckStatus.FAIL
+
+    mismatched = analysis.model_copy(
+        update={
+            "excluded_scope": ["적용 시점"],
+            "excluded_information_gaps": [],
+        }
+    )
+    mismatched_result = evaluate_checkpoint1(
+        cp1_request(), mismatched, cp1_requirements()
+    )
+    assert cp1_check(mismatched_result, "CP1-010").status == CheckStatus.FAIL
 
 
 def test_blocked_decision_blocks_agent2_handoff() -> None:
@@ -459,20 +544,20 @@ def test_blocked_decision_blocks_agent2_handoff() -> None:
 
 def test_related_requirement_can_be_marked_update_required() -> None:
     requirements = cp1_requirements()
-    local = requirements["REQ-LOCAL-002"]
+    related = requirements["REQ-NOTIFY-001"]
     conditions = [
         *cp1_valid_analysis().confirmed_conditions,
         ConfirmedCondition(
             condition_id="COND-004",
-            statement=local.statement,
+            statement=related.statement,
             source_type=ConditionSource.SRS,
-            source_text=local.statement,
-            requirement_ids=["REQ-LOCAL-002"],
+            source_text=related.statement,
+            requirement_ids=["REQ-NOTIFY-001"],
         ),
     ]
     effects = [
         item.model_copy(update={"relation": RequirementRelation.UPDATE_REQUIRED})
-        if item.requirement_id == "REQ-LOCAL-002"
+        if item.requirement_id == "REQ-NOTIFY-001"
         else item
         for item in cp1_valid_analysis().requirement_effects
     ]
@@ -513,9 +598,13 @@ from qa_pipeline_v2 import (
     Agent1Analysis,
     Agent2TestDesign,
     AnalysisDecision,
+    CommonQaCriterion,
     ConfirmedCondition,
     ConditionSource,
     ControlPath,
+    DomainQaCriterion,
+    DoubleAssertPolicy,
+    ExistingTestSelection,
     ExpectedResult,
     ObservationLayer,
     ProductTestCaseCandidate,
@@ -530,6 +619,7 @@ from qa_pipeline_v2 import (
 def agent2_design() -> Agent2TestDesign:
     return Agent2TestDesign(
         request_id="CR-TEST-001",
+        existing_tc_comparison_completed=True,
         test_cases=[
             ProductTestCaseCandidate(
                 tc_id="TC-CAND-001",
@@ -542,7 +632,7 @@ def agent2_design() -> Agent2TestDesign:
                     "REQ-NOTIFY-001",
                 ],
                 source_condition_ids=["COND-001", "COND-002", "COND-003"],
-                control_path=ControlPath.LOCAL,
+                control_path=ControlPath.CENTRAL,
                 target_role="PRIMARY_TEST_DEVICE",
                 test_data=StructuredTestData(
                     initial_mode="AUTO",
@@ -552,7 +642,7 @@ def agent2_design() -> Agent2TestDesign:
                 ),
                 preconditions=["대상 장비가 AUTO 모드이고 설정 온도가 18°C다."],
                 steps=["설정 온도를 18°C 미만으로 변경 요청한다."],
-                expected_results=[
+                    expected_results=[
                     ExpectedResult(
                         result_id="ER-001",
                         statement="화면의 설정 온도가 기존 값을 유지한다.",
@@ -572,6 +662,15 @@ def agent2_design() -> Agent2TestDesign:
                         source_condition_ids=["COND-003"],
                     ),
                 ],
+                common_qa_criteria=[CommonQaCriterion.BOUNDARY_VALUE],
+                domain_qa_criteria=[
+                    DomainQaCriterion.TARGET_DEVICE_ACCURACY,
+                    DomainQaCriterion.UI_INTERNAL_STATE_CONSISTENCY,
+                ],
+                feature_requirement_ids=["REQ-TEMP-001"],
+                independent_execution=True,
+                independence_reason="사전조건에서 대상 장비의 AUTO 모드와 초기 온도를 직접 구성한다.",
+                double_assert_policy=DoubleAssertPolicy.REQUIRED,
                 restore_required=False,
                 restore_steps=[],
                 automation_candidate=True,
@@ -633,11 +732,29 @@ def test_agent2_uses_structured_responses_api() -> None:
     assert response.usage["total_tokens"] == 300
     assert responses.kwargs["text_format"] is Agent2TestDesign
     assert responses.kwargs["store"] is False
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-14"
+    agent2_input = responses.kwargs["input"][1]["content"]
+    assert "[기존 사람 작성·자동화 TC 카탈로그]" in agent2_input
+    assert "TC-TEMP-001" in agent2_input
+    assert "TC-MODE-002" in agent2_input
+    assert "검증 동작" in agent2_input
+    assert "30°C 초과 요청 차단" in agent2_input
     assert "제품 기능 테스트케이스 후보" in AGENT2_SYSTEM_INSTRUCTIONS
     assert "Playwright 코드" in AGENT2_SYSTEM_INSTRUCTIONS
     assert "모든 confirmed_condition" in AGENT2_SYSTEM_INSTRUCTIONS
+    assert "Requirement ID만 같고 검증 동작이 다르면" in AGENT2_SYSTEM_INSTRUCTIONS
+    assert "내부 필드 식별자" in AGENT2_SYSTEM_INSTRUCTIONS
     assert "target_role=PRIMARY_TEST_DEVICE" in AGENT2_SYSTEM_INSTRUCTIONS
-    assert "전체 test_cases를 완전한 결과로 반환" in Path("src/qa_pipeline_v2.py").read_text(encoding="utf-8")
+    assert "V1의 3단계 QA 기준" in AGENT2_SYSTEM_INSTRUCTIONS
+    assert "independent_execution=true" in AGENT2_SYSTEM_INSTRUCTIONS
+    assert "모든 실행 TC는 control_path=CENTRAL" in AGENT2_SYSTEM_INSTRUCTIONS
+    assert "TC 분리 단위는 입력값 하나가 아니라 하나의 업무 규칙" in AGENT2_SYSTEM_INSTRUCTIONS
+    assert "INDEPENDENT_VARIANTS" in AGENT2_SYSTEM_INSTRUCTIONS
+    assert "verify_after_step" in AGENT2_SYSTEM_INSTRUCTIONS
+    assert "제외된_정보_부족" in AGENT2_SYSTEM_INSTRUCTIONS
+    assert "전체 test_cases와 관련_기존_TC를 완전한 결과로 반환" in Path(
+        "src/qa_pipeline_v2.py"
+    ).read_text(encoding="utf-8")
 
     agent.design(
         cp1_request(),
@@ -670,9 +787,12 @@ from qa_pipeline_v2 import (
     Agent2TestDesign,
     AnalysisDecision,
     CheckStatus,
+    CommonQaCriterion,
     ConfirmedCondition,
     ConditionSource,
     ControlPath,
+    DomainQaCriterion,
+    DoubleAssertPolicy,
     ExpectedResult,
     ObservationLayer,
     ProductTestCaseCandidate,
@@ -763,6 +883,14 @@ def cp2_requirements():
 def cp2_valid_design() -> Agent2TestDesign:
     return Agent2TestDesign(
         request_id="CR-TEST-001",
+        existing_tc_comparison_completed=True,
+        related_existing_tests=[
+            ExistingTestSelection(
+                tc_id="TC-TEMP-001",
+                source_condition_ids=["COND-001"],
+                selection_reason="변경된 온도 정책이 기존 상한 경계에 영향을 주는지 회귀 확인한다.",
+            )
+        ],
         test_cases=[
             ProductTestCaseCandidate(
                 tc_id="TC-CAND-001",
@@ -775,7 +903,7 @@ def cp2_valid_design() -> Agent2TestDesign:
                     "REQ-NOTIFY-001",
                 ],
                 source_condition_ids=["COND-001", "COND-002", "COND-003"],
-                control_path=ControlPath.LOCAL,
+                control_path=ControlPath.CENTRAL,
                 target_role="PRIMARY_TEST_DEVICE",
                 test_data=StructuredTestData(
                     initial_mode="AUTO",
@@ -805,6 +933,15 @@ def cp2_valid_design() -> Agent2TestDesign:
                         source_condition_ids=["COND-003"],
                     ),
                 ],
+                common_qa_criteria=[CommonQaCriterion.BOUNDARY_VALUE],
+                domain_qa_criteria=[
+                    DomainQaCriterion.TARGET_DEVICE_ACCURACY,
+                    DomainQaCriterion.UI_INTERNAL_STATE_CONSISTENCY,
+                ],
+                feature_requirement_ids=["REQ-TEMP-001"],
+                independent_execution=True,
+                independence_reason="사전조건에서 AUTO 모드와 초기 온도를 직접 구성한다.",
+                double_assert_policy=DoubleAssertPolicy.REQUIRED,
                 restore_required=False,
                 restore_steps=[],
                 automation_candidate=True,
@@ -823,8 +960,315 @@ def test_valid_design_passes_checkpoint2() -> None:
     result = evaluate_checkpoint2(cp1_request(), cp2_analysis(), cp2_valid_design(), cp2_requirements())
 
     assert result.status == CheckStatus.PASS
-    assert len(result.checks) == 11
+    assert len(result.checks) == 17
     assert all(item.status == CheckStatus.PASS for item in result.checks)
+
+
+def test_checkpoint2_routes_unchanged_condition_to_existing_tc() -> None:
+    maintained = ConfirmedCondition(
+        condition_id="COND-004",
+        statement="기존 30°C 상한 차단 정책을 유지한다.",
+        source_type=ConditionSource.CHANGE_REQUEST,
+        source_text="기존 30°C 상한 차단 정책을 유지한다.",
+        requirement_ids=["REQ-TEMP-001"],
+    )
+    analysis = cp2_analysis().model_copy(
+        update={
+            "confirmed_conditions": [
+                *cp2_analysis().confirmed_conditions,
+                maintained,
+            ]
+        }
+    )
+    design = cp2_valid_design().model_copy(
+        update={
+            "related_existing_tests": [
+                ExistingTestSelection(
+                    tc_id="TC-TEMP-001",
+                    source_condition_ids=["COND-001", "COND-004"],
+                    selection_reason="유지되는 상한 정책은 기존 TC로 회귀 확인한다.",
+                )
+            ]
+        }
+    )
+
+    result = evaluate_checkpoint2(
+        cp1_request(), analysis, design, cp2_requirements()
+    )
+
+    assert result.status == CheckStatus.PASS
+    assert cp2_check(result, "CP2-016").status == CheckStatus.PASS
+
+
+def test_checkpoint2_rejects_existing_regression_regenerated_as_candidate() -> None:
+    design = cp2_valid_design()
+    regenerated = design.test_cases[0].model_copy(
+        update={"purpose": TcPurpose.RELATED_REGRESSION}
+    )
+
+    result = evaluate_checkpoint2(
+        cp1_request(),
+        cp2_analysis(),
+        design.model_copy(update={"test_cases": [regenerated]}),
+        cp2_requirements(),
+    )
+
+    assert result.status == CheckStatus.FAIL
+    assert cp2_check(result, "CP2-016").status == CheckStatus.FAIL
+    assert "신규 후보로 재작성" in cp2_check(result, "CP2-016").message
+
+
+def test_checkpoint2_allows_incompatible_target_regression_to_be_omitted() -> None:
+    design = cp2_valid_design().model_copy(update={"related_existing_tests": []})
+
+    result = evaluate_checkpoint2(
+        cp1_request(), cp2_analysis(), design, cp2_requirements()
+    )
+
+    assert result.status == CheckStatus.PASS
+    assert cp2_check(result, "CP2-016").status == CheckStatus.PASS
+
+
+def test_checkpoint2_rejects_compound_ui_expected_result() -> None:
+    design = cp2_valid_design()
+    test_case = design.test_cases[0]
+    compound_result = test_case.expected_results[0].model_copy(
+        update={"statement": "화면 모드는 AUTO이고 설정 온도는 18°C로 유지된다."}
+    )
+    design = design.model_copy(
+        update={
+            "test_cases": [
+                test_case.model_copy(
+                    update={
+                        "expected_results": [
+                            compound_result,
+                            *test_case.expected_results[1:],
+                        ]
+                    }
+                )
+            ]
+        }
+    )
+
+    result = evaluate_checkpoint2(
+        cp1_request(), cp2_analysis(), design, cp2_requirements()
+    )
+
+    assert result.status == CheckStatus.FAIL
+    assert cp2_check(result, "CP2-006").status == CheckStatus.FAIL
+    assert "관찰값별로 분리" in cp2_check(result, "CP2-006").message
+
+    for contextual_statement in (
+        "AUTO 모드에서 화면의 온도 조작 버튼은 비활성화된다.",
+        "AUTO 모드에서 화면의 설정 온도 표시는 ---이다.",
+    ):
+        contextual_result = test_case.expected_results[0].model_copy(
+            update={"statement": contextual_statement}
+        )
+        contextual_design = design.model_copy(
+            update={
+                "test_cases": [
+                    test_case.model_copy(
+                        update={
+                            "expected_results": [
+                                contextual_result,
+                                *test_case.expected_results[1:],
+                            ]
+                        }
+                    )
+                ]
+            }
+        )
+        contextual_checkpoint = evaluate_checkpoint2(
+            cp1_request(), cp2_analysis(), contextual_design, cp2_requirements()
+        )
+        assert cp2_check(contextual_checkpoint, "CP2-006").status == CheckStatus.PASS
+
+
+def test_checkpoint2_rejects_procedural_selection_expected_result() -> None:
+    design = cp2_valid_design()
+    test_case = design.test_cases[0]
+    selection_result = ExpectedResult(
+        result_id="ER-004",
+        statement="PRIMARY_TEST_DEVICE가 단일 선택된다.",
+        observation_layer=ObservationLayer.UI,
+        source_condition_ids=["COND-001"],
+    )
+    design = design.model_copy(
+        update={
+            "test_cases": [
+                test_case.model_copy(
+                    update={
+                        "expected_results": [
+                            *test_case.expected_results,
+                            selection_result,
+                        ]
+                    }
+                )
+            ]
+        }
+    )
+
+    result = evaluate_checkpoint2(
+        cp1_request(), cp2_analysis(), design, cp2_requirements()
+    )
+
+    assert result.status == CheckStatus.FAIL
+    assert cp2_check(result, "CP2-017").status == CheckStatus.FAIL
+    assert "준비용 장비 선택" in cp2_check(result, "CP2-017").message
+
+
+def test_checkpoint2_rejects_ui_display_not_present_in_condition_source() -> None:
+    design = cp2_valid_design()
+    test_case = design.test_cases[0]
+    invented_display = ExpectedResult(
+        result_id="ER-004",
+        statement="사용자 화면의 잠금 상태가 잠금으로 표시된다.",
+        observation_layer=ObservationLayer.UI,
+        source_condition_ids=["COND-001"],
+    )
+    design = design.model_copy(
+        update={
+            "test_cases": [
+                test_case.model_copy(
+                    update={
+                        "expected_results": [
+                            *test_case.expected_results,
+                            invented_display,
+                        ]
+                    }
+                )
+            ]
+        }
+    )
+
+    result = evaluate_checkpoint2(
+        cp1_request(), cp2_analysis(), design, cp2_requirements()
+    )
+
+    assert result.status == CheckStatus.FAIL
+    assert cp2_check(result, "CP2-017").status == CheckStatus.FAIL
+    assert "Condition 원문에 없는 UI 표시" in cp2_check(result, "CP2-017").message
+
+
+def grouped_boundary_design() -> Agent2TestDesign:
+    design = cp2_valid_design()
+    test_case = design.test_cases[0]
+    lower_step = "AUTO 모드에서 17°C를 요청해 하한 차단을 확인한다."
+    reset_step = "상한 검증을 위해 AUTO 모드와 설정 온도 30°C를 독립적으로 다시 준비한다."
+    upper_step = "AUTO 모드에서 31°C를 요청해 상한 차단을 확인한다."
+    expected_results = [
+        test_case.expected_results[0].model_copy(
+            update={"verify_after_step": lower_step}
+        ),
+        test_case.expected_results[1].model_copy(
+            update={"verify_after_step": lower_step}
+        ),
+        test_case.expected_results[2].model_copy(
+            update={"verify_after_step": upper_step}
+        ),
+    ]
+    grouped = test_case.model_copy(
+        update={
+            "title": "AUTO 모드 설정 온도 범위",
+            "test_data": test_case.test_data.model_copy(
+                update={
+                    "requested_mode": None,
+                    "requested_modes": ["AUTO"],
+                    "requested_temperature_c": None,
+                    "requested_temperatures_c": [17.0, 30.0, 31.0],
+                }
+            ),
+            "condition_execution": pipeline.ConditionExecution.INDEPENDENT_VARIANTS,
+            "grouping_reason": "같은 설정 온도 관제점의 AUTO 허용 범위라는 하나의 업무 규칙이다.",
+            "intermediate_reset_steps": [reset_step],
+            "steps": [lower_step, reset_step, upper_step],
+            "expected_results": expected_results,
+            "independence_reason": "하한과 상한 조건 사이에 AUTO 30°C 상태를 다시 준비해 서로 의존하지 않는다.",
+        }
+    )
+    return design.model_copy(update={"test_cases": [grouped]})
+
+
+def test_checkpoint2_accepts_related_boundaries_as_one_grouped_tc() -> None:
+    result = evaluate_checkpoint2(
+        cp1_request(), cp2_analysis(), grouped_boundary_design(), cp2_requirements()
+    )
+
+    assert result.status == CheckStatus.PASS
+    assert cp2_check(result, "CP2-015").status == CheckStatus.PASS
+
+
+def test_checkpoint2_rejects_grouped_tc_without_reset_or_result_timing() -> None:
+    design = grouped_boundary_design()
+    test_case = design.test_cases[0]
+    broken_results = [
+        result.model_copy(update={"verify_after_step": None})
+        for result in test_case.expected_results
+    ]
+    broken = test_case.model_copy(
+        update={
+            "intermediate_reset_steps": [],
+            "expected_results": broken_results,
+        }
+    )
+
+    result = evaluate_checkpoint2(
+        cp1_request(), cp2_analysis(),
+        design.model_copy(update={"test_cases": [broken]}),
+        cp2_requirements(),
+    )
+
+    assert result.status == CheckStatus.FAIL
+    check = cp2_check(result, "CP2-015")
+    assert check.status == CheckStatus.FAIL
+    assert "초기화 절차 누락" in check.message
+    assert "판정 단계 누락" in check.message
+
+
+def test_checkpoint2_requires_explicit_runtime_restore_for_unknown_grouped_hvac_baseline() -> None:
+    design = grouped_boundary_design()
+    test_case = design.test_cases[0]
+    restore_step = "실행 직전 관찰한 모드와 설정 온도로 복원하고 중앙 관제 명령을 적용한다."
+    unknown_baseline = test_case.model_copy(
+        update={
+            "test_data": test_case.test_data.model_copy(
+                update={
+                    "initial_mode": None,
+                    "initial_temperature_c": None,
+                    "restore_observed_hvac_state": False,
+                }
+            ),
+            "restore_required": True,
+            "restore_steps": [restore_step],
+        }
+    )
+
+    rejected = evaluate_checkpoint2(
+        cp1_request(),
+        cp2_analysis(),
+        design.model_copy(update={"test_cases": [unknown_baseline]}),
+        cp2_requirements(),
+    )
+    accepted_case = unknown_baseline.model_copy(
+        update={
+            "test_data": unknown_baseline.test_data.model_copy(
+                update={"restore_observed_hvac_state": True}
+            )
+        }
+    )
+    accepted = evaluate_checkpoint2(
+        cp1_request(),
+        cp2_analysis(),
+        design.model_copy(update={"test_cases": [accepted_case]}),
+        cp2_requirements(),
+    )
+
+    assert cp2_check(rejected, "CP2-015").status == CheckStatus.FAIL
+    assert "실행 전 상태 저장·복원 표시 누락" in cp2_check(
+        rejected, "CP2-015"
+    ).message
+    assert cp2_check(accepted, "CP2-015").status == CheckStatus.PASS
 
 
 def test_human_review_note_pauses_checkpoint2() -> None:
@@ -868,6 +1312,12 @@ def test_final_review_note_does_not_pause_checkpoint2() -> None:
     schema_properties = pipeline.Agent2TestDesign.model_json_schema()["properties"]
     assert "최종_확인_사항" in schema_properties
     assert "중단_확인_사항" in schema_properties
+    assert "제외_범위" in schema_properties
+    assert "제외된_정보_부족" in schema_properties
+    tc_schema = pipeline.ProductTestCaseCandidate.model_json_schema()["properties"]
+    assert "common_qa_criteria" in tc_schema
+    assert "independent_execution" in tc_schema
+    assert "double_assert_policy" in tc_schema
 
 def test_control_requirement_cannot_use_local_path() -> None:
     condition = ConfirmedCondition(
@@ -923,7 +1373,7 @@ def test_control_requirement_cannot_use_local_path() -> None:
     assert cp2_check(result, "CP2-008").status == CheckStatus.FAIL
 
 
-def test_active_central_path_requires_direct_change_validation() -> None:
+def test_verify_central_path_can_use_existing_regression_without_new_candidate() -> None:
     condition = ConfirmedCondition(
         condition_id="COND-004",
         statement="중앙 관제 패널에서 변경 정책을 적용한다.",
@@ -952,45 +1402,79 @@ def test_active_central_path_requires_direct_change_validation() -> None:
             acceptance_criteria="선택 장비에 일괄 적용한다.",
         ),
     }
-    central_regression = ProductTestCaseCandidate(
-        tc_id="TC-CAND-002",
-        title="중앙 관제 패널 기존 적용 회귀",
-        purpose=TcPurpose.RELATED_REGRESSION,
-        test_type=TcType.NORMAL,
+    design = cp2_valid_design().model_copy(
+        update={
+            "related_existing_tests": [
+                *cp2_valid_design().related_existing_tests,
+                ExistingTestSelection(
+                    tc_id="TC-MODE-001",
+                    source_condition_ids=["COND-004"],
+                    selection_reason="유지되는 중앙 관제 적용 동작은 기존 TC로 회귀 확인한다.",
+                ),
+            ]
+        }
+    )
+
+    result = evaluate_checkpoint2(cp1_request(), analysis, design, requirements)
+
+    assert result.status == CheckStatus.PASS
+    assert cp2_check(result, "CP2-008").status == CheckStatus.PASS
+    assert cp2_check(result, "CP2-016").status == CheckStatus.PASS
+
+
+def test_verify_only_requirement_cannot_be_duplicated_as_new_candidate() -> None:
+    condition = ConfirmedCondition(
+        condition_id="COND-004",
+        statement="중앙 관제 패널에서 기존 제어 명령을 적용한다.",
+        source_type=ConditionSource.SRS,
+        source_text="중앙 관제 패널에서 기존 제어 명령을 적용한다.",
         requirement_ids=["REQ-CONTROL-001"],
-        source_condition_ids=["COND-004"],
-        control_path=ControlPath.CENTRAL,
-        target_role="SELECTED_ALLOWED_TEST_DEVICE_SET",
-        test_data=StructuredTestData(
-            initial_mode="COOL",
-            requested_mode="AUTO",
-            initial_temperature_c=19,
-            requested_temperature_c=18,
+    )
+    analysis = cp2_analysis().model_copy(
+        update={
+            "confirmed_conditions": [*cp2_analysis().confirmed_conditions, condition],
+            "requirement_effects": [
+                *cp2_analysis().requirement_effects,
+                RequirementEffect(
+                    requirement_id="REQ-CONTROL-001",
+                    relation=RequirementRelation.VERIFY,
+                    reason="기존 중앙 제어 회귀 확인",
+                ),
+            ],
+        }
+    )
+    requirements = {
+        **cp2_requirements(),
+        "REQ-CONTROL-001": SrsRequirement(
+            requirement_id="REQ-CONTROL-001",
+            statement="중앙 관제 패널에서 기존 제어 명령을 적용한다.",
+            acceptance_criteria="허용 대상에 기존 명령을 반영한다.",
         ),
-        preconditions=["선택 장비가 제어 허용 상태다."],
-        steps=["관제 패널에서 변경 값을 일괄 적용한다."],
-        expected_results=[
-            ExpectedResult(
-                result_id="ER-004",
-                statement="선택 장비에 요청 값이 적용된다.",
-                observation_layer=ObservationLayer.UI,
-                source_condition_ids=["COND-004"],
-            )
-        ],
-        restore_required=True,
-        restore_steps=["선택 장비의 기존 값을 복구한다."],
-        automation_candidate=True,
-        automation_reason="관제 패널과 대상 상태를 조회할 수 있다.",
+    }
+    base = cp2_valid_design().test_cases[0]
+    verify_only = base.model_copy(
+        update={
+            "tc_id": "TC-CAND-002",
+            "title": "기존 중앙 관제 적용 중복 후보",
+            "test_type": TcType.NORMAL,
+            "requirement_ids": ["REQ-CONTROL-001"],
+            "source_condition_ids": ["COND-004"],
+            "expected_results": [
+                item.model_copy(update={"source_condition_ids": ["COND-004"]})
+                for item in base.expected_results
+            ],
+            "feature_requirement_ids": ["REQ-CONTROL-001"],
+        }
     )
     design = cp2_valid_design().model_copy(
-        update={"test_cases": [*cp2_valid_design().test_cases, central_regression]}
+        update={"test_cases": [*cp2_valid_design().test_cases, verify_only]}
     )
 
     result = evaluate_checkpoint2(cp1_request(), analysis, design, requirements)
 
     assert result.status == CheckStatus.FAIL
-    assert cp2_check(result, "CP2-008").status == CheckStatus.FAIL
-    assert "CENTRAL 경로의 직접 변경 검증 TC 누락" in cp2_check(result, "CP2-008").message
+    assert cp2_check(result, "CP2-016").status == CheckStatus.FAIL
+    assert "VERIFY 유지 동작" in cp2_check(result, "CP2-016").message
 
 def test_structured_test_data_is_required_for_boundary_tc() -> None:
     tc = cp2_valid_design().test_cases[0].model_copy(
@@ -1006,7 +1490,23 @@ def test_structured_test_data_is_required_for_boundary_tc() -> None:
     assert cp2_check(result, "CP2-010").status == CheckStatus.FAIL
 
 
-def test_boundary_tc_with_initial_mode_requires_requested_mode_for_agent3() -> None:
+def test_state_consistency_without_mode_or_temperature_data_is_allowed() -> None:
+    tc = cp2_valid_design().test_cases[0].model_copy(
+        update={
+            "test_type": TcType.STATE_CONSISTENCY,
+            "test_data": StructuredTestData(),
+        }
+    )
+    design = cp2_valid_design().model_copy(update={"test_cases": [tc]})
+
+    result = evaluate_checkpoint2(
+        cp1_request(), cp2_analysis(), design, cp2_requirements()
+    )
+
+    assert cp2_check(result, "CP2-010").status == CheckStatus.PASS
+
+
+def test_boundary_tc_allows_initial_mode_as_execution_context() -> None:
     tc = cp2_valid_design().test_cases[0].model_copy(
         update={
             "test_data": StructuredTestData(
@@ -1022,7 +1522,7 @@ def test_boundary_tc_with_initial_mode_requires_requested_mode_for_agent3() -> N
         cp1_request(), cp2_analysis(), design, cp2_requirements()
     )
 
-    assert cp2_check(result, "CP2-010").status == CheckStatus.FAIL
+    assert cp2_check(result, "CP2-010").status == CheckStatus.PASS
 
 def test_missing_condition_is_rejected() -> None:
     tc = cp2_valid_design().test_cases[0].model_copy(
@@ -1075,6 +1575,94 @@ def test_state_consistency_type_without_internal_state_is_rejected() -> None:
 
     assert result.status == CheckStatus.FAIL
     assert cp2_check(result, "CP2-006").status == CheckStatus.FAIL
+
+
+def test_missing_three_tier_quality_criteria_is_rejected() -> None:
+    tc = cp2_valid_design().test_cases[0].model_copy(
+        update={
+            "common_qa_criteria": [],
+            "domain_qa_criteria": [],
+            "feature_requirement_ids": [],
+        }
+    )
+    design = cp2_valid_design().model_copy(update={"test_cases": [tc]})
+
+    result = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
+
+    assert result.status == CheckStatus.FAIL
+    assert cp2_check(result, "CP2-012").status == CheckStatus.FAIL
+
+
+def test_tc_declared_non_independent_is_rejected() -> None:
+    tc = cp2_valid_design().test_cases[0].model_copy(
+        update={"independent_execution": False, "independence_reason": None}
+    )
+    design = cp2_valid_design().model_copy(update={"test_cases": [tc]})
+
+    result = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
+
+    assert result.status == CheckStatus.FAIL
+    assert cp2_check(result, "CP2-013").status == CheckStatus.FAIL
+
+
+def test_tc_negative_cross_tc_reference_is_accepted_as_independence_evidence() -> None:
+    tc = cp2_valid_design().test_cases[0].model_copy(
+        update={
+            "independence_reason": (
+                "사전조건을 직접 구성하므로 이전 TC의 적용 또는 복원 결과에 "
+                "의존하지 않고 독립적으로 실행한다."
+            )
+        }
+    )
+    design = cp2_valid_design().model_copy(update={"test_cases": [tc]})
+
+    result = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
+
+    assert cp2_check(result, "CP2-013").status == CheckStatus.PASS
+
+
+def test_tc_positive_cross_tc_dependency_is_rejected() -> None:
+    tc = cp2_valid_design().test_cases[0].model_copy(
+        update={
+            "preconditions": ["이전 TC가 완료한 장비 상태를 그대로 사용한다."],
+            "independence_reason": "선행 테스트 결과를 이어받아 실행한다.",
+        }
+    )
+    design = cp2_valid_design().model_copy(update={"test_cases": [tc]})
+
+    result = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
+
+    assert cp2_check(result, "CP2-013").status == CheckStatus.FAIL
+
+
+def test_partial_scope_exclusions_must_be_preserved_by_agent2() -> None:
+    analysis = cp2_analysis().model_copy(
+        update={
+            "decision": AnalysisDecision.PARTIAL_PROCEED,
+            "excluded_scope": ["정확한 차단 안내 문구"],
+            "information_gaps": ["정확한 안내 문구가 정의되지 않음"],
+            "excluded_information_gaps": ["정확한 안내 문구가 정의되지 않음"],
+            "user_questions": ["차단 안내 문구를 확정해 주세요."],
+        }
+    )
+    design = cp2_valid_design()
+
+    result = evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements())
+
+    assert result.status == CheckStatus.FAIL
+    assert cp2_check(result, "CP2-014").status == CheckStatus.FAIL
+
+    preserved = design.model_copy(
+        update={
+            "excluded_scope": analysis.excluded_scope,
+            "excluded_information_gaps": analysis.information_gaps,
+        }
+    )
+    preserved_result = evaluate_checkpoint2(
+        cp1_request(), analysis, preserved, cp2_requirements()
+    )
+    assert preserved_result.status == CheckStatus.PASS
+    assert cp2_check(preserved_result, "CP2-014").status == CheckStatus.PASS
 
 
 def test_playwright_code_is_rejected() -> None:
@@ -1196,7 +1784,7 @@ def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
                 test_type=TcType.BOUNDARY,
                 requirement_ids=["REQ-TEMP-001"],
                 source_condition_ids=["COND-001", "COND-002", "COND-003", "COND-005"],
-                control_path=ControlPath.NOT_APPLICABLE,
+                    control_path=ControlPath.CENTRAL,
                 target_role="PRIMARY_TEST_DEVICE",
                 test_data=StructuredTestData(
                     initial_mode="AUTO",
@@ -1214,18 +1802,35 @@ def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
                         statement="요청 결과가 변경 조건과 일치한다.",
                         observation_layer=ObservationLayer.UI,
                         source_condition_ids=["COND-001", "COND-002", "COND-003", "COND-005"],
-                    )
-                ],
-                restore_required=False,
-                restore_steps=[],
-                automation_candidate=True,
-                automation_reason="화면에서 요청 결과를 확인할 수 있다.",
+                        )
+                    ],
+                    common_qa_criteria=[CommonQaCriterion.BOUNDARY_VALUE],
+                    domain_qa_criteria=[DomainQaCriterion.TARGET_DEVICE_ACCURACY],
+                    feature_requirement_ids=["REQ-TEMP-001"],
+                    independent_execution=True,
+                    independence_reason="사전조건에서 대상 장비의 모드와 초기 온도를 직접 구성한다.",
+                    double_assert_policy=DoubleAssertPolicy.UI_ONLY,
+                    double_assert_reason="이 단위 Fixture는 화면 경계 결과만 확인한다.",
+                    restore_required=False,
+                    restore_steps=[],
+                    automation_candidate=True,
+                    automation_reason="화면에서 요청 결과를 확인할 수 있다.",
             )
             return pipeline.Agent2Response(
-                design=Agent2TestDesign(
-                    request_id=request.request_id,
-                    test_cases=[tc],
+                    design=Agent2TestDesign(
+                        request_id=request.request_id,
+                        existing_tc_comparison_completed=True,
+                        related_existing_tests=[
+                            ExistingTestSelection(
+                                tc_id="TC-TEMP-001",
+                                source_condition_ids=["COND-001"],
+                                selection_reason="변경 대상 온도 정책의 기존 경계 TC를 회귀 확인한다.",
+                            )
+                        ],
+                        test_cases=[tc],
                     coverage_summary="확정 조건을 변경 검증 TC에 연결했다.",
+                    excluded_scope=analysis.excluded_scope,
+                    excluded_information_gaps=analysis.information_gaps,
                 ),
                 response_id="not-persisted",
                 model=self.model,
@@ -1325,7 +1930,7 @@ def agent3_test_case() -> ProductTestCaseCandidate:
             "restore_required": False,
             "restore_steps": [],
             "automation_candidate": True,
-            "automation_reason": "The local UI and internal state are observable.",
+            "automation_reason": "The central control-panel UI and internal state are observable.",
         }
     )
 
@@ -1399,12 +2004,12 @@ def agent3_plan() -> Agent3AutomationPlan:
         target_device_id=1,
         summary="Prepare AUTO 18, request 17, then verify blocking evidence.",
         actions=[
-            AutomationAction(action_id="ACT-001", phase="PRECONDITION", action_type="SELECT_DEVICE", selector="#device-card-1 .card-body-split", value=1, source_text="Select target"),
-            AutomationAction(action_id="ACT-002", phase="PRECONDITION", action_type="SET_MODE", selector="#det-mode-auto", value="AUTO", source_text="Prepare AUTO"),
-            AutomationAction(action_id="ACT-003", phase="PRECONDITION", action_type="SET_TEMPERATURE", selector="#det-temp-display", value=18.0, source_text="Prepare 18"),
-            AutomationAction(action_id="ACT-004", phase="PRECONDITION", action_type="APPLY_COMMANDS", selector=".btn-apply-cmd", source_text="Apply initial state"),
-            AutomationAction(action_id="ACT-005", phase="TEST", action_type="SET_TEMPERATURE", selector="#det-temp-display", value=17.0, source_text="Request 17"),
-            AutomationAction(action_id="ACT-006", phase="TEST", action_type="APPLY_COMMANDS", selector=".btn-apply-cmd", source_text="Apply request"),
+            AutomationAction(action_id="ACT-001", phase="PRECONDITION", action_type="SELECT_DEVICE", selector="#device-card-1 .card-body-split", value=1, source_text="Select an allowed device at AUTO 18 degrees."),
+            AutomationAction(action_id="ACT-002", phase="PRECONDITION", action_type="SET_MODE", selector="#det-mode-auto", value="AUTO", source_text="Select an allowed device at AUTO 18 degrees."),
+            AutomationAction(action_id="ACT-003", phase="PRECONDITION", action_type="SET_TEMPERATURE", selector="#det-temp-display", value=18.0, source_text="Select an allowed device at AUTO 18 degrees."),
+            AutomationAction(action_id="ACT-004", phase="PRECONDITION", action_type="APPLY_COMMANDS", selector=".btn-apply-cmd", source_text="Select an allowed device at AUTO 18 degrees."),
+            AutomationAction(action_id="ACT-005", phase="TEST", action_type="SET_TEMPERATURE", selector="#det-temp-display", value=17.0, source_text="Request 17 degrees and apply the pending command."),
+            AutomationAction(action_id="ACT-006", phase="TEST", action_type="APPLY_COMMANDS", selector=".btn-apply-cmd", source_text="Request 17 degrees and apply the pending command."),
         ],
         assertions=[
             AutomationAssertion(result_id="ER-005", observation_layer="UI", strategy="UI_TEMPERATURE", selector="#det-temp-display", expected_number=18.0),
@@ -1431,6 +2036,7 @@ def test_agent3_uses_structured_plan_api() -> None:
     assert result.plan.tc_id == "TC-CAND-003"
     assert responses.kwargs["text_format"] is Agent3AutomationPlan
     assert responses.kwargs["store"] is False
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent3-3-17"
     instructions = responses.kwargs["input"][0]["content"]
     assert "SET_TEMPERATURE=#det-temp-display" in instructions
     assert "Generic UI actions are CLICK, FILL, SELECT_OPTION, CHECK, and UNCHECK" in instructions
@@ -1443,7 +2049,142 @@ def test_agent3_uses_structured_plan_api() -> None:
     assert "UI_TEXT_CONTAINS may verify a short meaningful phrase" in instructions
     assert "do not use the entire natural-language Expected Result sentence" in instructions
     assert "TOAST_BLOCKING" in instructions
-    assert "propertyNames" not in json.dumps(Agent3AutomationPlan.model_json_schema())
+    assert "disabled or 비활성 grounds UI_ENABLED_EQUALS" in instructions
+    assert "RESTORE_OBSERVED_HVAC" in instructions
+
+
+def test_agent3_accepts_atomic_temperature_up_disabled_assertion() -> None:
+    test_case = agent3_test_case()
+    disabled_up = test_case.expected_results[0].model_copy(
+        update={
+            "statement": "온도 올림 버튼이 disabled 상태이다.",
+        }
+    )
+    test_case = test_case.model_copy(
+        update={
+            "expected_results": [
+                disabled_up,
+                *test_case.expected_results[1:],
+            ]
+        }
+    )
+    plan = agent3_plan()
+    enabled_assertion = plan.assertions[0].model_copy(
+        update={
+            "strategy": AssertionStrategy.UI_ENABLED_EQUALS,
+            "selector": "#det-temp-up-btn",
+            "expected_number": None,
+            "expected_value": False,
+        }
+    )
+    plan = plan.model_copy(
+        update={"assertions": [enabled_assertion, *plan.assertions[1:]]}
+    )
+    observation = agent3_observation()
+    observation = observation.model_copy(
+        update={
+            "elements": [
+                item.model_copy(
+                    update={"action_hint": "온도 올림 / Request one degree higher"}
+                )
+                if item.selector == "#det-temp-up-btn"
+                else item
+                for item in observation.elements
+            ]
+        }
+    )
+
+    checkpoint = evaluate_checkpoint3_plan(test_case, plan, observation)
+
+    assert checkpoint.status == CheckStatus.PASS
+    code = compile_automation_candidate(
+        "RUN-20260826-133000-ABCDEF", test_case, plan
+    )
+    assert "#det-temp-up-btn" in code
+    assert ".is_enabled()" in code
+
+
+def test_agent3_eligibility_keeps_atomic_temperature_button_selectors() -> None:
+    test_case = ProductTestCaseCandidate.model_validate(
+        {
+            "tc_id": "TC-CAND-004",
+            "title": "잠금 후 온도 버튼 비활성화",
+            "purpose": "CHANGE_VALIDATION",
+            "test_type": "STATE_CONSISTENCY",
+            "requirement_ids": ["REQ-LOCK-001", "REQ-STATE-001"],
+            "source_condition_ids": ["COND-001"],
+            "control_path": "CENTRAL",
+            "target_role": "PRIMARY_TEST_DEVICE",
+            "test_data": {},
+            "preconditions": ["대상 장비는 잠금 해제 상태이다."],
+            "steps": ["대상 장비에 잠금 설정을 적용한다."],
+            "expected_results": [
+                {
+                    "result_id": "ER-001",
+                    "statement": "온도 내림 버튼이 disabled 상태이다.",
+                    "observation_layer": "UI",
+                    "source_condition_ids": ["COND-001"],
+                },
+                {
+                    "result_id": "ER-002",
+                    "statement": "온도 올림 버튼이 disabled 상태이다.",
+                    "observation_layer": "UI",
+                    "source_condition_ids": ["COND-001"],
+                },
+                {
+                    "result_id": "ER-003",
+                    "statement": "내부 locked 값이 활성화되어 있다.",
+                    "observation_layer": "INTERNAL_STATE",
+                    "source_condition_ids": ["COND-001"],
+                },
+            ],
+            "restore_required": True,
+            "restore_steps": ["대상 장비의 잠금을 해제한다."],
+            "automation_candidate": True,
+            "automation_reason": "관찰된 UI와 내부 상태로 확인할 수 있다.",
+        }
+    )
+
+    eligibility = evaluate_agent3_eligibility(test_case)
+
+    assert "#det-temp-down-btn" in eligibility.required_selectors
+    assert "#det-temp-up-btn" in eligibility.required_selectors
+    assert "#device-card-1 .card-body-split" in eligibility.required_selectors
+    assert ".btn-apply-cmd" in eligibility.required_selectors
+    assert "selectedUnitId" in eligibility.required_harness_keys
+    assert "devices" in eligibility.required_harness_keys
+    assert "SELECT_PRIMARY_DEVICE" in eligibility.required_capabilities
+    assert "APPLY_CENTRAL_COMMAND" in eligibility.required_capabilities
+    assert "ASSERT_GENERIC_UI_STATE" in eligibility.required_capabilities
+
+
+def test_agent3_allows_observed_initial_mode_without_reapplying() -> None:
+    test_case = agent3_test_case()
+    plan = agent3_plan().model_copy(
+        update={
+            "actions": [
+                item
+                for item in agent3_plan().actions
+                if item.action_id not in {"ACT-002", "ACT-003", "ACT-004"}
+            ]
+        }
+    )
+    observation = agent3_observation().model_copy(
+        update={
+            "harness_values": {
+                "window.__vccs.devices[0].mode": "AUTO",
+                "window.__vccs.devices[0].setTemp": 18,
+            }
+        }
+    )
+
+    checkpoint = evaluate_checkpoint3_plan(test_case, plan, observation)
+
+    assert checkpoint.status == CheckStatus.PASS
+    sequence = next(
+        item for item in checkpoint.checks if item.rule_id == "CP3-006A"
+    )
+    assert sequence.status == CheckStatus.PASS
 
 
 def test_agent3_model_input_preview_is_minimal_and_has_no_local_path() -> None:
@@ -1451,12 +2192,45 @@ def test_agent3_model_input_preview_is_minimal_and_has_no_local_path() -> None:
         "REQ-TEMP-001": SrsRequirement(requirement_id="REQ-TEMP-001", statement="range", acceptance_criteria="block"),
         "REQ-UNRELATED-001": SrsRequirement(requirement_id="REQ-UNRELATED-001", statement="unrelated", acceptance_criteria="none"),
     }
-    payload = build_agent3_model_input(agent3_test_case(), agent3_observation(), requirements)
+    observation = agent3_observation().model_copy(
+        update={
+            "harness_values": {
+                "window.__vccs.devices[0].setTemp": 18,
+                "window.__vccs.unrelated.secretFlag": True,
+            }
+        }
+    )
+    payload = build_agent3_model_input(agent3_test_case(), observation, requirements)
     serialized = json.dumps(payload, ensure_ascii=False)
     assert payload["destination"] == "OpenAI Responses API"
     assert payload["store"] is False
     assert set(payload["related_srs_requirements"]) == {"REQ-TEMP-001"}
     assert payload["ui_observation"]["target_file"] == "virtual-controller.html"
+    assert set(payload["ui_observation"]["harness_values"]) == {
+        "window.__vccs.devices[0].setTemp"
+    }
+    assert set(payload["ui_observation"]["device_state_fields"]) == {
+        "mode",
+        "setTemp",
+    }
+    korean_expected_results = [
+        result.model_copy(
+            update={
+                "statement": "적용 후 내부 설정 온도는 18°C이며 기존 값과 일치합니다."
+            }
+        )
+        if result.observation_layer == ObservationLayer.INTERNAL_STATE
+        else result
+        for result in agent3_test_case().expected_results
+    ]
+    korean_tc = agent3_test_case().model_copy(
+        update={"expected_results": korean_expected_results}
+    )
+    korean_payload = build_agent3_model_input(korean_tc, observation, requirements)
+    assert "setTemp" in korean_payload["ui_observation"]["device_state_fields"]
+    assert "window.__vccs.devices[0].setTemp" in (
+        korean_payload["ui_observation"]["harness_values"]
+    )
     assert "C:\\" not in serialized
     assert "<!doctype html" not in serialized
 
@@ -1515,6 +2289,44 @@ def test_agent3_scoped_inventory_still_blocks_a_required_selector(tmp_path: Path
         )
 
 
+def test_agent3_observation_records_verified_clean_execution_context(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "verified-context.html"
+    target.write_text(
+        """<!doctype html><html><head><title>Verified Context</title></head><body>
+        <div id="device-card-1"><div class="card-body-split">IDU-00</div></div>
+        <script>window.__vccs = {devices: [{id: 1, status: 'STOP', locked: false, errorCode: null}]};</script>
+        </body></html>""",
+        encoding="utf-8",
+    )
+
+    observation = inspect_target_ui(
+        target,
+        required_selectors={"#device-card-1 .card-body-split"},
+        required_harness_keys={"devices"},
+    )
+
+    context = observation.verified_execution_context
+    assert context.clean_page_loaded is True
+    assert context.target_device_visible is True
+    assert context.device_state_available is True
+    assert context.error_free is True
+    assert context.unlocked is True
+    preview = build_agent3_model_input(
+        agent3_test_case(),
+        observation,
+        {
+            "REQ-TEMP-001": SrsRequirement(
+                requirement_id="REQ-TEMP-001",
+                statement="range",
+                acceptance_criteria="block",
+            )
+        },
+    )
+    assert preview["ui_observation"]["verified_execution_context"]["error_free"] is True
+
+
 def test_agent3_inspection_waits_for_delayed_required_selector(tmp_path: Path) -> None:
     target = tmp_path / "delayed-controller.html"
     target.write_text(
@@ -1532,6 +2344,55 @@ setTimeout(() => document.body.insertAdjacentHTML('beforeend',
     )
 
     assert [item.selector for item in observation.elements] == ["#det-mode-auto"]
+
+
+def test_agent3_verified_context_is_captured_after_delayed_interfaces(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "delayed-context.html"
+    target.write_text(
+        """<!doctype html><title>Delayed Context</title><body><script>
+setTimeout(() => {
+  document.body.insertAdjacentHTML('beforeend',
+    '<div id="device-card-1"><div class="card-body-split">IDU-00</div></div>');
+  window.__vccs = {devices: [{id: 1, status: 'STOP', locked: false, errorCode: null}]};
+}, 100);
+</script></body>""",
+        encoding="utf-8",
+    )
+
+    observation = inspect_target_ui(
+        target,
+        required_selectors={"#device-card-1 .card-body-split"},
+        required_harness_keys={"devices"},
+    )
+
+    context = observation.verified_execution_context
+    assert context.target_device_visible is True
+    assert context.device_state_available is True
+    assert context.error_free is True
+    assert context.unlocked is True
+
+
+def test_agent3_local_control_path_is_excluded_before_ui_or_model() -> None:
+    payload = agent3_test_case().model_dump(mode="json")
+    payload["control_path"] = "LOCAL"
+    test_case = ProductTestCaseCandidate.model_validate(payload)
+    eligibility = evaluate_agent3_eligibility(test_case)
+
+    assert eligibility.status == Agent3EligibilityStatus.NOT_AUTOMATABLE
+    assert eligibility.model_call_allowed is False
+    assert eligibility.generic_discovery_required is False
+    assert eligibility.required_selectors == []
+    assert eligibility.required_harness_keys == []
+    assert "CENTRAL_CONTROL_PANEL_ONLY" in eligibility.missing_capabilities
+    assert evaluate_checkpoint3_plan(
+        test_case, agent3_plan(), agent3_observation()
+    ).status == CheckStatus.FAIL
+    with pytest.raises(pipeline.Agent3Error, match="CENTRAL control-panel"):
+        compile_automation_candidate(
+            "RUN-20260824-LOCALBLOCK-ABCDEF", test_case, agent3_plan()
+        )
 
 
 def test_agent3_unknown_internal_state_uses_generic_discovery() -> None:
@@ -1634,8 +2495,12 @@ def test_agent3_non_hvac_mode_values_use_generic_discovery() -> None:
 
     assert eligibility.status == Agent3EligibilityStatus.DISCOVERY_REQUIRED
     assert eligibility.generic_discovery_required is True
-    assert eligibility.required_selectors == []
-    assert eligibility.required_harness_keys == []
+    assert eligibility.required_selectors == [
+        "#device-card-1 .card-body-split",
+        ".btn-apply-cmd",
+    ]
+    assert eligibility.required_harness_keys == ["devices", "selectedUnitId"]
+    assert "SELECT_PRIMARY_DEVICE" in eligibility.required_capabilities
     assert "DISCOVER_GENERIC_UI" in eligibility.required_capabilities
     assert "SET_MODE" not in eligibility.required_capabilities
 
@@ -1752,6 +2617,12 @@ toggle.addEventListener('change', () => {
     code = compile_automation_candidate("RUN-20260816-NEW001-ABCDEF", test_case, plan)
     assert "restore_baseline_0" in code
     assert "restore_control_checked" in code
+    assert "#new-feature-toggle" in code
+    assert "window.__vccs.feature.enabled" in code
+    assert "#det-temp-display" not in code
+    assert "#det-temp-up-btn" not in code
+    assert "#det-temp-down-btn" not in code
+    assert "window.__vccs.devices" not in code
     assert all(
         item.status == CheckStatus.PASS
         for item in evaluate_compiled_candidate(test_case, code)
@@ -1765,6 +2636,181 @@ toggle.addEventListener('change', () => {
         timeout_seconds=30,
     )
     assert trial.outcome == TrialOutcome.PASS
+
+
+def test_grouped_hvac_trial_restores_runtime_baseline(tmp_path: Path) -> None:
+    test_case = ProductTestCaseCandidate.model_validate(
+        {
+            "tc_id": "TC-CAND-099",
+            "title": "묶음 모드·온도 조건 실행과 원래 상태 복원",
+            "purpose": "CHANGE_VALIDATION",
+            "test_type": "STATE_CONSISTENCY",
+            "requirement_ids": ["REQ-MODE-001", "REQ-TEMP-001"],
+            "source_condition_ids": ["COND-099"],
+            "control_path": "CENTRAL",
+            "target_role": "PRIMARY_TEST_DEVICE",
+            "test_data": {
+                "requested_modes": ["AUTO", "COOL"],
+                "requested_temperatures_c": [18, 30],
+                "restore_observed_hvac_state": True,
+            },
+            "condition_execution": "SEQUENTIAL_TRANSITION",
+            "grouping_reason": "같은 장비의 모드·온도 전환 규칙을 순서대로 확인한다.",
+            "preconditions": ["온라인 정상 장비를 단일 대상으로 선택한다."],
+            "steps": [
+                "AUTO 모드와 18도를 선택하고 중앙 관제 명령을 적용한다.",
+                "COOL 모드와 30도를 선택하고 중앙 관제 명령을 적용한다.",
+            ],
+            "expected_results": [
+                {
+                    "result_id": "ER-099",
+                    "statement": "내부 mode 값은 AUTO이고 setTemp 값은 18이다.",
+                    "observation_layer": "INTERNAL_STATE",
+                    "source_condition_ids": ["COND-099"],
+                    "verify_after_step": "AUTO 모드와 18도를 선택하고 중앙 관제 명령을 적용한다.",
+                },
+                {
+                    "result_id": "ER-100",
+                    "statement": "내부 mode 값은 COOL이고 setTemp 값은 30이다.",
+                    "observation_layer": "INTERNAL_STATE",
+                    "source_condition_ids": ["COND-099"],
+                    "verify_after_step": "COOL 모드와 30도를 선택하고 중앙 관제 명령을 적용한다.",
+                },
+            ],
+            "restore_required": True,
+            "restore_steps": [
+                "실행 직전 관찰한 모드와 설정 온도로 복원하고 중앙 관제 명령을 적용한다."
+            ],
+            "automation_candidate": True,
+            "automation_reason": "관찰된 중앙 관제 모드·온도 UI와 내부 상태를 사용한다.",
+        }
+    )
+    eligibility = evaluate_agent3_eligibility(test_case)
+    target = REPO_ROOT.parent / "portfolio_export" / "virtual-controller.html"
+    target_hash = _sha256_file(target)
+    observation = inspect_target_ui(
+        target,
+        required_selectors=set(eligibility.required_selectors),
+        required_harness_keys=set(eligibility.required_harness_keys),
+        discover_generic=eligibility.generic_discovery_required,
+    )
+    plan = Agent3AutomationPlan.model_validate(
+        {
+            "tc_id": test_case.tc_id,
+            "target_device_id": 1,
+            "summary": "두 조건을 판정한 뒤 실행 직전 HVAC 상태를 복원한다.",
+            "actions": [
+                {
+                    "action_id": "ACT-090",
+                    "phase": "PRECONDITION",
+                    "action_type": "SELECT_DEVICE",
+                    "selector": "#device-card-1 .card-body-split",
+                    "value": 1,
+                    "source_text": "온라인 정상 장비를 단일 대상으로 선택한다.",
+                },
+                {
+                    "action_id": "ACT-091",
+                    "phase": "TEST",
+                    "action_type": "SET_MODE",
+                    "selector": "#det-mode-auto",
+                    "value": "AUTO",
+                    "source_text": "AUTO 모드와 18도를 선택하고 중앙 관제 명령을 적용한다.",
+                },
+                {
+                    "action_id": "ACT-092",
+                    "phase": "TEST",
+                    "action_type": "SET_TEMPERATURE",
+                    "selector": "#det-temp-display",
+                    "value": 18,
+                    "source_text": "AUTO 모드와 18도를 선택하고 중앙 관제 명령을 적용한다.",
+                },
+                {
+                    "action_id": "ACT-093",
+                    "phase": "TEST",
+                    "action_type": "APPLY_COMMANDS",
+                    "selector": ".btn-apply-cmd",
+                    "source_text": "AUTO 모드와 18도를 선택하고 중앙 관제 명령을 적용한다.",
+                },
+                {
+                    "action_id": "ACT-094",
+                    "phase": "TEST",
+                    "action_type": "SET_MODE",
+                    "selector": "#det-mode-cool",
+                    "value": "COOL",
+                    "source_text": "COOL 모드와 30도를 선택하고 중앙 관제 명령을 적용한다.",
+                },
+                {
+                    "action_id": "ACT-095",
+                    "phase": "TEST",
+                    "action_type": "SET_TEMPERATURE",
+                    "selector": "#det-temp-display",
+                    "value": 30,
+                    "source_text": "COOL 모드와 30도를 선택하고 중앙 관제 명령을 적용한다.",
+                },
+                {
+                    "action_id": "ACT-096",
+                    "phase": "TEST",
+                    "action_type": "APPLY_COMMANDS",
+                    "selector": ".btn-apply-cmd",
+                    "source_text": "COOL 모드와 30도를 선택하고 중앙 관제 명령을 적용한다.",
+                },
+                {
+                    "action_id": "ACT-097",
+                    "phase": "RESTORE",
+                    "action_type": "RESTORE_OBSERVED_HVAC",
+                    "selector": ".btn-apply-cmd",
+                    "source_text": "실행 직전 관찰한 모드와 설정 온도로 복원하고 중앙 관제 명령을 적용한다.",
+                },
+            ],
+            "assertions": [
+                {
+                    "result_id": "ER-099",
+                    "observation_layer": "INTERNAL_STATE",
+                    "strategy": "INTERNAL_DEVICE_FIELDS_EQUALS",
+                    "selector": "window.__vccs.devices",
+                    "expected_fields": [
+                        {"field_name": "mode", "expected_value": "AUTO"},
+                        {"field_name": "setTemp", "expected_value": 18},
+                    ],
+                    "after_action_id": "ACT-093",
+                },
+                {
+                    "result_id": "ER-100",
+                    "observation_layer": "INTERNAL_STATE",
+                    "strategy": "INTERNAL_DEVICE_FIELDS_EQUALS",
+                    "selector": "window.__vccs.devices",
+                    "expected_fields": [
+                        {"field_name": "mode", "expected_value": "COOL"},
+                        {"field_name": "setTemp", "expected_value": 30},
+                    ],
+                    "after_action_id": "ACT-096",
+                },
+            ],
+        }
+    )
+
+    checkpoint = evaluate_checkpoint3_plan(test_case, plan, observation)
+    assert checkpoint.status == CheckStatus.PASS
+    code = compile_automation_candidate(
+        "RUN-20260827-130000-ABCDEF", test_case, plan
+    )
+    assert "observed_hvac_baseline" in code
+    assert "restored_hvac_state != observed_hvac_baseline" in code
+    assert all(
+        item.status == CheckStatus.PASS
+        for item in evaluate_compiled_candidate(test_case, code)
+    )
+    candidate = tmp_path / "test_dynamic_hvac_restore.py"
+    candidate.write_text(code, encoding="utf-8")
+    trial = run_candidate_trial(
+        candidate,
+        target,
+        tmp_path / "dynamic-hvac-evidence",
+        timeout_seconds=30,
+    )
+
+    assert trial.outcome == TrialOutcome.PASS
+    assert _sha256_file(target) == target_hash
 
 
 def test_agent3_records_support_extension_without_generating_code() -> None:
@@ -1901,6 +2947,246 @@ def test_valid_agent3_plan_passes_cp3_and_compiles() -> None:
     assert "# EXPECTED_RESULT: ER-007" in code
     assert "PRODUCT_MISMATCH:" in code
 
+    test_phase_selection = plan.actions[0].model_copy(
+        update={
+            "phase": AutomationPhase.TEST,
+            "source_text": tc.steps[0],
+        }
+    )
+    test_phase_plan = plan.model_copy(
+        update={
+            "actions": [
+                *plan.actions[1:4],
+                test_phase_selection,
+                *plan.actions[4:],
+            ]
+        }
+    )
+    test_phase_checkpoint = evaluate_checkpoint3_plan(
+        tc, test_phase_plan, agent3_observation()
+    )
+    assert test_phase_checkpoint.status == CheckStatus.PASS
+
+    late_selection_plan = test_phase_plan.model_copy(
+        update={
+            "actions": [
+                *test_phase_plan.actions[:3],
+                test_phase_plan.actions[4],
+                test_phase_plan.actions[3],
+                *test_phase_plan.actions[5:],
+            ]
+        }
+    )
+    late_selection_checkpoint = evaluate_checkpoint3_plan(
+        tc, late_selection_plan, agent3_observation()
+    )
+    assert late_selection_checkpoint.status == CheckStatus.FAIL
+    assert any(
+        item.rule_id == "CP3-006A"
+        and "selection occurs after" in item.message
+        for item in late_selection_checkpoint.checks
+    )
+
+
+def grouped_agent3_case_and_plan() -> tuple[ProductTestCaseCandidate, Agent3AutomationPlan]:
+    base_case = agent3_test_case()
+    lower_step = base_case.steps[0]
+    reset_step = "Reset AUTO temperature to 30 degrees for an independent upper-bound check."
+    upper_step = "Request 31 degrees and apply the pending command."
+    expected_results = [
+        result.model_copy(update={"verify_after_step": lower_step})
+        for result in base_case.expected_results
+    ]
+    expected_results.append(
+        ExpectedResult(
+            result_id="ER-008",
+            statement="UI remains at 30 degrees.",
+            observation_layer=ObservationLayer.UI,
+            source_condition_ids=["COND-001"],
+            verify_after_step=upper_step,
+        )
+    )
+    test_case = base_case.model_copy(
+        update={
+            "test_data": base_case.test_data.model_copy(
+                update={
+                    "requested_temperature_c": None,
+                    "requested_temperatures_c": [17.0, 30.0, 31.0],
+                }
+            ),
+            "condition_execution": pipeline.ConditionExecution.INDEPENDENT_VARIANTS,
+            "grouping_reason": "Both variants verify one AUTO temperature-range rule.",
+            "intermediate_reset_steps": [reset_step],
+            "steps": [lower_step, reset_step, upper_step],
+            "expected_results": expected_results,
+        }
+    )
+    base_plan = agent3_plan()
+    anchored_assertions = [
+        assertion.model_copy(update={"after_action_id": "ACT-006"})
+        for assertion in base_plan.assertions
+    ]
+    anchored_assertions.append(
+        AutomationAssertion(
+            result_id="ER-008",
+            observation_layer=ObservationLayer.UI,
+            strategy=AssertionStrategy.UI_TEMPERATURE,
+            selector="#det-temp-display",
+            expected_number=30.0,
+            after_action_id="ACT-010",
+        )
+    )
+    plan = base_plan.model_copy(
+        update={
+            "actions": [
+                *base_plan.actions,
+                AutomationAction(
+                    action_id="ACT-007",
+                    phase=AutomationPhase.TEST,
+                    action_type=AutomationActionType.SET_TEMPERATURE,
+                    selector="#det-temp-display",
+                    value=30.0,
+                    source_text=reset_step,
+                ),
+                AutomationAction(
+                    action_id="ACT-008",
+                    phase=AutomationPhase.TEST,
+                    action_type=AutomationActionType.APPLY_COMMANDS,
+                    selector=".btn-apply-cmd",
+                    source_text=reset_step,
+                ),
+                AutomationAction(
+                    action_id="ACT-009",
+                    phase=AutomationPhase.TEST,
+                    action_type=AutomationActionType.SET_TEMPERATURE,
+                    selector="#det-temp-display",
+                    value=31.0,
+                    source_text=upper_step,
+                ),
+                AutomationAction(
+                    action_id="ACT-010",
+                    phase=AutomationPhase.TEST,
+                    action_type=AutomationActionType.APPLY_COMMANDS,
+                    selector=".btn-apply-cmd",
+                    source_text=upper_step,
+                ),
+            ],
+            "assertions": anchored_assertions,
+        }
+    )
+    return test_case, plan
+
+
+def test_agent3_grouped_tc_interleaves_assertions_before_next_condition() -> None:
+    test_case, plan = grouped_agent3_case_and_plan()
+
+    checkpoint = evaluate_checkpoint3_plan(test_case, plan, agent3_observation())
+    code = compile_automation_candidate(
+        "RUN-20260825-GROUPED-ABCDEF", test_case, plan
+    )
+
+    assert checkpoint.status == CheckStatus.PASS
+    assert next(
+        item for item in checkpoint.checks if item.rule_id == "CP3-003A"
+    ).status == CheckStatus.PASS
+    assert code.index("# ACT-006") < code.index("# EXPECTED_RESULT: ER-005")
+    assert code.index("# EXPECTED_RESULT: ER-007") < code.index("# ACT-007")
+    assert code.index("# ACT-010") < code.index("# EXPECTED_RESULT: ER-008")
+    assert "_request_temperature(page, 17.0)" in code
+    assert "_set_temperature(page, 30.0)" in code
+    assert "_request_temperature(page, 31.0)" in code
+
+
+def test_agent3_grouped_tc_rejects_unanchored_condition_results() -> None:
+    test_case, plan = grouped_agent3_case_and_plan()
+    unanchored = plan.model_copy(
+        update={
+            "assertions": [
+                assertion.model_copy(update={"after_action_id": None})
+                for assertion in plan.assertions
+            ]
+        }
+    )
+
+    checkpoint = evaluate_checkpoint3_plan(
+        test_case, unanchored, agent3_observation()
+    )
+
+    assert checkpoint.status == CheckStatus.FAIL
+    check = next(
+        item for item in checkpoint.checks if item.rule_id == "CP3-003A"
+    )
+    assert check.status == CheckStatus.FAIL
+    assert "no after_action_id" in check.message
+
+    early_assertions = list(plan.assertions)
+    early_assertions[0] = early_assertions[0].model_copy(
+        update={"after_action_id": "ACT-005"}
+    )
+    early_checkpoint = evaluate_checkpoint3_plan(
+        test_case,
+        plan.model_copy(update={"assertions": early_assertions}),
+        agent3_observation(),
+    )
+    early_check = next(
+        item for item in early_checkpoint.checks if item.rule_id == "CP3-003A"
+    )
+    assert early_check.status == CheckStatus.FAIL
+    assert "not anchored after the last action" in early_check.message
+
+
+def test_legacy_central_plan_cannot_bypass_required_actions_with_generic_assertion() -> None:
+    base = agent3_plan()
+    plan = base.model_copy(
+        update={
+            "actions": [base.actions[-1]],
+            "assertions": [
+                base.assertions[0],
+                base.assertions[1],
+                AutomationAssertion(
+                    result_id="ER-007",
+                    observation_layer="NOTIFICATION",
+                    strategy="UI_TEXT_CONTAINS",
+                    selector="#global-toast",
+                    expected_text="Toast",
+                ),
+            ],
+        }
+    )
+
+    checkpoint = evaluate_checkpoint3_plan(
+        agent3_test_case(), plan, agent3_observation()
+    )
+
+    assert checkpoint.status == CheckStatus.FAIL
+    sequence_check = next(
+        item for item in checkpoint.checks if item.rule_id == "CP3-006A"
+    )
+    assert sequence_check.status == CheckStatus.FAIL
+    assert "target device selection is missing" in sequence_check.message
+    assert "requested temperature action is missing" in sequence_check.message
+
+
+def test_specialized_action_source_text_must_be_an_approved_tc_line() -> None:
+    base = agent3_plan()
+    actions = list(base.actions)
+    actions[0] = actions[0].model_copy(
+        update={"source_text": "Model-invented setup step"}
+    )
+
+    checkpoint = evaluate_checkpoint3_plan(
+        agent3_test_case(),
+        base.model_copy(update={"actions": actions}),
+        agent3_observation(),
+    )
+
+    assert checkpoint.status == CheckStatus.FAIL
+    assert any(
+        item.rule_id == "CP3-002"
+        and "source_text is not an exact approved TC line" in item.message
+        for item in checkpoint.checks
+    )
+
 def test_blocked_temperature_request_compiles_until_target_or_stall() -> None:
     code = compile_automation_candidate(
         "RUN-20260813-120000-ABCDEF", agent3_test_case(), agent3_plan()
@@ -1908,6 +3194,26 @@ def test_blocked_temperature_request_compiles_until_target_or_stall() -> None:
     assert "def _request_temperature(page, target):" in code
     assert "if after == before:" in code
     assert "_request_temperature(page, 17.0)" in code
+
+
+def test_central_blocked_temperature_without_notification_uses_stall_request() -> None:
+    test_case_payload = agent3_test_case().model_dump(mode="json")
+    test_case_payload["expected_results"] = test_case_payload["expected_results"][:2]
+    plan_payload = agent3_plan().model_dump(mode="json")
+    plan_payload["assertions"] = plan_payload["assertions"][:2]
+
+    test_case = ProductTestCaseCandidate.model_validate(test_case_payload)
+    plan = Agent3AutomationPlan.model_validate(plan_payload)
+    checkpoint = evaluate_checkpoint3_plan(test_case, plan, agent3_observation())
+    code = compile_automation_candidate(
+        "RUN-20260823-CENTRAL-ABCDEF", test_case, plan
+    )
+
+    assert checkpoint.status == CheckStatus.PASS
+    assert "_request_temperature(page, 17.0)" in code
+    assert "simulateLocalTemp" not in code
+    assert "#qa-drawer-panel" not in code
+    compile(code, "<central-candidate>", "exec")
 
 
 def test_restore_contract_requires_initial_temperature_and_apply() -> None:
@@ -1927,14 +3233,14 @@ def test_restore_contract_requires_initial_temperature_and_apply() -> None:
                     action_type="SET_TEMPERATURE",
                     selector="#det-temp-display",
                     value=17.0,
-                    source_text="Keep requested temperature",
+                    source_text="Restore AUTO 18 and verify UI and internal state.",
                 ),
                 AutomationAction(
                     action_id="ACT-008",
                     phase="RESTORE",
                     action_type="APPLY_COMMANDS",
                     selector=".btn-apply-cmd",
-                    source_text="Apply restore",
+                    source_text="Restore AUTO 18 and verify UI and internal state.",
                 ),
             ]
         }
@@ -1968,14 +3274,14 @@ def test_compiler_verifies_restored_ui_and_internal_temperature() -> None:
                     action_type="SET_TEMPERATURE",
                     selector="#det-temp-display",
                     value=18.0,
-                    source_text="Restore initial temperature",
+                    source_text="Restore AUTO 18 and verify UI and internal state.",
                 ),
                 AutomationAction(
                     action_id="ACT-008",
                     phase="RESTORE",
                     action_type="APPLY_COMMANDS",
                     selector=".btn-apply-cmd",
-                    source_text="Apply restore",
+                    source_text="Restore AUTO 18 and verify UI and internal state.",
                 ),
             ]
         }
@@ -2147,6 +3453,12 @@ window.__vccs={get devices(){return devices},get pendingState(){return pendingSt
     trial = run_candidate_trial(candidate, target, tmp_path / "evidence", timeout_seconds=20)
     assert trial.outcome == TrialOutcome.PRODUCT_MISMATCH_CANDIDATE
     assert trial.evidence_complete is True
+    assert set(trial.evidence_sha256) == {
+        "trial-stdout.txt",
+        "trial-stderr.txt",
+        "trial-final.png",
+        "trial-trace.zip",
+    }
     stdout = (tmp_path / "evidence" / "trial-stdout.txt").read_text(encoding="utf-8")
     assert "ER-007: toast does not indicate blocking: successfully applied" in stdout
     assert "ER-006: internal device fields={'mode': 'AUTO', 'setTemp': 17}" in stdout
@@ -2249,7 +3561,15 @@ def _trial(outcome: TrialOutcome) -> pipeline.Agent3TrialResult:
         duration_ms=1,
         stdout_file="trial-stdout.txt",
         stderr_file="trial-stderr.txt",
-        evidence_complete=False,
+        screenshot_file="trial-final.png",
+        trace_file="trial-trace.zip",
+        evidence_sha256={
+            "trial-stdout.txt": "a" * 64,
+            "trial-stderr.txt": "b" * 64,
+            "trial-final.png": "c" * 64,
+            "trial-trace.zip": "d" * 64,
+        },
+        evidence_complete=True,
     )
 
 
@@ -2285,6 +3605,23 @@ def test_agent3_cli_exit_code_blocks_missing_trial_or_failed_checkpoint() -> Non
         )
         == 2
     )
+    incomplete = _trial(TrialOutcome.PASS).model_copy(
+        update={"evidence_complete": False, "evidence_sha256": {}}
+    )
+    assert pipeline._agent3_cli_exit_code(
+        _checkpoint3(CheckStatus.PASS), incomplete
+    ) == 2
+    extra_hash = _trial(TrialOutcome.PASS).model_copy(
+        update={
+            "evidence_sha256": {
+                **_trial(TrialOutcome.PASS).evidence_sha256,
+                "not-recorded.txt": "e" * 64,
+            }
+        }
+    )
+    assert pipeline._agent3_cli_exit_code(
+        _checkpoint3(CheckStatus.PASS), extra_hash
+    ) == 2
 
 
 def test_agent3_usage_aggregates_all_planning_attempts() -> None:
@@ -2317,6 +3654,73 @@ def test_agent3_usage_aggregates_all_planning_attempts() -> None:
         "output_tokens": 2162,
         "total_tokens": 7656,
     }
+
+
+def test_model_usage_records_cache_and_reasoning_details() -> None:
+    response = SimpleNamespace(
+        usage=SimpleNamespace(
+            input_tokens=100,
+            output_tokens=30,
+            total_tokens=130,
+            input_tokens_details=SimpleNamespace(
+                cached_tokens=80,
+                cache_write_tokens=20,
+            ),
+            output_tokens_details=SimpleNamespace(reasoning_tokens=12),
+        )
+    )
+
+    usage = pipeline._response_usage_summary(response)
+
+    assert usage == {
+        "input_tokens": 100,
+        "output_tokens": 30,
+        "total_tokens": 130,
+        "cached_input_tokens": 80,
+        "cache_write_input_tokens": 20,
+        "reasoning_output_tokens": 12,
+    }
+    assert pipeline._aggregate_model_usage(
+        [{"usage": usage}, {"usage": usage}]
+    )["cached_input_tokens"] == 160
+
+
+def test_agent2_duplicate_technical_ids_are_normalized_without_semantic_changes() -> None:
+    first = agent2_design().test_cases[0]
+    second = first.model_copy(update={"title": "독립적인 두 번째 경계값 검증"})
+    original = Agent2TestDesign(
+        request_id="CR-TEST-001",
+        test_cases=[first, second],
+        coverage_summary="중복 기술 ID 정리 검증",
+    )
+
+    normalized, changes = pipeline._normalize_agent2_technical_ids(original)
+
+    assert [item.tc_id for item in original.test_cases] == [
+        "TC-CAND-001",
+        "TC-CAND-001",
+    ]
+    assert [item.tc_id for item in normalized.test_cases] == [
+        "TC-CAND-001",
+        "TC-CAND-002",
+    ]
+    assert [
+        result.result_id
+        for item in normalized.test_cases
+        for result in item.expected_results
+    ] == [f"ER-{index:03d}" for index in range(1, 7)]
+    assert changes
+
+    def without_technical_ids(test_case):
+        payload = test_case.model_dump(mode="json")
+        payload.pop("tc_id")
+        for result in payload["expected_results"]:
+            result.pop("result_id")
+        return payload
+
+    assert [without_technical_ids(item) for item in normalized.test_cases] == [
+        without_technical_ids(item) for item in original.test_cases
+    ]
 
 
 def test_agent3_error_artifact_requires_a_fresh_attempt_workspace(
@@ -2414,6 +3818,29 @@ def test_pipeline_parser_exposes_one_command_agent1_to_agent3() -> None:
     assert unsupported_summaries[0]["missing_capabilities"] == []
 
 
+def test_agent3_selection_excludes_related_regression_candidates() -> None:
+    changed = agent3_test_case()
+    related = changed.model_copy(
+        update={
+            "tc_id": "TC-CAND-009",
+            "purpose": TcPurpose.RELATED_REGRESSION,
+        }
+    )
+
+    selected, summaries = pipeline._select_agent3_tcs(
+        Agent2TestDesign(
+            request_id="CR-TEST-001",
+            test_cases=[related, changed],
+            coverage_summary="변경분과 기존 회귀 분리",
+        )
+    )
+
+    assert selected == [changed.tc_id]
+    related_summary = next(item for item in summaries if item["tc_id"] == related.tc_id)
+    assert related_summary["status"] == "NOT_AUTOMATABLE"
+    assert "다시 구현하지 않고" in related_summary["missing_capabilities"][0]
+
+
 def test_pipeline_runs_stages_in_order_and_hashes_manifests(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -2438,16 +3865,17 @@ def test_pipeline_runs_stages_in_order_and_hashes_manifests(
     def fake_agent3(stage_args) -> int:
         calls.append("agent3")
         assert stage_args.tc_id == "TC-CAND-003"
-        run_dir = Path(stage_args.runs_root) / stage_args.run_id
+        artifact_dir = Path(stage_args.artifact_dir)
+        artifact_dir.mkdir(parents=True)
         _write_json(
-            run_dir / "agent3_manifest.json",
+            artifact_dir / "agent3_manifest.json",
             {
                 "run_id": stage_args.run_id,
                 "candidate_status": "PRODUCT_MISMATCH_DETECTED",
             },
         )
         _write_json(
-            run_dir / "agent3_trial.json",
+            artifact_dir / "agent3_trial.json",
             {"outcome": "PRODUCT_MISMATCH_CANDIDATE"},
         )
         return 0
@@ -2457,12 +3885,13 @@ def test_pipeline_runs_stages_in_order_and_hashes_manifests(
     monkeypatch.setattr(pipeline, "run_agent3", fake_agent3)
     monkeypatch.setattr(
         pipeline,
-        "_select_agent3_tc_from_run",
+        "_select_agent3_tcs_from_run",
         lambda _run_dir, _run_id: (
-            "TC-CAND-003",
+            ["TC-CAND-003"],
             [
                 {
                     "tc_id": "TC-CAND-003",
+                    "automation_candidate": True,
                     "status": "ELIGIBLE",
                     "missing_capabilities": [],
                 }
@@ -2480,7 +3909,8 @@ def test_pipeline_runs_stages_in_order_and_hashes_manifests(
     assert manifest["completed_stages"] == ["agent1", "agent2", "agent3"]
     assert manifest["stopped_at"] is None
     assert manifest["selected_tc_id"] == "TC-CAND-003"
-    assert manifest["trial_outcome"] == "PRODUCT_MISMATCH_CANDIDATE"
+    assert manifest["selected_tc_ids"] == ["TC-CAND-003"]
+    assert manifest["executed_tc_ids"] == ["TC-CAND-003"]
     assert manifest["agent3_selection_sha256"] == _sha256_file(
         run_dir / "agent3_selection.json"
     )
@@ -2490,9 +3920,93 @@ def test_pipeline_runs_stages_in_order_and_hashes_manifests(
     assert manifest["agent2_manifest_sha256"] == _sha256_file(
         run_dir / "agent2_manifest.json"
     )
-    assert manifest["agent3_manifest_sha256"] == _sha256_file(
-        run_dir / "agent3_manifest.json"
+    assert manifest["agent3_run_summary_sha256"] == _sha256_file(
+        run_dir / "agent3_run_summary.json"
     )
+
+
+def test_pipeline_continues_after_one_agent3_candidate_is_excluded(
+    tmp_path: Path, monkeypatch
+) -> None:
+    args = _pipeline_args(tmp_path)
+    Path(args.request).write_text("{}", encoding="utf-8")
+    Path(args.target_html).write_text("<html></html>", encoding="utf-8")
+    calls: list[str] = []
+
+    def fake_agent1(stage_args) -> int:
+        run_dir = Path(stage_args.runs_root) / stage_args.run_id
+        run_dir.mkdir(parents=True)
+        _write_json(run_dir / "run_manifest.json", {"run_id": stage_args.run_id})
+        return 0
+
+    def fake_agent2(stage_args) -> int:
+        run_dir = Path(stage_args.runs_root) / stage_args.run_id
+        _write_json(run_dir / "agent2_manifest.json", {"run_id": stage_args.run_id})
+        return 0
+
+    def fake_agent3(stage_args) -> int:
+        calls.append(stage_args.tc_id)
+        artifact_dir = Path(stage_args.artifact_dir)
+        artifact_dir.mkdir(parents=True)
+        if stage_args.tc_id == "TC-CAND-003":
+            _write_json(
+                artifact_dir / "agent3_automation_plan.json",
+                {
+                    "planning_status": "AUTOMATION_SUPPORT_EXTENSION_REQUIRED",
+                    "extension_reasons": ["화면 상태 관찰 방법이 없습니다."],
+                },
+            )
+            _write_json(
+                artifact_dir / "agent3_manifest.json",
+                {
+                    "run_id": stage_args.run_id,
+                    "status": "REVIEW",
+                    "candidate_status": "AUTOMATION_SUPPORT_EXTENSION_REQUIRED",
+                },
+            )
+            return 2
+        _write_json(
+            artifact_dir / "agent3_manifest.json",
+            {
+                "run_id": stage_args.run_id,
+                "status": "PASS",
+                "candidate_status": "READY_FOR_EXECUTION",
+            },
+        )
+        _write_json(artifact_dir / "agent3_trial.json", {"outcome": "PASS"})
+        return 0
+
+    monkeypatch.setattr(pipeline, "run_agent1", fake_agent1)
+    monkeypatch.setattr(pipeline, "run_agent2", fake_agent2)
+    monkeypatch.setattr(pipeline, "run_agent3", fake_agent3)
+    monkeypatch.setattr(
+        pipeline,
+        "_select_agent3_tcs_from_run",
+        lambda _run_dir, _run_id: (
+            ["TC-CAND-003", "TC-CAND-004"],
+            [
+                {
+                    "tc_id": tc_id,
+                    "automation_candidate": True,
+                    "status": "ELIGIBLE",
+                    "missing_capabilities": [],
+                }
+                for tc_id in ("TC-CAND-003", "TC-CAND-004")
+            ],
+        ),
+    )
+
+    assert pipeline.run_pipeline(args) == 0
+    assert calls == ["TC-CAND-003", "TC-CAND-004"]
+    run_dir = next((tmp_path / "runs").iterdir())
+    summary = json.loads(
+        (run_dir / "agent3_run_summary.json").read_text(encoding="utf-8")
+    )
+    assert summary["status"] == "PARTIAL"
+    assert summary["executed_tc_ids"] == ["TC-CAND-004"]
+    assert [item["tc_id"] for item in summary["자동화_제외_TC"]] == [
+        "TC-CAND-003"
+    ]
 
 
 def test_pipeline_stops_after_checkpoint_block_without_later_calls(
@@ -2546,13 +4060,43 @@ def _neutral_execution_result(
     source: pipeline.ExecutionSource,
     status: pipeline.NeutralExecutionStatus = pipeline.NeutralExecutionStatus.PASSED,
 ) -> pipeline.NeutralExecutionResult:
+    if source == pipeline.ExecutionSource.NEW_AUTOMATION_CANDIDATE:
+        source_outcome = {
+            pipeline.NeutralExecutionStatus.PASSED: "PASS",
+            pipeline.NeutralExecutionStatus.ASSERTION_FAILED: (
+                "PRODUCT_MISMATCH_CANDIDATE"
+            ),
+            pipeline.NeutralExecutionStatus.EXECUTION_ERROR: "AUTOMATION_ERROR",
+            pipeline.NeutralExecutionStatus.TIMEOUT: "TIMEOUT",
+            pipeline.NeutralExecutionStatus.SKIPPED: "AUTOMATION_ERROR",
+        }[status]
+    else:
+        source_outcome = {
+            pipeline.NeutralExecutionStatus.PASSED: "PYTEST_PASSED",
+            pipeline.NeutralExecutionStatus.ASSERTION_FAILED: "PYTEST_FAILED",
+            pipeline.NeutralExecutionStatus.EXECUTION_ERROR: "PYTEST_ERROR",
+            pipeline.NeutralExecutionStatus.TIMEOUT: "PYTEST_TIMEOUT",
+            pipeline.NeutralExecutionStatus.SKIPPED: "PYTEST_SKIPPED",
+        }[status]
+    evidence_files = ["evidence/stdout.txt", "evidence/stderr.txt"]
+    if source == pipeline.ExecutionSource.NEW_AUTOMATION_CANDIDATE:
+        evidence_files.extend(["evidence/final.png", "evidence/trace.zip"])
     return pipeline.NeutralExecutionResult(
         test_id=test_id,
         source=source,
         requirement_ids=["REQ-ENV-001"] if test_id == "TC-ENV-000" else ["REQ-TEMP-001"],
         status=status,
-        source_outcome="PYTEST_PASSED" if status == pipeline.NeutralExecutionStatus.PASSED else "PYTEST_ERROR",
-        exit_code=0 if status == pipeline.NeutralExecutionStatus.PASSED else 1,
+        source_outcome=source_outcome,
+        exit_code=(
+            None
+            if status == pipeline.NeutralExecutionStatus.TIMEOUT
+            else 0
+            if status in {
+                pipeline.NeutralExecutionStatus.PASSED,
+                pipeline.NeutralExecutionStatus.SKIPPED,
+            }
+            else 1
+        ),
         duration_ms=1,
         test_file="test_controller.py",
         test_sha256="a" * 64,
@@ -2560,11 +4104,8 @@ def _neutral_execution_result(
         reused=source == pipeline.ExecutionSource.NEW_AUTOMATION_CANDIDATE,
         stdout_file="evidence/stdout.txt",
         stderr_file="evidence/stderr.txt",
-        evidence_files=["evidence/stdout.txt", "evidence/stderr.txt"],
-        evidence_sha256={
-            "evidence/stdout.txt": "c" * 64,
-            "evidence/stderr.txt": "d" * 64,
-        },
+        evidence_files=evidence_files,
+        evidence_sha256={name: "c" * 64 for name in evidence_files},
         evidence_complete=True,
     )
 
@@ -2578,6 +4119,47 @@ def test_related_regression_selection_is_grounded_and_excludes_demo_cases() -> N
     assert "TC-INT-002" not in {item.tc_id for item in pipeline.EXISTING_REGRESSION_CATALOG}
     assert all(not item.tc_id.startswith("TC-PIPE-") for item in selected)
     assert all(item.tc_id != "TC-TEMP-002" for item in selected)
+
+
+def test_agent2_verify_regressions_are_added_deterministically() -> None:
+    analysis = agent1_analysis().model_copy(
+        update={
+            "confirmed_conditions": [
+                *agent1_analysis().confirmed_conditions,
+                ConfirmedCondition(
+                    condition_id="COND-002",
+                    statement="화면과 내부 장비 상태의 공통 값이 같다.",
+                    source_type=ConditionSource.SRS,
+                    source_text="화면과 내부 장비 상태의 공통 값이 같습니다.",
+                    requirement_ids=["REQ-STATE-001"],
+                ),
+            ],
+            "requirement_effects": [
+                *agent1_analysis().requirement_effects,
+                RequirementEffect(
+                    requirement_id="REQ-STATE-001",
+                    relation=RequirementRelation.VERIFY,
+                    reason="변경 뒤에도 기존 화면·내부 상태 정합성을 확인한다.",
+                ),
+            ],
+        }
+    )
+    design = agent2_design().model_copy(update={"related_existing_tests": []})
+
+    normalized, changes = pipeline._normalize_agent2_verify_regressions(
+        analysis, design
+    )
+    repeated, repeated_changes = pipeline._normalize_agent2_verify_regressions(
+        analysis, normalized
+    )
+
+    assert [item.tc_id for item in normalized.related_existing_tests] == [
+        "TC-MODE-001"
+    ]
+    assert normalized.related_existing_tests[0].source_condition_ids == ["COND-002"]
+    assert changes[0]["reason"] == "AGENT1_VERIFY_RELATION"
+    assert repeated == normalized
+    assert repeated_changes == []
 
 
 def test_existing_regression_runs_from_a_copied_neutral_workspace(
@@ -2637,30 +4219,46 @@ def _build_candidate_execution_handoff(
     target = tmp_path / "virtual-controller.html"
     target.write_text("<!doctype html>", encoding="utf-8")
     tc = agent3_test_case()
+    observation = agent3_observation()
+    plan = agent3_plan()
+    code = compile_automation_candidate(run_id, tc, plan)
+    checkpoint = evaluate_checkpoint3_plan(tc, plan, observation)
+    checkpoint.checks.extend(evaluate_compiled_candidate(tc, code))
     agent2_manifest = {"agent2_design_sha256": "b" * 64}
     _write_json(run_dir / "agent2_manifest.json", {"run_id": run_id})
     _write_json(run_dir / "agent3_eligibility.json", {})
-    _write_json(run_dir / "agent3_ui_observation.json", {})
-    _write_json(run_dir / "agent3_automation_plan.json", {})
+    _write_json(
+        run_dir / "agent3_ui_observation.json",
+        observation.model_dump(mode="json"),
+    )
+    _write_json(
+        run_dir / "agent3_automation_plan.json", plan.model_dump(mode="json")
+    )
     _write_json(
         run_dir / "checkpoint3.json",
-        _checkpoint3(CheckStatus.PASS).model_dump(mode="json"),
+        checkpoint.model_dump(mode="json"),
     )
+    candidate = candidate_dir / "test_tc_cand_003.py"
+    candidate.write_text(code, encoding="utf-8")
+    (evidence_dir / "trial-stdout.txt").write_text("1 passed\n", encoding="utf-8")
+    (evidence_dir / "trial-stderr.txt").write_text("", encoding="utf-8")
+    (evidence_dir / "trial-final.png").write_bytes(b"png")
+    (evidence_dir / "trial-trace.zip").write_bytes(b"zip")
+    evidence_sha256 = {
+        path.name: _sha256_file(path)
+        for path in evidence_dir.iterdir()
+        if path.is_file()
+    }
     trial = _trial(TrialOutcome.PASS).model_copy(
         update={
             "exit_code": 0,
             "evidence_complete": True,
             "screenshot_file": "trial-final.png",
             "trace_file": "trial-trace.zip",
+            "evidence_sha256": evidence_sha256,
         }
     )
     _write_json(run_dir / "agent3_trial.json", trial.model_dump(mode="json"))
-    candidate = candidate_dir / "test_tc_cand_003.py"
-    candidate.write_text("def test_tc_cand_003():\n    assert True\n", encoding="utf-8")
-    (evidence_dir / "trial-stdout.txt").write_text("1 passed\n", encoding="utf-8")
-    (evidence_dir / "trial-stderr.txt").write_text("", encoding="utf-8")
-    (evidence_dir / "trial-final.png").write_bytes(b"png")
-    (evidence_dir / "trial-trace.zip").write_bytes(b"zip")
     _write_json(
         run_dir / "agent3_manifest.json",
         {
@@ -2677,6 +4275,7 @@ def _build_candidate_execution_handoff(
             "candidate_file": candidate.name,
             "candidate_sha256": _sha256_file(candidate),
             "trial_sha256": _sha256_file(run_dir / "agent3_trial.json"),
+            "trial_evidence_sha256": evidence_sha256,
             "target_file": target.name,
             "target_sha256": _sha256_file(target),
             "project1_modified": False,
@@ -2714,6 +4313,40 @@ def test_candidate_trial_is_reused_only_after_hash_and_evidence_checks(
 
     target.write_text("changed", encoding="utf-8")
     with pytest.raises(ValueError, match="HTML이 신규 자동화 후보 시험 후 변경"):
+        pipeline._candidate_execution_record(run_dir, run_id, target)
+
+
+def test_candidate_handoff_recomputes_current_cp3_rules(
+    tmp_path: Path, monkeypatch
+) -> None:
+    run_dir, target, run_id = _build_candidate_execution_handoff(
+        tmp_path, monkeypatch
+    )
+    plan_file = run_dir / "agent3_automation_plan.json"
+    plan = Agent3AutomationPlan.model_validate_json(
+        plan_file.read_text(encoding="utf-8")
+    )
+    weakened = plan.model_copy(update={"actions": [plan.actions[-1]]})
+    _write_json(plan_file, weakened.model_dump(mode="json"))
+    manifest_file = run_dir / "agent3_manifest.json"
+    manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+    manifest["automation_plan_sha256"] = _sha256_file(plan_file)
+    _write_json(manifest_file, manifest)
+
+    with pytest.raises(ValueError, match="현재 CP3 규칙"):
+        pipeline._candidate_execution_record(run_dir, run_id, target)
+
+
+def test_candidate_handoff_rejects_evidence_changed_after_agent3(
+    tmp_path: Path, monkeypatch
+) -> None:
+    run_dir, target, run_id = _build_candidate_execution_handoff(
+        tmp_path, monkeypatch
+    )
+    evidence_file = run_dir / "evidence" / "TC-CAND-003" / "trial-stdout.txt"
+    evidence_file.write_text("changed after Agent 3\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="시험 증거 SHA-256"):
         pipeline._candidate_execution_record(run_dir, run_id, target)
 
 
@@ -2792,7 +4425,62 @@ def test_current_compiler_reuses_identical_code_and_retrials_stale_code(
         run_dir / "validation_candidates" / "test_tc_cand_003.py"
     )
     assert refreshed.status == pipeline.NeutralExecutionStatus.PASSED
-    assert (run_dir / "validation_candidate_trial.json").is_file()
+    assert (
+        run_dir / "validation_candidate_trials" / "TC-CAND-003.json"
+    ).is_file()
+
+
+def test_current_candidate_trial_returns_technical_failure_for_agent4(
+    tmp_path: Path, monkeypatch
+) -> None:
+    run_id = "RUN-20260816-015500-ABCDEF"
+    run_dir = tmp_path / run_id
+    run_dir.mkdir()
+    target = tmp_path / "virtual-controller.html"
+    target.write_text("<!doctype html>", encoding="utf-8")
+    test_case = agent3_test_case()
+    plan = agent3_plan()
+    _write_json(
+        run_dir / "agent3_automation_plan.json", plan.model_dump(mode="json")
+    )
+    stored = _neutral_execution_result(
+        test_case.tc_id, pipeline.ExecutionSource.NEW_AUTOMATION_CANDIDATE
+    ).model_copy(update={"test_sha256": "f" * 64})
+
+    def failed_trial(_candidate_file, _target, evidence_dir, *, timeout_seconds):
+        assert timeout_seconds == 10
+        evidence_dir.mkdir(parents=True)
+        stdout = evidence_dir / "trial-stdout.txt"
+        stderr = evidence_dir / "trial-stderr.txt"
+        stdout.write_text("locator failed\n", encoding="utf-8")
+        stderr.write_text("PlaywrightError\n", encoding="utf-8")
+        return pipeline.Agent3TrialResult(
+            outcome=TrialOutcome.AUTOMATION_ERROR,
+            exit_code=1,
+            duration_ms=1,
+            stdout_file=stdout.name,
+            stderr_file=stderr.name,
+            evidence_sha256={
+                stdout.name: _sha256_file(stdout),
+                stderr.name: _sha256_file(stderr),
+            },
+            evidence_complete=False,
+        )
+
+    monkeypatch.setattr(pipeline, "run_candidate_trial", failed_trial)
+    result = pipeline._current_candidate_execution_record(
+        run_dir,
+        run_id,
+        target,
+        test_case,
+        stored,
+        timeout_seconds=10,
+    )
+
+    assert result.status == pipeline.NeutralExecutionStatus.EXECUTION_ERROR
+    assert result.source_outcome == TrialOutcome.AUTOMATION_ERROR.value
+    assert result.evidence_complete is False
+    assert len(result.evidence_files) == 2
 
 
 def _validation_execution_args(
@@ -2838,7 +4526,13 @@ def test_validation_execution_reuses_candidate_and_runs_related_regressions(
     _write_json(
         run_dir / "agent2_test_design.json",
         cp2_valid_design()
-        .model_copy(update={"final_review_notes": ["운영 반영 시점을 최종 확인합니다."]})
+        .model_copy(
+            update={
+                "final_review_notes": ["운영 반영 시점을 최종 확인합니다."],
+                "excluded_scope": ["정확한 안내 문구"],
+                "excluded_information_gaps": ["정확한 문구가 정의되지 않음"],
+            }
+        )
         .model_dump(mode="json"),
     )
     candidate = _neutral_execution_result(
@@ -2882,10 +4576,85 @@ def test_validation_execution_reuses_candidate_and_runs_related_regressions(
         "CP1: 변경 전 값의 SRS 근거를 최종 확인합니다.",
         "CP2: 운영 반영 시점을 최종 확인합니다.",
     ]
+    assert bundle.excluded_scope == ["정확한 안내 문구"]
+    assert bundle.excluded_information_gaps == ["정확한 문구가 정의되지 않음"]
     assert manifest["validation_execution_sha256"] == _sha256_file(
         run_dir / "validation_execution.json"
     )
     assert manifest["project1_modified"] is False
+
+
+def test_validation_execution_carries_multiple_candidates_and_exclusions(
+    tmp_path: Path, monkeypatch
+) -> None:
+    run_id = "RUN-20260816-025000-ABCDEF"
+    run_dir = tmp_path / "runs" / run_id
+    run_dir.mkdir(parents=True)
+    target = tmp_path / "project1" / "virtual-controller.html"
+    baseline = tmp_path / "project1" / "tests" / "test_controller.py"
+    baseline.parent.mkdir(parents=True)
+    target.write_text("<!doctype html>", encoding="utf-8")
+    baseline.write_text("def test_placeholder():\n    pass\n", encoding="utf-8")
+    _write_json(
+        run_dir / "agent2_test_design.json",
+        cp2_valid_design().model_dump(mode="json", by_alias=True),
+    )
+    _write_json(run_dir / "agent3_run_summary.json", {"run_id": run_id})
+    first_case = agent3_test_case()
+    second_case = first_case.model_copy(update={"tc_id": "TC-CAND-004"})
+    first_result = _neutral_execution_result(
+        first_case.tc_id, pipeline.ExecutionSource.NEW_AUTOMATION_CANDIDATE
+    )
+    second_result = _neutral_execution_result(
+        second_case.tc_id, pipeline.ExecutionSource.NEW_AUTOMATION_CANDIDATE
+    )
+    records = []
+    for result, test_case in (
+        (first_result, first_case),
+        (second_result, second_case),
+    ):
+        artifact_dir = run_dir / "agent3_candidates" / test_case.tc_id
+        artifact_dir.mkdir(parents=True)
+        _write_json(artifact_dir / "agent3_manifest.json", {"run_id": run_id})
+        _write_json(artifact_dir / "agent3_trial.json", {"outcome": "PASS"})
+        records.append((result, test_case, {}, artifact_dir))
+    exclusion = pipeline.AutomationExclusion(
+        tc_id="TC-CAND-005",
+        candidate_status=pipeline.AutomationCandidateStatus.AUTOMATION_SUPPORT_EXTENSION_REQUIRED,
+        reason="현재 관찰 방법으로 구현할 수 없습니다.",
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_candidate_execution_records",
+        lambda *_args: (records, [exclusion], {"status": "PARTIAL"}),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_current_candidate_execution_record",
+        lambda _run_dir, _run_id, _target, _case, stored, **_kwargs: stored,
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "run_existing_regression",
+        lambda spec, *_args, source=pipeline.ExecutionSource.EXISTING_REGRESSION, **_kwargs: _neutral_execution_result(
+            spec.tc_id, source
+        ),
+    )
+
+    assert pipeline.run_validation_execution(
+        _validation_execution_args(tmp_path, run_id, target, baseline)
+    ) == 0
+    bundle = pipeline.ValidationExecutionBundle.model_validate_json(
+        (run_dir / "validation_execution.json").read_text(encoding="utf-8")
+    )
+    assert [item.test_id for item in bundle.candidate_results] == [
+        "TC-CAND-003",
+        "TC-CAND-004",
+    ]
+    assert bundle.candidate_result == bundle.candidate_results[0]
+    assert [item.tc_id for item in bundle.automation_exclusions] == [
+        "TC-CAND-005"
+    ]
 
 
 def test_validation_execution_stops_regressions_when_precheck_is_not_passed(
@@ -2901,6 +4670,10 @@ def test_validation_execution_stops_regressions_when_precheck_is_not_passed(
     baseline.write_text("def test_placeholder():\n    pass\n", encoding="utf-8")
     _write_json(run_dir / "agent3_manifest.json", {"run_id": run_id})
     _write_json(run_dir / "agent3_trial.json", {"outcome": "PASS"})
+    _write_json(
+        run_dir / "agent2_test_design.json",
+        cp2_valid_design().model_dump(mode="json", by_alias=True),
+    )
     monkeypatch.setattr(
         pipeline,
         "_candidate_execution_record",
@@ -2965,6 +4738,9 @@ def _write_agent4_inputs(
     candidate_status: pipeline.NeutralExecutionStatus = pipeline.NeutralExecutionStatus.PASSED,
     precheck_status: pipeline.NeutralExecutionStatus = pipeline.NeutralExecutionStatus.PASSED,
     final_review_notes: list[str] | None = None,
+    excluded_scope: list[str] | None = None,
+    excluded_information_gaps: list[str] | None = None,
+    automation_exclusions: list[pipeline.AutomationExclusion] | None = None,
 ) -> tuple[Path, str]:
     run_id = "RUN-20260817-030000-ABCDEF"
     run_dir = tmp_path / "runs" / run_id
@@ -2997,6 +4773,13 @@ def _write_agent4_inputs(
     candidate = materialize_evidence(candidate)
     precheck = materialize_evidence(precheck)
     regressions = [materialize_evidence(result) for result in regressions]
+    candidate_dir = run_dir / "candidates"
+    candidate_dir.mkdir()
+    candidate_file = candidate_dir / candidate.test_file
+    candidate_file.write_text("def test_candidate():\n    pass\n", encoding="utf-8")
+    candidate = candidate.model_copy(
+        update={"test_sha256": _sha256_file(candidate_file)}
+    )
     bundle = pipeline.ValidationExecutionBundle(
         run_id=run_id,
         status=(
@@ -3013,15 +4796,45 @@ def _write_agent4_inputs(
             if precheck_status == pipeline.NeutralExecutionStatus.PASSED
             else "ENVIRONMENT_PRECHECK_NOT_PASSED"
         ),
+        excluded_scope=excluded_scope or [],
+        excluded_information_gaps=excluded_information_gaps or [],
         final_review_notes=final_review_notes or [],
+        automation_exclusions=automation_exclusions or [],
         created_at="2026-08-17T00:00:00+00:00",
     )
     execution_file = run_dir / "validation_execution.json"
     _write_json(execution_file, bundle.model_dump(mode="json"))
+    _write_json(run_dir / "agent3_manifest.json", {"run_id": run_id})
+    _write_json(run_dir / "agent3_trial.json", {"outcome": "PASS"})
+    _write_json(
+        run_dir / "agent2_test_design.json",
+        pipeline.Agent2TestDesign(
+            request_id="CR-AGENT4-TEST",
+            test_cases=[agent3_test_case()],
+            existing_tc_comparison_completed=True,
+            coverage_summary="Agent 4 사람 최종 검토 문서용 후보입니다.",
+        ).model_dump(mode="json", by_alias=True),
+    )
     _write_json(
         run_dir / "validation_manifest.json",
         {
+            "contract_version": "1.2",
             "run_id": run_id,
+            "stage": "VALIDATION_EXECUTION",
+            "status": bundle.status.value,
+            "source_agent3_manifest_sha256": _sha256_file(
+                run_dir / "agent3_manifest.json"
+            ),
+            "source_agent3_trial_sha256": _sha256_file(
+                run_dir / "agent3_trial.json"
+            ),
+            "candidate_reused": candidate.reused,
+            "validation_candidate_sha256": candidate.test_sha256,
+            "validation_candidate_trial_sha256": None,
+            "baseline_test_file": precheck.test_file,
+            "baseline_test_sha256": precheck.test_sha256,
+            "target_file": "virtual-controller.html",
+            "target_sha256": candidate.target_sha256,
             "validation_execution_sha256": _sha256_file(execution_file),
             "project1_modified": False,
         },
@@ -3030,7 +4843,11 @@ def _write_agent4_inputs(
 
 
 def test_agent4_writes_consistent_pass_report_without_rerunning_tests(tmp_path: Path) -> None:
-    run_dir, run_id = _write_agent4_inputs(tmp_path)
+    run_dir, run_id = _write_agent4_inputs(
+        tmp_path,
+        excluded_scope=["정확한 차단 안내 문구"],
+        excluded_information_gaps=["정확한 안내 문구가 정의되지 않음"],
+    )
 
     assert pipeline.run_agent4(
         SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))
@@ -3045,19 +4862,222 @@ def test_agent4_writes_consistent_pass_report_without_rerunning_tests(tmp_path: 
     report = pipeline.FinalReport.model_validate_json(
         (run_dir / "final_report.json").read_text(encoding="utf-8")
     )
+    delivery = pipeline.ExternalReportingResult.model_validate_json(
+        (run_dir / "external_reporting.json").read_text(encoding="utf-8")
+    )
     assert checkpoint.status == pipeline.CheckStatus.PASS
     assert analysis.total_results == 3
     assert analysis.status_counts[pipeline.NeutralExecutionStatus.PASSED] == 3
+    assert analysis.product_result_count == 2
+    assert analysis.environment_result_count == 1
+    assert analysis.pipeline_fixture_result_count == 0
     assert analysis.findings == []
+    assert analysis.excluded_scope == ["정확한 차단 안내 문구"]
+    assert analysis.excluded_information_gaps == ["정확한 안내 문구가 정의되지 않음"]
     assert report.recommendation == pipeline.FinalRecommendation.PASS
     assert report.total_results == analysis.total_results
     assert report.status_counts == analysis.status_counts
+    assert report.product_result_count == 2
+    assert report.environment_result_count == 1
+    assert report.pipeline_fixture_result_count == 0
+    assert report.excluded_scope == analysis.excluded_scope
+    assert report.excluded_information_gaps == analysis.excluded_information_gaps
+    assert delivery.mode == "DRY_RUN"
+    assert delivery.allowed is True
+    assert delivery.slack.status == pipeline.ExternalDeliveryStatus.PREVIEW
+    assert delivery.notion.status == pipeline.ExternalDeliveryStatus.PREVIEW
+    assert delivery.notion.item_count == 3
+    assert (run_dir / "slack_payload.json").is_file()
+    assert (run_dir / "notion_payload.json").is_file()
     raw_analysis = json.loads((run_dir / "agent4_analysis.json").read_text(encoding="utf-8"))
     raw_report = json.loads((run_dir / "final_report.json").read_text(encoding="utf-8"))
     assert "검토_항목" in raw_analysis
     assert "최종_확인_사항" in raw_analysis
+    assert "제외_범위" in raw_analysis
+    assert "제외된_정보_부족" in raw_analysis
     assert "검토_항목" in raw_report
     assert "최종_확인_사항" in raw_report
+    assert "제외_범위" in raw_report
+    assert "제외된_정보_부족" in raw_report
+
+
+def test_agent4_send_delivers_only_after_cp4_pass(
+    tmp_path: Path, monkeypatch
+) -> None:
+    run_dir, run_id = _write_agent4_inputs(tmp_path)
+    monkeypatch.setattr(
+        pipeline,
+        "_send_slack_report",
+        lambda _payload: pipeline.ExternalDestinationResult(
+            destination="SLACK",
+            status=pipeline.ExternalDeliveryStatus.SENT,
+            item_count=1,
+            detail="sent",
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_upsert_notion_reports",
+        lambda records: pipeline.ExternalDestinationResult(
+            destination="NOTION",
+            status=pipeline.ExternalDeliveryStatus.SENT,
+            item_count=len(records),
+            detail="upserted",
+        ),
+    )
+
+    assert pipeline.run_agent4(
+        SimpleNamespace(
+            run_id=run_id,
+            runs_root=str(tmp_path / "runs"),
+            send=True,
+        )
+    ) == 0
+
+    delivery = pipeline.ExternalReportingResult.model_validate_json(
+        (run_dir / "external_reporting.json").read_text(encoding="utf-8")
+    )
+    assert delivery.mode == "SEND"
+    assert delivery.slack.status == pipeline.ExternalDeliveryStatus.SENT
+    assert delivery.notion.status == pipeline.ExternalDeliveryStatus.SENT
+    assert delivery.notion.item_count == 3
+
+
+def test_external_reporting_send_after_preview_preserves_first_evidence(
+    tmp_path: Path, monkeypatch
+) -> None:
+    run_dir, run_id = _write_agent4_inputs(tmp_path)
+    assert pipeline.run_agent4(
+        SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))
+    ) == 0
+    first_report = run_dir / "external_reporting.json"
+    first_bytes = first_report.read_bytes()
+    first_hash = _sha256_file(first_report)
+    monkeypatch.setattr(
+        pipeline,
+        "_send_slack_report",
+        lambda _payload: pipeline.ExternalDestinationResult(
+            destination="SLACK",
+            status=pipeline.ExternalDeliveryStatus.SENT,
+            item_count=1,
+            detail="sent",
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_upsert_notion_reports",
+        lambda records: pipeline.ExternalDestinationResult(
+            destination="NOTION",
+            status=pipeline.ExternalDeliveryStatus.SENT,
+            item_count=len(records),
+            detail="upserted",
+        ),
+    )
+
+    assert pipeline.run_external_reporting(
+        SimpleNamespace(
+            run_id=run_id,
+            runs_root=str(tmp_path / "runs"),
+            send=True,
+        )
+    ) == 0
+
+    assert first_report.read_bytes() == first_bytes
+    attempts = list((run_dir / "external_reporting_attempts").iterdir())
+    assert len(attempts) == 1
+    sent = pipeline.ExternalReportingResult.model_validate_json(
+        (attempts[0] / "external_reporting.json").read_text(encoding="utf-8")
+    )
+    assert sent.mode == "SEND"
+    assert sent.previous_reporting_sha256 == first_hash
+    assert sent.slack.status == pipeline.ExternalDeliveryStatus.SENT
+    assert sent.notion.status == pipeline.ExternalDeliveryStatus.SENT
+
+
+def test_agent4_verifies_multiple_agent3_source_artifacts(tmp_path: Path) -> None:
+    run_dir = tmp_path / "RUN-20260817-025000-ABCDEF"
+    run_dir.mkdir()
+    candidate_results = []
+    source_artifacts = []
+    for tc_id in ("TC-CAND-003", "TC-CAND-004"):
+        artifact_dir = run_dir / "agent3_candidates" / tc_id
+        candidate_dir = artifact_dir / "candidates"
+        candidate_dir.mkdir(parents=True)
+        candidate_file = candidate_dir / f"test_{tc_id.lower().replace('-', '_')}.py"
+        candidate_file.write_text("def test_candidate():\n    pass\n", encoding="utf-8")
+        agent3_manifest = artifact_dir / "agent3_manifest.json"
+        agent3_trial = artifact_dir / "agent3_trial.json"
+        _write_json(agent3_manifest, {"run_id": run_dir.name, "tc_id": tc_id})
+        _write_json(agent3_trial, {"outcome": "PASS"})
+        result = _neutral_execution_result(
+            tc_id, pipeline.ExecutionSource.NEW_AUTOMATION_CANDIDATE
+        ).model_copy(
+            update={
+                "test_file": candidate_file.relative_to(run_dir).as_posix(),
+                "test_sha256": _sha256_file(candidate_file),
+            }
+        )
+        candidate_results.append(result)
+        source_artifacts.append(
+            {
+                "tc_id": tc_id,
+                "agent3_manifest_file": agent3_manifest.relative_to(run_dir).as_posix(),
+                "agent3_manifest_sha256": _sha256_file(agent3_manifest),
+                "agent3_trial_file": agent3_trial.relative_to(run_dir).as_posix(),
+                "agent3_trial_sha256": _sha256_file(agent3_trial),
+                "candidate_reused": True,
+                "validation_candidate_sha256": result.test_sha256,
+                "validation_candidate_trial_file": None,
+                "validation_candidate_trial_sha256": None,
+            }
+        )
+    summary_file = run_dir / "agent3_run_summary.json"
+    _write_json(summary_file, {"run_id": run_dir.name, "status": "PASS"})
+    precheck = _neutral_execution_result(
+        "TC-ENV-000", pipeline.ExecutionSource.ENVIRONMENT_PRECHECK
+    )
+    bundle = pipeline.ValidationExecutionBundle(
+        run_id=run_dir.name,
+        status=pipeline.ValidationStageStatus.COMPLETED,
+        candidate_results=candidate_results,
+        environment_precheck=precheck,
+        selected_regression_ids=[],
+        regression_results=[],
+        created_at="2026-08-17T00:00:00+00:00",
+    )
+    manifest = {
+        "source_agent3_artifacts": source_artifacts,
+        "source_agent3_run_summary_sha256": _sha256_file(summary_file),
+    }
+
+    assert pipeline._agent4_new_source_chain_matches(run_dir, bundle, manifest) is True
+    source_artifacts[0]["agent3_trial_sha256"] = "f" * 64
+    assert pipeline._agent4_new_source_chain_matches(run_dir, bundle, manifest) is False
+
+
+def test_agent4_reports_automation_exclusion_without_blocking_executed_results(
+    tmp_path: Path,
+) -> None:
+    exclusion = pipeline.AutomationExclusion(
+        tc_id="TC-CAND-009",
+        candidate_status=pipeline.AutomationCandidateStatus.AUTOMATION_SUPPORT_EXTENSION_REQUIRED,
+        reason="현재 UI 관찰 방법으로 실행할 수 없습니다.",
+    )
+    run_dir, run_id = _write_agent4_inputs(
+        tmp_path, automation_exclusions=[exclusion]
+    )
+
+    assert pipeline.run_agent4(
+        SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))
+    ) == 0
+    report = pipeline.FinalReport.model_validate_json(
+        (run_dir / "final_report.json").read_text(encoding="utf-8")
+    )
+    assert report.recommendation == pipeline.FinalRecommendation.PASS
+    assert report.findings == []
+    assert report.automation_exclusions == [exclusion]
+    raw_report = json.loads((run_dir / "final_report.json").read_text(encoding="utf-8"))
+    assert "자동화_제외_TC" in raw_report
 
 
 def test_agent4_marks_assertion_failure_as_product_mismatch_candidate(tmp_path: Path) -> None:
@@ -3075,6 +5095,38 @@ def test_agent4_marks_assertion_failure_as_product_mismatch_candidate(tmp_path: 
     assert report.recommendation == pipeline.FinalRecommendation.HUMAN_REVIEW
     assert report.findings[0].category == pipeline.Agent4FindingCategory.PRODUCT_MISMATCH_CANDIDATE
     assert "확정" in report.findings[0].rationale
+    review_file = run_dir / "사람_최종_검토.md"
+    review_manifest = json.loads(
+        (run_dir / "사람_최종_검토_manifest.json").read_text(encoding="utf-8")
+    )
+    review_text = review_file.read_text(encoding="utf-8")
+    assert "# 사람 최종 검토서" in review_text
+    assert "제품 동작 불일치 후보" in review_text
+    assert "UI remains at 18 degrees." in review_text
+    assert "요구사항이 맞으며 제품 구현 수정이 필요함" in review_text
+    assert "검토자: ____________________" in review_text
+    assert "사람이 작성한 문서는 `--refresh`가 덮어쓰지 않습니다" in review_text
+    assert review_manifest["document_sha256"] == _sha256_file(review_file)
+    assert pipeline.run_human_review_document(
+        SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))
+    ) == 0
+
+
+def test_agent4_holds_candidate_automation_execution_issue(tmp_path: Path) -> None:
+    run_dir, run_id = _write_agent4_inputs(
+        tmp_path, candidate_status=pipeline.NeutralExecutionStatus.EXECUTION_ERROR
+    )
+
+    assert pipeline.run_agent4(
+        SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))
+    ) == 0
+    report = pipeline.FinalReport.model_validate_json(
+        (run_dir / "final_report.json").read_text(encoding="utf-8")
+    )
+    assert report.recommendation == pipeline.FinalRecommendation.HOLD
+    assert report.findings[0].category == (
+        pipeline.Agent4FindingCategory.AUTOMATION_EXECUTION_ISSUE
+    )
 
 
 def test_agent4_carries_non_blocking_review_notes_to_final_report(tmp_path: Path) -> None:
@@ -3115,6 +5167,25 @@ def test_agent4_holds_when_environment_precheck_blocks_regressions(tmp_path: Pat
     }
 
 
+def test_agent4_holds_when_product_mismatch_and_automation_issue_coexist() -> None:
+    findings = [
+        pipeline.Agent4Finding(
+            finding_id="FIND-001",
+            category=pipeline.Agent4FindingCategory.PRODUCT_MISMATCH_CANDIDATE,
+            rationale="product mismatch",
+        ),
+        pipeline.Agent4Finding(
+            finding_id="FIND-002",
+            category=pipeline.Agent4FindingCategory.AUTOMATION_EXECUTION_ISSUE,
+            rationale="automation issue",
+        ),
+    ]
+
+    assert pipeline._agent4_recommendation(
+        findings, pipeline.CheckStatus.PASS
+    ) == pipeline.FinalRecommendation.HOLD
+
+
 def test_agent4_rejects_validation_execution_hash_mismatch(tmp_path: Path) -> None:
     run_dir, run_id = _write_agent4_inputs(tmp_path)
     manifest_file = run_dir / "validation_manifest.json"
@@ -3128,8 +5199,48 @@ def test_agent4_rejects_validation_execution_hash_mismatch(tmp_path: Path) -> No
     checkpoint = pipeline.Checkpoint4Result.model_validate_json(
         (run_dir / "checkpoint4.json").read_text(encoding="utf-8")
     )
+    delivery = pipeline.ExternalReportingResult.model_validate_json(
+        (run_dir / "external_reporting.json").read_text(encoding="utf-8")
+    )
     assert checkpoint.status == pipeline.CheckStatus.FAIL
+    assert delivery.allowed is False
+    assert delivery.slack.status == pipeline.ExternalDeliveryStatus.BLOCKED
+    assert delivery.notion.status == pipeline.ExternalDeliveryStatus.BLOCKED
     assert (run_dir / "agent4_error.json").exists() is False
+
+
+def test_agent4_rejects_broken_manifest_or_candidate_chain(tmp_path: Path) -> None:
+    run_dir, run_id = _write_agent4_inputs(tmp_path)
+    manifest_file = run_dir / "validation_manifest.json"
+    manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+    manifest["source_agent3_manifest_sha256"] = "0" * 64
+    _write_json(manifest_file, manifest)
+
+    assert pipeline.run_agent4(
+        SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))
+    ) == 2
+    checkpoint = pipeline.Checkpoint4Result.model_validate_json(
+        (run_dir / "checkpoint4.json").read_text(encoding="utf-8")
+    )
+    assert checkpoint.checks[1].rule_id == "CP4-002"
+    assert checkpoint.checks[1].status == pipeline.CheckStatus.FAIL
+
+    candidate_root = tmp_path / "candidate-tamper"
+    candidate_run_dir, candidate_run_id = _write_agent4_inputs(candidate_root)
+    candidate_file = candidate_run_dir / "candidates" / "test_controller.py"
+    candidate_file.write_text("changed after validation\n", encoding="utf-8")
+
+    assert pipeline.run_agent4(
+        SimpleNamespace(
+            run_id=candidate_run_id,
+            runs_root=str(candidate_root / "runs"),
+        )
+    ) == 2
+    candidate_checkpoint = pipeline.Checkpoint4Result.model_validate_json(
+        (candidate_run_dir / "checkpoint4.json").read_text(encoding="utf-8")
+    )
+    assert candidate_checkpoint.checks[1].rule_id == "CP4-002"
+    assert candidate_checkpoint.checks[1].status == pipeline.CheckStatus.FAIL
 
 
 def test_agent4_rejects_mismatched_execution_source_contract(tmp_path: Path) -> None:
@@ -3169,9 +5280,63 @@ def test_agent4_rejects_missing_or_changed_evidence_file(tmp_path: Path) -> None
     assert checkpoint.checks[5].status == pipeline.CheckStatus.FAIL
 
 
+def test_agent4_rejects_passed_result_without_complete_evidence(
+    tmp_path: Path,
+) -> None:
+    run_dir, run_id = _write_agent4_inputs(tmp_path)
+    execution_file = run_dir / "validation_execution.json"
+    bundle = pipeline.ValidationExecutionBundle.model_validate_json(
+        execution_file.read_text(encoding="utf-8")
+    )
+    candidate = bundle.candidate_result.model_copy(
+        update={
+            "evidence_files": [
+                bundle.candidate_result.stdout_file,
+                bundle.candidate_result.stderr_file,
+            ],
+            "evidence_sha256": {
+                name: bundle.candidate_result.evidence_sha256[name]
+                for name in (
+                    bundle.candidate_result.stdout_file,
+                    bundle.candidate_result.stderr_file,
+                )
+            },
+            "evidence_complete": False,
+        }
+    )
+    bundle = bundle.model_copy(update={"candidate_result": candidate})
+    _write_json(execution_file, bundle.model_dump(mode="json"))
+    manifest_file = run_dir / "validation_manifest.json"
+    manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+    manifest["validation_execution_sha256"] = _sha256_file(execution_file)
+    _write_json(manifest_file, manifest)
+
+    assert pipeline.run_agent4(
+        SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))
+    ) == 2
+    checkpoint = pipeline.Checkpoint4Result.model_validate_json(
+        (run_dir / "checkpoint4.json").read_text(encoding="utf-8")
+    )
+    assert checkpoint.checks[5].rule_id == "CP4-006"
+    assert checkpoint.checks[5].status == pipeline.CheckStatus.FAIL
+
+
 def test_agent4_parser_exposes_rules_only_report_command() -> None:
     args = pipeline.build_parser().parse_args(
         ["agent4", "--run-id", "RUN-20260817-030000-ABCDEF"]
     )
 
     assert args.handler is pipeline.run_agent4
+    assert args.send is False
+
+    reporting = pipeline.build_parser().parse_args(
+        ["report", "--run-id", "RUN-20260817-030000-ABCDEF"]
+    )
+    assert reporting.handler is pipeline.run_external_reporting
+    assert reporting.send is False
+
+    human_review = pipeline.build_parser().parse_args(
+        ["human-review", "--run-id", "RUN-20260817-030000-ABCDEF"]
+    )
+    assert human_review.handler is pipeline.run_human_review_document
+    assert human_review.refresh is False
