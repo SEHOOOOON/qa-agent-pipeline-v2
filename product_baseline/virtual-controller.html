@@ -1,0 +1,4547 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Virtual Central Control System (가상 중앙제어 시스템) — Central Control Simulator</title>
+  <!-- Google Fonts: Inter, Outfit & Noto Sans KR -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      /* Virtual Central Control System (가상 중앙제어 시스템) — Color Palette & Theme */
+      --bg-light: #f5f6f8;
+      --sidebar-dark: #222736;
+      --sidebar-dark-active: #1d212f;
+      --text-dark: #333333;
+      --text-muted: #74788d;
+      --border-light: #e2e5ec;
+      --white: #ffffff;
+      
+      /* LG Signature Accent Colors */
+      --lg-magenta: #d91c5c;
+      --lg-magenta-glow: rgba(217, 28, 92, 0.2);
+      
+      /* Status General Colors */
+      --status-stop: #a6a6a6;     /* Gray for Stop */
+      --status-error: #ef4444;    /* Red for Error */
+      --status-offline: #9ca3af;  /* Light gray for offline */
+
+      /* Mode specific theme colors (Rule 1) */
+      --color-cool: #2563eb;      /* Blue */
+      --color-heat: #ea580c;      /* Orange */
+      --color-fan: #16a34a;       /* Green */
+      --color-dry: #1e3a8a;       /* Navy */
+      --color-auto: #7c3aed;      /* Purple */
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-light);
+      color: var(--text-dark);
+      font-family: 'Noto Sans KR', 'Inter', sans-serif;
+      height: 100vh;
+      width: 100vw;
+      overflow: hidden;
+      display: grid;
+      grid-template-columns: 70px 280px 1fr 340px;
+      grid-template-rows: 55px 1fr auto;  /* Row 3: Register Simulator View */
+      transition: grid-template-columns 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    body.sidebar-collapsed {
+      grid-template-columns: 70px 0px 1fr 340px;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f1f1f1;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #c1c1c1;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #a8a8a8;
+    }
+
+    /* ================================================================ */
+    /* Register Simulator View (가상 장치 상태)                           */
+    /* ================================================================ */
+    #hardware-simulator-zone {
+      height: 220px;
+      grid-column: 1 / 5;
+      grid-row: 3;
+      background: #0d1117;
+      border-top: 2px solid #30363d;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      font-family: 'Outfit', 'Courier New', monospace;
+    }
+
+    .hw-zone-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 18px;
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+      flex-shrink: 0;
+    }
+
+    .hw-zone-header-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: #58a6ff;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+    }
+
+    .hw-zone-header-badge {
+      font-size: 10px;
+      background: #1f6feb33;
+      border: 1px solid #1f6feb;
+      color: #58a6ff;
+      border-radius: 4px;
+      padding: 1px 7px;
+    }
+
+    .hw-zone-header-sync {
+      margin-left: auto;
+      font-size: 10px;
+      color: #3fb950;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .hw-sync-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #3fb950;
+      animation: hw-blink 1.4s ease-in-out infinite;
+    }
+
+    @keyframes hw-blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.2; }
+    }
+
+    .hw-register-scroll {
+      flex: 1;
+      overflow-x: auto;
+      overflow-y: hidden;
+      display: flex;
+      align-items: flex-start;
+      gap: 0;
+      padding: 10px 14px;
+    }
+
+    /* One device register block */
+    .hw-device-block {
+      flex-shrink: 0;
+      min-width: 130px;
+      margin-right: 10px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      overflow: hidden;
+      transition: border-color 0.3s;
+    }
+
+    .hw-device-block.hw-updated {
+      border-color: #3fb950;
+      box-shadow: 0 0 8px rgba(63, 185, 80, 0.3);
+    }
+
+    .hw-device-block-header {
+      background: #1c2128;
+      padding: 4px 8px;
+      font-size: 9.5px;
+      font-weight: 700;
+      color: #8b949e;
+      letter-spacing: 0.8px;
+      border-bottom: 1px solid #30363d;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .hw-reg-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 2px 8px;
+      border-bottom: 1px solid #21262d;
+      gap: 6px;
+    }
+
+    .hw-reg-row:last-child { border-bottom: none; }
+
+    .hw-reg-addr {
+      font-size: 9px;
+      color: #6e7681;
+      font-family: 'Courier New', monospace;
+      white-space: nowrap;
+    }
+
+    .hw-reg-label {
+      font-size: 9px;
+      color: #8b949e;
+      flex: 1;
+      text-align: center;
+    }
+
+    .hw-reg-val {
+      font-size: 10.5px;
+      font-weight: 700;
+      font-family: 'Outfit', 'Courier New', monospace;
+      color: #e6edf3;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 3px;
+      padding: 1px 6px;
+      min-width: 44px;
+      text-align: center;
+      transition: background 0.25s, color 0.25s;
+    }
+
+    .hw-reg-val.hw-val-changed {
+      background: #1a3b1a;
+      color: #3fb950;
+      border-color: #3fb950;
+    }
+
+    .hw-reg-val.hw-val-error {
+      background: #3b1a1a;
+      color: #f85149;
+      border-color: #f85149;
+    }
+
+    .hw-reg-val.hw-val-locked {
+      background: #2b2000;
+      color: #e3b341;
+      border-color: #e3b341;
+    }
+
+
+    /* ---------------------------------------------------------------- */
+    /* Layout Explicit Positioning Grid */
+    /* ---------------------------------------------------------------- */
+    header {
+      grid-row: 1;
+      grid-column: 1 / 5;
+      background-color: var(--white);
+      border-bottom: 1px solid var(--border-light);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 20px;
+      z-index: 100;
+    }
+
+    .icon-sidebar {
+      grid-row: 2;
+      grid-column: 1;
+      background-color: var(--sidebar-dark);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-top: 15px;
+      gap: 8px;
+    }
+
+    .qa-tower-panel {
+      grid-row: 2;
+      grid-column: 2;
+      background: linear-gradient(180deg, #090e1a 0%, #151d30 100%);
+      border-right: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 20px 15px 15px 15px;
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      color: #ffffff;
+      box-shadow: inset -5px 0 15px rgba(0, 0, 0, 0.3);
+      overflow-y: auto;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      width: 280px;
+      box-sizing: border-box;
+    }
+
+    .qa-tower-panel.collapsed {
+      width: 0;
+      padding: 20px 0;
+      opacity: 0;
+      pointer-events: none;
+      border-right: none;
+      overflow: hidden;
+    }
+
+    .dashboard-main {
+      grid-row: 2;
+      grid-column: 3;
+      padding: 20px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      position: relative;
+    }
+
+    .detail-panel {
+      grid-row: 2;
+      grid-column: 4;
+      background-color: var(--white);
+      border-left: 1px solid var(--border-light);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* Header Area */
+    /* ---------------------------------------------------------------- */
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+    }
+
+    .header-logo {
+      font-family: 'Outfit', sans-serif;
+      font-weight: 800;
+      color: var(--text-dark);
+      font-size: 1.15rem;
+      letter-spacing: 0.5px;
+    }
+
+    .header-logo span {
+      color: var(--lg-magenta);
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      font-size: 0.82rem;
+      color: var(--text-dark);
+    }
+
+    .system-status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+    }
+
+    .status-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+    }
+
+    .status-icon-triangle {
+      width: 0;
+      height: 0;
+      border-left: 7px solid transparent;
+      border-right: 7px solid transparent;
+      border-bottom: 12px solid var(--status-stop);
+      transition: all 0.3s ease;
+    }
+
+    .status-icon-triangle.error {
+      border-bottom-color: var(--status-error);
+      animation: blink 1s infinite alternate;
+    }
+
+    .status-icon-triangle.warning {
+      border-bottom-color: var(--status-warning);
+    }
+
+    .header-time {
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+
+    .btn-help {
+      background: #f1f3f7;
+      border: 1px solid var(--border-light);
+      padding: 4px 12px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 0.8rem;
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* Left Icon Sidebar */
+    /* ---------------------------------------------------------------- */
+    .sidebar-icon-btn {
+      width: 50px;
+      height: 50px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      color: #a6b0cf;
+      cursor: pointer;
+      border-radius: 8px;
+      transition: all 0.2s ease;
+    }
+
+    .sidebar-icon-btn:hover, .sidebar-icon-btn.active {
+      color: var(--white);
+      background-color: var(--sidebar-dark-active);
+    }
+
+    .sidebar-icon-btn.active {
+      border-left: 3px solid var(--lg-magenta);
+      border-radius: 0 8px 8px 0;
+    }
+
+    .sidebar-icon-btn svg {
+      width: 20px;
+      height: 20px;
+      margin-bottom: 3px;
+    }
+
+    .sidebar-icon-btn span {
+      font-size: 0.65rem;
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* Group Select Tree Panel */
+    /* ---------------------------------------------------------------- */
+    .tree-header-btn {
+      width: 100%;
+      background: #495057;
+      color: var(--white);
+      border: none;
+      padding: 8px;
+      border-radius: 3px;
+      font-size: 0.82rem;
+      cursor: pointer;
+      font-weight: 500;
+    }
+
+    .tree-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      border-bottom: 1px solid var(--border-light);
+    }
+
+    .tree-tab {
+      text-align: center;
+      padding: 6px 0;
+      font-size: 0.8rem;
+      cursor: pointer;
+      color: var(--text-muted);
+      border-bottom: 2px solid transparent;
+    }
+
+    .tree-tab.active {
+      color: var(--text-dark);
+      font-weight: bold;
+      border-bottom-color: #495057;
+    }
+
+    .tree-list {
+      flex: 1;
+      overflow-y: auto;
+      font-size: 0.8rem;
+    }
+
+    .tree-item {
+      display: flex;
+      align-items: center;
+      padding: 6px 4px;
+      cursor: pointer;
+      border-radius: 3px;
+      color: #495057;
+    }
+
+    .tree-item:hover {
+      background-color: rgba(0, 0, 0, 0.03);
+    }
+
+    .tree-item.selected {
+      background-color: #e8ebf3;
+      font-weight: bold;
+      color: var(--text-dark);
+    }
+
+    .tree-icon {
+      margin-right: 6px;
+      display: flex;
+      align-items: center;
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* Central Main Dashboard Work Area (장치 카드 배치 GRID) */
+    /* ---------------------------------------------------------------- */
+    .breadcrumb-row {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+    }
+
+    /* Operation status progress bar */
+    .status-overview-panel {
+      background-color: var(--white);
+      border: 1px solid var(--border-light);
+      border-radius: 4px;
+      padding: 12px 20px;
+    }
+
+    .overview-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      font-size: 0.82rem;
+    }
+
+    .overview-header .label {
+      font-weight: bold;
+      color: #495057;
+    }
+
+    .overview-legends {
+      display: flex;
+      gap: 15px;
+      font-size: 0.78rem;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .legend-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    .legend-dot.run { background-color: var(--color-cool); }
+    .legend-dot.stop { background-color: var(--status-stop); }
+    .legend-dot.error { background-color: var(--status-error); }
+
+    .progress-bar-container {
+      width: 100%;
+      height: 10px;
+      background-color: #e9ecef;
+      border-radius: 5px;
+      overflow: hidden;
+      display: flex;
+    }
+
+    .progress-bar-segment {
+      height: 100%;
+      transition: width 0.4s ease;
+    }
+
+    .progress-bar-segment.run { background-color: var(--color-cool); }
+    .progress-bar-segment.stop { background-color: #ced4da; }
+    .progress-bar-segment.error { background-color: var(--status-error); }
+
+    /* Filter Tools Toolbar */
+    .filter-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background-color: var(--white);
+      border: 1px solid var(--border-light);
+      border-radius: 4px;
+      padding: 8px 15px;
+    }
+
+    .filter-left {
+      display: flex;
+      gap: 10px;
+    }
+
+    .filter-select {
+      padding: 4px 8px;
+      font-size: 0.8rem;
+      border: 1px solid var(--border-light);
+      border-radius: 3px;
+      background: #fafafa;
+      outline: none;
+    }
+
+    .btn-multi-select {
+      background-color: var(--white);
+      border: 1px solid var(--border-light);
+      padding: 4px 12px;
+      border-radius: 3px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .btn-multi-select:hover {
+      background-color: #f8f9fa;
+    }
+
+    .btn-multi-select.active {
+      background-color: var(--lg-magenta);
+      color: var(--white);
+      border-color: var(--lg-magenta);
+    }
+
+    /* Device Card Grid */
+    .device-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(185px, 1fr));
+      gap: 12px;
+      position: relative;
+    }
+
+    /* 가상 관제 시스템 Specific 장치 카드 Style */
+    .ac-device-card {
+      background-color: var(--white);
+      border: 1px solid var(--border-light);
+      border-radius: 4px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      user-select: none;
+      overflow: hidden;
+      height: 110px;
+    }
+
+    .ac-device-card:hover {
+      box-shadow: 0 4px 10px rgba(0,0,0,0.06);
+    }
+
+    .ac-device-card.selected {
+      border: 2px solid var(--lg-magenta);
+      box-shadow: 0 0 10px var(--lg-magenta-glow);
+    }
+
+    /* Header top bar on card (Rule 1: Mode Colors) */
+    .card-top-bar {
+      height: 22px;
+      background-color: var(--status-stop);
+      color: white;
+      display: flex;
+      align-items: center;
+      padding: 0 8px;
+      font-size: 0.65rem;
+      justify-content: space-between;
+      transition: background-color 0.2s ease;
+    }
+
+    /* Top bar color mapping on running state (Rule 1) */
+    .ac-device-card.state-run.mode-cool .card-top-bar { background-color: var(--color-cool); }
+    .ac-device-card.state-run.mode-heat .card-top-bar { background-color: var(--color-heat); }
+    .ac-device-card.state-run.mode-fan .card-top-bar { background-color: var(--color-fan); }
+    .ac-device-card.state-run.mode-dry .card-top-bar { background-color: var(--color-dry); }
+    .ac-device-card.state-run.mode-auto .card-top-bar { background-color: var(--color-auto); }
+
+    .ac-device-card.state-stop .card-top-bar { background-color: var(--status-stop); }
+    .ac-device-card.state-error .card-top-bar { background-color: var(--status-error); }
+    .ac-device-card.state-offline .card-top-bar { background-color: var(--status-offline); }
+
+    /* Split body layout */
+    .card-body-split {
+      display: flex;
+      padding: 8px;
+      flex: 1;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    /* Left Side: Icon & Mode Text */
+    .card-body-left {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      width: 45%;
+    }
+
+    .fan-icon-container {
+      width: 28px;
+      height: 28px;
+      background: #f1f3f7;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+
+    .fan-icon-wings {
+      width: 16px;
+      height: 16px;
+      background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%2374788d"><path d="M12 2a1 1 0 0 1 .993.883L13 3v2.036c1.168.077 2.21.657 2.912 1.547l1.455-1.455a1 1 0 0 1 1.32-.083l.094.083l1.414 1.414a1 1 0 0 1 .083 1.32l-.083.094l-1.455 1.455c.89.702 1.47 1.744 1.547 2.912H21a1 1 0 0 1 .993.883L22 13v2a1 1 0 0 1-.883.993L21 16h-2.036c-.077 1.168-.657 2.21-1.547 2.912l1.455 1.455a1 1 0 0 1 .083 1.32l-.083.094l-1.414 1.414a1 1 0 0 1-1.32.083l-.094-.083l-1.455-1.455c-.702.89-1.744 1.47-2.912 1.547V21a1 1 0 0 1-.883.993L12 22h-2a1 1 0 0 1-.993-.883L9 21v-2.036c-1.168-.077-2.21-.657-2.912-1.547L4.633 18.87a1 1 0 0 1-1.32.083l-.094-.083L1.805 17.45a1 1 0 0 1-.083-1.32l.083-.094l1.455-1.455C2.37 13.88 1.79 12.837 1.713 11.67H1a1 1 0 0 1-.993-.883L0 10v-2a1 1 0 0 1 .883-.993L1 7h2.036c.077-1.168.657-2.21 1.547-2.912L3.128 2.633a1 1 0 0 1-.083-1.32l.083-.094L4.542.205a1 1 0 0 1 1.32-.083l.094.083 1.455 1.455C8.113.77 9.155.19 10.323.113V1a1 1 0 0 1 .883-.993L11 0z"/></svg>');
+      background-size: contain;
+      background-repeat: no-repeat;
+      background-position: center;
+      transition: transform 0.1s linear;
+    }
+
+    /* Colored icon wings on running states (animation removed) */
+    .ac-device-card.state-run.mode-cool .fan-icon-wings { background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%232563eb"><path d="M12 2a1 1 0 0 1 .993.883L13 3v2.036c1.168.077 2.21.657 2.912 1.547l1.455-1.455a1 1 0 0 1 1.32-.083l.094.083l1.414 1.414a1 1 0 0 1 .083 1.32l-.083.094l-1.455 1.455c.89.702 1.47 1.744 1.547 2.912H21a1 1 0 0 1 .993.883L22 13v2a1 1 0 0 1-.883.993L21 16h-2.036c-.077 1.168-.657 2.21-1.547 2.912l1.455 1.455a1 1 0 0 1 .083 1.32l-.083.094l-1.414 1.414a1 1 0 0 1-1.32.083l-.094-.083l-1.455-1.455c-.702.89-1.744 1.47-2.912 1.547V21a1 1 0 0 1-.883.993L12 22h-2a1 1 0 0 1-.993-.883L9 21v-2.036c-1.168-.077-2.21-.657-2.912-1.547L4.633 18.87a1 1 0 0 1-1.32.083l-.094-.083L1.805 17.45a1 1 0 0 1-.083-1.32l.083-.094l1.455-1.455C2.37 13.88 1.79 12.837 1.713 11.67H1a1 1 0 0 1-.993-.883L0 10v-2a1 1 0 0 1 .883-.993L1 7h2.036c.077-1.168.657-2.21 1.547-2.912L3.128 2.633a1 1 0 0 1-.083-1.32l.083-.094L4.542.205a1 1 0 0 1 1.32-.083l.094.083 1.455 1.455C8.113.77 9.155.19 10.323.113V1a1 1 0 0 1 .883-.993L11 0z"/></svg>'); }
+    .ac-device-card.state-run.mode-heat .fan-icon-wings { background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ea580c"><path d="M12 2a1 1 0 0 1 .993.883L13 3v2.036c1.168.077 2.21.657 2.912 1.547l1.455-1.455a1 1 0 0 1 1.32-.083l.094.083l1.414 1.414a1 1 0 0 1 .083 1.32l-.083.094l-1.455 1.455c.89.702 1.47 1.744 1.547 2.912H21a1 1 0 0 1 .993.883L22 13v2a1 1 0 0 1-.883.993L21 16h-2.036c-.077 1.168-.657 2.21-1.547 2.912l1.455 1.455a1 1 0 0 1 .083 1.32l-.083.094l-1.414 1.414a1 1 0 0 1-1.32.083l-.094-.083l-1.455-1.455c-.702.89-1.744 1.47-2.912 1.547V21a1 1 0 0 1-.883.993L12 22h-2a1 1 0 0 1-.993-.883L9 21v-2.036c-1.168-.077-2.21-.657-2.912-1.547L4.633 18.87a1 1 0 0 1-1.32.083l-.094-.083L1.805 17.45a1 1 0 0 1-.083-1.32l.083-.094l1.455-1.455C2.37 13.88 1.79 12.837 1.713 11.67H1a1 1 0 0 1-.993-.883L0 10v-2a1 1 0 0 1 .883-.993L1 7h2.036c.077-1.168.657-2.21 1.547-2.912L3.128 2.633a1 1 0 0 1-.083-1.32l.083-.094L4.542.205a1 1 0 0 1 1.32-.083l.094.083 1.455 1.455C8.113.77 9.155.19 10.323.113V1a1 1 0 0 1 .883-.993L11 0z"/></svg>'); }
+    .ac-device-card.state-run.mode-fan .fan-icon-wings { background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%2316a34a"><path d="M12 2a1 1 0 0 1 .993.883L13 3v2.036c1.168.077 2.21.657 2.912 1.547l1.455-1.455a1 1 0 0 1 1.32-.083l.094.083l1.414 1.414a1 1 0 0 1 .083 1.32l-.083.094l-1.455 1.455c.89.702 1.47 1.744 1.547 2.912H21a1 1 0 0 1 .993.883L22 13v2a1 1 0 0 1-.883.993L21 16h-2.036c-.077 1.168-.657 2.21-1.547 2.912l1.455 1.455a1 1 0 0 1 .083 1.32l-.083.094l-1.414 1.414a1 1 0 0 1-1.32.083l-.094-.083l-1.455-1.455c-.702.89-1.744 1.47-2.912 1.547V21a1 1 0 0 1-.883.993L12 22h-2a1 1 0 0 1-.993-.883L9 21v-2.036c-1.168-.077-2.21-.657-2.912-1.547L4.633 18.87a1 1 0 0 1-1.32.083l-.094-.083L1.805 17.45a1 1 0 0 1-.083-1.32l.083-.094l1.455-1.455C2.37 13.88 1.79 12.837 1.713 11.67H1a1 1 0 0 1-.993-.883L0 10v-2a1 1 0 0 1 .883-.993L1 7h2.036c.077-1.168.657-2.21 1.547-2.912L3.128 2.633a1 1 0 0 1-.083-1.32l.083-.094L4.542.205a1 1 0 0 1 1.32-.083l.094.083 1.455 1.455C8.113.77 9.155.19 10.323.113V1a1 1 0 0 1 .883-.993L11 0z"/></svg>'); }
+    .ac-device-card.state-run.mode-dry .fan-icon-wings { background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%231e3a8a"><path d="M12 2a1 1 0 0 1 .993.883L13 3v2.036c1.168.077 2.21.657 2.912 1.547l1.455-1.455a1 1 0 0 1 1.32-.083l.094.083l1.414 1.414a1 1 0 0 1 .083 1.32l-.083.094l-1.455 1.455c.89.702 1.47 1.744 1.547 2.912H21a1 1 0 0 1 .993.883L22 13v2a1 1 0 0 1-.883.993L21 16h-2.036c-.077 1.168-.657 2.21-1.547 2.912l1.455 1.455a1 1 0 0 1 .083 1.32l-.083.094l-1.414 1.414a1 1 0 0 1-1.32.083l-.094-.083l-1.455-1.455c-.702.89-1.744 1.47-2.912 1.547V21a1 1 0 0 1-.883.993L12 22h-2a1 1 0 0 1-.993-.883L9 21v-2.036c-1.168-.077-2.21-.657-2.912-1.547L4.633 18.87a1 1 0 0 1-1.32.083l-.094-.083L1.805 17.45a1 1 0 0 1-.083-1.32l.083-.094l1.455-1.455C2.37 13.88 1.79 12.837 1.713 11.67H1a1 1 0 0 1-.993-.883L0 10v-2a1 1 0 0 1 .883-.993L1 7h2.036c.077-1.168.657-2.21 1.547-2.912L3.128 2.633a1 1 0 0 1-.083-1.32l.083-.094L4.542.205a1 1 0 0 1 1.32-.083l.094.083 1.455 1.455C8.113.77 9.155.19 10.323.113V1a1 1 0 0 1 .883-.993L11 0z"/></svg>'); }
+    .ac-device-card.state-run.mode-auto .fan-icon-wings { background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%237c3aed"><path d="M12 2a1 1 0 0 1 .993.883L13 3v2.036c1.168.077 2.21.657 2.912 1.547l1.455-1.455a1 1 0 0 1 1.32-.083l.094.083l1.414 1.414a1 1 0 0 1 .083 1.32l-.083.094l-1.455 1.455c.89.702 1.47 1.744 1.547 2.912H21a1 1 0 0 1 .993.883L22 13v2a1 1 0 0 1-.883.993L21 16h-2.036c-.077 1.168-.657 2.21-1.547 2.912l1.455 1.455a1 1 0 0 1 .083 1.32l-.083.094l-1.414 1.414a1 1 0 0 1-1.32.083l-.094-.083l-1.455-1.455c-.702.89-1.744 1.47-2.912 1.547V21a1 1 0 0 1-.883.993L12 22h-2a1 1 0 0 1-.993-.883L9 21v-2.036c-1.168-.077-2.21-.657-2.912-1.547L4.633 18.87a1 1 0 0 1-1.32.083l-.094-.083L1.805 17.45a1 1 0 0 1-.083-1.32l.083-.094l1.455-1.455C2.37 13.88 1.79 12.837 1.713 11.67H1a1 1 0 0 1-.993-.883L0 10v-2a1 1 0 0 1 .883-.993L1 7h2.036c.077-1.168.657-2.21 1.547-2.912L3.128 2.633a1 1 0 0 1-.083-1.32l.083-.094L4.542.205a1 1 0 0 1 1.32-.083l.094.083 1.455 1.455C8.113.77 9.155.19 10.323.113V1a1 1 0 0 1 .883-.993L11 0z"/></svg>'); }
+
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    .card-mode-text {
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      transition: color 0.2s ease;
+    }
+
+    /* Fan Speed Indicator in Card (Rule 1 & 2 related) */
+    .fan-speed-indicator {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.65rem;
+      color: var(--text-muted);
+      margin-top: 3px;
+      background: #f1f3f7;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-weight: 600;
+    }
+    
+    .speed-bars-mini {
+      display: inline-flex;
+      gap: 1.5px;
+      align-items: flex-end;
+      height: 9px;
+    }
+    
+    .speed-bar-dot {
+      width: 2.5px;
+      background-color: #cbd5e1;
+      border-radius: 0.5px;
+    }
+    
+    .speed-bar-dot:nth-child(1) { height: 3px; }
+    .speed-bar-dot:nth-child(2) { height: 6px; }
+    .speed-bar-dot:nth-child(3) { height: 9px; }
+    
+    /* Highlight speed bars based on level */
+    .speed-low .speed-bar-dot:nth-child(1) { background-color: #475569; }
+    .speed-med .speed-bar-dot:nth-child(1), .speed-med .speed-bar-dot:nth-child(2) { background-color: #475569; }
+    .speed-high .speed-bar-dot:nth-child(1), .speed-high .speed-bar-dot:nth-child(2), .speed-high .speed-bar-dot:nth-child(3) { background-color: #475569; }
+    
+    .speed-auto-icon {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      border: 1px solid #475569;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.5rem;
+      font-weight: 800;
+      color: #475569;
+      line-height: 1;
+    }
+    
+    /* Mode Text Theme color mapping (Rule 1) */
+    .ac-device-card.state-run.mode-cool .card-mode-text { color: var(--color-cool); }
+    .ac-device-card.state-run.mode-heat .card-mode-text { color: var(--color-heat); }
+    .ac-device-card.state-run.mode-fan .card-mode-text { color: var(--color-fan); }
+    .ac-device-card.state-run.mode-dry .card-mode-text { color: var(--color-dry); }
+    .ac-device-card.state-run.mode-auto .card-mode-text { color: var(--color-auto); }
+
+    /* Right Side: Temperature and settings */
+    .card-body-right {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      width: 55%;
+      gap: 1px;
+    }
+
+    .card-cur-temp {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #333333;
+    }
+    
+    .card-cur-temp span {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      font-weight: normal;
+    }
+
+    .card-set-temp {
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--text-muted);
+    }
+    
+    /* Set temperature color mapping (Rule 1) */
+    .ac-device-card.state-run.mode-cool .card-set-temp { color: var(--color-cool); }
+    .ac-device-card.state-run.mode-heat .card-set-temp { color: var(--color-heat); }
+    .ac-device-card.state-run.mode-fan .card-set-temp { color: var(--color-fan); }
+    .ac-device-card.state-run.mode-dry .card-set-temp { color: var(--color-dry); }
+    .ac-device-card.state-run.mode-auto .card-set-temp { color: var(--color-auto); }
+
+    .card-temp-range {
+      font-size: 0.62rem;
+      color: var(--text-muted);
+    }
+
+    .card-bottom-footer {
+      height: 24px;
+      background-color: #f8f9fa;
+      border-top: 1px solid var(--border-light);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #495057;
+    }
+
+    /* Lock Indicator (Rule 3: 자물쇠 모양 🔒) */
+    .card-lock-indicator {
+      font-size: 0.75rem;
+      display: none;
+      line-height: 1;
+    }
+
+    .ac-device-card.locked .card-lock-indicator {
+      display: inline-block;
+    }
+
+    .offline-overlay-shield {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(245, 246, 248, 0.75);
+      backdrop-filter: blur(1.5px);
+      z-index: 5;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .ac-device-card.state-offline .offline-overlay-shield {
+      display: flex;
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* Right Side Detail 제어 패널 */
+    /* ---------------------------------------------------------------- */
+    .detail-header {
+      padding: 15px;
+      border-bottom: 1px solid var(--border-light);
+    }
+
+    .detail-title {
+      font-size: 0.95rem;
+      font-weight: bold;
+      color: var(--text-dark);
+      margin-bottom: 4px;
+    }
+
+    .detail-subtitle {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .detail-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      border-bottom: 1px solid var(--border-light);
+      background-color: #fafafa;
+    }
+
+    .detail-tab {
+      text-align: center;
+      padding: 10px 0;
+      font-size: 0.82rem;
+      cursor: pointer;
+      color: var(--text-muted);
+      border-bottom: 2px solid transparent;
+      font-weight: 500;
+    }
+
+    .detail-tab.active {
+      color: var(--text-dark);
+      font-weight: bold;
+      border-bottom-color: var(--lg-magenta);
+      background-color: var(--white);
+    }
+
+    .detail-content {
+      padding: 15px;
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      flex: 1;
+    }
+
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .control-title-small {
+      font-size: 0.75rem;
+      font-weight: bold;
+      color: var(--text-muted);
+      text-transform: uppercase;
+    }
+
+    /* Segmented Action Buttons */
+    .btn-segments {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      background: #f1f3f7;
+      padding: 3px;
+      border-radius: 4px;
+      border: 1px solid var(--border-light);
+    }
+
+    .btn-segments.cols-5 {
+      grid-template-columns: repeat(5, 1fr);
+    }
+
+    .btn-segments.cols-4 {
+      grid-template-columns: repeat(4, 1fr);
+    }
+
+    .segment-btn {
+      background: none;
+      border: none;
+      padding: 6px 0;
+      font-size: 0.78rem;
+      font-weight: 500;
+      cursor: pointer;
+      color: var(--text-muted);
+      border-radius: 3px;
+      transition: all 0.15s ease;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+    }
+
+    .segment-btn.active {
+      background-color: var(--white);
+      color: var(--text-dark);
+      font-weight: bold;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    .segment-btn svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    /* Active mode coloring for 제어 패널 buttons (Rule 1) */
+    #det-mode-cool.active { color: var(--color-cool); border-bottom: 2px solid var(--color-cool); }
+    #det-mode-heat.active { color: var(--color-heat); border-bottom: 2px solid var(--color-heat); }
+    #det-mode-fan.active { color: var(--color-fan); border-bottom: 2px solid var(--color-fan); }
+    #det-mode-dry.active { color: var(--color-dry); border-bottom: 2px solid var(--color-dry); }
+    #det-mode-auto.active { color: var(--color-auto); border-bottom: 2px solid var(--color-auto); }
+
+    /* Temp Settings Controller (Rule 2) */
+    .temp-adjuster-card {
+      background: #f8f9fa;
+      border: 1px solid var(--border-light);
+      border-radius: 4px;
+      padding: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: opacity 0.2s ease;
+    }
+
+    .temp-adjuster-card.disabled {
+      opacity: 0.5;
+      background: #e9ecef;
+      pointer-events: none;
+    }
+
+    .temp-adjuster-display {
+      font-size: 1.6rem;
+      font-weight: 800;
+      color: var(--color-cool);
+      font-family: 'Outfit', sans-serif;
+    }
+    
+    .temp-adjuster-display.heating { color: var(--color-heat); }
+    .temp-adjuster-display.fan { color: var(--color-fan); }
+    .temp-adjuster-display.dry { color: var(--color-dry); }
+    .temp-adjuster-display.auto { color: var(--color-auto); }
+
+    .temp-adjuster-display span {
+      font-size: 1rem;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+
+    .temp-adjuster-buttons {
+      display: flex;
+      gap: 6px;
+    }
+
+    .temp-adjust-btn {
+      width: 32px;
+      height: 32px;
+      border: 1px solid var(--border-light);
+      background: var(--white);
+      border-radius: 3px;
+      cursor: pointer;
+      font-weight: bold;
+      font-size: 1rem;
+    }
+
+    .temp-adjust-btn:hover {
+      background-color: #f1f3f7;
+    }
+
+    .temp-adjust-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .temp-limits-display {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    /* Lock Option */
+    .lock-setting-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #fff8f8;
+      border: 1px dashed rgba(217, 28, 92, 0.3);
+      padding: 8px 12px;
+      border-radius: 4px;
+    }
+
+    .lock-setting-row .label {
+      font-size: 0.78rem;
+      font-weight: bold;
+      color: var(--lg-magenta);
+    }
+
+    /* Apply button at the bottom of the control panel */
+    .btn-apply-cmd {
+      background-color: #495057;
+      color: var(--white);
+      border: none;
+      padding: 12px;
+      border-radius: 4px;
+      font-weight: bold;
+      font-size: 0.85rem;
+      cursor: pointer;
+      margin-top: auto;
+      transition: background-color 0.2s ease;
+    }
+
+    .btn-apply-cmd:hover {
+      background-color: #343a40;
+    }
+
+    .btn-apply-cmd:active {
+      transform: scale(0.99);
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* Floating QA Simulator Drawer Panel */
+    /* ---------------------------------------------------------------- */
+    .qa-toggle-trigger {
+      position: fixed;
+      bottom: 20px;
+      right: 360px;
+      background: #1e293b;
+      color: #fbbf24;
+      border: 1px solid #334155;
+      padding: 10px 18px;
+      border-radius: 30px;
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-weight: bold;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+      z-index: 1000;
+      transition: all 0.2s ease;
+    }
+
+    .qa-toggle-trigger:hover {
+      transform: translateY(-2px);
+      background: #0f172a;
+    }
+
+    .qa-drawer {
+      position: fixed;
+      top: 55px;
+      right: -360px;
+      width: 350px;
+      height: calc(100vh - 55px);
+      background: #111827;
+      color: #f3f4f6;
+      border-left: 1px solid #1f2937;
+      box-shadow: -10px 0 30px rgba(0,0,0,0.25);
+      z-index: 999;
+      transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .qa-drawer.open {
+      right: 0;
+    }
+
+    .qa-drawer-header {
+      padding: 15px;
+      background: #1f2937;
+      border-bottom: 1px solid #374151;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .qa-drawer-title {
+      font-size: 0.9rem;
+      font-weight: bold;
+      color: #fbbf24;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .qa-drawer-close {
+      background: none;
+      border: none;
+      color: #9ca3af;
+      cursor: pointer;
+      font-size: 1.1rem;
+    }
+
+    .qa-drawer-content {
+      padding: 15px;
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    .qa-section {
+      background: #1f2937;
+      border: 1px solid #374151;
+      border-radius: 4px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .qa-section-title {
+      font-size: 0.78rem;
+      font-weight: bold;
+      color: #9ca3af;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border-bottom: 1px solid #374151;
+      padding-bottom: 6px;
+    }
+
+    .qa-btn {
+      background: #374151;
+      border: 1px solid #4b5563;
+      color: #f3f4f6;
+      padding: 6px 12px;
+      font-size: 0.78rem;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .qa-btn:hover {
+      background: #4b5563;
+    }
+
+    .qa-btn.danger {
+      background: rgba(239, 68, 68, 0.2);
+      border-color: rgba(239, 68, 68, 0.4);
+      color: #fca5a5;
+    }
+
+    .qa-btn.danger:hover {
+      background: rgba(239, 68, 68, 0.35);
+    }
+
+    .qa-btn.success {
+      background: rgba(34, 197, 94, 0.2);
+      border-color: rgba(34, 197, 94, 0.4);
+      color: #a7f3d0;
+    }
+
+    .qa-btn.success:hover {
+      background: rgba(34, 197, 94, 0.35);
+    }
+
+    .qa-flex-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .qa-flex-row .qa-btn {
+      flex: 1;
+    }
+
+    /* Live Alarm & Event Log Panel inside QA Panel */
+    .qa-log-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      border: 1px solid #374151;
+      border-radius: 4px;
+      overflow: hidden;
+      background: #0b0f19;
+    }
+
+    .qa-log-header {
+      background: #1f2937;
+      padding: 6px 10px;
+      font-size: 0.75rem;
+      font-weight: bold;
+      color: #f3f4f6;
+      border-bottom: 1px solid #374151;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .qa-log-list {
+      padding: 8px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      flex: 1;
+      font-family: 'Courier New', monospace;
+      font-size: 0.7rem;
+    }
+
+    .qa-log-item {
+      border-bottom: 1px solid #1f2937;
+      padding-bottom: 6px;
+      line-height: 1.3;
+    }
+
+    .qa-log-meta {
+      display: flex;
+      justify-content: space-between;
+      color: #6b7280;
+      margin-bottom: 2px;
+    }
+
+    .qa-log-src-sys { color: #60a5fa; }
+    .qa-log-src-loc { color: #f472b6; }
+    .qa-log-src-gtw { color: #fbbf24; }
+
+    .qa-log-text {
+      color: #d1d5db;
+    }
+
+    .qa-log-item.log-level-error .qa-log-text { color: #ef4444; }
+    .qa-log-item.log-level-warn .qa-log-text { color: #f59e0b; }
+
+    /* Toast elements */
+    .toast-box {
+      position: fixed;
+      top: 70px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-20px);
+      background-color: rgba(239, 68, 68, 0.95);
+      border: 1px solid #ef4444;
+      color: white;
+      padding: 10px 25px;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      font-weight: bold;
+      box-shadow: 0 10px 20px rgba(0,0,0,0.15);
+      z-index: 1100;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+
+    .toast-box.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    .toast-box.toast-warn {
+      background-color: rgba(245, 158, 11, 0.95);
+      border-color: #f59e0b;
+    }
+
+    /* Animation utility */
+    @keyframes blink {
+      from { opacity: 1; }
+      to { opacity: 0.4; }
+    }
+
+    /* AI Agent Control Tower Styles */
+    .tower-header {
+      margin-bottom: 10px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+      padding-bottom: 9px;
+    }
+
+    .tower-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.8rem;
+      font-weight: 800;
+      color: #fbbf24;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+    }
+
+    .tower-title-led {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #34d399;
+      box-shadow: 0 0 6px #34d399;
+      animation: ledPulse 2s infinite;
+      flex-shrink: 0;
+    }
+
+    @keyframes ledPulse {
+      0%, 100% { opacity: 1; box-shadow: 0 0 6px #34d399; }
+      50%       { opacity: 0.5; box-shadow: 0 0 2px #34d399; }
+    }
+
+    .tower-subtitle {
+      font-size: 0.62rem;
+      color: #64748b;
+      margin-top: 3px;
+      letter-spacing: 0.3px;
+    }
+
+    .tower-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(217, 28, 92, 0.12);
+      border: 1px solid rgba(217, 28, 92, 0.3);
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-size: 0.6rem;
+      color: #fb7185;
+      font-weight: 700;
+      margin-top: 4px;
+      letter-spacing: 0.3px;
+    }
+
+    /* Hierarchy Layout */
+    .tower-tree-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+      margin: 8px 0 6px;
+    }
+
+    .tower-node-row {
+      display: flex;
+      justify-content: space-around;
+      width: 100%;
+      position: relative;
+    }
+
+    .agent-branch-arrows {
+      width: 100%;
+      height: 32px;
+      margin: 0;
+      display: block;
+    }
+
+    /* Node circles */
+    .agent-circle-node {
+      position: relative;
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: linear-gradient(145deg, #1e293b, #0f172a);
+      border: 1.5px solid #334155;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.28s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      box-shadow: 0 3px 10px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06);
+    }
+
+    .agent-circle-node.lead-node {
+      width: 58px;
+      height: 58px;
+      background: linear-gradient(145deg, #1a0a1e, #0f0a1a);
+      border: 2px solid rgba(217, 28, 92, 0.7);
+      box-shadow: 0 0 16px rgba(217, 28, 92, 0.3), 0 4px 12px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05);
+      animation: leadPulse 3s infinite;
+    }
+
+    @keyframes leadPulse {
+      0%, 100% { box-shadow: 0 0 16px rgba(217, 28, 92, 0.3), 0 4px 12px rgba(0,0,0,0.4); }
+      50%       { box-shadow: 0 0 24px rgba(217, 28, 92, 0.55), 0 4px 12px rgba(0,0,0,0.4); }
+    }
+
+    .agent-circle-node:hover {
+      transform: scale(1.14) translateY(-2px);
+      border-color: #fbbf24;
+      box-shadow: 0 6px 18px rgba(251, 191, 36, 0.4), 0 0 0 2px rgba(251, 191, 36, 0.15);
+    }
+
+    .agent-circle-node.lead-node:hover {
+      transform: scale(1.1) translateY(-2px);
+      border-color: #d91c5c;
+      box-shadow: 0 0 28px rgba(217, 28, 92, 0.8), 0 6px 16px rgba(0,0,0,0.4);
+      animation: none;
+    }
+
+    .agent-circle-node.flashing {
+      animation: agentGlow 0.35s infinite alternate;
+    }
+
+    @keyframes agentGlow {
+      from {
+        box-shadow: 0 0 4px rgba(251, 191, 36, 0.2);
+        border-color: #475569;
+      }
+      to {
+        box-shadow: 0 0 22px rgba(251, 191, 36, 0.9), 0 0 8px rgba(251, 191, 36, 0.4);
+        border-color: #fbbf24;
+        background: linear-gradient(145deg, #2d3a1e, #1a2410);
+      }
+    }
+
+    /* Inline SVG style */
+    .agent-bot-svg {
+      width: 74%;
+      height: 74%;
+    }
+
+    /* Sticky note label style */
+    .agent-label-note {
+      position: absolute;
+      background: rgba(255,255,255,0.96);
+      color: #0f172a;
+      padding: 2px 6px;
+      font-size: 0.6rem;
+      font-weight: 900;
+      border: 1px solid rgba(203, 213, 225, 0.8);
+      border-radius: 3px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3), 0 1px 0 rgba(255,255,255,0.6) inset;
+      white-space: nowrap;
+      pointer-events: none;
+      font-family: 'Noto Sans KR', sans-serif;
+      letter-spacing: -0.3px;
+    }
+
+    .lead-node .agent-label-note {
+      bottom: -4px;
+      right: -22px;
+      transform: rotate(-5deg);
+      font-size: 0.68rem;
+      background: #fffbeb;
+      border-color: #fde68a;
+      color: #78350f;
+    }
+
+    .sub-node .agent-label-note {
+      bottom: -10px;
+      left: 50%;
+      transform: translateX(-50%) rotate(2.5deg);
+    }
+
+    /* Status text at bottom of control tower */
+    .tower-footer {
+      margin-top: 10px;
+      background: rgba(0, 0, 0, 0.25);
+      padding: 7px 10px;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      font-size: 0.68rem;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .tower-status-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: #64748b;
+    }
+
+    .tower-status-val {
+      color: #34d399;
+      font-weight: 700;
+      font-family: 'Outfit', monospace;
+      font-size: 0.72rem;
+    }
+
+    /* Modal Styles */
+    .agent-modal-backdrop {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(15, 23, 42, 0.75);
+      backdrop-filter: blur(4px);
+      z-index: 2000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+
+    .agent-modal-backdrop.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .agent-modal-card {
+      width: 600px;
+      max-height: 80vh;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transform: scale(0.9);
+      transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    .agent-modal-backdrop.show .agent-modal-card {
+      transform: scale(1);
+    }
+
+    .agent-modal-header {
+      padding: 14px 20px;
+      background: #0f172a;
+      border-bottom: 1px solid #334155;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .agent-modal-header h3 {
+      font-size: 0.95rem;
+      color: #f8fafc;
+      font-weight: bold;
+      margin: 0;
+    }
+
+    .agent-modal-close {
+      background: none;
+      border: none;
+      color: #94a3b8;
+      cursor: pointer;
+      font-size: 1.5rem;
+      line-height: 1;
+    }
+
+    .agent-modal-close:hover {
+      color: white;
+    }
+
+    .agent-modal-body {
+      padding: 20px;
+      overflow-y: auto;
+      flex: 1;
+      background: #111827;
+    }
+
+    .agent-tc-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.78rem;
+      color: #cbd5e1;
+    }
+
+    .agent-tc-table th, .agent-tc-table td {
+      border: 1px solid #374151;
+      padding: 8px 10px;
+      text-align: left;
+    }
+
+    .agent-tc-table th {
+      background: #1f2937;
+      color: #f3f4f6;
+      font-weight: bold;
+    }
+
+    .agent-tc-table tbody tr:hover {
+      background: #1f2937;
+    }
+  </style>
+</head>
+<body class="sidebar-collapsed">
+
+  <!-- Header -->
+  <header>
+    <div class="header-left">
+      <div class="header-logo">중앙제어 시스템</div>
+    </div>
+    <div class="header-right">
+      <div class="system-status-indicator">
+        <div class="status-item" onclick="toggleQADrawer()">
+          <div class="status-icon-triangle" id="hdr-device-err-icon"></div>
+          <span>장치 에러 <strong id="hdr-device-err-cnt">0</strong></span>
+        </div>
+        <div class="status-item" onclick="toggleQADrawer()">
+          <div class="status-icon-triangle" id="hdr-net-err-icon"></div>
+          <span>네트워크 에러 <strong id="hdr-net-err-cnt">0</strong></span>
+        </div>
+      </div>
+      <div class="header-time" id="live-clock">2023-08-02 12:27:00</div>
+      <button class="btn-help">도움말</button>
+    </div>
+  </header>
+
+  <!-- Left Icon Sidebar -->
+  <div class="icon-sidebar">
+    <div class="sidebar-icon-btn active" id="tab-control" onclick="switchSidebarTab('control')" title="장치 관제 및 제어">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 24px; height: 24px; margin-bottom: 4px;"><path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"/></svg>
+      <span>제어</span>
+    </div>
+    <div class="sidebar-icon-btn" id="tab-qa" onclick="switchSidebarTab('qa')" title="AI QA 거버넌스 컨트롤 타워">
+      <svg viewBox="0 0 100 100" style="width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 2.2; margin-bottom: 4px;">
+        <rect x="25" y="25" width="50" height="40" rx="6" fill="#fb7185" stroke="#fff" stroke-width="4.5" />
+        <circle cx="40" cy="45" r="4.5" fill="#fff" />
+        <circle cx="60" cy="45" r="4.5" fill="#fff" />
+        <line x1="50" y1="25" x2="50" y2="14" stroke="#fff" stroke-width="4" />
+        <circle cx="50" cy="10" r="3.5" fill="#fbbf24" />
+      </svg>
+      <span>자율 QA</span>
+    </div>
+    <div class="sidebar-icon-btn" id="tab-test-panel" onclick="toggleQADrawer()" title="QA 테스트 컨트롤러">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2" style="width:24px;height:24px;margin-bottom:4px;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01"/></svg>
+      <span>테스트</span>
+    </div>
+    <div class="sidebar-icon-btn" id="tab-simulator" onclick="toggleHwSimulator()" title="H/W Device Simulator">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:24px;height:24px;margin-bottom:4px;"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      <span>시뮬레이터</span>
+    </div>
+  </div>
+  
+  <script>
+    function toggleHwSimulator() {
+      const zone = document.getElementById('hardware-simulator-zone');
+      if (zone.style.display === 'none') {
+        zone.style.display = 'flex';
+      } else {
+        zone.style.display = 'none';
+      }
+    }
+  </script>
+
+  <!-- AI Agent Control Tower Embedded Grid Panel -->
+  <div class="qa-tower-panel collapsed">
+    <div class="tower-header">
+      <div class="tower-title">
+        <span class="tower-title-led"></span>
+        🤖 AI QA CONTROL TOWER
+      </div>
+      <div class="tower-subtitle">Autonomous 4-Agent Governance Pipeline</div>
+      <div class="tower-badge">▲ QA ARCHITECT · Oh Se-hun</div>
+    </div>
+    
+    <div class="tower-tree-container">
+      <!-- Lead Node (팀장) -->
+      <div class="agent-circle-node lead-node" id="agent-lead-btn" onclick="runMasterQASequence(event)" title="팀장 전체 자율 구동">
+        <!-- Cute Robot Icon SVG -->
+        <svg class="agent-bot-svg" viewBox="0 0 100 100">
+          <rect x="25" y="25" width="50" height="40" rx="4" fill="#E07A5F" />
+          <rect x="17" y="37" width="8" height="16" rx="2" fill="#E07A5F" />
+          <rect x="75" y="37" width="8" height="16" rx="2" fill="#E07A5F" />
+          <path d="M37 42 L43 45 L37 48" stroke="#110d1f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+          <path d="M63 42 L57 45 L63 48" stroke="#110d1f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+          <rect x="33" y="65" width="8" height="10" fill="#E07A5F" />
+          <rect x="46" y="65" width="8" height="10" fill="#E07A5F" />
+          <rect x="59" y="65" width="8" height="10" fill="#E07A5F" />
+        </svg>
+        <div class="agent-label-note">팀장</div>
+      </div>
+      
+      <!-- Branch arrows SVG with gradient + numbered stops -->
+      <svg class="agent-branch-arrows" viewBox="0 0 260 36">
+        <defs>
+          <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(148,163,184,0.6)" />
+          </marker>
+          <linearGradient id="lineGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="rgba(217,28,92,0.6)" />
+            <stop offset="100%" stop-color="rgba(148,163,184,0.3)" />
+          </linearGradient>
+        </defs>
+        <line x1="130" y1="0" x2="30" y2="32" stroke="rgba(148,163,184,0.35)" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow2)" />
+        <line x1="130" y1="0" x2="95" y2="32" stroke="rgba(148,163,184,0.35)" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow2)" />
+        <line x1="130" y1="0" x2="165" y2="32" stroke="rgba(148,163,184,0.35)" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow2)" />
+        <line x1="130" y1="0" x2="230" y2="32" stroke="rgba(148,163,184,0.35)" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow2)" />
+        <circle cx="30" cy="32" r="0" />
+      </svg>
+      
+      <!-- Sub-nodes (Agent 1-4) -->
+      <div class="tower-node-row">
+        <div class="agent-circle-node sub-node" id="agent-1-btn" onclick="runAgent1Action(event)" title="에이전트 1번 (요구사항 정리)">
+          <svg class="agent-bot-svg" viewBox="0 0 100 100">
+            <rect x="25" y="25" width="50" height="40" rx="4" fill="#818cf8" />
+            <rect x="17" y="37" width="8" height="16" rx="2" fill="#818cf8" />
+            <rect x="75" y="37" width="8" height="16" rx="2" fill="#818cf8" />
+            <path d="M37 42 L43 45 L37 48" stroke="#110d1f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+            <path d="M63 42 L57 45 L63 48" stroke="#110d1f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+            <rect x="33" y="65" width="8" height="10" fill="#818cf8" />
+            <rect x="46" y="65" width="8" height="10" fill="#818cf8" />
+            <rect x="59" y="65" width="8" height="10" fill="#818cf8" />
+          </svg>
+          <div class="agent-label-note">요구사항 정제</div>
+        </div>
+        
+        <div class="agent-circle-node sub-node" id="agent-2-btn" onclick="runAgent2Action(event)" title="에이전트 2번 (품질 체크리스트)">
+          <svg class="agent-bot-svg" viewBox="0 0 100 100">
+            <rect x="25" y="25" width="50" height="40" rx="4" fill="#fb7185" />
+            <rect x="17" y="37" width="8" height="16" rx="2" fill="#fb7185" />
+            <rect x="75" y="37" width="8" height="16" rx="2" fill="#fb7185" />
+            <path d="M37 42 L43 45 L37 48" stroke="#110d1f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+            <path d="M63 42 L57 45 L63 48" stroke="#110d1f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+            <rect x="33" y="65" width="8" height="10" fill="#fb7185" />
+            <rect x="46" y="65" width="8" height="10" fill="#fb7185" />
+            <rect x="59" y="65" width="8" height="10" fill="#fb7185" />
+          </svg>
+          <div class="agent-label-note">TC 설계</div>
+        </div>
+        
+        <div class="agent-circle-node sub-node" id="agent-3-btn" onclick="runAgent3Action(event)" title="에이전트 3번 (자동화 테스트)">
+          <svg class="agent-bot-svg" viewBox="0 0 100 100">
+            <rect x="25" y="25" width="50" height="40" rx="4" fill="#34d399" />
+            <rect x="17" y="37" width="8" height="16" rx="2" fill="#34d399" />
+            <rect x="75" y="37" width="8" height="16" rx="2" fill="#34d399" />
+            <path d="M37 42 L43 45 L37 48" stroke="#110d1f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+            <path d="M63 42 L57 45 L63 48" stroke="#110d1f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+            <rect x="33" y="65" width="8" height="10" fill="#34d399" />
+            <rect x="46" y="65" width="8" height="10" fill="#34d399" />
+            <rect x="59" y="65" width="8" height="10" fill="#34d399" />
+          </svg>
+          <div class="agent-label-note">자동화 실행</div>
+        </div>
+        
+        <div class="agent-circle-node sub-node" id="agent-4-btn" onclick="runAgent4Action(event)" title="에이전트 4번 (결과 분석·보고)">
+          <svg class="agent-bot-svg" viewBox="0 0 100 100">
+            <rect x="25" y="25" width="50" height="40" rx="4" fill="#fbbf24" />
+            <rect x="17" y="37" width="8" height="16" rx="2" fill="#fbbf24" />
+            <rect x="75" y="37" width="8" height="16" rx="2" fill="#fbbf24" />
+            <path d="M37 42 L43 45 L37 48" stroke="#110d1f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+            <path d="M63 42 L57 45 L63 48" stroke="#110d1f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+            <rect x="33" y="65" width="8" height="10" fill="#fbbf24" />
+            <rect x="46" y="65" width="8" height="10" fill="#fbbf24" />
+            <rect x="59" y="65" width="8" height="10" fill="#fbbf24" />
+          </svg>
+          <div class="agent-label-note">결과 분석·보고</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tower-footer">
+      <div class="tower-status-row">
+        <span>컨트롤러 상태</span>
+        <span class="tower-status-val" id="tower-status-val">● 대기 중</span>
+      </div>
+      <div class="tower-status-row" style="border-top: 1px solid rgba(255,255,255,0.05); padding-top:5px; margin-top:1px;">
+        <span>자동화 가드레일</span>
+        <span style="color:#e2e8f0; font-weight:700; font-family:'Outfit',monospace; font-size:0.72rem;" id="tower-guardrail-val">● 활성화</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dashboard Main Workspace (장치 카드 뷰) -->
+  <div class="dashboard-main">
+    <div class="breadcrumb-row" style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+      <span>장치 제어 &gt; 중앙제어 시스템</span>
+      
+      <!-- B2B Real Enterprise System Controls -->
+      <div style="display:flex; gap:12px; align-items:center; user-select:none;">
+        
+
+        <!-- Temp Unit Selector -->
+        <div style="display:flex; align-items:center; background:#1e293b; border:1px solid #334155; border-radius:6px; padding:2px; font-size:0.7rem; font-family:'Noto Sans KR',sans-serif;">
+          <span style="color:#94a3b8; padding:0 8px; font-weight:700;">🌡️ 단위</span>
+          <button id="unit-c-btn" class="unit-segment-btn active" onclick="switchTempUnit('C')" style="background:#0284c7; border:none; color:white; border-radius:4px; padding:3px 8px; cursor:pointer; font-weight:700; transition:all 0.2s; font-size:0.66rem;">°C</button>
+          <button id="unit-f-btn" class="unit-segment-btn" onclick="switchTempUnit('F')" style="background:transparent; border:none; color:#64748b; border-radius:4px; padding:3px 8px; cursor:pointer; font-weight:700; transition:all 0.2s; font-size:0.66rem;">°F</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Active running progress overview panel -->
+    <div class="status-overview-panel">
+      <div class="overview-header">
+        <span class="label">현재 운전 현황</span>
+        <div class="overview-legends">
+          <div class="legend-item">
+            <span class="legend-dot run"></span>
+            <span>운전 (<strong id="overview-run-cnt">0</strong>)</span>
+          </div>
+          <div class="legend-item">
+            <span class="legend-dot stop"></span>
+            <span>정지 (<strong id="overview-stop-cnt">0</strong>)</span>
+          </div>
+          <div class="legend-item">
+            <span class="legend-dot error"></span>
+            <span>에러 (<strong id="overview-error-cnt">0</strong>)</span>
+          </div>
+        </div>
+      </div>
+      <div class="progress-bar-container">
+        <div class="progress-bar-segment run" id="prog-run-segment" style="width: 0%"></div>
+        <div class="progress-bar-segment stop" id="prog-stop-segment" style="width: 100%"></div>
+        <div class="progress-bar-segment error" id="prog-err-segment" style="width: 0%"></div>
+      </div>
+    </div>
+
+    <!-- Filter Toolbar -->
+    <div class="filter-toolbar">
+      <div class="filter-left">
+        <select class="filter-select">
+          <option>모든 장치/상태</option>
+        </select>
+        
+        
+      </div>
+      <button class="btn-multi-select" id="btn-multi-select-trigger" onclick="toggleMultiSelectMode()">
+        <input type="checkbox" id="chk-multi-select" style="cursor:pointer;" onchange="toggleMultiSelectMode(this.checked); event.stopPropagation();">
+        <span>복수선택</span>
+      </button>
+    </div>
+
+    <!-- Device Cards Grid -->
+    <div class="device-grid" id="ac-grid-container">
+      <!-- Cards will load dynamically via JS -->
+    </div>
+  </div>
+
+  <!-- Right Detail 제어 패널 (Control Panel) -->
+  <div class="detail-panel" style="position:relative;">
+    <!-- Viewer Warning Overlay -->
+    <div id="viewer-warning-overlay" style="display:none; position:absolute; top:88px; left:0; right:0; bottom:0; background:rgba(15,23,42,0.85); backdrop-filter:blur(3px); z-index:50; flex-direction:column; justify-content:center; align-items:center; text-align:center; padding:20px; box-sizing:border-box; border-radius:0 0 12px 12px; transition: all 0.3s ease;">
+      <div style="font-size:2rem; margin-bottom:10px;">🔒</div>
+      <div style="color:#fb7185; font-size:0.78rem; font-weight:700; margin-bottom:4px;">뷰어 권한 전용 (Viewer Mode)</div>
+      <div style="color:#94a3b8; font-size:0.68rem; line-height:1.5;">모니터링 기능만 허용됩니다.<br>제어 명령 변경 권한이 차단되었습니다.</div>
+    </div>
+
+    <div class="detail-header">
+      <div class="detail-title" id="det-unit-name">선택된 장치 없음</div>
+      <div class="detail-subtitle" id="det-unit-info" style="display:none;">장치 카드를 그리드에서 선택해 주세요.</div>
+    </div>
+    
+    <div class="detail-tabs">
+      <div class="detail-tab active">제어</div>
+      <div class="detail-tab">장치정보</div>
+    </div>
+
+    <div class="detail-content" id="det-control-section" style="pointer-events: none; opacity: 0.5;">
+      <!-- Power State -->
+      <div class="control-group">
+        <div class="control-title-small">동작 상태</div>
+        <div class="btn-segments">
+          <button class="segment-btn" id="det-power-on-btn" onclick="setPanelPower('OPERATION')">운전</button>
+          <button class="segment-btn" id="det-power-off-btn" onclick="setPanelPower('STOP')">정지</button>
+        </div>
+      </div>
+
+      <!-- Mode (Rule 1: 냉방-파란색, 난방-주황색, 송풍-초록색, 제습-네이비색, 자동-보라색) -->
+      <div class="control-group">
+        <div class="control-title-small">운전 모드</div>
+        <div class="btn-segments cols-5">
+          <button class="segment-btn" id="det-mode-cool" onclick="setPanelMode('COOL')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h20M12 2v20M20 8l-4 4 4 4M4 8l4 4-4 4M8 4l4 4 4-4M8 20l4-4 4 4"/></svg>
+            냉방
+          </button>
+          <button class="segment-btn" id="det-mode-heat" onclick="setPanelMode('HEAT')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v10M18 8l-6 6-6-6M12 22v-6"/></svg>
+            난방
+          </button>
+          <button class="segment-btn" id="det-mode-fan" onclick="setPanelMode('FAN')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3v9M12 12l6 6M12 12L6 18"/></svg>
+            송풍
+          </button>
+          <button class="segment-btn" id="det-mode-dry" onclick="setPanelMode('DRY')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22a7 7 0 0 0 7-7c0-4.3-7-13-7-13S5 10.7 5 15a7 7 0 0 0 7 7z"/></svg>
+            제습
+          </button>
+          <button class="segment-btn" id="det-mode-auto" onclick="setPanelMode('AUTO')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+            자동
+          </button>
+        </div>
+      </div>
+
+      <!-- Temperature Settings (Rule 2: 송풍/제습 시 비활성화) -->
+      <div class="control-group">
+        <div class="control-title-small">설정 온도</div>
+        <div class="temp-adjuster-card" id="det-temp-adjust-card">
+          <div class="temp-adjuster-display" id="det-temp-display">20.0<span>°C</span></div>
+          <div class="temp-adjuster-buttons">
+            <button class="temp-adjust-btn" id="det-temp-down-btn" onclick="adjustPanelTemp(-1)">-</button>
+            <button class="temp-adjust-btn" id="det-temp-up-btn" onclick="adjustPanelTemp(1)">+</button>
+          </div>
+        </div>
+        <div class="temp-limits-display" id="det-temp-limit-text">제한 온도: 16.0 ~ 30.0 (°C)</div>
+      </div>
+
+      <!-- Fan Speed -->
+      <div class="control-group">
+        <div class="control-title-small">풍량</div>
+        <div class="btn-segments cols-4">
+          <button class="segment-btn" id="det-fan-low" onclick="setPanelFan('LOW')">약풍</button>
+          <button class="segment-btn" id="det-fan-med" onclick="setPanelFan('MED')">중풍</button>
+          <button class="segment-btn" id="det-fan-high" onclick="setPanelFan('HIGH')">강풍</button>
+          <button class="segment-btn" id="det-fan-auto" onclick="setPanelFan('AUTO')">자동</button>
+        </div>
+      </div>
+
+      <!-- Lock configuration on Dashboard -->
+      <div class="control-group">
+        <div class="control-title-small">잠금</div>
+        <div class="btn-segments cols-2">
+          <button class="segment-btn" id="det-lock-on-btn" onclick="setPanelLock(true)">설정</button>
+          <button class="segment-btn" id="det-lock-off-btn" onclick="setPanelLock(false)">해제</button>
+        </div>
+      </div>
+
+      <!-- Air Purify Dynamic Control Point -->
+      <div class="control-group" id="det-purify-group" style="display: none; border: 1px dashed rgba(251, 113, 133, 0.4); padding: 10px; border-radius: 8px; background: rgba(251, 113, 133, 0.03); margin-top: 10px; transition: all 0.3s ease;">
+        <div class="control-title-small" style="color: #fb7185; display: flex; align-items: center; gap: 5px;">
+          <span>✨</span> 공기청정 기능 (확장 관제점)
+        </div>
+        <div class="lock-setting-row">
+          <span class="label">공기청정 운전</span>
+          <div class="btn-segments" style="width: 140px;">
+            <button class="segment-btn" id="det-purify-on-btn" onclick="setPanelPurify(true)">켜짐</button>
+            <button class="segment-btn active" id="det-purify-off-btn" onclick="setPanelPurify(false)">꺼짐</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Apply Button -->
+      <button class="btn-apply-cmd" onclick="applyPanelCommands()">적용</button>
+    </div>
+  </div>
+
+
+
+  <!-- QA Simulator Drawer -->
+  <div class="qa-drawer" id="qa-drawer-panel">
+    <div class="qa-drawer-header">
+      <div class="qa-drawer-title">
+        <span>⚙️</span> 가상 관제 시스템 Closed-Loop QA 도구
+      </div>
+      <button class="qa-drawer-close" onclick="toggleQADrawer(false)">×</button>
+    </div>
+    
+    <div class="qa-drawer-content">
+      
+      <!-- Network Gateway Control -->
+      <div class="qa-section">
+        <div class="qa-section-title">게이트웨이 통신 상태</div>
+        <div class="qa-flex-row">
+          <button class="qa-btn success" onclick="setGatewayState(true)">온라인 (Online)</button>
+          <button class="qa-btn danger" onclick="setGatewayState(false)">오프라인 (Offline)</button>
+        </div>
+      </div>
+
+      <!-- Unit Specific Fault Injector -->
+      <div class="qa-section">
+        <div class="qa-section-title">물리 에러 강제 주입 (선택 기기 대상)</div>
+        <div class="qa-flex-row">
+          <button class="qa-btn danger" onclick="injectSelectedError('CH05')">CH05 과열 에러</button>
+          <button class="qa-btn danger" onclick="injectSelectedError('CH21')">CH21 냉매 누설</button>
+        </div>
+        <button class="qa-btn success" onclick="clearSelectedError()" style="width: 100%;">에러 정상 해제 (Clear)</button>
+      </div>
+
+      <!-- Local Remote Controller simulator -->
+      <div class="qa-section">
+        <div class="qa-section-title">현장 벽면 물리 리모컨 조작 시뮬레이터</div>
+        <div class="qa-flex-row">
+          <button class="qa-btn" onclick="simulateLocalPower()">물리 전원 토글</button>
+        </div>
+        <div class="qa-flex-row">
+          <button class="qa-btn" onclick="simulateLocalTemp(-1)">현장 온도 -</button>
+          <button class="qa-btn" onclick="simulateLocalTemp(1)">현장 온도 +</button>
+        </div>
+      </div>
+
+      <!-- Reset Simulator State -->
+      <div class="qa-section">
+        <div class="qa-section-title">시뮬레이터 설정 초기화</div>
+        <button class="qa-btn danger" onclick="resetSimulatorState()" style="width: 100%;">기기 설정 전체 초기화 (Reset)</button>
+      </div>
+
+      <!-- Realtime Event and QA validation log -->
+      <div class="qa-log-panel">
+        <div class="qa-log-header">
+          <span>실시간 알람 & 트랜잭션 이벤트 로그</span>
+          <span style="cursor: pointer; text-decoration: underline;" onclick="clearLogs()">Clear</span>
+        </div>
+        <div class="qa-log-list" id="qa-log-container">
+          <!-- Live logs populate here -->
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Alert Dialog Box (Toast) -->
+  <div class="toast-box" id="global-toast">경고 메시지</div>
+
+  <!-- ================================================================ -->
+  <!-- H/W Device Simulator Memory View                                  -->
+  <!-- ================================================================ -->
+  <div id="hardware-simulator-zone">
+    <div class="hw-zone-header">
+      <span style="font-size:13px;">🖥️</span>
+      <span class="hw-zone-header-title">H/W Device Simulator — Register Memory View</span>
+      <span class="hw-zone-header-badge">BASE ADDR: 0xA000</span>
+      <span class="hw-zone-header-badge">PROTOCOL: Simulated Register Model</span>
+      <span class="hw-zone-header-badge" id="hw-last-sync-badge">대기 중...</span>
+      <span class="hw-zone-header-sync">
+        <span class="hw-sync-dot"></span>
+        LIVE SYNC
+      </span>
+    </div>
+    <div class="hw-register-scroll" id="hw-register-scroll">
+      <!-- 16개 장치 레지스터 블록은 JS initHardwareView()가 렌더링 -->
+    </div>
+  </div>
+
+  <!-- Business Logic script -->
+  <script>
+    // 16 Indoor Units Mock DB (IDU-00 to IDU-15)
+    const devices = [
+      { id: 1, name: 'IDU-00', status: 'STOP', currentTemp: 25.0, setTemp: 24, mode: 'COOL', fanSpeed: 'LOW', locked: false, errorCode: null },
+      { id: 2, name: 'IDU-01', status: 'STOP', currentTemp: 25.0, setTemp: 24, mode: 'COOL', fanSpeed: 'LOW', locked: false, errorCode: null },
+      { id: 3, name: 'IDU-02', status: 'STOP', currentTemp: 25.0, setTemp: 24, mode: 'COOL', fanSpeed: 'LOW', locked: false, errorCode: null },
+      { id: 4, name: 'IDU-03', status: 'STOP', currentTemp: 25.0, setTemp: 24, mode: 'COOL', fanSpeed: 'LOW', locked: false, errorCode: null },
+      { id: 5, name: 'IDU-04', status: 'STOP', currentTemp: 25.0, setTemp: 24, mode: 'COOL', fanSpeed: 'LOW', locked: false, errorCode: null },
+      { id: 6, name: 'IDU-05', status: 'STOP', currentTemp: 25.0, setTemp: 24, mode: 'COOL', fanSpeed: 'LOW', locked: false, errorCode: null },
+      { id: 7, name: 'IDU-06', status: 'STOP', currentTemp: 25.0, setTemp: 24, mode: 'COOL', fanSpeed: 'LOW', locked: false, errorCode: null },
+      { id: 8, name: 'IDU-07', status: 'STOP', currentTemp: 25.0, setTemp: 24, mode: 'COOL', fanSpeed: 'LOW', locked: false, errorCode: null },
+      { id: 9, name: 'IDU-08', status: 'STOP', currentTemp: 25.0, setTemp: 24, mode: 'COOL', fanSpeed: 'LOW', locked: false, errorCode: null },
+      { id: 10, name: 'IDU-09', status: 'STOP', currentTemp: 25.0, setTemp: 24, mode: 'COOL', fanSpeed: 'LOW', locked: false, errorCode: null },
+      { id: 11, name: 'IDU-10', status: 'STOP', currentTemp: 25.0, setTemp: 24, mode: 'COOL', fanSpeed: 'LOW', locked: false, errorCode: null },
+      { id: 12, name: 'IDU-11', status: 'STOP', currentTemp: 25.0, setTemp: 24, mode: 'COOL', fanSpeed: 'LOW', locked: false, errorCode: null },
+      { id: 13, name: 'IDU-12', status: 'STOP', currentTemp: 25.0, setTemp: 24, mode: 'COOL', fanSpeed: 'LOW', locked: false, errorCode: null },
+      { id: 14, name: 'IDU-13', status: 'STOP', currentTemp: 25.0, setTemp: 24, mode: 'COOL', fanSpeed: 'LOW', locked: false, errorCode: null },
+      { id: 15, name: 'IDU-14', status: 'STOP', currentTemp: 25.0, setTemp: 24, mode: 'COOL', fanSpeed: 'LOW', locked: false, errorCode: null },
+      { id: 16, name: 'IDU-15', status: 'STOP', currentTemp: 25.0, setTemp: 24, mode: 'COOL', fanSpeed: 'LOW', locked: false, errorCode: null }
+    ];
+
+    let selectedUnitId = 4;
+    let selectedUnitIds = [4];
+    let isMultiSelectMode = false;
+    let isGatewayOnline = true;
+    let currentUserRole = 'ADMIN'; // ADMIN or VIEWER
+    let currentTempUnit = 'C';     // C or F
+    let pendingState = {}; // holds unsaved state in the right-hand 제어 패널 before clicking "적용"
+
+    // Live clock updater
+    setInterval(() => {
+      const now = new Date();
+      const yr = now.getFullYear();
+      const mo = String(now.getMonth() + 1).padStart(2, '0');
+      const dy = String(now.getDate()).padStart(2, '0');
+      const hr = String(now.getHours()).padStart(2, '0');
+      const mn = String(now.getMinutes()).padStart(2, '0');
+      const sc = String(now.getSeconds()).padStart(2, '0');
+      document.getElementById('live-clock').innerText = `${yr}-${mo}-${dy} ${hr}:${mn}:${sc}`;
+    }, 1000);
+
+    // Toast Alert Notification Box
+    function showToast(msg, isWarn = false) {
+      const toast = document.getElementById('global-toast');
+      toast.innerText = msg;
+      if (isWarn) {
+        toast.classList.add('toast-warn');
+      } else {
+        toast.classList.remove('toast-warn');
+      }
+      toast.classList.add('show');
+      setTimeout(() => {
+        toast.classList.remove('show');
+      }, 3000);
+    }
+
+    // ── B2B 실무용 권한 및 온도 단위 제어 ────────────────────────────────
+    function switchUserRole(role) {
+      currentUserRole = role;
+      const adminBtn = document.getElementById('role-admin-btn');
+      const viewerBtn = document.getElementById('role-viewer-btn');
+      const warningOverlay = document.getElementById('viewer-warning-overlay');
+
+      if (role === 'ADMIN') {
+        adminBtn.style.background = '#4f46e5';
+        adminBtn.style.color = 'white';
+        adminBtn.classList.add('active');
+        
+        viewerBtn.style.background = 'transparent';
+        viewerBtn.style.color = '#64748b';
+        viewerBtn.classList.remove('active');
+        
+        warningOverlay.style.display = 'none';
+        appendQALog('SYSTEM', '[권한 세션 변경] Admin 권한 전환 -> 원격 제어 가드레일 해제 (제어 가능)', 'info');
+        showToast('관리자 권한 전환 완료', false);
+      } else {
+        adminBtn.style.background = 'transparent';
+        adminBtn.style.color = '#64748b';
+        adminBtn.classList.remove('active');
+        
+        viewerBtn.style.background = '#fb7185';
+        viewerBtn.style.color = 'white';
+        viewerBtn.classList.add('active');
+        
+        warningOverlay.style.display = 'flex';
+        appendQALog('SYSTEM', '[권한 세션 변경] Viewer 권한 전환 -> 원격 제어 차단 가드레일 활성화 (조회만 허용)', 'info');
+        showToast('뷰어 권한 전환 완료 (제어 차단)', false);
+      }
+      
+      if (window.__vccs) {
+        window.__vccs.currentUserRole = currentUserRole;
+      }
+    }
+
+    function switchTempUnit(unit) {
+      currentTempUnit = unit;
+      const cBtn = document.getElementById('unit-c-btn');
+      const fBtn = document.getElementById('unit-f-btn');
+
+      if (unit === 'C') {
+        cBtn.style.background = '#0284c7';
+        cBtn.style.color = 'white';
+        cBtn.classList.add('active');
+        
+        fBtn.style.background = 'transparent';
+        fBtn.style.color = '#64748b';
+        fBtn.classList.remove('active');
+      } else {
+        cBtn.style.background = 'transparent';
+        cBtn.style.color = '#64748b';
+        cBtn.classList.remove('active');
+        
+        fBtn.style.background = '#0284c7';
+        fBtn.style.color = 'white';
+        fBtn.classList.add('active');
+      }
+      
+      appendQALog('SYSTEM', `[온도 단위 변환] 설정 단위를 ${unit === 'C' ? '섭씨(°C)' : '화씨(°F)'} 단위로 변경합니다.`, 'info');
+      showToast(`온도 단위 ${unit === 'C' ? '섭씨(°C)' : '화씨(°F)'}로 전환 완료`, false);
+
+      renderGrid();
+      updatePanelUI();
+
+      if (window.__vccs) {
+        window.__vccs.currentTempUnit = currentTempUnit;
+      }
+    }
+
+    // QA Logger (within 500ms criteria, executed at 50ms)
+    function appendQALog(source, message, level = 'info') {
+      setTimeout(() => {
+        const logContainer = document.getElementById('qa-log-container');
+        const now = new Date();
+        const timestamp = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
+        
+        let srcClass = 'qa-log-src-sys';
+        if (source === 'LOCAL') srcClass = 'qa-log-src-loc';
+        if (source === 'GATEWAY') srcClass = 'qa-log-src-gtw';
+        
+        const logItem = document.createElement('div');
+        logItem.className = `qa-log-item log-level-${level}`;
+        logItem.innerHTML = `
+          <div class="qa-log-meta">
+            <span class="${srcClass}">[${source}]</span>
+            <span>${timestamp}</span>
+          </div>
+          <div class="qa-log-text">${message}</div>
+        `;
+        
+        logContainer.insertBefore(logItem, logContainer.firstChild);
+      }, 50);
+    }
+
+    function clearLogs() {
+      document.getElementById('qa-log-container').innerHTML = '';
+    }
+
+    // LocalStorage State Persistence Utilities
+    function saveStateToLocalStorage() {
+      localStorage.setItem('vccs_simulator_devices', JSON.stringify(devices));
+      localStorage.setItem('vccs_simulator_gateway', JSON.stringify(isGatewayOnline));
+      localStorage.setItem('vccs_simulator_selected_ids', JSON.stringify(selectedUnitIds));
+      localStorage.setItem('vccs_simulator_multiselect', JSON.stringify(isMultiSelectMode));
+    }
+
+    function resetSimulatorState() {
+      if (confirm('모든 장치 카드의 관제점 설정값과 변경 사항을 초기화하시겠습니까?')) {
+        localStorage.removeItem('vccs_simulator_devices');
+        localStorage.removeItem('vccs_simulator_gateway');
+        localStorage.removeItem('vccs_simulator_selected_ids');
+        localStorage.removeItem('vccs_simulator_multiselect');
+        location.reload();
+      }
+    }
+
+    // Multi-Select Mode toggler
+    function toggleMultiSelectMode(explicitValue = null) {
+      const chk = document.getElementById('chk-multi-select');
+      const btn = document.getElementById('btn-multi-select-trigger');
+      
+      if (explicitValue !== null) {
+        chk.checked = explicitValue;
+      } else {
+        chk.checked = !chk.checked;
+      }
+      
+      isMultiSelectMode = chk.checked;
+      
+      if (isMultiSelectMode) {
+        btn.classList.add('active');
+        appendQALog('SYSTEM', '복수 선택 모드 활성화됨', 'info');
+      } else {
+        btn.classList.remove('active');
+        appendQALog('SYSTEM', '복수 선택 모드 비활성화됨 (단일 선택 모드 전환)', 'info');
+        
+        if (selectedUnitIds.length > 1) {
+          const keepId = selectedUnitIds[selectedUnitIds.length - 1];
+          selectedUnitIds.forEach(uid => {
+            if (uid !== keepId) {
+              const c = document.getElementById(`device-card-${uid}`);
+              if (c) c.classList.remove('selected');
+            }
+          });
+          selectedUnitIds = [keepId];
+          selectedUnitId = keepId;
+        }
+      }
+      
+      updatePanelUI();
+      saveStateToLocalStorage();
+    }
+
+    // Toggle QA Controller Sidebar Panel
+    function toggleQADrawer(open) {
+      const drawer = document.getElementById('qa-drawer-panel');
+      if (open === undefined) {
+        drawer.classList.toggle('open');
+      } else if (open) {
+        drawer.classList.add('open');
+      } else {
+        drawer.classList.remove('open');
+      }
+    }
+
+    // Initialize Devices Grid (장치 카드 렌더링)
+    function renderGrid() {
+      const grid = document.getElementById('ac-grid-container');
+      grid.innerHTML = '';
+      
+      devices.forEach(device => {
+        const card = document.createElement('div');
+        card.id = `device-card-${device.id}`;
+        
+        // Mode classes mapping (Rule 1)
+        let modeClass = '';
+        let modeIcon = '❄️';
+        let modeText = '냉방';
+        
+        if (device.mode === 'COOL') { modeClass = 'mode-cool'; modeIcon = '❄️'; modeText = '냉방'; }
+        if (device.mode === 'HEAT') { modeClass = 'mode-heat'; modeIcon = '☀️'; modeText = '난방'; }
+        if (device.mode === 'FAN') { modeClass = 'mode-fan'; modeIcon = '🌀'; modeText = '송풍'; }
+        if (device.mode === 'DRY') { modeClass = 'mode-dry'; modeIcon = '💧'; modeText = '제습'; }
+        if (device.mode === 'AUTO') { modeClass = 'mode-auto'; modeIcon = '🤖'; modeText = '자동'; }
+
+        card.className = `ac-device-card ${modeClass}`;
+        
+        // Power/Status classes
+        if (device.status === 'OPERATION') card.classList.add('state-run');
+        if (device.status === 'STOP') card.classList.add('state-stop');
+        if (device.status === 'ERROR') card.classList.add('state-error');
+        if (device.status === 'OFFLINE') card.classList.add('state-offline');
+        
+        if (device.locked) card.classList.add('locked');
+        if (device.id === selectedUnitId) card.classList.add('selected');
+        
+        // Temperature display value (Rule 2: 송풍/제습 시 설정온도는 비활성)
+        const isTempDisabled = (device.mode === 'FAN' || device.mode === 'DRY');
+        let displaySetTempText = '';
+        let displayCurTempText = '';
+        let tempRangeText = '';
+        
+        if (currentTempUnit === 'C') {
+          displaySetTempText = isTempDisabled ? '--' : `${device.setTemp.toFixed(1)}°C`;
+          displayCurTempText = `${device.currentTemp.toFixed(1)}<span>°C</span>`;
+          tempRangeText = '16.0 ~ 30.0';
+        } else {
+          const setF = Math.round(device.setTemp * 1.8 + 32);
+          const curF = Math.round(device.currentTemp * 1.8 + 32);
+          displaySetTempText = isTempDisabled ? '--' : `${setF}°F`;
+          displayCurTempText = `${curF}<span>°F</span>`;
+          tempRangeText = '61 ~ 86';
+        }
+        
+        const tempClass = isTempDisabled ? 'disabled' : '';
+
+        // Fan Speed HTML representation (약풍/중풍/강풍/자동)
+        let fanSpeedHtml = '';
+        if (device.fanSpeed === 'LOW') {
+          fanSpeedHtml = `
+            <div class="fan-speed-indicator">
+              <div class="speed-bars-mini speed-low">
+                <span class="speed-bar-dot"></span>
+                <span class="speed-bar-dot"></span>
+                <span class="speed-bar-dot"></span>
+              </div>
+              <span>약풍</span>
+            </div>
+          `;
+        } else if (device.fanSpeed === 'MED') {
+          fanSpeedHtml = `
+            <div class="fan-speed-indicator">
+              <div class="speed-bars-mini speed-med">
+                <span class="speed-bar-dot"></span>
+                <span class="speed-bar-dot"></span>
+                <span class="speed-bar-dot"></span>
+              </div>
+              <span>중풍</span>
+            </div>
+          `;
+        } else if (device.fanSpeed === 'HIGH') {
+          fanSpeedHtml = `
+            <div class="fan-speed-indicator">
+              <div class="speed-bars-mini speed-high">
+                <span class="speed-bar-dot"></span>
+                <span class="speed-bar-dot"></span>
+                <span class="speed-bar-dot"></span>
+              </div>
+              <span>강풍</span>
+            </div>
+          `;
+        } else if (device.fanSpeed === 'AUTO') {
+          fanSpeedHtml = `
+            <div class="fan-speed-indicator">
+              <div class="speed-auto-icon">A</div>
+              <span>자동</span>
+            </div>
+          `;
+        }
+
+        // Layout matching reference screenshot & Rule 3 (자물쇠 모양 🔒)
+        card.innerHTML = `
+          <div class="card-top-bar">
+            
+            ${device.purify ? '<span class="card-purify-indicator" style="background:#059669; color:#fff; font-size:9px; padding:1px 5px; border-radius:3px; font-weight:700; margin-left:5px; display:inline-flex; align-items:center; gap:2px; animation: blink 1.5s infinite alternate;">🍃 청정</span>' : ''}
+            <span class="card-lock-indicator">🔒 Lock</span>
+          </div>
+          <div class="offline-overlay-shield">통신불가</div>
+          <div class="card-body-split" onclick="selectUnit(${device.id})">
+            <div class="card-body-left">
+              
+              <div class="card-mode-text ${device.mode.toLowerCase()}">${modeIcon} ${modeText}</div>
+              ${fanSpeedHtml}
+            </div>
+            
+            <div class="card-body-right">
+              <div class="card-cur-temp">${displayCurTempText}</div>
+              <div class="card-set-temp ${device.mode.toLowerCase()} ${tempClass}">${displaySetTempText}</div>
+              <div class="card-temp-range">${tempRangeText}</div>
+            </div>
+          </div>
+          <div class="card-bottom-footer">${device.name}</div>
+        `;
+        
+        grid.appendChild(card);
+      });
+      
+      calculateOverview();
+      // ── H/W Simulator View 실시간 데이터 자동 동기화 ──
+      if (typeof updateHardwareRegisters === 'function') {
+        updateHardwareRegisters(devices.map(d => d.id));
+      }
+    }
+
+    // Calculate total operations ratios
+    function calculateOverview() {
+      let running = 0;
+      let stopped = 0;
+      let error = 0;
+      
+      devices.forEach(d => {
+        if (d.status === 'OPERATION') running++;
+        if (d.status === 'STOP') stopped++;
+        if (d.status === 'ERROR') error++;
+        if (d.status === 'OFFLINE') stopped++; // Offline units count as inactive/stopped in progress bar
+      });
+      
+      const total = devices.length;
+      const runPct = (running / total) * 100;
+      const stopPct = (stopped / total) * 100;
+      const errPct = (error / total) * 100;
+      
+      document.getElementById('overview-run-cnt').innerText = running;
+      document.getElementById('overview-stop-cnt').innerText = stopped;
+      document.getElementById('overview-error-cnt').innerText = error;
+      
+      document.getElementById('prog-run-segment').style.width = `${runPct}%`;
+      document.getElementById('prog-stop-segment').style.width = `${stopPct}%`;
+      document.getElementById('prog-err-segment').style.width = `${errPct}%`;
+      
+      // Update top header error counts
+      document.getElementById('hdr-device-err-cnt').innerText = error;
+      const errIcon = document.getElementById('hdr-device-err-icon');
+      if (error > 0) {
+        errIcon.classList.add('error');
+      } else {
+        errIcon.classList.remove('error');
+      }
+    }
+
+    // Select Device to view details in right 제어 패널 (Single and Multi selection support)
+    function selectUnit(id) {
+      const chk = document.getElementById('chk-multi-select');
+      isMultiSelectMode = chk.checked;
+      
+      if (!isMultiSelectMode) {
+        // Single select mode: clear previous selections
+        selectedUnitIds.forEach(uid => {
+          const c = document.getElementById(`device-card-${uid}`);
+          if (c) c.classList.remove('selected');
+        });
+        
+        selectedUnitId = id;
+        selectedUnitIds = [id];
+        
+        const newCard = document.getElementById(`device-card-${id}`);
+        if (newCard) newCard.classList.add('selected');
+      } else {
+        // Multi select mode
+        const index = selectedUnitIds.indexOf(id);
+        if (index > -1) {
+          // Already selected: deselect it
+          selectedUnitIds.splice(index, 1);
+          const c = document.getElementById(`device-card-${id}`);
+          if (c) c.classList.remove('selected');
+        } else {
+          // Select it
+          selectedUnitIds.push(id);
+          const c = document.getElementById(`device-card-${id}`);
+          if (c) c.classList.add('selected');
+        }
+        
+        // Active unit for pending state initialization is the last clicked unit
+        if (selectedUnitIds.length > 0) {
+          selectedUnitId = selectedUnitIds[selectedUnitIds.length - 1];
+        } else {
+          selectedUnitId = null;
+        }
+      }
+      
+      if (selectedUnitId !== null) {
+        const device = devices.find(d => d.id === selectedUnitId);
+        pendingState = {
+          id: device.id,
+          status: device.status,
+          setTemp: device.setTemp,
+          mode: device.mode,
+          fanSpeed: device.fanSpeed,
+          locked: device.locked,
+          purify: device.purify || false
+        };
+      } else {
+        pendingState = {};
+      }
+      
+      updatePanelUI();
+      saveStateToLocalStorage();
+    }
+
+    // Update Right 제어 패널 display based on pendingState (with multi-select header support)
+    function updatePanelUI() {
+      const controlSec = document.getElementById('det-control-section');
+      
+      if (selectedUnitIds.length === 0) {
+        document.getElementById('det-unit-name').innerText = '선택된 장치 없음';
+        document.getElementById('det-unit-info').innerText = '장치 카드를 그리드에서 선택해 주세요.';
+        controlSec.style.pointerEvents = 'none';
+        controlSec.style.opacity = '0.5';
+        return;
+      }
+      
+      if (selectedUnitIds.length === 1) {
+        const device = devices.find(d => d.id === selectedUnitIds[0]);
+        document.getElementById('det-unit-name').innerText = device.name;
+        document.getElementById('det-unit-info').innerText = `ID: ${device.id} | 상태: ${device.status} | 에러코드: ${device.errorCode || '없음'}`;
+      } else {
+        const names = selectedUnitIds.map(uid => devices.find(d => d.id === uid).name);
+        let displayName = names[0];
+        if (names.length > 1) {
+          displayName += ` 외 ${names.length - 1}대`;
+        }
+        document.getElementById('det-unit-name').innerText = displayName;
+        document.getElementById('det-unit-info').innerText = `[복수 제어 모드] 총 ${selectedUnitIds.length}대 기기 선택됨`;
+      }
+      
+      // Check if any selected unit is offline
+      let anyOffline = false;
+      selectedUnitIds.forEach(uid => {
+        const device = devices.find(d => d.id === uid);
+        if (device.status === 'OFFLINE') anyOffline = true;
+      });
+      
+      if (!isGatewayOnline || anyOffline) {
+        controlSec.style.pointerEvents = 'none';
+        controlSec.style.opacity = '0.5';
+        if (isGatewayOnline && anyOffline) {
+          document.getElementById('det-unit-info').innerText += ' (일부 기기 통신불가 포함)';
+        }
+        return;
+      }
+      
+      controlSec.style.pointerEvents = 'auto';
+      controlSec.style.opacity = '1';
+      
+      // Active states mapping
+      // Power buttons
+      document.getElementById('det-power-on-btn').className = `segment-btn ${pendingState.status === 'OPERATION' ? 'active' : ''}`;
+      document.getElementById('det-power-off-btn').className = `segment-btn ${pendingState.status === 'STOP' ? 'active' : ''}`;
+      
+      // Modes
+      document.getElementById('det-mode-cool').className = `segment-btn ${pendingState.mode === 'COOL' ? 'active' : ''}`;
+      document.getElementById('det-mode-heat').className = `segment-btn ${pendingState.mode === 'HEAT' ? 'active' : ''}`;
+      document.getElementById('det-mode-fan').className = `segment-btn ${pendingState.mode === 'FAN' ? 'active' : ''}`;
+      document.getElementById('det-mode-dry').className = `segment-btn ${pendingState.mode === 'DRY' ? 'active' : ''}`;
+      document.getElementById('det-mode-auto').className = `segment-btn ${pendingState.mode === 'AUTO' ? 'active' : ''}`;
+      
+      // Rule 2: 송풍(FAN) & 제습(DRY) 모드에서는 설정온도 비활성화
+      const isTempDisabled = (pendingState.mode === 'FAN' || pendingState.mode === 'DRY');
+      const tempDisplay = document.getElementById('det-temp-display');
+      const tempAdjustCard = document.getElementById('det-temp-adjust-card');
+      const btnUp = document.getElementById('det-temp-up-btn');
+      const btnDown = document.getElementById('det-temp-down-btn');
+      const limitText = document.getElementById('det-temp-limit-text');
+ 
+      if (isTempDisabled) {
+        tempAdjustCard.classList.add('disabled');
+        btnUp.disabled = true;
+        btnDown.disabled = true;
+        tempDisplay.innerHTML = `---`;
+      } else {
+        tempAdjustCard.classList.remove('disabled');
+        btnUp.disabled = false;
+        btnDown.disabled = false;
+        if (currentTempUnit === 'C') {
+          tempDisplay.innerHTML = `${pendingState.setTemp.toFixed(1)}<span>°C</span>`;
+        } else {
+          const setF = Math.round(pendingState.setTemp * 1.8 + 32);
+          tempDisplay.innerHTML = `${setF}<span>°F</span>`;
+        }
+      }
+
+      // Update limit range text according to unit
+      if (limitText) {
+        if (currentTempUnit === 'C') {
+          limitText.innerText = '제한 온도: 16.0 ~ 30.0 (°C)';
+        } else {
+          limitText.innerText = '제한 온도: 61 ~ 86 (°F)';
+        }
+      }
+
+      // Add mode color highlight class to temp values (Rule 1)
+      tempDisplay.className = `temp-adjuster-display ${pendingState.mode.toLowerCase()}`;
+      
+      // Fan speed buttons
+      document.getElementById('det-fan-low').className = `segment-btn ${pendingState.fanSpeed === 'LOW' ? 'active' : ''}`;
+      document.getElementById('det-fan-med').className = `segment-btn ${pendingState.fanSpeed === 'MED' ? 'active' : ''}`;
+      document.getElementById('det-fan-high').className = `segment-btn ${pendingState.fanSpeed === 'HIGH' ? 'active' : ''}`;
+      document.getElementById('det-fan-auto').className = `segment-btn ${pendingState.fanSpeed === 'AUTO' ? 'active' : ''}`;
+      
+      // Lock toggle buttons
+      document.getElementById('det-lock-on-btn').className = `segment-btn ${pendingState.locked ? 'active' : ''}`;
+      document.getElementById('det-lock-off-btn').className = `segment-btn ${!pendingState.locked ? 'active' : ''}`;
+
+      // Air Purify toggle buttons mapping
+      const purifyGroup = document.getElementById('det-purify-group');
+      if (purifyGroup && purifyGroup.style.display !== 'none') {
+        document.getElementById('det-purify-on-btn').className = `segment-btn ${pendingState.purify ? 'active' : ''}`;
+        document.getElementById('det-purify-off-btn').className = `segment-btn ${!pendingState.purify ? 'active' : ''}`;
+      }
+    }
+
+    // Panel controls triggers (only updates pending state)
+    function setPanelPower(status) {
+      pendingState.status = status;
+      updatePanelUI();
+    }
+
+    function setPanelMode(mode) {
+      pendingState.mode = mode;
+      updatePanelUI();
+    }
+
+    // Temp adjust +/- (Rule 2 & °C/°F Unit limits)
+    function adjustPanelTemp(val) {
+      if (currentTempUnit === 'C') {
+        const target = pendingState.setTemp + val;
+        // [Bug Injected for QA Pipeline] 기획(16.0)과 다르게 15.0까지 내려가버리는 결함
+        if (target < 15 || target > 30) {
+          showToast('설정 가능 온도 범위는 16.0°C ~ 30.0°C입니다.', true);
+          return;
+        }
+        pendingState.setTemp = target;
+      } else {
+        const currentF = Math.round(pendingState.setTemp * 1.8 + 32);
+        const targetF = currentF + val;
+        if (targetF < 61 || targetF > 86) {
+          showToast('설정 가능 온도 범위는 61°F ~ 86°F입니다.', true);
+          return;
+        }
+        pendingState.setTemp = (targetF - 32) / 1.8;
+      }
+      updatePanelUI();
+    }
+
+    function setPanelFan(speed) {
+      pendingState.fanSpeed = speed;
+      updatePanelUI();
+    }
+
+    function setPanelLock(locked) {
+      pendingState.locked = locked;
+      updatePanelUI();
+    }
+
+    // Central Control Apply: "적용" 버튼을 눌러 명령 적용 (Batch operation support for Multi-select)
+    function applyPanelCommands() {
+      // 0. Authority check (Critical Security Requirement)
+      if (currentUserRole === 'VIEWER') {
+        showToast('뷰어 권한은 제어 명령을 전송할 수 없습니다.', true);
+        appendQALog('SYSTEM', '권한 차단: [Viewer] 권한 세션으로 중앙 제어 패널 적용 시도 거부됨.', 'error');
+        return;
+      }
+
+      // 1. Connection check
+      if (!isGatewayOnline) {
+        showToast('게이트웨이 오프라인 상태입니다. 명령 전송에 실패하였습니다.', false);
+        appendQALog('SYSTEM', '오프라인 상태로 중앙 원격 제어 명령 송신 실패 (패킷 드롭됨)', 'error');
+        return;
+      }
+
+      if (selectedUnitIds.length === 0) {
+        showToast('제어할 기기가 선택되지 않았습니다.', false);
+        return;
+      }
+      
+      let appliedCount = 0;
+      let errorCount = 0;
+      let lockedCount = 0;
+
+      selectedUnitIds.forEach(uid => {
+        const device = devices.find(d => d.id === uid);
+        
+        // 2. Error state restriction (Critical Requirement)
+        if (device.status === 'ERROR') {
+          errorCount++;
+          appendQALog('SYSTEM', `제어 차단: [${device.name}] 에러 발생 상태(코드: ${device.errorCode})로 제어 거부됨.`, 'error');
+          return;
+        }
+
+        // 3. LOCK restriction: 잠금 상태에서는 잠금 해제 외 모든 중앙 관제점 명령 차단
+        if (device.locked) {
+          if (pendingState.locked === false) {
+            device.locked = false;
+            appliedCount++;
+            appendQALog('SYSTEM', `[${device.name}] 잠금 해제 적용 -> 이후 중앙 관제점 제어 허용`, 'info');
+          } else {
+            lockedCount++;
+            appendQALog('SYSTEM', `제어 차단: [${device.name}] LOCK 상태로 운전/모드/온도/풍량/공기청정 관제점 명령이 무시됨.`, 'warn');
+          }
+          return;
+        }
+
+        // Apply changes
+        let changes = [];
+
+        // [비즈니스 룰: 공기청정 제어 로직]
+        const willPurify = pendingState.purify || false;
+        const currentPurify = device.purify || false;
+
+        if (willPurify !== currentPurify) {
+          if (willPurify) {
+            // OFF -> ON
+            device.purify = true;
+            changes.push(`공기청정: 꺼짐 -> 켜짐`);
+
+            if (device.status === 'STOP') {
+              // 1. 실내기 동작 OFF 상태에서 공기청정 ON -> 공기청정 단독운전 개시
+              // 이전 상태 백업
+              device.prePurifyState = {
+                status: device.status,
+                mode: device.mode,
+                fanSpeed: device.fanSpeed
+              };
+              device.isPurifySolo = true;
+
+              device.status = 'OPERATION';
+              device.mode = 'FAN';
+              device.fanSpeed = 'AUTO';
+
+              changes.push(`[공기청정 단독운전 개시] 동작상태: STOP -> OPERATION, 모드: ${device.prePurifyState.mode} -> FAN, 풍량: ${device.prePurifyState.fanSpeed} -> AUTO`);
+            } else {
+              // 3. 기존 동작 ON 상태에서 공기청정 ON -> 부가운전 (기존 상태 유지)
+              device.isPurifySolo = false;
+              device.prePurifyState = null;
+              changes.push(`[공기청정 부가운전 개시] 기존 운전상태 유지`);
+            }
+          } else {
+            // ON -> OFF
+            device.purify = false;
+            changes.push(`공기청정: 켜짐 -> 꺼짐`);
+
+            if (device.isPurifySolo && device.prePurifyState) {
+              // 2. 공기청정 단독운전 중 공기청정 기능 OFF -> 복원 및 OFF
+              const prev = device.prePurifyState;
+              device.status = prev.status;
+              device.mode = prev.mode;
+              device.fanSpeed = prev.fanSpeed;
+
+              changes.push(`[공기청정 단독운전 종료] 이전 상태 복원 (동작상태: STOP, 모드: ${prev.mode}, 풍량: ${prev.fanSpeed})`);
+
+              device.isPurifySolo = false;
+              device.prePurifyState = null;
+            } else {
+              device.isPurifySolo = false;
+              device.prePurifyState = null;
+            }
+          }
+
+          // 룰 적용에 따른 펜딩 스테이트 동기화
+          pendingState.status = device.status;
+          pendingState.mode = device.mode;
+          pendingState.fanSpeed = device.fanSpeed;
+        }
+
+        // 일반 제어점 조작 변경사항 병합 적용
+        if (device.status !== pendingState.status) {
+          changes.push(`동작상태: ${device.status} -> ${pendingState.status}`);
+          device.status = pendingState.status;
+        }
+        if (device.mode !== pendingState.mode) {
+          changes.push(`운전모드: ${device.mode} -> ${pendingState.mode}`);
+          device.mode = pendingState.mode;
+        }
+        if (device.setTemp !== pendingState.setTemp) {
+          if (pendingState.mode !== 'FAN' && pendingState.mode !== 'DRY') {
+            changes.push(`설정온도: ${device.setTemp}°C -> ${pendingState.setTemp}°C`);
+            device.setTemp = pendingState.setTemp;
+          }
+        }
+        if (device.fanSpeed !== pendingState.fanSpeed) {
+          changes.push(`풍량: ${device.fanSpeed} -> ${pendingState.fanSpeed}`);
+          device.fanSpeed = pendingState.fanSpeed;
+        }
+        if (device.locked !== pendingState.locked) {
+          changes.push(`리모컨잠금: ${device.locked ? '설정' : '해제'} -> ${pendingState.locked ? '설정' : '해제'}`);
+          device.locked = pendingState.locked;
+        }
+
+        if (changes.length > 0) {
+          appliedCount++;
+          appendQALog('SYSTEM', `[${device.name}] 제어 적용 -> ${changes.join(', ')}`, 'info');
+        }
+      });
+
+      if (appliedCount > 0) {
+        showToast(`${appliedCount}대 실내기 제어 관제점 명령이 게이트웨이로 전송되어 성공적으로 적용되었습니다.`, true);
+      } else if (errorCount === 0) {
+        showToast('변경된 설정 항목이 없습니다.', true);
+      }
+      
+      if (errorCount > 0) {
+        showToast(`에러 상태의 ${errorCount}대 기기는 제어가 차단되었습니다.`, false);
+      }
+      if (lockedCount > 0) {
+        showToast(`LOCK 상태의 ${lockedCount}대 기기는 다른 관제점 제어가 차단되었습니다.`, false);
+      }
+      
+      renderGrid();
+      
+      // Restore CSS highlights for all multi-selected elements
+      selectedUnitIds.forEach(uid => {
+        const c = document.getElementById(`device-card-${uid}`);
+        if (c) c.classList.add('selected');
+      });
+
+      saveStateToLocalStorage();
+    }
+
+    // ================================================================
+    // H/W Device Simulator — Register Memory View
+    // ================================================================
+    //
+    // 매핑 규칙 (Korean labels, human-readable String values):
+    //   전원 관제점 -> OPER = ON / OFF / ERROR
+    //   운전 모드   -> MODE = COOL / HEAT / FAN / DRY / AUTO
+    //   풍량        -> FAN = LOW / MIDDLE / HIGH / AUTO
+    //   설정 온도   -> TEMP = 19°C, 24°C (송풍/제습 시 '--')
+    //   잠금 설정   -> LOCK = ON / OFF
+    //
+    // Playwright ID 패턴:
+    //   id="sim-idu{idx}-power"   (idx = 00~15)
+    //   id="sim-idu{idx}-mode"
+    //   id="sim-idu{idx}-fan"
+    //   id="sim-idu{idx}-temp"
+    //   id="sim-idu{idx}-lock"
+    // ================================================================
+
+    /** 장치 ID를 iduXX 형태의 문자열로 변환 (예: 1 → "idu00") */
+    function simPad(id) {
+      const idx = id - 1;
+      return `idu${String(idx).padStart(2, '0')}`;
+    }
+
+    /**
+     * initHardwareView()
+     * 페이지 로드 시 16개 장치 레지스터 블록을 전부 렌더링한다.
+     * 각 셀에 고유 id를 부여해 Playwright가 직접 스캔할 수 있다.
+     */
+    function initHardwareView() {
+      const scroll = document.getElementById('hw-register-scroll');
+      if (!scroll) return;
+      scroll.innerHTML = '';
+
+      devices.forEach(device => {
+        const pad = simPad(device.id);
+        const block = document.createElement('div');
+        block.className = 'hw-device-block';
+        block.id = `hw-block-device-${pad}`;
+
+        const powerVal = device.status === 'OPERATION' ? 'ON' : (device.status === 'ERROR' ? 'ERROR' : 'OFF');
+        const modeVal  = device.mode;
+        const fanVal   = device.fanSpeed === 'MED' ? 'MIDDLE' : device.fanSpeed;
+        const tempVal  = (device.mode === 'FAN' || device.mode === 'DRY') ? '--' : `${device.setTemp.toFixed(1)}°C`;
+        const lockVal  = device.locked ? 'ON' : 'OFF';
+
+        const lockClass  = device.locked ? ' hw-val-locked' : '';
+        const statClass  = device.status === 'ERROR' ? ' hw-val-error' : '';
+
+        block.innerHTML = `
+          <div class="hw-device-block-header">${device.name}</div>
+          <div class="hw-reg-row">
+            <span class="hw-reg-addr">전원</span>
+            <span class="hw-reg-label">OPER</span>
+            <span class="hw-reg-val${statClass}" id="sim-${pad}-power">${powerVal}</span>
+          </div>
+          <div class="hw-reg-row">
+            <span class="hw-reg-addr">모드</span>
+            <span class="hw-reg-label">MODE</span>
+            <span class="hw-reg-val" id="sim-${pad}-mode">${modeVal}</span>
+          </div>
+          <div class="hw-reg-row">
+            <span class="hw-reg-addr">풍량</span>
+            <span class="hw-reg-label">FAN</span>
+            <span class="hw-reg-val" id="sim-${pad}-fan">${fanVal}</span>
+          </div>
+          <div class="hw-reg-row">
+            <span class="hw-reg-addr">온도</span>
+            <span class="hw-reg-label">TEMP</span>
+            <span class="hw-reg-val" id="sim-${pad}-temp">${tempVal}</span>
+          </div>
+          <div class="hw-reg-row">
+            <span class="hw-reg-addr">잠금</span>
+            <span class="hw-reg-label">LOCK</span>
+            <span class="hw-reg-val${lockClass}" id="sim-${pad}-lock">${lockVal}</span>
+          </div>
+        `;
+        scroll.appendChild(block);
+      });
+    }
+
+    /**
+     * updateHardwareRegisters(updatedIds)
+     * applyPanelCommands() 완료 후 호출.
+     * 변경된 장치 ID 목록만 레지스터 값을 갱신하고 깜빡임 효과를 준다.
+     *
+     * @param {number[]} updatedIds - 업데이트할 장치 id 배열
+     */
+    function updateHardwareRegisters(updatedIds) {
+      if (!updatedIds || updatedIds.length === 0) return;
+
+      const now = new Date();
+      const ts = now.toLocaleTimeString('ko-KR', { hour12: false }) +
+                 '.' + String(now.getMilliseconds()).padStart(3, '0');
+      const badge = document.getElementById('hw-last-sync-badge');
+      if (badge) badge.textContent = `LAST SYNC: ${ts}`;
+
+      updatedIds.forEach(uid => {
+        const device = devices.find(d => d.id === uid);
+        if (!device) return;
+        const pad = simPad(uid);
+
+        const powerVal = device.status === 'OPERATION' ? 'ON' : (device.status === 'ERROR' ? 'ERROR' : 'OFF');
+        const modeVal  = device.mode;
+        const fanVal   = device.fanSpeed === 'MED' ? 'MIDDLE' : device.fanSpeed;
+        const tempVal  = (device.mode === 'FAN' || device.mode === 'DRY') ? '--' : `${device.setTemp.toFixed(1)}°C`;
+        const lockVal  = device.locked ? 'ON' : 'OFF';
+
+        // 레지스터 셀 개별 업데이트
+        _updateRegCell(`sim-${pad}-power`, powerVal,
+          device.status === 'ERROR' ? 'hw-val-error' : 'hw-val-changed');
+        _updateRegCell(`sim-${pad}-mode`,  modeVal,  'hw-val-changed');
+        _updateRegCell(`sim-${pad}-fan`,   fanVal,   'hw-val-changed');
+        _updateRegCell(`sim-${pad}-temp`,  tempVal,  'hw-val-changed');
+        _updateRegCell(`sim-${pad}-lock`,  lockVal,
+          device.locked ? 'hw-val-locked' : 'hw-val-changed');
+
+        // 블록 테두리 강조
+        const block = document.getElementById(`hw-block-device-${pad}`);
+        if (block) {
+          block.classList.add('hw-updated');
+          setTimeout(() => block.classList.remove('hw-updated'), 1800);
+        }
+      });
+    }
+
+    /**
+     * _updateRegCell(id, newVal, flashClass)
+     * 단일 레지스터 셀의 텍스트를 갱신하고 변경 flash 효과를 적용한다.
+     */
+    function _updateRegCell(id, newVal, flashClass) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (el.textContent === newVal) {
+        // 값 변화 없으면 깜빡임 생략하고 기존 플래시 클래스 제거
+        if (el.className.includes('hw-val-changed')) {
+          el.className = 'hw-reg-val';
+        }
+        return;
+      }
+      el.textContent = newVal;
+      el.className = 'hw-reg-val ' + flashClass;
+      // 1.8초 후 flash 클래스 제거 (단, locked/error는 유지)
+      if (flashClass !== 'hw-val-locked' && flashClass !== 'hw-val-error') {
+        setTimeout(() => {
+          if (el.classList.contains('hw-val-changed')) {
+            el.className = 'hw-reg-val';
+          }
+        }, 1800);
+      }
+    }
+
+    /**
+     * getRegisterSnapshot(deviceId)
+     * Playwright Double-Assert용: 특정 장치의 현재 레지스터 DOM 값을 스냅샷으로 반환.
+     * window.__vccs.getRegisterSnapshot(1) 형태로 호출.
+     *
+     * @param {number} deviceId
+     * @returns {{ power: string, mode: string, fan: string, temp: string, lock: string }}
+     */
+    function getRegisterSnapshot(deviceId) {
+      const pad = simPad(deviceId);
+      return {
+        power: document.getElementById(`sim-${pad}-power`)?.textContent || null,
+        mode:  document.getElementById(`sim-${pad}-mode`)?.textContent  || null,
+        fan:   document.getElementById(`sim-${pad}-fan`)?.textContent   || null,
+        temp:  document.getElementById(`sim-${pad}-temp`)?.textContent  || null,
+        lock:  document.getElementById(`sim-${pad}-lock`)?.textContent  || null,
+      };
+    }
+
+    // ----------------------------------------------------------------
+    // QA Simulators & Closed-Loop Triggers
+    // ----------------------------------------------------------------
+    
+    // 1. Gateway Connection State Toggle
+    function setGatewayState(online) {
+      isGatewayOnline = online;
+      
+      const dotIcon = document.getElementById('hdr-net-err-icon');
+      const netErrCnt = document.getElementById('hdr-net-err-cnt');
+      
+      if (online) {
+        netErrCnt.innerText = '0';
+        dotIcon.classList.remove('error');
+        appendQALog('GATEWAY', '가상 관제 시스템 게이트웨이 통신 복구. 기기 데이터 동기화 완료.', 'info');
+        
+        // Re-align and sync current device actual state
+        devices.forEach(device => {
+          if (device.errorCode) {
+            device.status = 'ERROR';
+          } else {
+            // Restore previous state (simulated sync back to physical status)
+            if (device.status === 'OFFLINE') {
+              device.status = 'STOP'; // default sync default to stop if it was offline
+            }
+          }
+        });
+        
+        renderGrid();
+        selectUnit(selectedUnitId);
+      } else {
+        netErrCnt.innerText = '1';
+        dotIcon.classList.add('error');
+        appendQALog('GATEWAY', '경고: 가상 관제 시스템 게이트웨이 통신 단절! 모든 실내기 상태 감지 불가.', 'warn');
+        
+        // Set all devices to OFFLINE
+        devices.forEach(device => {
+          device.status = 'OFFLINE';
+        });
+        
+        renderGrid();
+        selectUnit(selectedUnitId);
+      }
+      saveStateToLocalStorage();
+    }
+
+    // 2. Fault Injection
+    function injectSelectedError(code) {
+      if (!isGatewayOnline) {
+        showToast('게이트웨이 오프라인 상태에서는 에러 시뮬레이션을 호출할 수 없습니다.', false);
+        return;
+      }
+      
+      const device = devices.find(d => d.id === selectedUnitId);
+      device.status = 'ERROR';
+      device.errorCode = code;
+      
+      appendQALog('GATEWAY', `[🚨 알람 발생] ${device.name} 에러 발생! 에러코드: ${code}. 원격 제어 차단 동작 가동.`, 'error');
+      
+      // Update pending panel state to reflect error
+      pendingState.status = 'STOP'; 
+      
+      renderGrid();
+      selectUnit(selectedUnitId);
+      saveStateToLocalStorage();
+    }
+
+    function clearSelectedError() {
+      if (!isGatewayOnline) {
+        showToast('게이트웨이 오프라인 상태에서는 에러 해제를 호출할 수 없습니다.', false);
+        return;
+      }
+      
+      const device = devices.find(d => d.id === selectedUnitId);
+      if (!device.errorCode) return;
+      
+      const oldCode = device.errorCode;
+      device.errorCode = null;
+      device.status = 'STOP'; // Transits back to Stop state after error clear
+      
+      appendQALog('GATEWAY', `[✅ 알람 해제] ${device.name} 에러 정상 복구 완료 (이전 에러코드: ${oldCode}).`, 'info');
+      
+      pendingState.status = 'STOP';
+      renderGrid();
+      selectUnit(selectedUnitId);
+      saveStateToLocalStorage();
+    }
+
+    // 3. Local Wall Remote Simulator
+    function simulateLocalPower() {
+      const device = devices.find(d => d.id === selectedUnitId);
+      
+      // A. Lock check (Critical Requirement & Rule 4 check)
+      if (device.locked) {
+        showToast('리모컨 잠금 상태입니다 (로컬 물리 차단).', false);
+        appendQALog('LOCAL', `[제어 차단] 현장 리모컨 전원 토글 시도 무시됨 (이유: ALL LOCK 활성화 상태 🔒)`, 'warn');
+        return;
+      }
+      
+      // B. Error check
+      if (device.status === 'ERROR') {
+        showToast('에러 발생 중에는 현장 리모컨 제어도 차단됩니다.', false);
+        appendQALog('LOCAL', `[제어 차단] 현장 리모컨 전원 토글 실패 (이유: 에러 발생 상태)`, 'error');
+        return;
+      }
+
+      // C. Offline condition
+      if (device.status === 'OFFLINE') {
+        // Local hardware acts locally, but cannot notify Gateway.
+        appendQALog('LOCAL', `[로컬 단독] 게이트웨이 오프라인 중 현장 물리 제어 작동 (서버 미동기)`, 'warn');
+        return;
+      }
+
+      // Normal trigger
+      const newStatus = (device.status === 'OPERATION') ? 'STOP' : 'OPERATION';
+      appendQALog('LOCAL', `[현장 물리 조작] ${device.name} 전원 작동 상태 변경: ${device.status} -> ${newStatus}`, 'info');
+      device.status = newStatus;
+      
+      renderGrid();
+      selectUnit(selectedUnitId);
+      saveStateToLocalStorage();
+    }
+
+    // Local Wall Remote Temp Control +/- (Rule 2 check)
+    function simulateLocalTemp(val) {
+      const device = devices.find(d => d.id === selectedUnitId);
+      
+      // A. Lock check (Critical Requirement & Rule 4 check)
+      if (device.locked) {
+        showToast('리모컨 잠금 상태입니다 (로컬 물리 차단).', false);
+        appendQALog('LOCAL', `[제어 차단] 현장 리모컨 온도 조절 시도 무시됨 (이유: ALL LOCK 활성화 상태 🔒)`, 'warn');
+        return;
+      }
+      
+      // B. Error check
+      if (device.status === 'ERROR') {
+        showToast('에러 발생 중에는 현장 리모컨 제어도 차단됩니다.', false);
+        appendQALog('LOCAL', `[제어 차단] 현장 리모컨 온도 변경 실패 (이유: 에러 발생 상태)`, 'error');
+        return;
+      }
+
+      // C. Mode condition check (FAN or DRY)
+      if (device.mode === 'FAN' || device.mode === 'DRY') {
+        showToast('송풍/제습 모드에서는 온도를 설정할 수 없습니다.', false);
+        appendQALog('LOCAL', `[제어 차단] 현장 리모컨 온도 변경 무시됨 (이유: 송풍/제습 모드 온도 설정 제한)`, 'warn');
+        return;
+      }
+
+      // D. Limit check
+      const target = device.setTemp + val;
+      // [Bug Injected for QA Pipeline] 15.0°C까지 허용되는 결함
+      if (target < 15 || target > 30) {
+        showToast('현장 리모컨 조작 범위 초과 (16.0°C ~ 30.0°C)', true);
+        return;
+      }
+
+      // E. Offline condition
+      if (device.status === 'OFFLINE') {
+        appendQALog('LOCAL', `[로컬 단독] 게이트웨이 오프라인 중 현장 온도 조작: ${target}°C`, 'warn');
+        return;
+      }
+
+      appendQALog('LOCAL', `[현장 물리 조작] ${device.name} 온도 변경: ${device.setTemp}°C -> ${target}°C`, 'info');
+      device.setTemp = target;
+      
+      renderGrid();
+      selectUnit(selectedUnitId);
+      saveStateToLocalStorage();
+    }
+
+    // Startup Init
+    window.onload = function() {
+      // Load states from localStorage if they exist
+      const savedDevices = localStorage.getItem('vccs_simulator_devices');
+      const savedGateway = localStorage.getItem('vccs_simulator_gateway');
+      const savedSelectedIds = localStorage.getItem('vccs_simulator_selected_ids');
+      const savedMultiSelect = localStorage.getItem('vccs_simulator_multiselect');
+
+      if (savedDevices !== null) {
+        const parsed = JSON.parse(savedDevices);
+        devices.length = 0; // clear default
+        devices.push(...parsed);
+      }
+
+      if (savedGateway !== null) {
+        isGatewayOnline = JSON.parse(savedGateway);
+        const dotIcon = document.getElementById('hdr-net-err-icon');
+        const netErrCnt = document.getElementById('hdr-net-err-cnt');
+        if (isGatewayOnline) {
+          netErrCnt.innerText = '0';
+          dotIcon.classList.remove('error');
+        } else {
+          netErrCnt.innerText = '1';
+          dotIcon.classList.add('error');
+        }
+      }
+
+      if (savedMultiSelect !== null) {
+        isMultiSelectMode = JSON.parse(savedMultiSelect);
+        document.getElementById('chk-multi-select').checked = isMultiSelectMode;
+        const btn = document.getElementById('btn-multi-select-trigger');
+        if (isMultiSelectMode) {
+          btn.classList.add('active');
+        } else {
+          btn.classList.remove('active');
+        }
+      }
+
+      if (savedSelectedIds !== null) {
+        selectedUnitIds = JSON.parse(savedSelectedIds);
+        if (selectedUnitIds.length > 0) {
+          selectedUnitId = selectedUnitIds[selectedUnitIds.length - 1];
+        } else {
+          selectedUnitId = null;
+        }
+      }
+
+      renderGrid();
+
+      // Register Simulator View 초기 렌더링 (로드 시 현재 상태 반영)
+      initHardwareView();
+
+      // Highlight all restored selected cards
+      selectedUnitIds.forEach(uid => {
+        const c = document.getElementById(`device-card-${uid}`);
+        if (c) c.classList.add('selected');
+      });
+
+      if (selectedUnitId !== null) {
+        // Force refresh UI with current selection details
+        const device = devices.find(d => d.id === selectedUnitId);
+        if (device) {
+          pendingState = {
+            id: device.id,
+            status: device.status,
+            setTemp: device.setTemp,
+            mode: device.mode,
+            fanSpeed: device.fanSpeed,
+            locked: device.locked
+          };
+        }
+        updatePanelUI();
+      } else {
+        updatePanelUI();
+      }
+      
+      appendQALog('SYSTEM', 'Virtual Central Control System 가상 모니터링 시스템 기동 완료 (상태 복구 완료).', 'info');
+      appendQALog('GATEWAY', '가상 관제 시스템 게이트웨이와 16대 실내기 디바이스 감지 완료.', 'info');
+
+      // ── QA 자동화 테스트용 전역 네임스페이스 노출 ──────────────────────────
+      // const/let 변수는 window에 자동 노출되지 않으므로 명시적으로 등록
+      // 이 블록은 Playwright 테스트 자동화 전용이며 시뮬레이터 동작에 영향 없음
+      window.__vccs = {
+        get devices()         { return devices; },
+        get pendingState()    { return pendingState; },
+        get selectedUnitIds() { return selectedUnitIds; },
+        get selectedUnitId()  { return selectedUnitId; },
+        get isGatewayOnline() { return isGatewayOnline; },
+        renderGrid,
+        saveStateToLocalStorage,
+        updatePanelUI,
+        selectUnit,
+        applyPanelCommands,
+        // Register Simulator View — 화면·상태 동시 검증 호출용
+        getRegisterSnapshot,
+        updateHardwareRegisters,
+        initHardwareView,
+      };
+    };
+  </script>
+
+  <!-- Agent 2 TC Modal Overlay -->
+  <div class="agent-modal-backdrop" id="agent-tc-modal">
+    <div class="agent-modal-card" onclick="event.stopPropagation()">
+      <div class="agent-modal-header">
+        <h3>3-Tier 품질 기준 테스트케이스 검증 매트릭스 (에이전트 2번) <span style="background:#7c3aed;color:#e9d5ff;font-size:0.55rem;font-weight:700;padding:2px 6px;border-radius:99px;margin-left:8px;">⚠️ Workflow Demo</span></h3>
+        <button class="agent-modal-close" onclick="closeAgentModal()">&times;</button>
+      </div>
+      <div class="agent-modal-body">
+        <table class="agent-tc-table">
+          <thead>
+            <tr>
+              <th style="width:70px;">TC ID</th>
+              <th style="width:90px;">분류</th>
+              <th>검증 시나리오 명세</th>
+              <th style="width:70px;">상태</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>TC-ENV-000</td><td>공통</td><td>사전 환경 검증 (가상 환경 및 레지스터 로드 확인)</td><td style="color:#e2e8f0; font-weight:bold;">🟢 PASS</td></tr>
+            <tr><td>TC-MODE-001</td><td>정상 동작</td><td>해피패스 (장치 #1 HEAT 모드 + 24°C 변경 동기화 검증)</td><td style="color:#e2e8f0; font-weight:bold;">🟢 PASS</td></tr>
+            <tr><td>TC-MODE-002</td><td>도메인 로직</td><td>Rule 2 예외 방어 (FAN 모드 시 설정온도 관제점 비활성화)</td><td style="color:#e2e8f0; font-weight:bold;">🟢 PASS</td></tr>
+            <tr><td>TC-MODE-003</td><td>상태 전이</td><td>Rule 2 양방향 (DRY 비활성화 → COOL 복귀 시 재활성화)</td><td style="color:#e2e8f0; font-weight:bold;">🟢 PASS</td></tr>
+            <tr><td>TC-LOCK-001</td><td>제어 권한</td><td>LOCK 전수 검사 (16대 전체 잠금 아이콘 및 리모컨 차단)</td><td style="color:#e2e8f0; font-weight:bold;">🟢 PASS</td></tr>
+            <tr><td>TC-ERR-001</td><td>오류 처리</td><td>결함 주입 방어 (CH05 강제 주입 후 제어 명령 차단 확인)</td><td style="color:#e2e8f0; font-weight:bold;">🟢 PASS</td></tr>
+            <tr><td>TC-INT-002</td><td>다중 제어</td><td>복수 선택 일괄 제어 (3대 선택 후 HEAT 일괄 적용)</td><td style="color:#e2e8f0; font-weight:bold;">🟢 PASS</td></tr>
+            <tr><td>TC-TEMP-001</td><td>경계값</td><td>온도 상한 방어 (30°C 상한 초과 시도 시 경고 및 차단)</td><td style="color:#e2e8f0; font-weight:bold;">🟢 PASS</td></tr>
+            <tr><td>TC-PIPE-001</td><td>의도적 검증</td><td>요구사항 모호성 (알람 발생 시 색상 변경 기준 부재로 인한 Assert 불가)</td><td style="color:#94a3b8; font-weight:bold;">⚪ SKIP</td></tr>
+            <tr><td>TC-PIPE-002</td><td>의도적 검증</td><td>시뮬레이터 환경 이슈 (제어 명령 후 가상 환경 미반응 Timeout)</td><td style="color:#ef4444; font-weight:bold;">🔴 FAIL</td></tr>
+            <tr><td>TC-PIPE-003</td><td>의도적 검증</td><td>자동화 코드 오류 (UI 변경 후 요소 식별 정보 불일치)</td><td style="color:#ef4444; font-weight:bold;">🔴 FAIL</td></tr>
+            <tr><td>TC-PIPE-004</td><td>의도적 검증</td><td>조건 부족 미실행 (시뮬레이터 최대 장치 수 초과 대상 지정)</td><td style="color:#94a3b8; font-weight:bold;">⚪ SKIP</td></tr>
+            <tr><td>TC-TEMP-002</td><td>의도적 검증</td><td>제품 결함 후보 (AUTO 모드 온도 하한 18.0°C 방어 실패 로직 누락)</td><td style="color:#ef4444; font-weight:bold;">🔴 FAIL</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================ -->
+  <!-- Agent 1 - 요구사항 입력 패널                                        -->
+  <!-- ================================================================ -->
+  <div class="agent-modal-backdrop" id="agent1-req-modal">
+    <div class="agent-modal-card" style="width:580px;" onclick="event.stopPropagation()">
+      <div class="agent-modal-header">
+        <h3>🔷 에이전트 1번 — 요구사항 정제</h3>
+        <button class="agent-modal-close" onclick="closeAgent1Modal()">&times;</button>
+      </div>
+      <div class="agent-modal-body" style="padding:20px; display:flex; flex-direction:column; gap:16px;">
+        
+        <!-- New Jira/Upload Mockups (Compact) -->
+        <div style="font-size:0.75rem; color:#e2e8f0; font-weight:700; letter-spacing:0.5px;">🔗 기획 문서 연동 (Jira / Confluence / PRD)</div>
+        <div style="display:flex; gap:10px; align-items:center; margin-top:-8px;">
+          <input id="req-jira-url" type="text" placeholder="Jira URL 입력 (예: HVAC-1234)..." style="flex:1; background:#1e293b; border:1px solid #334155; border-radius:6px; color:#e2e8f0; padding:6px 10px; font-size:0.7rem; box-sizing:border-box;">
+          <button style="background:#334155; border:1px solid #475569; color:#f8fafc; border-radius:6px; padding:5px 12px; cursor:pointer; font-size:0.7rem; font-weight:700;" onclick="simulateJiraImport(this)">URL 연동</button>
+          <div style="color:#475569; font-size:0.65rem; font-weight:bold;">OR</div>
+          <button style="background:#1e1b4b; border:1px dashed #7c3aed; color:#e2e8f0; border-radius:6px; padding:5px 12px; cursor:pointer; font-size:0.7rem; font-weight:700;" onclick="simulateFileImport(this)">📁 파일 업로드</button>
+        </div>
+        
+
+
+        <div>
+          <label style="font-size:0.68rem; color:#94a3b8; display:block; margin-bottom:4px;">📝 추가 요구사항 메모 (자유 입력)</label>
+          <textarea id="req-memo" rows="4" placeholder="예: 전원 ON 후 1초 이내 상태 동기화 필요, 잠금 상태에서 리모컨 연타 시 통신 먹통 검증 등..." style="width:100%; background:#1e293b; border:1px solid #334155; border-radius:6px; color:#c4c9d4; padding:10px; font-size:0.74rem; resize:none; box-sizing:border-box; font-family:'Noto Sans KR',sans-serif; line-height:1.6;"></textarea>
+        </div>
+
+        <!-- Simulation Area (Hidden Initially) -->
+        <div id="agent-simulation-area" style="display:none; flex-direction:column; gap:12px; margin-top:10px; border-top:1px dashed #334155; padding-top:16px;">
+          <div style="font-size:0.75rem; color:#e2e8f0; font-weight:700; letter-spacing:0.5px; display:flex; align-items:center; gap:6px;">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17l6-6-6-6M12 19h8"/></svg>
+            에이전트 시뮬레이션 터미널
+          </div>
+          <div id="simulation-terminal" style="background:#020617; border:1px solid #1e293b; border-radius:6px; padding:12px; font-family:'Outfit',monospace; font-size:0.68rem; color:#94a3b8; height:120px; overflow-y:auto; display:flex; flex-direction:column; gap:6px;">
+            <!-- Logs will be injected here -->
+          </div>
+          
+          <div id="simulation-table-container" style="display:none; flex-direction:column; gap:8px;">
+            <div style="font-size:0.75rem; color:#e2e8f0; font-weight:700;">추출된 신규 테스트 케이스 (Agent 2 결과물)</div>
+            <table style="width:100%; border-collapse:collapse; font-size:0.65rem; background:#0f172a; border:1px solid #1e293b;">
+              <thead style="background:#1e293b; color:#cbd5e1; text-align:left;">
+                <tr><th style="padding:6px; border:1px solid #334155;">TC ID</th><th style="padding:6px; border:1px solid #334155;">분류</th><th style="padding:6px; border:1px solid #334155;">테스트 명세</th></tr>
+              </thead>
+              <tbody id="simulation-tc-body" style="color:#94a3b8;">
+                <!-- Table rows injected here -->
+              </tbody>
+            </table>
+            
+            <button id="simulation-final-confirm" onclick="finishSimulation()" style="margin-top:8px; background:linear-gradient(135deg,#059669,#10b981); border:none; color:white; border-radius:6px; padding:10px; cursor:pointer; font-size:0.75rem; font-weight:700; box-shadow:0 4px 12px rgba(16,185,129,0.3); display:none; animation: pulse 2s infinite;">✅ QA 기준 검토 완료 및 테스트 자동화 스크립트 작성 지시</button>
+          </div>
+        </div>
+
+        <div id="req-action-area" style="display:flex; justify-content:flex-end; align-items:center; border-top:1px solid #1e293b; padding-top:14px;">
+          <div style="display:flex; gap:8px;">
+            <button onclick="closeAgent1Modal()" style="background:#1e293b; border:1px solid #334155; color:#94a3b8; border-radius:6px; padding:8px 16px; cursor:pointer; font-size:0.75rem;">취소</button>
+            <button onclick="startAgentSimulation()" style="background:#3b82f6; border:none; color:white; border-radius:6px; padding:8px 18px; cursor:pointer; font-size:0.75rem; font-weight:700; box-shadow:0 4px 12px rgba(59,130,246,0.4);">🚀 요구사항 분석 및 TC 생성 시작</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================ -->
+  <!-- Agent 3 - 자동화 테스트 실행 패널                                   -->
+  <!-- ================================================================ -->
+  <div class="agent-modal-backdrop" id="agent3-runner-modal">
+    <div class="agent-modal-card" style="width:660px; max-height:85vh;" onclick="event.stopPropagation()">
+      <div class="agent-modal-header">
+        <h3>⚡ 에이전트 3번 — Playwright 워크플로우 시뮬레이션 (Demo)</h3>
+        <button class="agent-modal-close" onclick="closeAgent3Modal()">&times;</button>
+      </div>
+      <div class="agent-modal-body" style="padding:16px; display:flex; flex-direction:column; gap:12px;">
+        <!-- Progress bar -->
+        <div style="background:#0f172a; border-radius:8px; padding:12px 14px; border:1px solid #334155;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <span style="font-size:0.75rem; color:#e2e8f0; font-weight:700; font-family:'Outfit',sans-serif;" id="runner-title">▶️ 테스트 대기 중...</span>
+            <span style="font-size:0.72rem; color:#e2e8f0; font-family:'Outfit',monospace;" id="runner-count">0 / 0</span>
+          </div>
+          <div style="background:#1e293b; border-radius:4px; height:8px; overflow:hidden;">
+            <div id="runner-progress-bar" style="height:100%; width:0%; background:#3b82f6; border-radius:4px; transition:width 0.3s ease;"></div>
+          </div>
+          <div style="display:flex; gap:16px; margin-top:8px; font-size:0.66rem; color:#6b7280;">
+            <span>✅ PASS: <strong id="runner-pass-cnt" style="color:#e2e8f0;">0</strong></span>
+            <span>❌ FAIL: <strong id="runner-fail-cnt" style="color:#e2e8f0;">0</strong></span>
+            <span>⏳ 대기: <strong id="runner-pending-cnt" style="color:#94a3b8;">0</strong></span>
+          </div>
+        </div>
+        <!-- TC results list -->
+        <div id="runner-tc-list" style="display:flex; flex-direction:column; gap:4px; overflow-y:auto; max-height:360px; padding-right:4px;">
+        </div>
+        <!-- Summary (hidden until done) -->
+        <div id="runner-summary" style="display:none; background:#0f172a; border:1px solid #334155; border-radius:8px; padding:14px;">
+          <div style="font-size:0.8rem; font-weight:700; color:#e2e8f0; margin-bottom:8px;">🏁 테스트 실행 완료 — 최종 리포트</div>
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; text-align:center;">
+            <div style="background:#1e293b; border-radius:6px; padding:10px;">
+              <div style="font-size:1.4rem; font-weight:900; color:#e2e8f0;" id="summary-pass">18</div>
+              <div style="font-size:0.65rem; color:#e2e8f0;">PASS</div>
+            </div>
+            <div style="background:#1e293b; border-radius:6px; padding:10px;">
+              <div style="font-size:1.4rem; font-weight:900; color:#e2e8f0;" id="summary-fail">2</div>
+              <div style="font-size:0.65rem; color:#e2e8f0;">FAIL (결함 후보)</div>
+            </div>
+            <div style="background:#1e293b; border-radius:6px; padding:10px;">
+              <div style="font-size:1.4rem; font-weight:900; color:#e2e8f0;" id="summary-rate">90%</div>
+              <div style="font-size:0.65rem; color:#e2e8f0;">통과율</div>
+            </div>
+          </div>
+          <div style="margin-top:10px; font-size:0.68rem; color:#6b7280; line-height:1.7;">
+            ⚠️ <span style="color:#e2e8f0; font-weight:700;">SAMPLE-FINDING-01</span> — TC-TEMP-002: AUTO 모드 온도 하한 18.0°C 방어 실패 결함<br>
+            ⚠️ <span style="color:#e2e8f0; font-weight:700;">SAMPLE-FINDING-02</span> — TC-12: LOCK 상태 리모컨 연타 시 통신 먹통 결함
+          </div>
+        </div>
+        <!-- Run button -->
+        <div style="display:flex; justify-content:flex-end; align-items:center; gap:10px;">
+          <span title="이 패널은 실제 Playwright를 실행하지 않으며, QA 워크플로우 흐름을 시각화하는 Workflow Demo입니다." style="background:#7c3aed; color:#e9d5ff; font-size:0.62rem; font-weight:700; padding:3px 8px; border-radius:99px; cursor:help; border:1px solid #a78bfa; letter-spacing:0.03em;">⚠️ Workflow Demo</span>
+          <button id="runner-start-btn" onclick="startTestRunner()" style="background:#3b82f6; border:none; color:white; border-radius:8px; padding:10px 24px; cursor:pointer; font-size:0.78rem; font-weight:700; box-shadow:0 4px 14px rgba(59,130,246,0.4); display:flex; align-items:center; gap:8px;">
+            ▶ Workflow 시뮬레이션 실행
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================ -->
+  <!-- Agent 4 - 결과 분석·보고 패널                                      -->
+  <!-- ================================================================ -->
+  <div class="agent-modal-backdrop" id="agent4-cicd-modal">
+    <div class="agent-modal-card" style="width:620px;" onclick="event.stopPropagation()">
+      <div class="agent-modal-header">
+        <h3>🚀 에이전트 4번 — 결과 분석·보고 Demo <span style="background:#7c3aed;color:#e9d5ff;font-size:0.55rem;font-weight:700;padding:2px 6px;border-radius:99px;margin-left:8px;">⚠️ Workflow Demo</span></h3>
+        <button class="agent-modal-close" onclick="closeAgent4Modal()">&times;</button>
+      </div>
+      <div class="agent-modal-body" style="padding:20px; display:flex; flex-direction:column; gap:16px;">
+        <!-- Pipeline stages -->
+        <div style="display:flex; align-items:center; gap:0; justify-content:center;" id="cicd-pipeline-row">
+          <!-- Stage 1 -->
+          <div class="cicd-stage" id="cicd-stage-1">
+            <div class="cicd-stage-icon" id="cicd-icon-1">📥</div>
+            <div class="cicd-stage-name">실행 수집</div>
+            <div class="cicd-stage-status" id="cicd-status-1">대기</div>
+          </div>
+          <div class="cicd-arrow">→</div>
+          <!-- Stage 2 -->
+          <div class="cicd-stage" id="cicd-stage-2">
+            <div class="cicd-stage-icon" id="cicd-icon-2">🔎</div>
+            <div class="cicd-stage-name">원인 분석</div>
+            <div class="cicd-stage-status" id="cicd-status-2">대기</div>
+          </div>
+          <div class="cicd-arrow">→</div>
+          <!-- Stage 3 -->
+          <div class="cicd-stage" id="cicd-stage-3">
+            <div class="cicd-stage-icon" id="cicd-icon-3">⚖️</div>
+            <div class="cicd-stage-name">교차 검증</div>
+            <div class="cicd-stage-status" id="cicd-status-3">대기</div>
+          </div>
+          <div class="cicd-arrow">→</div>
+          <!-- Stage 4 -->
+          <div class="cicd-stage" id="cicd-stage-4">
+            <div class="cicd-stage-icon" id="cicd-icon-4">🏁</div>
+            <div class="cicd-stage-name">릴리즈 판정</div>
+            <div class="cicd-stage-status" id="cicd-status-4">대기</div>
+          </div>
+          <div class="cicd-arrow">→</div>
+          <!-- Stage 5 -->
+          <div class="cicd-stage" id="cicd-stage-5">
+            <div class="cicd-stage-icon" id="cicd-icon-5">📡</div>
+            <div class="cicd-stage-name">외부 보고 Demo</div>
+            <div class="cicd-stage-status" id="cicd-status-5">대기</div>
+          </div>
+        </div>
+
+        <!-- Log console -->
+        <div style="background:#111; border-radius:8px; border:1px solid #292400; padding:12px; font-size:0.7rem; font-family:'Courier New',monospace; color:#a3a3a3; height:150px; overflow-y:auto;" id="cicd-log">
+          <div >⬛ 결과 분석·보고 Demo 대기 중... 실행 버튼을 클릭하세요.</div>
+        </div>
+
+        <!-- Jira tickets dashboard -->
+        <div id="cicd-jira-area" style="display:none;">
+          <div style="font-size:0.72rem; color:#e2e8f0; font-weight:700; margin-bottom:8px;">🎫 결함 티켓 Demo 생성 <span style="font-size:0.55rem;color:#a3a3a3;font-weight:400;">(실제 Jira 연동 아님)</span></div>
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <div style="background:#1e293b; border:1px solid #334155; border-radius:6px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <span style="font-size:0.68rem; color:#e2e8f0; font-weight:700;">SAMPLE-FINDING-01</span>
+                <span style="font-size:0.68rem; color:#a3a3a3; margin-left:8px;">송풍 모드 레지스터 온도 미초기화 결함</span>
+              </div>
+              <span style="font-size:0.62rem; background:#1e293b; color:#e2e8f0; border-radius:4px; padding:2px 8px; font-weight:700;">🔴 CRITICAL</span>
+            </div>
+            <div style="background:#1e293b; border:1px solid #334155; border-radius:6px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <span style="font-size:0.68rem; color:#e2e8f0; font-weight:700;">SAMPLE-FINDING-02</span>
+                <span style="font-size:0.68rem; color:#a3a3a3; margin-left:8px;">LOCK 상태 리모컨 연타 시 통신 데드락 결함</span>
+              </div>
+              <span style="font-size:0.62rem; background:#1e293b; color:#e2e8f0; border-radius:4px; padding:2px 8px; font-weight:700;">🔴 CRITICAL</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Run button -->
+        <div style="display:flex; justify-content:flex-end;">
+          <button id="cicd-run-btn" onclick="startCICD()" style="background:#3b82f6; border:none; color:white; border-radius:8px; padding:10px 24px; cursor:pointer; font-size:0.78rem; font-weight:700; box-shadow:0 4px 14px rgba(59,130,246,0.4);">
+            🚀 저장 예시 시현
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- V2 실제 Run 연동 패널: 로컬 qa-pipeline-ui로 열었을 때만 활성화 -->
+  <div class="agent-modal-backdrop" id="qa-live-modal" onclick="closeQaLiveModal()">
+    <div class="agent-modal-card qa-live-card" onclick="event.stopPropagation()">
+      <div class="agent-modal-header">
+        <h3>🔗 QA Pipeline V2 실제 Run</h3>
+        <button class="agent-modal-close" onclick="closeQaLiveModal()">✕</button>
+      </div>
+      <div class="qa-live-body">
+        <div class="qa-live-banner">
+          <div>
+            <span class="qa-live-dot"></span>
+            <strong id="qa-live-connection">로컬 브리지 확인 중</strong>
+          </div>
+          <div class="qa-live-banner-status">
+            <span id="qa-live-mode" class="qa-live-status">연결 확인 중</span>
+            <span id="qa-live-overall" class="qa-live-status">대기</span>
+          </div>
+        </div>
+
+        <div class="qa-live-mode-block qa-live-view-block">
+          <div class="qa-live-mode-title">
+            <strong>저장 결과 보기</strong>
+            <span>AI API 사용 없음</span>
+          </div>
+          <div class="qa-live-controls">
+            <label for="qa-live-run-select">완료된 Run</label>
+            <select id="qa-live-run-select" onchange="loadQaLiveRun(this.value)"></select>
+            <button type="button" onclick="refreshQaLiveData()">새로고침</button>
+          </div>
+        </div>
+
+        <div class="qa-live-mode-block qa-live-execute-block">
+          <div class="qa-live-mode-title">
+            <strong>새 요구사항 실제 실행</strong>
+            <span>AI API 비용 발생</span>
+          </div>
+          <div class="qa-live-request">
+            <label for="qa-live-request-select">변경 요청</label>
+            <select id="qa-live-request-select" onchange="resetQaLiveStartApproval()"></select>
+            <button id="qa-live-start-btn" type="button" onclick="startQaLiveRun()" disabled>
+              새 Live 실행 잠김
+            </button>
+          </div>
+        </div>
+        <div id="qa-live-message" class="qa-live-message">
+          저장된 Run을 선택하면 실제 산출물을 읽어 표시합니다.
+        </div>
+
+        <div class="qa-live-run-title">
+          <strong id="qa-live-run-id">Run 미선택</strong>
+          <span id="qa-live-request-id">-</span>
+        </div>
+        <div id="qa-live-description" class="qa-live-description"></div>
+
+        <div class="qa-live-stage-grid">
+          <button id="qa-live-stage-agent1" class="qa-live-stage" onclick="showQaLiveStage('agent1')">
+            <span>1</span><strong>요구사항 정제</strong><small>대기</small>
+          </button>
+          <button id="qa-live-stage-agent2" class="qa-live-stage" onclick="showQaLiveStage('agent2')">
+            <span>2</span><strong>TC 설계</strong><small>대기</small>
+          </button>
+          <button id="qa-live-stage-agent3" class="qa-live-stage" onclick="showQaLiveStage('agent3')">
+            <span>3</span><strong>자동화 실행</strong><small>대기</small>
+          </button>
+          <button id="qa-live-stage-agent4" class="qa-live-stage" onclick="showQaLiveStage('agent4')">
+            <span>4</span><strong>결과 분석·보고</strong><small>대기</small>
+          </button>
+        </div>
+
+        <div class="qa-live-detail">
+          <h4 id="qa-live-detail-title">실제 Run 요약</h4>
+          <p id="qa-live-detail-summary">Run을 선택해 주세요.</p>
+          <ul id="qa-live-detail-list"></ul>
+        </div>
+        <div class="qa-live-approval">
+          <div class="qa-live-mode-title">
+            <strong>후보 TC 공식 자산 판단</strong>
+            <span>AI API 재호출 없음</span>
+          </div>
+          <p id="qa-live-approval-status">승인 가능한 후보를 확인 중입니다.</p>
+          <div class="qa-live-approval-form">
+            <label for="qa-live-candidate-select">후보 TC</label>
+            <select id="qa-live-candidate-select" onchange="resetQaAssetSelection()"></select>
+            <label for="qa-live-reviewer">검토자</label>
+            <input id="qa-live-reviewer" maxlength="80" placeholder="검토자 이름">
+            <label for="qa-live-approval-note">판단 메모</label>
+            <input id="qa-live-approval-note" maxlength="500" placeholder="승인 근거 또는 보류 사유">
+          </div>
+          <div id="qa-live-srs-revision" class="qa-live-srs-revision" hidden>
+            <strong>기준 SRS 개정 제안</strong>
+            <ul id="qa-live-srs-revision-list"></ul>
+            <label>
+              <input id="qa-live-srs-approve" type="checkbox">
+              표시된 인수 기준 개정을 검토했으며 공식 자산 등록과 함께 반영합니다.
+            </label>
+          </div>
+          <div class="qa-live-approval-actions">
+            <button id="qa-live-revalidate-btn" type="button" onclick="revalidateQaAsset()" disabled>현재 화면에서 후보 재검증</button>
+            <button id="qa-live-approve-btn" type="button" onclick="submitQaAssetDecision('APPROVE')" disabled>공식 TC·자동화 등록 승인</button>
+            <button id="qa-live-hold-btn" type="button" onclick="submitQaAssetDecision('HOLD')" disabled>보류</button>
+          </div>
+        </div>
+        <div class="qa-live-note">
+          화면 값은 <code>runs/&lt;Run ID&gt;</code>의 JSON 증거를 요약합니다. 공식 등록은 후보 원본을 바꾸지 않고 별도 자산과 해시 기록을 남기며, 새 실행의 외부 보고는 미리보기만 생성합니다.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .qa-live-card { width: 760px; max-width: calc(100vw - 32px); max-height: 88vh; }
+    .qa-live-body { padding: 16px 18px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+    .qa-live-banner, .qa-live-run-title, .qa-live-mode-title { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+    .qa-live-banner { border:1px solid #1e3a5f; background:#07111f; border-radius:8px; padding:10px 12px; color:#cbd5e1; font-size:.75rem; }
+    .qa-live-dot { display:inline-block; width:8px; height:8px; margin-right:7px; border-radius:50%; background:#34d399; box-shadow:0 0 8px rgba(52,211,153,.7); }
+    .qa-live-status { border:1px solid #334155; border-radius:999px; padding:3px 9px; color:#e2e8f0; font:700 .68rem 'Outfit',sans-serif; }
+    .qa-live-banner-status { display:flex; gap:6px; align-items:center; }
+    .qa-live-mode-block, .qa-live-approval { border:1px solid #26344a; border-radius:8px; padding:10px 11px; background:#0b1322; }
+    .qa-live-view-block { border-left:3px solid #38bdf8; }
+    .qa-live-execute-block { border-left:3px solid #f59e0b; }
+    .qa-live-mode-title { margin-bottom:8px; color:#e2e8f0; font-size:.72rem; }
+    .qa-live-mode-title span { color:#94a3b8; font-size:.62rem; }
+    .qa-live-controls, .qa-live-request { display:grid; grid-template-columns:80px minmax(0,1fr) auto; gap:8px; align-items:center; }
+    .qa-live-controls label, .qa-live-request label { color:#94a3b8; font-size:.7rem; }
+    .qa-live-controls select, .qa-live-request select { min-width:0; background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:6px; padding:7px 9px; font-size:.7rem; }
+    .qa-live-controls button, .qa-live-request button { background:#172033; color:#e2e8f0; border:1px solid #334155; border-radius:6px; padding:7px 10px; font-size:.68rem; cursor:pointer; }
+    .qa-live-request button:disabled { opacity:.45; cursor:not-allowed; }
+    .qa-live-message { padding:8px 10px; background:#111827; border-left:3px solid #64748b; color:#94a3b8; font-size:.68rem; line-height:1.5; }
+    .qa-live-run-title { padding-top:2px; color:#f8fafc; }
+    .qa-live-run-title strong { font:700 .86rem 'Outfit',sans-serif; }
+    .qa-live-run-title span { color:#94a3b8; font-size:.68rem; }
+    .qa-live-description { color:#cbd5e1; font-size:.72rem; line-height:1.55; }
+    .qa-live-stage-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }
+    .qa-live-stage { display:grid; grid-template-columns:24px minmax(0,1fr); grid-template-rows:auto auto; column-gap:7px; text-align:left; background:#0f172a; border:1px solid #334155; border-radius:8px; padding:9px; color:#cbd5e1; cursor:pointer; }
+    .qa-live-stage:hover, .qa-live-stage.active { border-color:#60a5fa; background:#101d32; }
+    .qa-live-stage > span { grid-row:1 / 3; width:23px; height:23px; display:grid; place-items:center; border-radius:50%; background:#1e293b; color:#93c5fd; font:700 .7rem 'Outfit',sans-serif; }
+    .qa-live-stage strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.68rem; }
+    .qa-live-stage small { color:#94a3b8; font-size:.62rem; }
+    .qa-live-detail { min-height:150px; background:#080f1d; border:1px solid #1e293b; border-radius:8px; padding:12px 14px; }
+    .qa-live-detail h4 { margin:0 0 7px; color:#f8fafc; font-size:.78rem; }
+    .qa-live-detail p { margin:0 0 8px; color:#bfdbfe; font-size:.7rem; line-height:1.5; }
+    .qa-live-detail ul { margin:0; padding-left:18px; max-height:210px; overflow-y:auto; color:#94a3b8; font-size:.67rem; line-height:1.65; }
+    .qa-live-approval { border-left:3px solid #34d399; }
+    .qa-live-approval p { margin:0 0 9px; color:#94a3b8; font-size:.67rem; line-height:1.5; }
+    .qa-live-approval-form { display:grid; grid-template-columns:72px minmax(0,1fr); gap:7px 8px; align-items:center; }
+    .qa-live-approval-form label { color:#94a3b8; font-size:.66rem; }
+    .qa-live-approval-form select, .qa-live-approval-form input { min-width:0; background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:6px; padding:7px 9px; font-size:.68rem; }
+    .qa-live-srs-revision { margin-top:9px; padding:9px; border:1px solid #7c5c1d; border-radius:6px; background:#171207; color:#d6c59b; font-size:.65rem; line-height:1.55; }
+    .qa-live-srs-revision strong { color:#fde68a; }
+    .qa-live-srs-revision ul { margin:6px 0; padding-left:18px; max-height:130px; overflow-y:auto; }
+    .qa-live-srs-revision label { display:flex; align-items:flex-start; gap:7px; color:#fef3c7; }
+    .qa-live-srs-revision input { margin-top:3px; }
+    .qa-live-approval-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:9px; }
+    .qa-live-approval-actions button { background:#172033; color:#e2e8f0; border:1px solid #334155; border-radius:6px; padding:7px 10px; font-size:.67rem; cursor:pointer; }
+    .qa-live-approval-actions button:nth-child(2) { border-color:#047857; color:#a7f3d0; }
+    .qa-live-approval-actions button:disabled { opacity:.4; cursor:not-allowed; }
+    .qa-live-note { color:#64748b; font-size:.62rem; line-height:1.5; }
+    .qa-live-note code { color:#94a3b8; }
+    @media (max-width: 700px) {
+      .qa-live-stage-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .qa-live-controls, .qa-live-request { grid-template-columns:1fr; }
+      .qa-live-approval-form { grid-template-columns:1fr; }
+    }
+
+    .req-chip {
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #94a3b8;
+      border-radius: 20px;
+      padding: 4px 12px;
+      font-size: 0.68rem;
+      cursor: pointer;
+      font-family: 'Noto Sans KR', sans-serif;
+      transition: all 0.2s;
+      outline: none;
+    }
+    .req-chip.active {
+      background: rgba(79, 70, 229, 0.2);
+      border-color: #4f46e5;
+      color: #a5b4fc;
+    }
+    .req-chip:hover { border-color: #7c3aed; color: #c4b5fd; }
+
+    .runner-tc-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #0a1a0e;
+      border: 1px solid #14532d;
+      border-radius: 6px;
+      padding: 7px 12px;
+      font-size: 0.72rem;
+      color: #94a3b8;
+      animation: slideInTc 0.25s ease;
+    }
+    @keyframes slideInTc {
+      from { opacity: 0; transform: translateX(-10px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+    .runner-tc-row.running { border-color: #334155; background: #1e293b; }
+    .runner-tc-row.pass    { border-color: #334155; background: #1e293b; }
+    .runner-tc-row.fail    { border-color: #334155; background: #1e293b; }
+    .runner-tc-id   { font-family: 'Outfit', monospace; font-weight: 700; color: #e2e8f0; min-width: 48px; }
+    .runner-tc-desc { flex: 1; }
+    .runner-tc-badge { font-weight: 700; font-size: 0.68rem; padding: 2px 8px; border-radius: 4px; }
+    .runner-tc-badge.running { background:transparent; color:#e2e8f0; border:1px solid #334155; }
+    .runner-tc-badge.pass    { background:transparent; color:#e2e8f0; border:1px solid #334155; }
+    .runner-tc-badge.fail    { background:transparent; color:#e2e8f0; border:1px solid #334155; }
+
+    .cicd-stage {
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      background: #1a1400; border: 1px solid #333; border-radius: 10px;
+      padding: 12px 14px; min-width: 80px; transition: all 0.3s;
+    }
+    .cicd-stage.running { border-color: #334155; background: #1e293b; }
+    .cicd-stage.done    { border-color: #334155; background: #1e293b; }
+    .cicd-stage.warn    { border-color: #334155; background: #1e293b; }
+    @keyframes cicdPulse {
+      from { box-shadow: 0 0 8px rgba(245,158,11,0.2); }
+      to   { box-shadow: 0 0 20px rgba(245,158,11,0.5); }
+    }
+    .cicd-stage-icon   { font-size: 1.4rem; line-height: 1; }
+    .cicd-stage-name   { font-size: 0.65rem; color: #9ca3af; font-weight: 700; letter-spacing: 0.3px; }
+    .cicd-stage-status { font-size: 0.6rem; color: #6b7280; font-family: 'Outfit', monospace; padding: 1px 6px; border-radius: 3px; background: rgba(0,0,0,0.3); }
+    .cicd-arrow { color: #374151; font-size: 1.2rem; padding: 0 4px; flex-shrink: 0; }
+  </style>
+
+  <script>
+    const qaLiveState = {
+      connected: false,
+      overview: null,
+      run: null,
+      selectedStage: 'agent1',
+      pollTimer: null,
+      startApprovalArmed: false,
+      assetApprovalArmed: false
+    };
+
+    async function qaLiveFetch(path, options) {
+      const response = await fetch(path, options);
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+      return payload;
+    }
+
+    function setQaLiveOptions(select, items, valueKey, labelBuilder) {
+      select.replaceChildren();
+      items.forEach(item => {
+        const option = document.createElement('option');
+        option.value = typeof item === 'string' ? item : item[valueKey];
+        option.textContent = labelBuilder(item);
+        select.appendChild(option);
+      });
+    }
+
+    async function initQaLiveBridge() {
+      try {
+        const [overview, runsPayload, requestsPayload] = await Promise.all([
+          qaLiveFetch('/api/qa/state'),
+          qaLiveFetch('/api/qa/runs'),
+          qaLiveFetch('/api/qa/requests')
+        ]);
+        qaLiveState.connected = true;
+        qaLiveState.overview = overview;
+        document.getElementById('qa-live-connection').textContent = 'V2 로컬 실행 서버 연결됨';
+        const runSelect = document.getElementById('qa-live-run-select');
+        setQaLiveOptions(runSelect, runsPayload.runs, null, item => item);
+        const requestSelect = document.getElementById('qa-live-request-select');
+        setQaLiveOptions(
+          requestSelect,
+          requestsPayload.requests,
+          'file',
+          item => `${item.request_id} · ${item.file}`
+        );
+        updateQaLiveExecutionControls(overview);
+        if (overview.latest_run_id) {
+          runSelect.value = overview.latest_run_id;
+          await loadQaLiveRun(overview.latest_run_id);
+        }
+        setTowerStatus('실제 Run 연결', '#34d399');
+      } catch (error) {
+        qaLiveState.connected = false;
+      }
+    }
+
+    function updateQaLiveExecutionControls(overview) {
+      qaLiveState.overview = overview;
+      const startButton = document.getElementById('qa-live-start-btn');
+      startButton.disabled = !overview.allow_live_run || overview.running;
+      document.getElementById('qa-live-mode').textContent = overview.allow_live_run
+        ? '실제 실행 가능'
+        : '저장 결과 조회 전용';
+      startButton.textContent = overview.running
+        ? 'Live 실행 중'
+        : overview.allow_live_run && qaLiveState.startApprovalArmed
+          ? '확인: API Live 실행'
+          : overview.allow_live_run
+            ? '새 Live 실행'
+            : '새 Live 실행 잠김';
+      document.getElementById('qa-live-message').textContent =
+        overview.allow_live_run && qaLiveState.startApprovalArmed && !overview.running
+          ? 'OpenAI API 비용이 발생합니다. 다시 누르면 Agent 1→4를 실행하며 외부 보고는 미리보기로만 생성합니다.'
+          : overview.message;
+      if (overview.running) {
+        setTowerStatus(`실제 실행 중 · ${overview.phase}`, '#fbbf24');
+      } else if (overview.phase === 'FAILED') {
+        setTowerStatus('실제 실행 실패', '#f87171');
+      } else if (overview.phase === 'COMPLETED') {
+        setTowerStatus('실제 실행 완료', '#34d399');
+      }
+    }
+
+    function resetQaLiveStartApproval() {
+      qaLiveState.startApprovalArmed = false;
+      if (qaLiveState.overview) updateQaLiveExecutionControls(qaLiveState.overview);
+    }
+
+    async function refreshQaLiveData() {
+      if (!qaLiveState.connected) return;
+      try {
+        const [overview, runsPayload] = await Promise.all([
+          qaLiveFetch('/api/qa/state'),
+          qaLiveFetch('/api/qa/runs')
+        ]);
+        updateQaLiveExecutionControls(overview);
+        const select = document.getElementById('qa-live-run-select');
+        const current = select.value;
+        setQaLiveOptions(select, runsPayload.runs, null, item => item);
+        select.value = overview.run_id || current || overview.latest_run_id || '';
+        if (select.value) await loadQaLiveRun(select.value);
+        if (overview.running) scheduleQaLivePoll();
+      } catch (error) {
+        document.getElementById('qa-live-message').textContent = `상태 갱신 실패: ${error.message}`;
+      }
+    }
+
+    function scheduleQaLivePoll() {
+      if (qaLiveState.pollTimer) clearTimeout(qaLiveState.pollTimer);
+      qaLiveState.pollTimer = setTimeout(refreshQaLiveData, 1500);
+    }
+
+    async function loadQaLiveRun(runId) {
+      if (!runId) return;
+      try {
+        qaLiveState.run = await qaLiveFetch(`/api/qa/runs/${encodeURIComponent(runId)}`);
+        renderQaLiveRun();
+      } catch (error) {
+        document.getElementById('qa-live-message').textContent = `Run 조회 실패: ${error.message}`;
+      }
+    }
+
+    function renderQaLiveRun() {
+      const run = qaLiveState.run;
+      if (!run) return;
+      document.getElementById('qa-live-run-id').textContent = run.run_id;
+      document.getElementById('qa-live-request-id').textContent = `${run.request_id || '-'} · ${run.target_requirement_id || '-'}`;
+      document.getElementById('qa-live-description').textContent = run.description || '';
+      document.getElementById('qa-live-overall').textContent = run.overall_status || '대기';
+      Object.entries(run.stages).forEach(([key, stage]) => {
+        const button = document.getElementById(`qa-live-stage-${key}`);
+        button.querySelector('small').textContent = stage.status;
+        button.dataset.status = stage.status;
+      });
+      renderQaAssetApproval();
+      if (qaLiveState.selectedStage === 'overview') showQaLiveOverview();
+      else showQaLiveStage(qaLiveState.selectedStage);
+    }
+
+    function showQaLiveOverview() {
+      const run = qaLiveState.run;
+      if (!run) return;
+      qaLiveState.selectedStage = 'overview';
+      document.querySelectorAll('.qa-live-stage').forEach(item => item.classList.remove('active'));
+      document.getElementById('qa-live-detail-title').textContent = `전체 흐름 · ${run.overall_status}`;
+      document.getElementById('qa-live-detail-summary').textContent =
+        `${run.request_id || '-'}의 Agent 1→4 실제 Run 상태입니다.`;
+      const list = document.getElementById('qa-live-detail-list');
+      list.replaceChildren();
+      Object.values(run.stages).forEach(stage => {
+        const item = document.createElement('li');
+        item.textContent = `${stage.name}: ${stage.status} · ${stage.summary}`;
+        list.appendChild(item);
+      });
+    }
+
+    function showQaLiveStage(stageKey) {
+      const run = qaLiveState.run;
+      if (!run || !run.stages[stageKey]) return;
+      qaLiveState.selectedStage = stageKey;
+      document.querySelectorAll('.qa-live-stage').forEach(item => item.classList.remove('active'));
+      document.getElementById(`qa-live-stage-${stageKey}`).classList.add('active');
+      const stage = run.stages[stageKey];
+      document.getElementById('qa-live-detail-title').textContent = `${stage.name} · ${stage.status}`;
+      document.getElementById('qa-live-detail-summary').textContent = stage.summary;
+      const list = document.getElementById('qa-live-detail-list');
+      list.replaceChildren();
+      (stage.details.length ? stage.details : ['세부 산출물이 아직 없습니다.']).forEach(detail => {
+        const item = document.createElement('li');
+        item.textContent = detail;
+        list.appendChild(item);
+      });
+    }
+
+    function resetQaAssetApproval() {
+      qaLiveState.assetApprovalArmed = false;
+      renderQaAssetApproval();
+    }
+
+    function resetQaAssetSelection() {
+      document.getElementById('qa-live-srs-approve').checked = false;
+      resetQaAssetApproval();
+    }
+
+    function renderQaAssetApproval() {
+      const run = qaLiveState.run;
+      const select = document.getElementById('qa-live-candidate-select');
+      const status = document.getElementById('qa-live-approval-status');
+      const revalidateButton = document.getElementById('qa-live-revalidate-btn');
+      const approveButton = document.getElementById('qa-live-approve-btn');
+      const holdButton = document.getElementById('qa-live-hold-btn');
+      const srsBox = document.getElementById('qa-live-srs-revision');
+      const srsList = document.getElementById('qa-live-srs-revision-list');
+      const srsApprove = document.getElementById('qa-live-srs-approve');
+      const current = select.value;
+      const candidates = run ? (run.candidate_assets || []) : [];
+      setQaLiveOptions(select, candidates, 'tc_id', item => `${item.tc_id} · ${item.title}`);
+      if (candidates.some(item => item.tc_id === current)) select.value = current;
+      const candidate = candidates.find(item => item.tc_id === select.value);
+      const approvalEnabled = Boolean(qaLiveState.overview && qaLiveState.overview.allow_asset_approval);
+      if (!candidate) {
+        status.textContent = '이 Run에는 공식 자산 판단 대상 후보가 없습니다.';
+        revalidateButton.disabled = true;
+        approveButton.disabled = true;
+        holdButton.disabled = true;
+        srsBox.hidden = true;
+        return;
+      }
+      const srsProposals = candidate.srs_revision_proposals || [];
+      srsBox.hidden = srsProposals.length === 0;
+      srsList.replaceChildren();
+      srsProposals.forEach(proposal => {
+        const item = document.createElement('li');
+        item.textContent = `${proposal.requirement_id}: ${proposal.current_acceptance_criteria} → ${proposal.proposed_acceptance_criteria}`;
+        srsList.appendChild(item);
+      });
+      srsApprove.disabled = false;
+      const decision = candidate.decision;
+      if (decision && decision.decision === 'APPROVED') {
+        status.textContent = `등록 완료: ${decision.official_tc_id} · 검토자 ${decision.reviewer}`;
+        srsApprove.disabled = true;
+      } else if (decision && decision.decision === 'HELD') {
+        status.textContent = `보류됨 · 검토자 ${decision.reviewer} · 다시 검토 후 승인할 수 있습니다.`;
+      } else if (!candidate.approval_eligible) {
+        status.textContent = `등록 불가: ${(candidate.eligibility_reasons || []).join(' ')}`;
+      } else if (!approvalEnabled) {
+        status.textContent = '검증 조건은 충족했습니다. 서버의 공식 자산 승인 기능이 잠겨 있습니다.';
+      } else if (qaLiveState.assetApprovalArmed) {
+        status.textContent = srsProposals.length
+          ? '다시 누르면 SRS 개정과 후보 TC·자동화 공식 등록이 함께 수행됩니다.'
+          : '다시 누르면 후보 TC와 검증된 자동화가 공식 자산으로 등록됩니다.';
+      } else {
+        status.textContent = '검증 조건을 충족했습니다. 사람의 최종 판단을 기록할 수 있습니다.';
+      }
+      approveButton.textContent = qaLiveState.assetApprovalArmed
+        ? '확인: 공식 자산 등록'
+        : '공식 TC·자동화 등록 승인';
+      approveButton.disabled = !approvalEnabled || !candidate.approval_eligible || (decision && decision.decision === 'APPROVED');
+      revalidateButton.disabled = !approvalEnabled || !candidate.revalidation_required || (decision && decision.decision === 'APPROVED');
+      holdButton.disabled = !approvalEnabled || (decision && decision.decision === 'APPROVED');
+    }
+
+    async function revalidateQaAsset() {
+      const run = qaLiveState.run;
+      if (!run) return;
+      const tcId = document.getElementById('qa-live-candidate-select').value;
+      const status = document.getElementById('qa-live-approval-status');
+      const button = document.getElementById('qa-live-revalidate-btn');
+      button.disabled = true;
+      status.textContent = 'AI API 호출 없이 현재 중앙제어 화면에서 후보 자동화를 다시 실행 중입니다.';
+      try {
+        const payload = await qaLiveFetch(`/api/qa/runs/${encodeURIComponent(run.run_id)}/asset-revalidation`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({tc_id: tcId})
+        });
+        qaLiveState.run = payload.run;
+        renderQaLiveRun();
+      } catch (error) {
+        status.textContent = `현재 화면 재검증 실패: ${error.message}`;
+        renderQaAssetApproval();
+      }
+    }
+
+    async function submitQaAssetDecision(decision) {
+      const run = qaLiveState.run;
+      if (!run) return;
+      const tcId = document.getElementById('qa-live-candidate-select').value;
+      const reviewer = document.getElementById('qa-live-reviewer').value.trim();
+      const note = document.getElementById('qa-live-approval-note').value.trim();
+      const srsProposals = (run.candidate_assets || []).find(item => item.tc_id === tcId)?.srs_revision_proposals || [];
+      const approveSrsRevisions = document.getElementById('qa-live-srs-approve').checked;
+      if (!reviewer) {
+        document.getElementById('qa-live-approval-status').textContent = '검토자 이름을 입력해 주세요.';
+        return;
+      }
+      if (decision === 'HOLD' && !note) {
+        document.getElementById('qa-live-approval-status').textContent = '보류 사유를 판단 메모에 입력해 주세요.';
+        return;
+      }
+      if (decision === 'APPROVE' && srsProposals.length && !approveSrsRevisions) {
+        document.getElementById('qa-live-approval-status').textContent = '기준 SRS 개정 제안을 확인하고 반영 승인에 체크해 주세요.';
+        return;
+      }
+      if (decision === 'APPROVE' && !qaLiveState.assetApprovalArmed) {
+        qaLiveState.assetApprovalArmed = true;
+        renderQaAssetApproval();
+        return;
+      }
+      qaLiveState.assetApprovalArmed = false;
+      try {
+        const payload = await qaLiveFetch(`/api/qa/runs/${encodeURIComponent(run.run_id)}/asset-decision`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({tc_id: tcId, decision, reviewer, note, approve_srs_revisions: approveSrsRevisions})
+        });
+        qaLiveState.run = payload.run;
+        renderQaLiveRun();
+      } catch (error) {
+        document.getElementById('qa-live-approval-status').textContent = `판단 기록 실패: ${error.message}`;
+      }
+    }
+
+    function openQaLiveModal(stageKey) {
+      if (!qaLiveState.connected) return false;
+      document.getElementById('qa-live-modal').classList.add('show');
+      if (stageKey === 'overview') showQaLiveOverview();
+      else if (stageKey) showQaLiveStage(stageKey);
+      refreshQaLiveData();
+      appendQALog('SYSTEM', `[V2 실제 Run] ${qaLiveState.run ? qaLiveState.run.run_id : 'Run'} 증거를 조회했습니다.`, 'info');
+      return true;
+    }
+
+    function closeQaLiveModal() {
+      document.getElementById('qa-live-modal').classList.remove('show');
+      if (qaLiveState.pollTimer) clearTimeout(qaLiveState.pollTimer);
+    }
+
+    async function startQaLiveRun() {
+      const overview = qaLiveState.overview;
+      if (!overview || !overview.allow_live_run || overview.running) return;
+      const requestFile = document.getElementById('qa-live-request-select').value;
+      if (!requestFile) return;
+      if (!qaLiveState.startApprovalArmed) {
+        qaLiveState.startApprovalArmed = true;
+        document.getElementById('qa-live-start-btn').textContent = '확인: API Live 실행';
+        document.getElementById('qa-live-message').textContent =
+          'OpenAI API 비용이 발생합니다. 다시 누르면 Agent 1→4를 실행하며 외부 보고는 미리보기로만 생성합니다.';
+        return;
+      }
+      qaLiveState.startApprovalArmed = false;
+      try {
+        const nextOverview = await qaLiveFetch('/api/qa/runs', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({request_file: requestFile})
+        });
+        updateQaLiveExecutionControls(nextOverview);
+        scheduleQaLivePoll();
+      } catch (error) {
+        document.getElementById('qa-live-message').textContent = `Live 실행 시작 실패: ${error.message}`;
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', initQaLiveBridge);
+
+    // ── Sidebar Tab Toggle ───────────────────────────────────────────
+    function switchSidebarTab(tabName) {
+      const controlBtn = document.getElementById('tab-control');
+      const qaBtn = document.getElementById('tab-qa');
+      const towerPanel = document.querySelector('.qa-tower-panel');
+      
+      if (tabName === 'qa' && qaBtn.classList.contains('active')) {
+        tabName = 'control'; // Toggle off
+      }
+      
+      if (tabName === 'control') {
+        controlBtn.classList.add('active');
+        qaBtn.classList.remove('active');
+        towerPanel.classList.add('collapsed');
+        document.body.classList.add('sidebar-collapsed');
+        appendQALog('SYSTEM', '[화면 전환] 장치 관제 모니터링 모드 활성화 (QA 패널 숨김)', 'info');
+      } else {
+        controlBtn.classList.remove('active');
+        qaBtn.classList.add('active');
+        towerPanel.classList.remove('collapsed');
+        document.body.classList.remove('sidebar-collapsed');
+        appendQALog('SYSTEM', '[화면 전환] 자율 QA 거버넌스 모드 활성화 (QA 패널 노출)', 'info');
+      }
+      
+      // 브라우저 리사이징 강제 트리거로 카드 그리드 크기 자동 보정
+      window.dispatchEvent(new Event('resize'));
+    }
+
+    // ── Modal helpers ────────────────────────────────────────────────
+    function openAgentModal()   { document.getElementById('agent-tc-modal').classList.add('show'); }
+    function closeAgentModal()  { document.getElementById('agent-tc-modal').classList.remove('show'); }
+    function closeAgent1Modal() { document.getElementById('agent1-req-modal').classList.remove('show');
+      if (typeof isMasterRunning !== 'undefined' && isMasterRunning) {
+          isMasterRunning = false;
+          const lead = document.getElementById('agent-lead-btn');
+          if(lead) lead.classList.remove('flashing');
+          setTowerStatus('대기 중', '#34d399');
+      }
+ }
+    function closeAgent3Modal() { document.getElementById('agent3-runner-modal').classList.remove('show'); }
+    function closeAgent4Modal() { document.getElementById('agent4-cicd-modal').classList.remove('show'); }
+    function toggleChip(el)     { el.classList.toggle('active'); }
+
+    function setTowerStatus(text, color) {
+      const el = document.getElementById('tower-status-val');
+      el.innerText = '● ' + text;
+      el.style.color = color;
+    }
+
+    // Helper: Flash node
+    function flashNode(id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.classList.add('flashing');
+      setTimeout(() => el.classList.remove('flashing'), 1500);
+    }
+
+    // Auto-fill simulations for Demo
+    function simulateJiraImport(btn) {
+      btn.innerText = '연동 중...';
+      btn.style.color = '#fbbf24';
+      setTimeout(() => {
+        document.getElementById('req-jira-url').value = 'https://jira.company.com/browse/HVAC-2048';
+        document.getElementById('req-memo').value = '[신규 요구사항: 공기청정 제어 로직 추가]\n- 공기청정 활성화 시, 전용 아이콘 표출 및 독립 제어 가능해야 함.\n- 난방 모드와 동시 활성화 시 충돌 방어 로직 검증 필수.\n- 상호배타 조건 위반 시 즉시 에러 발생.';
+        btn.innerText = '✅ 연동 완료';
+        btn.style.color = '#4ade80';
+      }, 800);
+    }
+
+    function simulateFileImport(btn) {
+      btn.innerText = '업로드 중...';
+      setTimeout(() => {
+        document.getElementById('req-jira-url').value = 'PRD_HVAC_AirCare_v2.pdf (업로드됨)';
+        document.getElementById('req-memo').value = '[PDF 기획서 파싱 완료]\n- 신규 기능: 공기청정 제어\n- 예외 조건: 난방 모드 동작 시 공기청정 동시 켬 불가 (상호배타 로직 엣지케이스 테스트 추가 요망).';
+        btn.innerText = '✅ 파싱 완료';
+        btn.style.border = '1px solid #4ade80';
+        btn.style.color = '#4ade80';
+      }, 1200);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // AGENT 1 — 요구사항 정의
+    // ═══════════════════════════════════════════════════════════════
+    function runAgent1Action(event) {
+      if (event) event.stopPropagation();
+      if (openQaLiveModal('agent1')) return;
+      flashNode('agent-1-btn');
+      document.getElementById('agent1-req-modal').classList.add('show');
+      setTowerStatus('요구사항 입력 중', '#818cf8');
+      appendQALog('SYSTEM', '[에이전트 1번 (요구사항)] 품질 요구사항 정의 패널 활성화. 요구사항을 입력하고 확정하세요.', 'info');
+    }
+
+    function startAgentSimulation() {
+      document.getElementById('req-action-area').style.display = 'none';
+      document.getElementById('agent-simulation-area').style.display = 'flex';
+      const term = document.getElementById('simulation-terminal');
+      term.innerHTML = '';
+      
+      const logs = [
+        { msg: '<span style="color:#38bdf8">[Agent 1]</span> 기획 요구사항 텍스트 파싱 및 엣지케이스 분석 시작...', delay: 500 },
+        { msg: '<span style="color:#f59e0b">[Step 1 ✓]</span> 요구사항 충분성 검증 ➔ <span style="color:#4ade80">Pass</span> (제어 온도 범위 및 상태 이상 에러코드 명시 확인)', delay: 1500 },
+        { msg: '<span style="color:#c084fc">[Agent 2]</span> 검증된 요구사항을 바탕으로 테스트 시나리오(TC) 구조화 중...', delay: 2500 },
+        { msg: '<span style="color:#c084fc">[Agent 2]</span> 설계 완료: 기존 TC 20개 + 신규 TC 2개 추가 도출됨.', delay: 3800 },
+        { msg: '<span style="color:#f59e0b">[Step 2 ✓]</span> TC 품질 적합성 검증 대기 중... (Human in the loop)', delay: 4800 }
+      ];
+
+      logs.forEach(log => {
+        setTimeout(() => {
+          const div = document.createElement('div');
+          div.innerHTML = `> ${log.msg}`;
+          term.appendChild(div);
+          term.scrollTop = term.scrollHeight;
+        }, log.delay);
+      });
+
+      setTimeout(() => {
+        const tbody = document.getElementById('simulation-tc-body');
+        tbody.innerHTML = `
+          <tr style="background:rgba(251,113,133,0.1);">
+            <td style="padding:6px; border:1px solid #334155; color:#f43f5e; font-weight:bold;">TC-21</td>
+            <td style="padding:6px; border:1px solid #334155;">확장관제</td>
+            <td style="padding:6px; border:1px solid #334155;">공기청정 제어 로직 ↔ 레지스터 매핑 및 아이콘 상태 동기화 검증</td>
+          </tr>
+          <tr style="background:rgba(251,113,133,0.1);">
+            <td style="padding:6px; border:1px solid #334155; color:#f43f5e; font-weight:bold;">TC-22</td>
+            <td style="padding:6px; border:1px solid #334155;">상호배타</td>
+            <td style="padding:6px; border:1px solid #334155;">난방 모드와 공기청정 동시 활성화 시 에러 방어 로직 검증</td>
+          </tr>
+        `;
+        document.getElementById('simulation-table-container').style.display = 'flex';
+      }, 5500);
+
+      setTimeout(() => {
+        document.getElementById('simulation-final-confirm').style.display = 'block';
+      }, 6000);
+    }
+
+    function finishSimulation() {
+      // 1. Close Modal
+      document.getElementById('agent1-req-modal').classList.remove('show');
+      if (typeof isMasterRunning !== 'undefined' && isMasterRunning) {
+          isMasterRunning = false;
+          const lead = document.getElementById('agent-lead-btn');
+          if(lead) lead.classList.remove('flashing');
+          setTowerStatus('대기 중', '#34d399');
+      }
+
+      
+      // 2. Reset Simulation UI for next time
+      document.getElementById('req-action-area').style.display = 'flex';
+      document.getElementById('agent-simulation-area').style.display = 'none';
+      document.getElementById('simulation-table-container').style.display = 'none';
+      document.getElementById('simulation-final-confirm').style.display = 'none';
+
+      // 3. Update main UI (simulate the result of the new TCs being applied)
+      flashNode('agent-1-btn');
+      setTowerStatus('대기 중', '#34d399');
+      appendQALog('SYSTEM', '[체크포인트 2] 사용자가 신규 TC를 최종 승인하여 테스트 자동화 스크립트(Agent 3) 작성이 대기열에 등록되었습니다.', 'success');
+      showToast('요구사항 반영 완료: 공기청정 제어 UI 및 신규 TC가 추가되었습니다.', false);
+      
+      const purifyGroup = document.getElementById('det-purify-group');
+      if (purifyGroup) purifyGroup.style.display = 'block';
+      
+      const tcTableBody = document.querySelector('.agent-tc-table tbody');
+      if (tcTableBody && !document.getElementById('tc-row-21')) {
+        const tr = document.createElement('tr');
+        tr.id = 'tc-row-21';
+        tr.style.background = 'rgba(251, 113, 133, 0.05)';
+        tr.innerHTML = `
+          <td>TC-21, 22</td>
+          <td style="color:#fb7185; font-weight:700;">확장관제</td>
+          <td>공기청정 제어 및 상호배타 방어 로직 모의 테스트</td>
+          <td style="color:#e2e8f0; font-weight:bold;">대기 중</td>`;
+        tcTableBody.appendChild(tr);
+      }
+      
+      // E2E 데이터에도 추가
+      if (!tcData.find(tc => tc.id === 'TC-21')) {
+        tcData.push({ 
+          id:'TC-21', 
+          category:'확장관제', 
+          desc:'공기청정 제어 및 상호배타 방어 로직 모의 테스트', 
+          pass: true 
+        });
+      }
+    }
+
+    // ── 공기청정 제어 패널 동작 핸들러 ────────────────────────────────
+    function setPanelPurify(state) {
+      if (selectedUnitIds.length === 0) {
+        showToast('제어할 장치를 먼저 선택해 주세요.', true);
+        return;
+      }
+      pendingState.purify = state;
+      updatePanelUI();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // AGENT 2 — 품질 체크리스트 (TC 매트릭스)
+    // ═══════════════════════════════════════════════════════════════
+    function runAgent2Action(event) {
+      if (event) event.stopPropagation();
+      if (openQaLiveModal('agent2')) return;
+      flashNode('agent-2-btn');
+      openAgentModal();
+      setTowerStatus('TC 매트릭스 확인 중', '#fb7185');
+      appendQALog('SYSTEM', '[에이전트 2번 (품질체크)] 도메인 체크리스트 기반 TC 매트릭스 확인 중.', 'info');
+      setTimeout(() => setTowerStatus('대기 중', '#34d399'), 4000);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // AGENT 3 — 자동화 테스트 실행 (실시간 E2E 시뮬레이션)
+    // ═══════════════════════════════════════════════════════════════
+    const tcData = [
+      { id:'TC-ENV-000', category:'공통', desc:'사전 환경 검증 (가상 환경 및 레지스터 로드 확인)', expected_pytest_status: 'passed', expected_classification: 'none' },
+      { id:'TC-MODE-001', category:'정상 동작', desc:'해피패스 (장치 #1 HEAT 모드 + 24°C 변경 동기화 검증)', expected_pytest_status: 'passed', expected_classification: 'none' },
+      { id:'TC-MODE-002', category:'도메인 로직', desc:'Rule 2 예외 방어 (FAN 모드 시 설정온도 관제점 비활성화)', expected_pytest_status: 'passed', expected_classification: 'none' },
+      { id:'TC-MODE-003', category:'상태 전이', desc:'Rule 2 양방향 (DRY 비활성화 → COOL 복귀 시 재활성화)', expected_pytest_status: 'passed', expected_classification: 'none' },
+      { id:'TC-LOCK-001', category:'제어 권한', desc:'LOCK 전수 검사 (16대 전체 잠금 아이콘 및 리모컨 차단)', expected_pytest_status: 'passed', expected_classification: 'none' },
+      { id:'TC-ERR-001', category:'오류 처리', desc:'결함 주입 방어 (CH05 강제 주입 후 제어 명령 차단 확인)', expected_pytest_status: 'passed', expected_classification: 'none' },
+      { id:'TC-INT-002', category:'다중 제어', desc:'복수 선택 일괄 제어 (3대 선택 후 HEAT 일괄 적용)', expected_pytest_status: 'passed', expected_classification: 'none' },
+      { id:'TC-TEMP-001', category:'경계값', desc:'온도 상한 방어 (30°C 상한 초과 시도 시 경고 및 차단)', expected_pytest_status: 'passed', expected_classification: 'none' },
+      { id:'TC-PIPE-001', category:'의도적 검증', desc:'요구사항 모호성 (알람 발생 시 색상 변경 기준 부재로 인한 Assert 불가)', expected_pytest_status: 'skipped', expected_classification: 'requirement_review' },
+      { id:'TC-PIPE-002', category:'의도적 검증', desc:'시뮬레이터 환경 이슈 (제어 명령 후 가상 환경 미반응 Timeout)', expected_pytest_status: 'failed', expected_classification: 'environment_issue' },
+      { id:'TC-PIPE-003', category:'의도적 검증', desc:'자동화 코드 오류 (UI 변경 후 요소 식별 정보 불일치)', expected_pytest_status: 'failed', expected_classification: 'automation_issue' },
+      { id:'TC-PIPE-004', category:'의도적 검증', desc:'조건 부족 미실행 (시뮬레이터 최대 장치 수 초과 대상 지정)', expected_pytest_status: 'skipped', expected_classification: 'not_executed' },
+      { id:'TC-TEMP-002', category:'의도적 검증', desc:'제품 결함 후보 (AUTO 모드 온도 하한 18.0°C 방어 실패 로직 누락)', expected_pytest_status: 'failed', expected_classification: 'product_defect' },
+    ];
+
+    let isRunnerRunning = false;
+
+    function runAgent3Action(event) {
+      if (event) event.stopPropagation();
+      if (openQaLiveModal('agent3')) return;
+      flashNode('agent-3-btn');
+      isRunnerRunning = false;
+      // UI Reset
+      document.getElementById('runner-tc-list').innerHTML = '';
+      document.getElementById('runner-progress-bar').style.width = '0%';
+      document.getElementById('runner-count').innerText = `0 / ${tcData.length}`;
+      document.getElementById('runner-pass-cnt').innerText = '0';
+      document.getElementById('runner-fail-cnt').innerText = '0';
+      document.getElementById('runner-pending-cnt').innerText = tcData.length;
+      document.getElementById('runner-title').innerText = '▶️ 테스트 대기 중... ▶ 버튼을 클릭하세요.';
+      document.getElementById('runner-summary').style.display = 'none';
+      const startBtn = document.getElementById('runner-start-btn');
+      startBtn.disabled = false;
+      startBtn.style.opacity = '1';
+      startBtn.innerText = '▶ Playwright 테스트 실행';
+      document.getElementById('agent3-runner-modal').classList.add('show');
+      setTowerStatus('테스트 준비 완료', '#34d399');
+      appendQALog('GATEWAY', '[에이전트 3번 (자동화)] Playwright 실행 패널 활성화. 테스트를 가동할 수 있습니다.', 'info');
+    }
+
+    function startTestRunner() {
+      if (isRunnerRunning) return;
+      isRunnerRunning = true;
+      const startBtn = document.getElementById('runner-start-btn');
+      startBtn.disabled = true;
+      startBtn.style.opacity = '0.5';
+      startBtn.innerText = '실행 중...';
+      document.getElementById('runner-title').innerText = '⚡ Playwright 자동화 E2E 테스트 검증 중...';
+      setTowerStatus('테스트 실행 중', '#fbbf24');
+
+      let passCnt = 0, failCnt = 0;
+      const list = document.getElementById('runner-tc-list');
+      list.innerHTML = '';
+
+      // Initialize all rows with pending icon
+      tcData.forEach((tc, idx) => {
+        const row = document.createElement('div');
+        row.id = `tc-row-${idx}`;
+        row.className = 'runner-tc-row running';
+        row.innerHTML = `
+          <span class="runner-tc-id">${tc.id}</span>
+          <span class="runner-tc-badge running">⏳ 대기</span>
+          <span class="runner-tc-desc" >${tc.desc}</span>`;
+        list.appendChild(row);
+      });
+
+      // Run sequence
+      tcData.forEach((tc, idx) => {
+        setTimeout(() => {
+          const row = document.getElementById(`tc-row-${idx}`);
+          if (!row) return;
+          list.scrollTop = row.offsetTop - 50;
+
+          if (tc.expected_pytest_status === 'passed') {
+            passCnt++;
+            row.className = 'runner-tc-row pass';
+            row.innerHTML = `
+              <span class="runner-tc-id">${tc.id}</span>
+              <span class="runner-tc-badge pass">✅ PASS</span>
+              <span class="runner-tc-desc">${tc.desc}</span>`;
+          } else {
+            failCnt++;
+            row.className = 'runner-tc-row fail';
+            row.innerHTML = `
+              <span class="runner-tc-id">${tc.id}</span>
+              <span class="runner-tc-badge fail">❌ FAIL</span>
+              <span class="runner-tc-desc">${tc.desc}</span>
+              <span style="font-size:0.62rem;color:#e2e8f0;font-weight:700;white-space:nowrap;margin-left:auto;">${tc.expected_classification !== 'none' ? tc.expected_classification : ''}</span>`;
+            appendQALog('GATEWAY', `[에이전트 3번 (자동화)] ❌ E2E 검증 오류 - ${tc.id} FAIL: ${tc.desc} (${tc.expected_classification !== 'none' ? tc.expected_classification : ''})`, 'error');
+          }
+
+          const done = passCnt + failCnt;
+          document.getElementById('runner-count').innerText = `${done} / ${tcData.length}`;
+          document.getElementById('runner-pass-cnt').innerText = passCnt;
+          document.getElementById('runner-fail-cnt').innerText = failCnt;
+          document.getElementById('runner-pending-cnt').innerText = tcData.length - done;
+          document.getElementById('runner-progress-bar').style.width = `${(done/tcData.length)*100}%`;
+
+          appendQALog('GATEWAY', `[에이전트 3번 (자동화)] ${tc.id} 실시간 ModBus 레지스터 검증: ${tc.pass ? 'PASS' : 'FAIL'}`, tc.pass ? 'info' : 'error');
+
+          if (done === tcData.length) {
+            setTimeout(() => {
+              document.getElementById('runner-title').innerText = '🏁 테스트 검증 완료';
+              document.getElementById('runner-summary').style.display = 'block';
+              document.getElementById('summary-pass').innerText = passCnt;
+              document.getElementById('summary-fail').innerText = failCnt;
+              document.getElementById('summary-rate').innerText = `${Math.round((passCnt/tcData.length)*100)}%`;
+              setTowerStatus(`테스트 완료 (${failCnt}개 결함)`, '#f87171');
+              appendQALog('SYSTEM', `[에이전트 3번 (자동화)] E2E 테스트 스위트 구동 완료 - 통과율: ${Math.round((passCnt/tcData.length)*100)}%`, 'info');
+              isRunnerRunning = false;
+            }, 500);
+          }
+        }, idx * 200 + 100);
+      });
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // AGENT 4 — CI/CD 및 외부 보고 Workflow Demo (실제 API 전송은 scripts/agent4_reporting.py --send)
+    // ═══════════════════════════════════════════════════════════════
+    const cicdStages = [
+      { id:1, name:'실행 수집', icon:'📥', log:'Pytest qa_results.json 실행 결과 수집 완료 (Total: 13건)', duration: 800 },
+      { id:2, name:'원인 분석', icon:'🔎', log:'QA 5대 원인 분류 완료 (제품결함:1, 환경:1, 자동화코드:1, 요구사항:1, 조건미달:1)', duration: 1200 },
+      { id:3, name:'교차 검증', icon:'⚖️', log:'[Checkpoint 4] report.html vs qa_results.json ID·상태·건수 교차 검증 완료', isWarn:true, duration: 1500 },
+      { id:4, name:'릴리즈 판정', icon:'🏁', log:'실제 제품 결함(1건) 잔존 확인 -> 릴리즈 의사결정: HOLD', duration: 1000 },
+      { id:5, name:'외부 보고', icon:'📡', log:'[DEMO] Slack / Notion 보고 Payload 미리보기 완료 (외부 전송 없음)', isWarn:true, duration: 1200 }
+    ];
+
+    let isCICDRunning = false;
+
+    function runAgent4Action(event) {
+      if (event) event.stopPropagation();
+      if (openQaLiveModal('agent4')) return;
+      flashNode('agent-4-btn');
+      isCICDRunning = false;
+      // Reset stages
+      cicdStages.forEach(s => {
+        const stageEl = document.getElementById(`cicd-stage-${s.id}`);
+        const statusEl = document.getElementById(`cicd-status-${s.id}`);
+        const iconEl   = document.getElementById(`cicd-icon-${s.id}`);
+        stageEl.className = 'cicd-stage';
+        statusEl.innerText = '대기';
+        iconEl.innerText = s.icon;
+      });
+      document.getElementById('cicd-log').innerHTML = '<div >⬛ 결과 분석·보고 Demo 대기 중... 🚀 버튼을 클릭하세요.</div>';
+      document.getElementById('cicd-jira-area').style.display = 'none';
+      const btn = document.getElementById('cicd-run-btn');
+      btn.disabled = false; btn.style.opacity = '1'; btn.innerText = '🚀 Demo 실행';
+      document.getElementById('agent4-cicd-modal').classList.add('show');
+      setTowerStatus('결과 분석 준비 완료', '#fbbf24');
+      appendQALog('GATEWAY', '[에이전트 4번 (결과 분석)] 결과 분석·보고 Demo 창 활성화.', 'info');
+    }
+
+    function appendCICDLog(msg, color) {
+      const log = document.getElementById('cicd-log');
+      const d = document.createElement('div');
+      d.style.cssText = `color:${color||'#a3a3a3'}; padding:1px 0; border-bottom:1px solid rgba(255,255,255,0.03);`;
+      d.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      log.appendChild(d);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function startCICD() {
+      if (isCICDRunning) return;
+      isCICDRunning = true;
+      const btn = document.getElementById('cicd-run-btn');
+      btn.disabled = true; btn.style.opacity = '0.5'; btn.innerText = '실행 중...';
+      document.getElementById('cicd-log').innerHTML = '';
+      setTowerStatus('결과 분석 Demo 실행 중', '#fbbf24');
+      appendQALog('SYSTEM', '[에이전트 4번 (결과 분석)] 결과 분석·보고 Demo 기동 시작', 'info');
+
+      let cumDelay = 0;
+      cicdStages.forEach((stage, idx) => {
+        const startAt = cumDelay;
+        cumDelay += stage.duration;
+        const endAt = cumDelay;
+
+        setTimeout(() => {
+          document.getElementById(`cicd-stage-${stage.id}`).className = 'cicd-stage running';
+          document.getElementById(`cicd-status-${stage.id}`).innerText = '실행 중...';
+          appendCICDLog(`▶ [${stage.name}] 파이프라인 실행`, '#e2e8f0');
+        }, startAt);
+
+        setTimeout(() => {
+          const stageEl  = document.getElementById(`cicd-stage-${stage.id}`);
+          const statusEl = document.getElementById(`cicd-status-${stage.id}`);
+          const iconEl   = document.getElementById(`cicd-icon-${stage.id}`);
+          if (stage.pass) {
+            stageEl.className = 'cicd-stage done';
+            statusEl.innerText = '✅ Demo 완료';
+            iconEl.innerText = stage.icon;
+            appendCICDLog(`✅ [${stage.name}] ${stage.log}`, '#e2e8f0');
+          } else {
+            stageEl.className = 'cicd-stage warn'; 
+            statusEl.innerText = '⚠️ 결함';
+            appendCICDLog(`⚠️ [${stage.name}] ${stage.log}`, '#e2e8f0');
+            appendQALog('GATEWAY', `[에이전트 4번 (결과 분석)] Demo 경고 - Auto Test 결함 2건 검출`, 'warn');
+          }
+
+          if (idx === cicdStages.length - 1) {
+            setTimeout(() => {
+              document.getElementById('cicd-jira-area').style.display = 'block';
+              appendCICDLog('🎫 [DEMO] Notion TCM Upsert 미리보기: 13건 결과 / 5종 원인 분류', '#e2e8f0');
+              appendCICDLog('📨 [DEMO] Slack Block Kit Payload 미리보기 완료 (실제 발송 없음)', '#e2e8f0');
+              setTowerStatus('리포팅 Demo 완료', '#34d399');
+              appendQALog('GATEWAY', '[에이전트 4번 (리포팅 Demo)] Payload 미리보기 완료. 실제 API 전송은 scripts/agent4_reporting.py --send에서 수행.', 'info');
+              isCICDRunning = false;
+            }, 500);
+          }
+        }, endAt);
+      });
+    }
+
+    // ── Master QA Sequence (팀장 마스터 버튼) ───────────────────────────────
+    let isMasterRunning = false;
+    function runMasterQASequence(event) {
+      if (event) event.stopPropagation();
+      if (openQaLiveModal('overview')) return;
+      if (typeof isMasterRunning !== 'undefined' && isMasterRunning) return;
+      isMasterRunning = true;
+
+      const lead = document.getElementById('agent-lead-btn');
+      if (lead) lead.classList.add('flashing');
+      setTowerStatus('QA Workflow 진행 중', '#fb7185');
+      appendQALog('SYSTEM', '==================================================', 'info');
+      appendQALog('SYSTEM', '[팀장] 마스터 자율 QA 워크플로우 시작', 'info');
+
+      // 요구사항 모달 열기
+      setTimeout(() => {
+          runAgent1Action(event);
+      }, 500);
+    }
+  </script>
+</body>
+</html>

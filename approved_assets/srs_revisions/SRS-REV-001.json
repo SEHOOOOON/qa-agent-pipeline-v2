@@ -1,0 +1,29 @@
+{
+  "contract_version": "1.0",
+  "revision_id": "SRS-REV-001",
+  "source_run_id": "RUN-20260829-054330-A18942",
+  "source_tc_id": "TC-CAND-001",
+  "official_tc_id": "TC-V2-001",
+  "reviewer": "오세훈",
+  "approval_note": "공식 TC 재사용과 기준 SRS 정합성 보완 승인",
+  "requirements": [
+    {
+      "requirement_id": "REQ-CONTROL-001",
+      "before": "적용 전 상태는 유지되고 적용 후 허용 대상의 화면·내부 상태가 대기값과 같습니다.",
+      "after": "적용 전 상태는 유지되고 적용 후 허용 대상의 화면과 내부 상태는 기능별 표시 규칙을 반영해 같은 동작 의미를 나타냅니다."
+    },
+    {
+      "requirement_id": "REQ-FAN-001",
+      "before": "적용 후 화면·내부 fanSpeed가 선택한 값과 같습니다.",
+      "after": "적용 후 내부 fanSpeed는 선택한 코드와 같고, HIGH는 장비 카드에 사용자용 한글 라벨 강풍으로 표시됩니다."
+    },
+    {
+      "requirement_id": "REQ-STATE-001",
+      "before": "status·mode·currentTemp·setTemp·fanSpeed·locked 등 검증 대상 공통 값이 같습니다.",
+      "after": "status·mode·currentTemp·setTemp·locked 등 같은 표현을 쓰는 공통 값은 일치하고, fanSpeed처럼 사용자 라벨과 내부 코드가 다른 필드는 기능별 표시 규칙에 따라 같은 동작 의미를 나타냅니다."
+    }
+  ],
+  "srs_before_sha256": "9224c2cdb2bb9b9a106b5931d96d21aa64249d828170f07aa36ea446a66e087d",
+  "srs_after_sha256": "ac3575f13acf17576385e57b90c7264985c0fbdcbf207069f0f24cd20f3a3b56",
+  "approved_at": "2026-08-30T09:38:57.689154+00:00"
+}

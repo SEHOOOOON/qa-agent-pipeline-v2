@@ -175,3 +175,25 @@ V2가 End-to-End로 구현되기 전에는 Project1 페이지에 Live Agent Pipe
 - 기존 자동화는 사람이 작성한 Reference Automation으로 부릅니다.
 - Product SRS Requirement와 연결되지 않는 Fixture를 제품 결과에 포함하지 않습니다.
 - 알려진 불일치를 정상 정책이나 Agent 정답으로 사용하지 않습니다.
+
+## 10. V2 기준 제품으로 가져온 상태
+
+2026-08-29에 Project1 커밋
+`ba62b611251180cbd0426eae0f9ab43a67a12abf`에서 V2 독립 실행에 필요한 다음 네
+파일만 `product_baseline/`으로 가져왔습니다.
+
+- `virtual-controller.html`
+- `pytest.ini`
+- `tests/conftest.py`
+- `tests/test_controller.py`
+
+V2 HTML은 이후 제품 보완과 Agent 3 시험 대상으로 사용합니다. 기존 사람이 작성한
+TC와 Playwright 코드는 변경분을 새로 만드는 재료가 아니라, Agent 2가 관련 있다고
+선택한 기존 회귀를 실제 실행하는 기준 코드입니다. 실행기는 테스트와 HTML을 임시
+Workspace에 복사해 선택된 함수만 실행합니다. 가져오기 뒤 Project1 Git 상태와
+원본 파일은 변경하지 않았습니다.
+
+2026-08-29 사용자 지시에 따라 V2 HTML의 QA 팀장·Agent 버튼에는 로컬 실제 Run 조회
+패널을 추가했습니다. 따라서 현재 V2 HTML 전체 파일 해시는 가져온 시점의 V1 HTML과
+같지 않지만 제품 제어 동작과 기존 회귀 인터페이스는 유지합니다. 이 변경은 V2 복사본에만
+적용됐고 Project1 원본과 공식 TC 자산은 변경하지 않았습니다.

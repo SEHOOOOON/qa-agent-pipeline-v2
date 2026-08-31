@@ -230,6 +230,32 @@ Agent 4는 중립 실행 결과와 Manifest SHA-256을 다시 확인하고, 시�
 
 2026-08-27 공개 증거 결정: 원본 `runs/`는 실행 중간 산출물과 대용량 증거를 포함하므로 계속 Git에서 제외합니다. 대신 최신 Agent 1→4 잠금 Live의 단계별 상태·사용량, 검증 집계, 사람 검토 대기 항목, Slack·Notion 실제 전송 상태와 원본 SHA-256을 `examples/results/agent1-agent2-agent3-agent4-lock-disable/`에 최소 공개 묶음으로 기록합니다. 공개 Manifest는 공개 파일 자체의 SHA-256을 제공하며 API 자격정보, 로컬 절대경로, 전체 모델 산출물, Screenshot과 Trace는 포함하지 않습니다.
 
+2026-08-29 기준 제품 소유 결정: 잠금 Run은 제품 불일치 후보를 보여주는 실패 증거로 유지합니다. 성공 흐름은 기존 실패 요구사항을 바꾸지 않고, 현재 제품에서 근거를 확인한 별도 풍량 표시 변경 요청 `CR-SUCCESS-FAN-001`로 시험합니다. 이 요청은 HIGH 풍량을 사용자 화면의 `강풍`과 내부 `fanSpeed=HIGH`로 함께 검증하고 LOW로 복원하도록 했지만, 실제 Agent 1~4 Live 전에는 PASS라고 부르지 않습니다.
+
+같은 날 최종 복사 범위를 정정했습니다. V2가 외부 Project1 경로 없이 독립 실행하려면 가상 제품뿐 아니라 이미 존재한다고 가정한 기존 회귀의 실제 실행 코드도 V2에 있어야 합니다. 따라서 출처 커밋 `ba62b611251180cbd0426eae0f9ab43a67a12abf`의 `virtual-controller.html`, `pytest.ini`, `tests/conftest.py`, `tests/test_controller.py` 네 파일을 `product_baseline/`에 둡니다. 포트폴리오 페이지·과거 보고서·영상·V1 Agent 4 코드·`.env`는 복사하지 않습니다. 신규·수정 TC는 V2 Agent 3가 별도로 만들고, 기존 테스트는 Agent 2가 관련 있다고 선택한 항목만 임시 Workspace에서 재실행합니다. 이후 제품 변경은 V2 HTML 복사본에만 적용하며 정식 TC 자산 승격은 실제 성공 실행 뒤 사람 승인에 따라 처리할 다음 구현 범위입니다.
+
+2026-08-29 성공 후보 첫 Live에서 Agent 1 지침은 시험 준비·복원을 제품 Condition에서 제외하라고 했지만 CP1-008은 모든 acceptance_notes를 제품 판정 조건으로 강제해 중단됐습니다. 준비·복원 문장은 제품 Expected Result가 아니지만 실행 제외도 아니므로, Agent 1은 둘 다 만들지 않고 변경 요청 원문을 Agent 2에 넘깁니다. Agent 2는 준비 문장을 preconditions·steps에, 종료 후 복원 문장을 restore_steps에 보존하며 CP2-014가 누락이나 제외 목록 혼입을 차단합니다.
+
+두 번째 Live에서는 Agent 2가 만든 풍량 TC와 내부 `fanSpeed=HIGH` 계획은 유효했지만, CP3가 실행 전 대상 카드의 `약풍` 텍스트만 보고 실행 후 `강풍` 검증을 의미 연결 없음으로 거부했습니다. 변경 후 문구가 초기 화면에 없는 것은 정상일 수 있으므로, 승인 Expected Result가 대상 장비 카드를 명시하고 정확한 대상 ID의 카드 Selector를 사용하는 경우에만 동적 텍스트 검증을 허용합니다. 이 예외는 다른 카드·상위 컨테이너·임의 Selector에는 적용하지 않습니다.
+
+보완 후 `RUN-20260829-035050-2FF59B`은 Agent 1 REVIEW·CONTINUE, Agent 2·CP2 PASS, Agent 3 첫 계획·CP3·Candidate Trial PASS를 기록했습니다. 생성 TC는 초기 LOW 확인, HIGH 적용 직후 장비 카드 `강풍`과 내부 `fanSpeed=HIGH` 이중 검증, LOW 복원을 포함합니다. `execute`는 후보 증거를 해시 확인 후 재사용하고 환경 점검을 통과했으며 Agent 4는 제품 1건·환경 1건 PASSED, CP4·최종 권고 PASS, 검토 항목·자동화 제외 0건을 생성했습니다. Slack·Notion은 PREVIEW만 생성했고 실제 전송하지 않았습니다. 모델 사용량은 Agent 1 5,393, Agent 2 9,289, Agent 3 18,756으로 총 33,438 tokens입니다. 자동 테스트 150건과 카탈로그 수량도 일치합니다.
+
+2026-08-29 중앙제어 실제 Run 연결 결정: V1에서 복사한 제품 제어 동작과 기존 회귀 인터페이스는 유지하되 V2 HTML의 팀장·Agent 1~4 버튼은 로컬 `qa_pipeline_ui`가 제공하는 실제 Run 요약 패널을 우선 엽니다. 연결부는 허용된 Run ID와 `examples/change_request*.json`만 받고 브라우저에 로컬 절대경로·비밀정보·전체 원본 산출물을 전달하지 않습니다. 기본은 저장 Run 조회 전용이고 `--allow-live-run`과 화면 확인이 함께 있을 때만 Agent 1→3, 검증 실행, 규칙 기반 Agent 4를 순서대로 실행합니다. 이 경로의 Agent 4는 `--send`를 사용하지 않아 Slack·Notion 실제 전송은 발생하지 않습니다. HTML을 직접 열어 브리지가 없으면 기존 데모가 유지되며 Project1 원본은 변경하지 않습니다. 연동 자동 테스트 5건을 추가해 전체 155건입니다.
+
+2026-08-30 중앙제어 Live 실행 안정성 결정: 실제 UI 실행에서 여러 브리지의 메모리 잠금이 서로 독립적이어서 중복 API Run이 시작될 수 있고, 30초 Candidate Trial 제한이 정상 Playwright 종료·Trace 생성까지 포함하면 경계값이 되는 문제를 확인했습니다. 저장소 단위 파일 잠금으로 동시에 하나의 Live Run만 허용하고, Candidate Trial 기본 제한을 90초로 조정합니다. 시간 초과 시 pytest·Playwright 자식 프로세스 트리를 정리하고, 쓰기가 중단된 Trace는 경로·비밀정보 제거를 보장할 수 없으므로 증거에서 폐기합니다. UI의 API 비용 2단계 확인 상태는 자동 새로고침 뒤에도 유지합니다. 이 보완은 제품 기대값·TC 판정·Assertion을 변경하지 않습니다.
+
+같은 날 최신 UI Live `RUN-20260829-054330-A18942`은 Agent 1 첫 응답의 인수 조건 누락을 CP1이 차단해 1회 재작업한 뒤 Agent 1 REVIEW·CONTINUE, Agent 2·CP2 PASS, Agent 3·CP3 및 Candidate Trial PASS를 기록했습니다. `execute`는 후보 증거를 재사용하고 환경 점검을 통과했으며, Agent 4는 제품 1건·환경 1건 PASSED, CP4·최종 권고 PASS를 생성했습니다. 자동화 제외·검토 항목은 0건이고 CP1 최종 확인 1건을 사람 검토서에 남겼습니다. Slack·Notion은 PREVIEW로 외부 전송하지 않았고 Run 텍스트의 비밀정보 패턴은 0건입니다. 모델 사용량은 Agent 1 11,069, Agent 2 9,699, Agent 3 18,885로 총 39,653 tokens이며 자동 테스트 159건과 카탈로그가 일치합니다.
+
+2026-08-30 후보 자산 승인 결정: 중앙제어 실제 Run 패널에서 `저장 결과 보기`, `새 요구사항 실제 실행`, `후보 TC 공식 자산 판단`을 분리합니다. 공식 자산 판단은 `--allow-asset-approval`에서만 활성화하고, 최종 권고·CP3·CP4·변경 검증 PASS, 완전한 Screenshot·Trace, 후보·증거·현재 HTML SHA-256을 서버가 다시 확인합니다. Run 이후 HTML이 바뀌었으면 기존 검증 산출물을 덮어쓰지 않고 같은 후보 Python만 현재 HTML에서 API 호출 없이 재실행합니다. 사람 승인 시 후보 TC와 Python을 `approved_assets/`에 복사하고 출처·제품·자산 해시와 검토 기록을 Registry에 남깁니다. 보류는 사유만 Run에 기록하며 공식 자산을 만들지 않고, 이미 승인된 자산은 화면에서 보류로 되돌리지 않습니다. 기존 사람 작성 회귀 파일은 자동으로 수정하지 않습니다.
+
+같은 날 `RUN-20260829-054330-A18942 / TC-CAND-001`은 Run·승인 UI 변경으로 대상 HTML 해시가 달라져 처음에는 공식 등록이 차단됐습니다. 중앙 화면의 `현재 화면에서 후보 재검증`으로 모델 API 없이 다시 실행해 54,781ms PASS와 완전한 Screenshot·Trace를 확보했고, 재검증 증거의 비밀정보·로컬 절대경로 패턴은 0건이었습니다. 승인 버튼은 활성화됐지만 사람 최종 판단을 대신하지 않으므로 공식 자산은 생성하지 않았습니다. 승인·보류·무결성·재검증 자동 테스트 4건을 추가해 전체 163건입니다.
+
+같은 날 오세훈 검토자 승인으로 위 후보를 `TC-V2-001` 공식 자산으로 등록했습니다. Registry와 TC·Python 파일의 출처·제품·자산 해시를 확인했고, 복사된 Python을 현재 V2 HTML에 직접 실행해 PASS했습니다. 이 승인은 후보 보존과 단독 실행 가능성만 확정합니다. 감사 결과 `approved_assets/registry.json`을 Agent 2 또는 `execute`가 읽지 않아 다음 변경 Run의 기존 TC 대조·관련 회귀에 자동 편입되지 않으며, Agent 1의 `UPDATE_REQUIRED` 및 Agent 2의 SRS 후속 개정 메모도 최종 사람 검토서·공식 승인 조건으로 전달되지 않는다는 두 연결 공백을 확인했습니다. 후속 구현 전에는 공식 등록을 SRS·TC·회귀의 닫힌 순환 완성으로 표현하지 않습니다.
+
+2026-08-30 승인 자산 재사용 결정: 공식 Registry를 단순 보관 목록으로 두지 않습니다. 다음 Agent 2 실행 전에 TC·Python·선택적 SRS 개정 기록의 경로와 SHA-256, 구조화 TC와 단일 테스트 함수를 검증하고 V1 카탈로그와 합친 Run Snapshot을 만듭니다. Agent 2는 Requirement뿐 아니라 검증 동작 의미가 현재 확정 조건과 맞을 때만 공식 TC를 선택하며, `execute`는 Snapshot과 현재 승인 Python 해시가 같을 때 그 파일을 임시 Workspace에서 실행합니다. `TC-V2-001`을 Registry에서 로딩해 현재 V2 HTML에 실제 Playwright 재실행했고 PASS·Screenshot·Trace를 확인했습니다.
+
+같은 날 SRS 승인 결정: MODIFIED·UPDATE_REQUIRED Requirement는 Agent 2가 `SRS_개정_제안`에 현재 인수 기준, 제안 인수 기준, 근거 Condition과 사유를 구조화해야 하며 CP2가 누락·중복·현재 원문·근거를 검사합니다. 제안은 검증 실행, Agent 4 최종 보고, 사람 최종 검토 문서와 중앙제어 승인 화면까지 그대로 전달합니다. 적용할 변경이 있으면 별도 SRS 동의 없이는 공식 TC 승인을 차단하고, 동의 시 해당 Requirement 인수 기준만 현재 원문 일치 조건으로 교체하며 Run 결정 기록·공식 개정 기록·전후 SHA-256을 남깁니다. 기존 `TC-V2-001` 승인 당시 확인했던 `REQ-CONTROL-001`, `REQ-FAN-001`, `REQ-STATE-001` 기준 문구는 `SRS-REV-001` 기록과 Registry 해시로 연결했습니다. 이 보완은 기존 역사적 Run에 신규 계약을 소급 적용하거나 Checkpoint PASS를 사람 승인으로 바꾸지 않습니다. 자동 테스트 167건 중 Registry 로딩·공식 자동화 실제 재실행·SRS 제안 CP2·SRS 적용/충돌·UI 동시 승인 검증이 포함됩니다.
+
 선택이 충돌하면 다음 순서로 판단합니다.
 
 1. 실제 구현과 설명의 사실성

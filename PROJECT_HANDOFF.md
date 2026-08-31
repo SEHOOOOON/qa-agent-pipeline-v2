@@ -1,6 +1,6 @@
 # QA Agent Pipeline V2 인계 문서
 
-최종 갱신: 2026-08-27
+최종 갱신: 2026-08-30
 
 ## 1. 현재 방향
 
@@ -29,6 +29,8 @@
 | Agent 4 / CP4 | 규칙 기반 원인 분류, 전체 산출물·증거·집계 정합성 검사, 사람 최종 검토 양식, Slack·Notion Dry-run/명시적 전송 |
 | 다중 TC | 실행 가능 TC는 계속 실행, 불명확·미지원 TC만 제외해 최종 보고 |
 | 제품 경계 | 중앙 관제 패널만 지원, 벽면 리모컨·로컬 경로 제외 |
+| V2 기준 실행 자산 | V1 커밋 `ba62b611...`의 HTML·Pytest 설정·사람 작성 기존 회귀 테스트 네 파일만 `product_baseline/`에 가져옴 |
+| 중앙제어 Run 화면 | 저장 결과 조회·API 새 실행·후보 공식 자산 판단을 분리. 팀장·Agent 1~4 버튼이 실제 Run 산출물 조회, 새 API 실행과 사람 자산 승인은 각각 기본 잠금, Agent 4 외부 보고는 미리보기 고정 |
 
 ## 3. 2026-08-25 단순화
 
@@ -57,8 +59,8 @@
 
 ## 4. 현재 검증
 
-- python -m pytest: 145건 통과
-- python -m pytest --collect-only -q: 145건
+- python -m pytest: 167건 통과
+- python -m pytest --collect-only -q: 167건
 - 첫 Live `RUN-20260825-122801-18C8C0`: Agent 2 독립성 문구 오탐으로 중단, Agent 1·2 35,167 tokens
 - 보완 Live `RUN-20260825-123313-41B570`: Agent 1·2 PASS, Agent 3 완료 6건·자동화 제외 3건, 환경 점검·관련 기존 회귀 3건·CP4 PASS
 - 보완 Live 실제 모델 사용량: Agent 1 6,218 + Agent 2 29,228 + Agent 3 58,795 = 94,241 tokens
@@ -76,6 +78,20 @@
 - 푸시 전 최종 감사: 자동 테스트 145건 통과, 테스트 카탈로그 145건 일치, Python 컴파일·`git diff --check` 통과, 실제 키·인증정보 포함 URL 0건, Project1 Git 무변경과 대상 HTML SHA-256 유지
 - GitHub 공개 정합성: `examples/results/agent1-agent2-agent3-agent4-lock-disable/`에 최신 Run의 단계별 상태·핵심 관찰·사람 검토 공개본·Slack/Notion 전송 상태·원본 및 공개 파일 SHA-256을 포함한 최소 증거 묶음 추가
 - Git 반영 기준: 이 문서의 최신 수치, 구현, 자동 테스트 카탈로그와 공개 증거 묶음을 같은 커밋으로 `main`에 반영
+- 2026-08-29 V2 기준 실행 자산 원복: HTML·Pytest 설정·기존 테스트 네 파일을 V2에 유지해 외부 V1 경로 없이 독립 실행, 포트폴리오·보고서·Agent 4·`.env`는 제외, Project1 Git 무변경
+- 성공 Live `RUN-20260829-035050-2FF59B`: HIGH 풍량의 UI 한글 라벨 `강풍`·내부 `fanSpeed=HIGH`를 적용 직후 함께 확인하고 LOW 복원까지 완료. Agent 1 REVIEW·CONTINUE, CP2·CP3·후보 Trial·환경 점검·CP4 PASS, 최종 권고 PASS, 검토 항목·자동화 제외 0건
+- 성공 Live 실제 모델 사용량: Agent 1 5,393 + Agent 2 9,289 + Agent 3 18,756 = 33,438 tokens. Slack·Notion은 PREVIEW이며 외부 전송하지 않음
+- Live에서 발견한 절차 손실과 동적 UI 오탐 보완: 시험 준비·복원을 제품 기대 결과나 제외 범위로 바꾸지 않고 TC 절차로 보존하며, 실행 전 문구가 아직 없는 대상 장비 카드도 정확한 대상 Selector에 한해 변경 후 검증 허용
+- V2 중앙제어 실제 Run 연결: `qa_pipeline_ui` 조회 전용 서버와 Agent 1~4 단계 패널을 추가해 성공 Run `RUN-20260829-035050-2FF59B`을 표시. `--allow-live-run` 없이는 API 실행 불가, 외부 보고는 항상 Dry-run
+- 최신 UI Live `RUN-20260829-054330-A18942`: Agent 1 재작업 1회 뒤 REVIEW·CONTINUE, Agent 2·CP2 PASS, Agent 3 CP3·후보 Trial PASS, 환경 점검 PASS, Agent 4·CP4·최종 권고 PASS. Slack·Notion PREVIEW, 자동화 제외·검토 항목 0건, CP1 최종 확인 1건
+- 최신 Live 모델 사용량: Agent 1 11,069 + Agent 2 9,699 + Agent 3 18,885 = 39,653 tokens
+- 실행 안정성 보완: Candidate Trial 기본 제한 90초, 시간 초과 시 pytest·Playwright 자식 프로세스 트리 정리, 불완전·미정제 Trace 폐기, 여러 로컬 브리지 사이 저장소 단위 Live Run 잠금, UI 비용 확인 상태의 자동 새로고침 보존
+- V2 기준 제품의 기존 13개 회귀 전체 확인: 정상 기능 8건 PASS, 정보 부족·미실행 Fixture 2건 SKIP, 의도적 환경 오류·자동화 오류 Fixture 2건과 기존 AUTO 18°C 하한 제품 불일치 후보 1건 FAIL. `docs/05_PROJECT1_BASELINE_AUDIT.md`의 기존 분류와 일치하며 Run 패널 추가로 새로 깨진 정상 기능은 없음
+- 후보 공식 자산 흐름: `--allow-asset-approval`에서만 승인·보류 허용. 실패·증거 누락·대상 HTML 변경 후보는 등록 차단하고, HTML 변경 시 API 없이 후보만 별도 재검증. 승인 시 `approved_assets/`에 TC·Python·Registry 해시를 남기며 기존 Run·사람 회귀는 비수정
+- 최신 성공 후보 공식 등록: 중앙제어 Run·승인 UI 변경 후 `RUN-20260829-054330-A18942 / TC-CAND-001`을 현재 HTML에서 API 없이 다시 실행해 54,781ms PASS, Screenshot·Trace 포함 완전한 증거와 비밀정보·로컬 경로 0건 확인. 오세훈 검토자 승인으로 `TC-V2-001`을 `approved_assets/`에 등록했고 복사된 자동화 파일도 현재 V2 HTML에서 독립 실행 PASS
+- 공식 자산 재사용 연결 완료: Registry의 TC·Python·SRS 개정 기록 SHA-256과 구조화 TC를 확인해 다음 Agent 2의 기존 TC 대조 입력 및 Run Snapshot에 합침. 선택된 공식 TC는 `execute`가 승인 Python으로 실행하고 실행 중 해시 불변도 다시 확인함. `TC-V2-001`을 이 경로로 실제 Playwright 재실행해 PASS·Screenshot·Trace를 확인
+- SRS 개정 연결 완료: MODIFIED·UPDATE_REQUIRED Requirement마다 Agent 2가 개정 전·후 인수 기준과 Condition 근거를 만들고 CP2가 검사함. 제안은 검증 실행·Agent 4·사람 최종 검토·중앙제어 승인 화면까지 전달되며, 별도 SRS 승인 뒤에만 공식 TC와 기준 SRS를 함께 반영하고 Run·공식 개정 기록에 전·후 SHA-256을 남김
+- 기존 `TC-V2-001` 승인 시 누락됐던 기준 문서 변경은 `REQ-CONTROL-001`, `REQ-FAN-001`, `REQ-STATE-001`의 관찰된 UI·내부 상태 의미를 반영했고 `approved_assets/srs_revisions/SRS-REV-001.json` 및 Registry 해시로 연결함
 
 과거 일괄 호출 전용 테스트 2건을 제거했고, Live에서 발견한 CP2 독립성 문구 오탐 회귀 테스트 2건을 추가했습니다. 2026-08-26에는 동일 업무 규칙의 조건 묶음 CP2 테스트 2건과 Agent 3 조건별 Assertion 배치 테스트 2건을 추가했습니다. 같은 날 CP2-006이 `FAN 모드에서 버튼은 비활성화된다`처럼 모드를 조건으로 쓴 문장을 별도 모드 표시 검증으로 오인하지 않도록 좁혔고, 실제 복합 관찰은 계속 차단합니다. 현재 TC별 실행·인계·Agent 4 검증은 유지합니다.
 
@@ -86,6 +102,8 @@
 ## 5. 중요한 제품·사실성 규칙
 
 - Project1은 읽기 전용 기준 자산입니다.
+- V2 Agent 3 실행·향후 제품 보완의 대상은 `product_baseline/virtual-controller.html`입니다.
+- 기존 TC·Playwright 자동화는 `product_baseline/tests/test_controller.py`에서 선택 실행하며, 실제 실행은 원본과 분리된 임시 Workspace에서 수행합니다.
 - Agent 1~3만 생성형 모델을 사용합니다.
 - Agent 3 모델은 계획을 만들고 Python은 허용 목록 컴파일러가 생성합니다.
 - Agent 4는 규칙 기반 분석기입니다.
@@ -113,14 +131,16 @@
 | docs/05_PROJECT1_BASELINE_AUDIT.md | Project1 기준 자산과 한계 |
 | docs/06_TEST_HARNESS_GUIDE.md | UI·내부 상태 확인 경계 |
 | docs/07_TEST_CATALOG.md | 자동 테스트 목록 |
+| product_baseline/ | V2 가상 중앙제어 HTML·Pytest 설정·사람 작성 기존 회귀 테스트 |
 | src/qa_pipeline_v2.py | 전체 구현 |
+| src/qa_pipeline_ui.py | 중앙제어 HTML 정적 제공, 실제 Run 요약, 선택적 Live 실행 연결부 |
 | tests/test_pipeline.py | 자동 테스트 |
 
 ## 7. 다음 작업
 
-1. `RUN-20260827-114925-507176/사람_최종_검토.md`에서 FIND-001을 사람이 최종 판정
-2. 새 묶음 온도 정책을 실제 모델로 다시 실행할 필요가 있으면 API 비용 승인 뒤 `restore_observed_hvac_state` 생성 여부 확인
-3. 사람 판정을 GitHub 공개 이력에도 남길 필요가 있으면 공개 검토본의 `PENDING` 상태를 별도 변경으로 갱신
+1. 새 계약을 실제 API Live Run에서 한 번 확인해 Agent 2의 SRS 개정 제안과 승인 공식 TC 대조가 실제 모델 출력에서도 유지되는지 검증
+2. 성공 Run 최소 공개 증거 묶음과 로컬 실제 Run·승인 시연 영상을 만들되, Slack·Notion PREVIEW와 실제 전송을 구분해 표시
+3. 잠금 Run은 실패 증거로 유지하고 `RUN-20260827-114925-507176/사람_최종_검토.md`의 FIND-001을 사람이 최종 판정
 
 API 호출, 커밋, 푸시는 사용자의 명시적 지시가 있을 때만 수행합니다.
 

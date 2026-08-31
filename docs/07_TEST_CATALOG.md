@@ -1,7 +1,7 @@
 # 자동 테스트 카탈로그
 
-최종 확인: 2026-08-27
-실행 기준: `python -m pytest --collect-only -q` → **145건**
+최종 확인: 2026-08-30
+실행 기준: `python -m pytest --collect-only -q` → **167건**
 실제 정의 파일: `tests/test_pipeline.py`
 
 이 문서는 현재 수집되는 자동 테스트를 사람이 확인하기 쉽게 정리한 목록입니다. 실행의 기준은 항상 테스트 코드와 Pytest 수집 결과이며, 테스트를 추가·삭제할 때는 이 문서도 같은 변경에서 갱신합니다.
@@ -10,16 +10,18 @@
 
 | 구성 | 수량 | 설명 |
 |---|---:|---|
-| 일반 테스트 함수 | 141 | 함수 하나가 Pytest 실행 1건 |
+| 일반 테스트 함수 | 162 | 함수 하나가 Pytest 실행 1건 |
 | 파라미터 테스트 함수 | 1 | 아래 5개 Trial 결과를 각각 독립 실행 |
-| 합계 | **145** | 현재 Pytest 수집 수 |
+| 합계 | **167** | 현재 Pytest 수집 수 |
 
 파라미터 테스트 `test_agent3_cli_exit_code_reflects_trial_trustworthiness`는 다음 다섯 결과를 별도 실행합니다: `PASS`, `PRODUCT_MISMATCH_CANDIDATE`, `AUTOMATION_ERROR`, `ENVIRONMENT_ERROR`, `TIMEOUT`.
 
-## 1. SRS·Agent 1·Checkpoint 1 (23건)
+## 1. 기준 자산·SRS·Agent 1·Checkpoint 1 (26건)
 
 | 테스트 | 확인 내용 |
 |---|---|
+| `test_v2_product_baseline_contains_only_runtime_assets` | V2의 V1 복사 자산이 독립 실행에 필요한 네 파일뿐인지 확인 |
+| `test_success_fan_speed_request_is_grounded_in_v2_baseline` | 새 풍량 성공 후보의 SRS Requirement·UI Selector·내부 적용 근거 존재 |
 | `test_loads_product_requirements_from_markdown` | Product SRS 요구사항 로딩 |
 | `test_rendered_context_contains_ids_and_acceptance_criteria` | Agent 1 입력 문맥의 ID·인수기준 |
 | `test_product_srs_excludes_test_harness_requirements` | 제품 SRS와 테스트 하네스 분리 |
@@ -33,6 +35,7 @@
 | `test_unverified_before_value_requires_review` | 변경 전 값 불일치 REVIEW |
 | `test_ungrounded_confirmed_condition_is_rejected` | 근거 없는 확정 조건 차단 |
 | `test_missing_acceptance_note_is_rejected` | 인수 기준 누락 차단 |
+| `test_checkpoint1_does_not_require_setup_or_restore_as_product_conditions` | 시험 준비·종료 후 복원을 제품 기대 결과로 강제하지 않음 |
 | `test_missing_requested_out_of_scope_is_rejected` | 요청된 제외 범위 누락 차단 |
 | `test_redundant_reconfirmation_requires_review` | 불필요한 재확인 REVIEW |
 | `test_legitimate_missing_detail_question_passes_checkpoint` | 정당한 세부 질문 허용 |
@@ -44,7 +47,7 @@
 | `test_scope_limited_acceptance_note_is_only_excluded` | 범위 제한 인수 조건을 확정 조건이 아닌 제외 범위로 전달 |
 | `test_scope_limited_acceptance_note_cannot_be_confirmed_condition` | 범위 제한 문구의 확정 조건 혼입 차단 |
 
-## 2. Agent 2·Checkpoint 2·인계 (37건)
+## 2. Agent 2·Checkpoint 2·인계 (40건)
 
 | 테스트 | 확인 내용 |
 |---|---|
@@ -53,6 +56,8 @@
 | `test_agent2_duplicate_technical_ids_are_normalized_without_semantic_changes` | 중복 기술 ID만 정리하고 TC 의미 필드 불변 확인 |
 | `test_agent2_verify_regressions_are_added_deterministically` | Agent 1 VERIFY 유지 Requirement의 기존 회귀 결정론적 보충·중복 방지 |
 | `test_valid_design_passes_checkpoint2` | 유효 TC 설계의 CP2 통과 |
+| `test_checkpoint2_requires_grounded_srs_revision_proposal_for_modified_requirement` | MODIFIED Requirement의 근거 있는 SRS 개정 제안 필수 계약 |
+| `test_srs_revision_preview_apply_and_conflict_detection` | SRS 개정 미리보기·적용·멱등성과 원문 충돌 차단 |
 | `test_checkpoint2_routes_unchanged_condition_to_existing_tc` | 유지 조건을 신규 후보가 아닌 기존 TC ID로 연결 |
 | `test_checkpoint2_rejects_existing_regression_regenerated_as_candidate` | 기존 회귀를 신규 후보로 다시 만드는 설계 차단 |
 | `test_checkpoint2_allows_incompatible_target_regression_to_be_omitted` | 변경 후 기대와 맞지 않는 대상 기존 TC의 비강제 선택 |
@@ -79,6 +84,7 @@
 | `test_tc_negative_cross_tc_reference_is_accepted_as_independence_evidence` | 다른 TC 비의존 문장을 실제 의존으로 오탐하지 않음 |
 | `test_tc_positive_cross_tc_dependency_is_rejected` | 다른 TC 결과를 이어받는 실제 의존 차단 |
 | `test_partial_scope_exclusions_must_be_preserved_by_agent2` | Agent 1 제외 범위·정보 부족의 Agent 2 인계 |
+| `test_agent2_preserves_setup_and_restore_notes_as_tc_procedures` | 시험 준비·종료 후 복원을 제외하지 않고 TC 절차로 보존 |
 | `test_playwright_code_is_rejected` | TC 내 Playwright 코드 혼입 차단 |
 | `test_verified_agent1_run_can_handoff_to_agent2` | 검증된 Agent 1 SHA 인계 |
 | `test_modified_agent1_artifact_is_blocked_before_agent2` | 변조된 Agent 1 산출물 차단 |
@@ -86,7 +92,7 @@
 | `test_agent1_to_agent2_cli_handoff_with_frozen_inputs` | CLI 동결 입력 인계 |
 | `test_agent2_rejects_an_active_run_reservation` | 동시 Agent 2 실행 예약 차단 |
 
-## 3. Agent 3 조사·계획 계약 (28건)
+## 3. Agent 3 조사·계획 계약 (29건)
 
 | 테스트 | 확인 내용 |
 |---|---|
@@ -106,6 +112,7 @@
 | `test_agent3_rejects_unobserved_or_ungrounded_device_fields` | 미관찰·무근거 장비 필드 차단 |
 | `test_agent3_non_hvac_mode_values_use_generic_discovery` | 비 HVAC 상태값의 동적 조사 |
 | `test_agent3_textual_link_tolerates_korean_particles` | 한국어 조사·어미 의미 연결 |
+| `test_agent3_allows_dynamic_text_on_the_approved_target_device_card` | 정확한 대상 장비 카드의 변경 후 동적 문구 검증 허용 |
 | `test_agent3_notification_rejects_the_whole_expected_result_as_ui_text` | 알림 Expected Result 전체 문구 오사용 차단 |
 | `test_agent3_generic_discovery_compiles_and_runs_a_new_control` | 신규 범용 제어의 조사·컴파일·시험 |
 | `test_agent3_records_support_extension_without_generating_code` | 지원 범위 확장 REVIEW·코드 미생성 |
@@ -119,7 +126,7 @@
 | `test_legacy_central_plan_cannot_bypass_required_actions_with_generic_assertion` | 전용·범용 혼합 계획의 필수 중앙제어 순서 우회 차단 |
 | `test_specialized_action_source_text_must_be_an_approved_tc_line` | 전용 Action도 승인 TC 원문만 근거로 허용 |
 
-## 4. Agent 3 CP3·후보 시험·증거 (36건)
+## 4. Agent 3 CP3·후보 시험·증거 (38건)
 
 | 테스트 | 확인 내용 |
 |---|---|
@@ -137,6 +144,8 @@
 | `test_central_blocked_temperature_without_notification_uses_stall_request` | 알림 기대 결과가 없어도 중앙 패널 차단 요청을 정지형 조작으로 컴파일 |
 | `test_agent3_trace_redaction_handles_path_uri_and_json_escapes` | Trace 경로·URI·JSON escape 치환 |
 | `test_agent3_trial_strips_secrets_and_redacts_local_paths` | Trial 증거 비밀정보·로컬 경로 제거 |
+| `test_agent3_timeout_discards_incomplete_unredacted_trace` | 시간 초과로 미완성된 미정제 Trace의 증거 제외 |
+| `test_trial_timeout_terminates_playwright_child_processes` | 시간 초과 시 pytest·Playwright 자식 프로세스 트리 정리 |
 | `test_agent3_cli_exit_code_reflects_trial_trustworthiness[PASS]` | 신뢰 가능한 PASS 종료 코드 |
 | `test_agent3_cli_exit_code_reflects_trial_trustworthiness[PRODUCT_MISMATCH_CANDIDATE]` | 제품 불일치 후보 종료 코드 |
 | `test_agent3_cli_exit_code_reflects_trial_trustworthiness[AUTOMATION_ERROR]` | 자동화 오류 종료 코드 |
@@ -190,6 +199,24 @@
 | `test_agent4_holds_when_product_mismatch_and_automation_issue_coexist` | 제품 불일치와 자동화 오류가 함께 있으면 HOLD 우선 |
 | `test_agent4_rejects_broken_manifest_or_candidate_chain` | Agent 3→검증 Manifest 또는 실제 후보 파일 체인 불일치 차단 |
 | `test_agent4_rejects_passed_result_without_complete_evidence` | 완전한 증거 없는 PASS 결과 차단 |
+
+## 7. 중앙제어 실제 Run 연동·후보 자산 승인 (13건)
+
+| 테스트 | 확인 내용 |
+|---|---|
+| `test_pipeline_ui_summarizes_real_run_artifacts` | Agent 1~4·검증·외부 보고 JSON을 실제 Run 표시용으로 일관되게 요약 |
+| `test_pipeline_ui_rejects_unscoped_run_and_request_paths` | Run ID·변경 요청 파일 경로 우회와 기본 Live 실행 차단 |
+| `test_pipeline_ui_failure_message_is_safe_and_actionable` | 로컬 경로를 숨긴 Agent 3 TC별 실패·시간 초과 원인 표시 |
+| `test_pipeline_ui_live_run_is_disabled_by_default` | 로컬 브리지의 새 API 실행 기본 잠금 |
+| `test_pipeline_ui_prevents_parallel_live_runs_across_bridges` | 여러 로컬 브리지에서 같은 저장소 Live Run 중복 실행 차단 |
+| `test_pipeline_ui_live_run_uses_agent1_to_4_order_without_external_send` | 허용 모드의 Agent 1→3·검증·Agent 4 순서와 외부 전송 금지 |
+| `test_v2_product_ui_routes_agent_buttons_to_real_run_bridge` | 팀장·Agent 1~4 버튼의 실제 Run 패널 연결과 외부 보고 미리보기 고정 |
+| `test_pipeline_ui_human_approval_registers_immutable_tc_and_automation` | 사람 승인 시 후보 TC·자동화·Registry SHA-256 등록과 중복 승인 멱등성 |
+| `test_approved_tc_registry_is_loaded_and_official_automation_is_reusable` | 승인 Registry 자산 로딩·해시 검증과 공식 Python의 실제 Playwright 재실행·증거 생성 |
+| `test_pipeline_ui_requires_and_applies_srs_revision_with_asset_approval` | SRS 별도 동의 없는 자산 승인 차단과 동시 개정·전후 해시 기록 |
+| `test_pipeline_ui_hold_is_recorded_and_can_later_be_approved` | 보류 사유 기록, 공식 자산 미생성, 후속 승인 전환 |
+| `test_pipeline_ui_blocks_asset_approval_for_failed_or_stale_evidence` | 최종 실패·현재 HTML 해시 불일치 후보의 공식 등록 차단 |
+| `test_pipeline_ui_revalidates_stale_candidate_without_model_call` | HTML 변경 뒤 모델 호출 없는 후보 재검증과 승인 가능 상태 복구 |
 
 ## 갱신 규칙
 

@@ -1,0 +1,32 @@
+{
+  "contract_version": "1.0",
+  "assets": [
+    {
+      "source_key": "RUN-20260829-054330-A18942:TC-CAND-001",
+      "official_tc_id": "TC-V2-001",
+      "source_run_id": "RUN-20260829-054330-A18942",
+      "source_tc_id": "TC-CAND-001",
+      "title": "단일 허용 장비 HIGH 풍량 적용 시 강풍 카드 라벨 및 fanSpeed HIGH 유지",
+      "requirement_ids": [
+        "REQ-FAN-001",
+        "REQ-CONTROL-001",
+        "REQ-STATE-001"
+      ],
+      "test_case_file": "test_cases/TC-V2-001.json",
+      "test_case_sha256": "79a7b17b444f9f86c9758e0d4f178119ac456dc5d3b919dd332a317bf5f8efbc",
+      "automation_file": "automation/test_tc_v2_001.py",
+      "automation_sha256": "68188e6e407a2a156a2dd30e26f06eb96ccb0811355904bb9baca5c29d5d978f",
+      "target_sha256": "c7b9b7bca36fa027589aeec5113117284f031992fe9b766ecbcd498bf0605038",
+      "approval_revalidation_file": "asset_revalidation/TC-CAND-001/latest.json",
+      "approval_revalidation_sha256": "96c5792d3776d0fcfacb06890c1331068af7ff516d901070e0fa01dafd32328e",
+      "srs_revision_file": "srs_revisions/SRS-REV-001.json",
+      "srs_revision_sha256": "12cc185677dd82307690bd7627401cac5c062617b3515dc3b8655da95c8b07cc",
+      "srs_revision_applied": true,
+      "srs_revision_before_sha256": "9224c2cdb2bb9b9a106b5931d96d21aa64249d828170f07aa36ea446a66e087d",
+      "srs_revision_after_sha256": "ac3575f13acf17576385e57b90c7264985c0fbdcbf207069f0f24cd20f3a3b56",
+      "reviewer": "오세훈",
+      "approval_note": "현재 HTML 재검증 PASS 및 Screenshot·Trace·해시 확인",
+      "approved_at": "2026-08-30T09:38:57.689154+00:00"
+    }
+  ]
+}

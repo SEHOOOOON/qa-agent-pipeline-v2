@@ -15,17 +15,17 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=8,<9"]
-agent3 = ["pytest>=8,<9", "playwright>=1.45,<2"]
+agent3 = ["pytest>=8,<9", "playwright>=1.45,<2", "psutil>=5.9,<8"]
 
 [project.scripts]
 qa-pipeline-v2 = "qa_pipeline_v2:main"
+qa-pipeline-ui = "qa_pipeline_ui:main"
 
 [tool.setuptools]
-py-modules = ["qa_pipeline_v2"]
+py-modules = ["qa_pipeline_v2", "qa_pipeline_ui"]
 package-dir = {"" = "src"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-q"
-

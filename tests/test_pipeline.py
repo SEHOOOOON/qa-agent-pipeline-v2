@@ -1,5 +1,9 @@
 # Product SRS parser
 import json
+import os
+import subprocess
+import sys
+import time
 import zipfile
 from pathlib import Path
 
@@ -44,6 +48,7 @@ def test_product_srs_excludes_test_harness_requirements() -> None:
 from types import SimpleNamespace
 
 import pytest
+import qa_pipeline_ui as pipeline_ui
 
 from qa_pipeline_v2 import Agent1Error, OpenAIAgent1
 from qa_pipeline_v2 import (
@@ -128,7 +133,7 @@ def test_agent1_uses_structured_responses_api() -> None:
     assert result.response_id == "resp_test"
     assert result.usage["total_tokens"] == 150
     assert responses.kwargs["text_format"] is Agent1Analysis
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent1-2-6"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent1-2-7"
     assert responses.kwargs["store"] is False
     instructions = responses.kwargs["input"][0]["content"]
     assert "현재 SRS는 변경 전 제품 상태" in instructions
@@ -388,6 +393,34 @@ def test_missing_acceptance_note_is_rejected() -> None:
     assert result.status == CheckStatus.FAIL
     assert cp1_check(result, "CP1-008").status == CheckStatus.FAIL
     assert cp1_request().acceptance_notes[-1] in cp1_check(result, "CP1-008").message
+
+
+def test_checkpoint1_does_not_require_setup_or_restore_as_product_conditions() -> None:
+    setup_note = "첫 실행 기본 상태인 LOW 풍량을 확인한 뒤 시험을 시작한다."
+    restore_note = "시험 뒤 대상 장비를 LOW 풍량으로 복원하고 적용한다."
+    request = cp1_request().model_copy(
+        update={
+            "acceptance_notes": [
+                *cp1_request().acceptance_notes,
+                setup_note,
+                restore_note,
+            ]
+        }
+    )
+    analysis = cp1_valid_analysis().model_copy(
+        update={
+            "excluded_scope": [
+                *cp1_valid_analysis().excluded_scope,
+                setup_note,
+                restore_note,
+            ]
+        }
+    )
+
+    result = evaluate_checkpoint1(request, analysis, cp1_requirements())
+
+    assert result.status == CheckStatus.PASS
+    assert cp1_check(result, "CP1-008").status == CheckStatus.PASS
 
 
 def test_missing_requested_out_of_scope_is_rejected() -> None:
@@ -732,7 +765,7 @@ def test_agent2_uses_structured_responses_api() -> None:
     assert response.usage["total_tokens"] == 300
     assert responses.kwargs["text_format"] is Agent2TestDesign
     assert responses.kwargs["store"] is False
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-14"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-15"
     agent2_input = responses.kwargs["input"][1]["content"]
     assert "[기존 사람 작성·자동화 TC 카탈로그]" in agent2_input
     assert "TC-TEMP-001" in agent2_input
@@ -962,6 +995,78 @@ def test_valid_design_passes_checkpoint2() -> None:
     assert result.status == CheckStatus.PASS
     assert len(result.checks) == 17
     assert all(item.status == CheckStatus.PASS for item in result.checks)
+
+
+def test_checkpoint2_requires_grounded_srs_revision_proposal_for_modified_requirement() -> None:
+    proposal = pipeline.SrsRevisionProposal(
+        proposal_id="SRS-REV-001",
+        requirement_id="REQ-TEMP-001",
+        source_condition_ids=["COND-001"],
+        current_acceptance_criteria="범위 밖 차단",
+        proposed_acceptance_criteria="AUTO 모드는 18~30°C를 허용하고 범위 밖 요청을 차단",
+        reason="AUTO 모드 하한 변경을 기준 문서에 반영한다.",
+    )
+    design = cp2_valid_design().model_copy(
+        update={"srs_revision_proposals": [proposal]}
+    )
+
+    passed = evaluate_checkpoint2(
+        cp1_request(),
+        cp2_analysis(),
+        design,
+        cp2_requirements(),
+        require_srs_revision_proposals=True,
+    )
+    missing = evaluate_checkpoint2(
+        cp1_request(),
+        cp2_analysis(),
+        cp2_valid_design(),
+        cp2_requirements(),
+        require_srs_revision_proposals=True,
+    )
+
+    assert cp2_check(passed, "CP2-018").status == CheckStatus.PASS
+    assert cp2_check(missing, "CP2-018").status == CheckStatus.FAIL
+    assert "개정 제안 누락=REQ-TEMP-001" in cp2_check(missing, "CP2-018").message
+
+
+def test_srs_revision_preview_apply_and_conflict_detection(tmp_path: Path) -> None:
+    srs_file = tmp_path / "SRS.md"
+    srs_file.write_text(
+        "# SRS\n\n| ID | 요구사항 | 인수 기준 |\n"
+        "|---|---|---|\n"
+        "| REQ-TEMP-001 | 온도 범위 | 기존 기준 |\n",
+        encoding="utf-8",
+    )
+    proposal = pipeline.SrsRevisionProposal(
+        proposal_id="SRS-REV-001",
+        requirement_id="REQ-TEMP-001",
+        source_condition_ids=["COND-001"],
+        current_acceptance_criteria="기존 기준",
+        proposed_acceptance_criteria="변경 기준",
+        reason="승인된 변경을 반영한다.",
+    )
+
+    preview = pipeline.apply_srs_revision_proposals(
+        srs_file, [proposal], write=False
+    )
+    assert preview["changed_requirement_ids"] == ["REQ-TEMP-001"]
+    assert "기존 기준" in srs_file.read_text(encoding="utf-8")
+
+    applied = pipeline.apply_srs_revision_proposals(srs_file, [proposal], write=True)
+    repeated = pipeline.apply_srs_revision_proposals(srs_file, [proposal], write=True)
+    assert applied["changed_requirement_ids"] == ["REQ-TEMP-001"]
+    assert repeated["already_applied_requirement_ids"] == ["REQ-TEMP-001"]
+    assert "변경 기준" in srs_file.read_text(encoding="utf-8")
+
+    conflicting = proposal.model_copy(
+        update={
+            "current_acceptance_criteria": "다른 기준",
+            "proposed_acceptance_criteria": "또 다른 기준",
+        }
+    )
+    with pytest.raises(ValueError, match="기준 원문과 다릅니다"):
+        pipeline.apply_srs_revision_proposals(srs_file, [conflicting], write=True)
 
 
 def test_checkpoint2_routes_unchanged_condition_to_existing_tc() -> None:
@@ -1665,6 +1770,47 @@ def test_partial_scope_exclusions_must_be_preserved_by_agent2() -> None:
     assert cp2_check(preserved_result, "CP2-014").status == CheckStatus.PASS
 
 
+def test_agent2_preserves_setup_and_restore_notes_as_tc_procedures() -> None:
+    setup_note = "첫 실행 기본 상태인 LOW 풍량을 확인한 뒤 시험을 시작한다."
+    restore_note = "시험 뒤 대상 장비를 LOW 풍량으로 복원하고 적용한다."
+    request = cp1_request().model_copy(
+        update={
+            "acceptance_notes": [
+                *cp1_request().acceptance_notes,
+                setup_note,
+                restore_note,
+            ]
+        }
+    )
+    analysis = cp2_analysis().model_copy(
+        update={"excluded_scope": [setup_note, restore_note]}
+    )
+    incorrectly_excluded = cp2_valid_design().model_copy(
+        update={"excluded_scope": [setup_note, restore_note]}
+    )
+
+    rejected = evaluate_checkpoint2(
+        request, analysis, incorrectly_excluded, cp2_requirements()
+    )
+
+    assert cp2_check(rejected, "CP2-014").status == CheckStatus.FAIL
+
+    base_tc = cp2_valid_design().test_cases[0]
+    procedural_tc = base_tc.model_copy(
+        update={
+            "preconditions": [*base_tc.preconditions, setup_note],
+            "restore_required": True,
+            "restore_steps": [restore_note],
+        }
+    )
+    preserved = cp2_valid_design().model_copy(
+        update={"test_cases": [procedural_tc], "excluded_scope": []}
+    )
+    accepted = evaluate_checkpoint2(request, analysis, preserved, cp2_requirements())
+
+    assert cp2_check(accepted, "CP2-014").status == CheckStatus.PASS
+
+
 def test_playwright_code_is_rejected() -> None:
     tc = cp2_valid_design().test_cases[0].model_copy(
         update={"steps": ["page.locator('#temperature').click()"]}
@@ -1828,6 +1974,27 @@ def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
                             )
                         ],
                         test_cases=[tc],
+                        srs_revision_proposals=[
+                            pipeline.SrsRevisionProposal(
+                                proposal_id="SRS-REV-001",
+                                requirement_id="REQ-TEMP-001",
+                                source_condition_ids=[
+                                    "COND-001",
+                                    "COND-002",
+                                    "COND-003",
+                                    "COND-005",
+                                ],
+                                current_acceptance_criteria=(
+                                    "범위 안 요청은 반영되고 범위 밖 요청은 차단되며 "
+                                    "화면·내부 설정 온도가 기존 값을 유지합니다."
+                                ),
+                                proposed_acceptance_criteria=(
+                                    "AUTO 모드에서는 18~30°C 요청을 허용하고 범위 밖 요청은 "
+                                    "차단하며 화면·내부 설정 온도가 기존 값을 유지합니다."
+                                ),
+                                reason="AUTO 모드 하한 변경을 SRS 인수 기준에 반영합니다.",
+                            )
+                        ],
                     coverage_summary="확정 조건을 변경 검증 TC에 연결했다.",
                     excluded_scope=analysis.excluded_scope,
                     excluded_information_gaps=analysis.information_gaps,
@@ -1863,6 +2030,16 @@ def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
     assert manifest["status"] == CheckStatus.PASS.value
     assert manifest["request_sha256"] == _sha256_file(run_dir / "request.json")
     assert manifest["srs_sha256"] == _sha256_file(run_dir / "srs_snapshot.md")
+    catalog_snapshot = json.loads(
+        (run_dir / "approved_regression_catalog.json").read_text(encoding="utf-8")
+    )
+    assert [item["tc_id"] for item in catalog_snapshot["approved_assets"]] == [
+        "TC-V2-001"
+    ]
+    assert manifest["approved_regression_catalog_sha256"] == _sha256_file(
+        run_dir / "approved_regression_catalog.json"
+    )
+    assert manifest["srs_revision_contract"] == "1.0"
 
 
 def test_agent2_rejects_an_active_run_reservation(tmp_path: Path) -> None:
@@ -2036,7 +2213,7 @@ def test_agent3_uses_structured_plan_api() -> None:
     assert result.plan.tc_id == "TC-CAND-003"
     assert responses.kwargs["text_format"] is Agent3AutomationPlan
     assert responses.kwargs["store"] is False
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent3-3-17"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent3-3-18"
     instructions = responses.kwargs["input"][0]["content"]
     assert "SET_TEMPERATURE=#det-temp-display" in instructions
     assert "Generic UI actions are CLICK, FILL, SELECT_OPTION, CHECK, and UNCHECK" in instructions
@@ -2514,6 +2691,148 @@ def test_agent3_textual_link_tolerates_korean_particles() -> None:
     assert not pipeline._has_textual_link("삭제 버튼", "적용을 실행한다.")
 
 
+def test_agent3_allows_dynamic_text_on_the_approved_target_device_card() -> None:
+    test_case = ProductTestCaseCandidate.model_validate(
+        {
+            "tc_id": "TC-CAND-101",
+            "title": "대상 장비 카드 풍량 표시와 내부 코드 검증",
+            "purpose": "CHANGE_VALIDATION",
+            "test_type": "NORMAL",
+            "requirement_ids": ["REQ-FAN-001"],
+            "source_condition_ids": ["COND-101"],
+            "control_path": "CENTRAL",
+            "target_role": "PRIMARY_TEST_DEVICE",
+            "test_data": {},
+            "preconditions": ["오류와 잠금이 없는 단일 대상 장비를 준비한다."],
+            "steps": [
+                "대상 장비를 단일 선택한다.",
+                "대상 장비의 풍량으로 HIGH를 선택하고 적용한다.",
+                "대상 장비 카드의 풍량 표시를 확인한다.",
+                "대상 장비의 내부 fanSpeed를 확인한다.",
+            ],
+            "expected_results": [
+                {
+                    "result_id": "ER-101",
+                    "statement": "대상 장비 카드에 강풍이 표시된다.",
+                    "observation_layer": "UI",
+                    "source_condition_ids": ["COND-101"],
+                    "verify_after_step": "대상 장비 카드의 풍량 표시를 확인한다.",
+                },
+                {
+                    "result_id": "ER-102",
+                    "statement": "대상 장비의 내부 fanSpeed는 HIGH이다.",
+                    "observation_layer": "INTERNAL_STATE",
+                    "source_condition_ids": ["COND-101"],
+                    "verify_after_step": "대상 장비의 내부 fanSpeed를 확인한다.",
+                },
+            ],
+            "restore_required": False,
+            "restore_steps": [],
+            "automation_candidate": True,
+            "automation_reason": "대상 카드와 내부 상태를 관찰할 수 있다.",
+        }
+    )
+    observation = UiObservation(
+        target_file="virtual-controller.html",
+        target_sha256="a" * 64,
+        page_title="Virtual Controller",
+        elements=[
+            ObservedUiElement(
+                selector="#device-card-1 .card-body-split",
+                tag="div",
+                text="약풍",
+                visible=True,
+                enabled=True,
+                action_hint="Select PRIMARY_TEST_DEVICE",
+            ),
+            ObservedUiElement(
+                selector="#det-fan-high",
+                tag="button",
+                text="강풍",
+                visible=True,
+                enabled=True,
+                action_hint="CLICK",
+            ),
+            ObservedUiElement(
+                selector=".btn-apply-cmd",
+                tag="button",
+                text="적용",
+                visible=True,
+                enabled=True,
+                action_hint="Apply pending commands",
+            ),
+            ObservedUiElement(
+                selector="#device-card-1",
+                tag="div",
+                text="약풍",
+                visible=True,
+                enabled=True,
+                action_hint="READ_STATE",
+            ),
+        ],
+        harness_keys=["devices", "selectedUnitId"],
+        harness_values={"window.__vccs.devices[0].fanSpeed": "LOW"},
+        device_state_fields=["fanSpeed"],
+        observed_at="2026-08-29T00:00:00+00:00",
+    )
+    plan = Agent3AutomationPlan.model_validate(
+        {
+            "tc_id": "TC-CAND-101",
+            "target_device_id": 1,
+            "summary": "HIGH 풍량 적용 뒤 카드 표시와 내부 코드를 확인한다.",
+            "actions": [
+                {
+                    "action_id": "ACT-101",
+                    "phase": "TEST",
+                    "action_type": "SELECT_DEVICE",
+                    "selector": "#device-card-1 .card-body-split",
+                    "value": 1,
+                    "source_text": "대상 장비를 단일 선택한다.",
+                },
+                {
+                    "action_id": "ACT-102",
+                    "phase": "TEST",
+                    "action_type": "CLICK",
+                    "selector": "#det-fan-high",
+                    "source_text": "대상 장비의 풍량으로 HIGH를 선택하고 적용한다.",
+                },
+                {
+                    "action_id": "ACT-103",
+                    "phase": "TEST",
+                    "action_type": "APPLY_COMMANDS",
+                    "selector": ".btn-apply-cmd",
+                    "source_text": "대상 장비의 풍량으로 HIGH를 선택하고 적용한다.",
+                },
+            ],
+            "assertions": [
+                {
+                    "result_id": "ER-101",
+                    "observation_layer": "UI",
+                    "strategy": "UI_TEXT_CONTAINS",
+                    "selector": "#device-card-1",
+                    "expected_text": "강풍",
+                },
+                {
+                    "result_id": "ER-102",
+                    "observation_layer": "INTERNAL_STATE",
+                    "strategy": "INTERNAL_DEVICE_FIELDS_EQUALS",
+                    "selector": "window.__vccs.devices",
+                    "expected_fields": [
+                        {"field_name": "fanSpeed", "expected_value": "HIGH"}
+                    ],
+                },
+            ],
+        }
+    )
+
+    checkpoint = evaluate_checkpoint3_plan(test_case, plan, observation)
+
+    assert checkpoint.status == CheckStatus.PASS
+    assert next(
+        item for item in checkpoint.checks if item.rule_id == "CP3-004"
+    ).status == CheckStatus.PASS
+
+
 def test_agent3_notification_rejects_the_whole_expected_result_as_ui_text() -> None:
     payload = agent3_plan().model_dump(mode="json")
     payload["assertions"][2] = {
@@ -2633,7 +2952,7 @@ toggle.addEventListener('change', () => {
         candidate,
         target,
         tmp_path / "new-control-evidence",
-        timeout_seconds=30,
+        timeout_seconds=90,
     )
     assert trial.outcome == TrialOutcome.PASS
 
@@ -2686,7 +3005,7 @@ def test_grouped_hvac_trial_restores_runtime_baseline(tmp_path: Path) -> None:
         }
     )
     eligibility = evaluate_agent3_eligibility(test_case)
-    target = REPO_ROOT.parent / "portfolio_export" / "virtual-controller.html"
+    target = REPO_ROOT / "product_baseline" / "virtual-controller.html"
     target_hash = _sha256_file(target)
     observation = inspect_target_ui(
         target,
@@ -2806,7 +3125,7 @@ def test_grouped_hvac_trial_restores_runtime_baseline(tmp_path: Path) -> None:
         candidate,
         target,
         tmp_path / "dynamic-hvac-evidence",
-        timeout_seconds=30,
+        timeout_seconds=90,
     )
 
     assert trial.outcome == TrialOutcome.PASS
@@ -3506,10 +3825,11 @@ def test_agent3_trial_strips_secrets_and_redacts_local_paths(tmp_path: Path, mon
     target.write_text("<!doctype html>", encoding="utf-8")
     captured_env = {}
 
-    def fake_run(*args, **kwargs):
-        captured_env.update(kwargs["env"])
+    def fake_run(_command, *, cwd, env, timeout_seconds):
+        assert timeout_seconds == 5
+        captured_env.update(env)
         local_path = str(target.resolve())
-        temp_path = str(Path(kwargs["cwd"]).resolve())
+        temp_path = str(Path(cwd).resolve())
         return SimpleNamespace(
             returncode=1,
             stdout=f"한글 실행 증거\n{local_path}\n{temp_path}",
@@ -3518,7 +3838,7 @@ def test_agent3_trial_strips_secrets_and_redacts_local_paths(tmp_path: Path, mon
 
     for name in ("OPENAI_API_KEY", "SLACK_WEBHOOK_URL", "NOTION_API_KEY", "NOTION_TOKEN", "GITHUB_TOKEN"):
         monkeypatch.setenv(name, "must-not-reach-trial")
-    monkeypatch.setattr(pipeline.subprocess, "run", fake_run)
+    monkeypatch.setattr(pipeline, "_run_trial_subprocess", fake_run)
 
     evidence_dir = tmp_path / "evidence"
     result = run_candidate_trial(candidate, target, evidence_dir, timeout_seconds=5)
@@ -3533,6 +3853,59 @@ def test_agent3_trial_strips_secrets_and_redacts_local_paths(tmp_path: Path, mon
     assert "한글 실행 증거" in stdout
     assert str(target.resolve()) not in stdout
     assert "<LOCAL_PATH>" in stdout
+
+
+def test_agent3_timeout_discards_incomplete_unredacted_trace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    candidate = tmp_path / "candidate.py"
+    candidate.write_text("def test_candidate():\n    pass\n", encoding="utf-8")
+    target = tmp_path / "target.html"
+    target.write_text("<!doctype html>", encoding="utf-8")
+    evidence = tmp_path / "evidence"
+
+    def fake_timeout(command, *, cwd, env, timeout_seconds):
+        trace = Path(env["QA_EVIDENCE_DIR"]) / "trial-trace.zip"
+        trace.write_bytes(b"incomplete trace with unredacted local data")
+        raise subprocess.TimeoutExpired(command, timeout_seconds)
+
+    monkeypatch.setattr(pipeline, "_run_trial_subprocess", fake_timeout)
+    result = run_candidate_trial(
+        candidate,
+        target,
+        evidence,
+        timeout_seconds=5,
+    )
+
+    assert result.outcome == TrialOutcome.TIMEOUT
+    assert result.trace_file is None
+    assert result.evidence_complete is False
+    assert not (evidence / "trial-trace.zip").exists()
+
+
+def test_trial_timeout_terminates_playwright_child_processes(tmp_path: Path) -> None:
+    psutil = pytest.importorskip("psutil")
+    child_pid_file = tmp_path / "child.pid"
+    parent_script = (
+        "import subprocess,sys,time; from pathlib import Path; "
+        "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)']); "
+        "Path(sys.argv[1]).write_text(str(child.pid), encoding='utf-8'); time.sleep(30)"
+    )
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        pipeline._run_trial_subprocess(
+            [sys.executable, "-c", parent_script, str(child_pid_file)],
+            cwd=tmp_path,
+            env=dict(os.environ),
+            timeout_seconds=2,
+        )
+
+    child_pid = int(child_pid_file.read_text(encoding="utf-8"))
+    for _ in range(20):
+        if not psutil.pid_exists(child_pid):
+            break
+        time.sleep(0.05)
+    assert not psutil.pid_exists(child_pid)
 
 
 def _checkpoint3(status: CheckStatus) -> pipeline.Checkpoint3Result:
@@ -3784,7 +4157,7 @@ def test_pipeline_parser_exposes_one_command_agent1_to_agent3() -> None:
 
     assert args.handler is pipeline.run_pipeline
     assert args.tc_id == "AUTO"
-    assert args.timeout == 30
+    assert args.timeout == 90
     assert pipeline._orchestrator_status(0) == "PASS"
     assert pipeline._orchestrator_status(1) == "ERROR"
     assert pipeline._orchestrator_status(2) == "STOPPED"
@@ -4741,6 +5114,7 @@ def _write_agent4_inputs(
     excluded_scope: list[str] | None = None,
     excluded_information_gaps: list[str] | None = None,
     automation_exclusions: list[pipeline.AutomationExclusion] | None = None,
+    srs_revision_proposals: list[pipeline.SrsRevisionProposal] | None = None,
 ) -> tuple[Path, str]:
     run_id = "RUN-20260817-030000-ABCDEF"
     run_dir = tmp_path / "runs" / run_id
@@ -4799,6 +5173,7 @@ def _write_agent4_inputs(
         excluded_scope=excluded_scope or [],
         excluded_information_gaps=excluded_information_gaps or [],
         final_review_notes=final_review_notes or [],
+        srs_revision_proposals=srs_revision_proposals or [],
         automation_exclusions=automation_exclusions or [],
         created_at="2026-08-17T00:00:00+00:00",
     )
@@ -4813,6 +5188,7 @@ def _write_agent4_inputs(
             test_cases=[agent3_test_case()],
             existing_tc_comparison_completed=True,
             coverage_summary="Agent 4 사람 최종 검토 문서용 후보입니다.",
+            srs_revision_proposals=srs_revision_proposals or [],
         ).model_dump(mode="json", by_alias=True),
     )
     _write_json(
@@ -5130,8 +5506,18 @@ def test_agent4_holds_candidate_automation_execution_issue(tmp_path: Path) -> No
 
 
 def test_agent4_carries_non_blocking_review_notes_to_final_report(tmp_path: Path) -> None:
+    proposal = pipeline.SrsRevisionProposal(
+        proposal_id="SRS-REV-001",
+        requirement_id="REQ-TEMP-001",
+        source_condition_ids=["COND-001"],
+        current_acceptance_criteria="기존 기준",
+        proposed_acceptance_criteria="변경 기준",
+        reason="승인된 변경을 기준 문서에 반영한다.",
+    )
     run_dir, run_id = _write_agent4_inputs(
-        tmp_path, final_review_notes=["CP1: 변경 전 값의 SRS 근거를 최종 확인한다."]
+        tmp_path,
+        final_review_notes=["CP1: 변경 전 값의 SRS 근거를 최종 확인한다."],
+        srs_revision_proposals=[proposal],
     )
 
     assert pipeline.run_agent4(
@@ -5146,6 +5532,11 @@ def test_agent4_carries_non_blocking_review_notes_to_final_report(tmp_path: Path
     assert report.final_review_notes == [
         "CP1: 변경 전 값의 SRS 근거를 최종 확인한다."
     ]
+    assert report.srs_revision_proposals == [proposal]
+    review_text = (run_dir / "사람_최종_검토.md").read_text(encoding="utf-8")
+    assert "## 4. 기준 SRS 개정 승인" in review_text
+    assert "현재 인수 기준: 기존 기준" in review_text
+    assert "제안 인수 기준: 변경 기준" in review_text
 
 
 def test_agent4_holds_when_environment_precheck_blocks_regressions(tmp_path: Path) -> None:
@@ -5340,3 +5731,677 @@ def test_agent4_parser_exposes_rules_only_report_command() -> None:
     )
     assert human_review.handler is pipeline.run_human_review_document
     assert human_review.refresh is False
+
+
+def test_v2_product_baseline_contains_only_runtime_assets() -> None:
+    baseline_root = REPO_ROOT / "product_baseline"
+    imported_files: list[str] = []
+    for path in baseline_root.rglob("*"):
+        if not path.is_file():
+            continue
+        relative_path = path.relative_to(baseline_root)
+        if any(
+            part in {".pytest_cache", "__pycache__", "reports"}
+            for part in relative_path.parts
+        ) or relative_path.name == "debug.log":
+            continue
+        imported_files.append(relative_path.as_posix())
+
+    assert sorted(imported_files) == [
+        "pytest.ini",
+        "tests/conftest.py",
+        "tests/test_controller.py",
+        "virtual-controller.html",
+    ]
+    assert (baseline_root / "virtual-controller.html").is_file()
+
+
+def test_success_fan_speed_request_is_grounded_in_v2_baseline() -> None:
+    request = pipeline.ChangeRequest.model_validate_json(
+        (REPO_ROOT / "examples" / "change_request.success-fan-speed.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    requirements = pipeline.load_srs_requirements(
+        REPO_ROOT / "docs" / "01_PRODUCT_SRS.md"
+    )
+    product_html = (
+        REPO_ROOT / "product_baseline" / "virtual-controller.html"
+    ).read_text(encoding="utf-8")
+
+    assert request.target_requirement_id == "REQ-FAN-001"
+    assert request.target_requirement_id in requirements
+    assert "HIGH" in request.after_value
+    assert "fanSpeed" in request.after_value
+    assert any("LOW" in note and "복원" in note for note in request.acceptance_notes)
+    assert 'id="det-fan-high"' in product_html
+    assert "setPanelFan('HIGH')" in product_html
+    assert "device.fanSpeed = pendingState.fanSpeed" in product_html
+
+
+def test_pipeline_ui_summarizes_real_run_artifacts(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    run_id = "RUN-20260829-120000-ABCDEF"
+    run_dir = runs_root / run_id
+    run_dir.mkdir(parents=True)
+    _write_json(
+        run_dir / "request.json",
+        {
+            "request_id": "CR-UI-001",
+            "target_requirement_id": "REQ-FAN-001",
+            "description": "실제 Run 표시 확인",
+        },
+    )
+    _write_json(
+        run_dir / "agent1_change_analysis.json",
+        {
+            "change_summary": "HIGH 표시 매핑을 변경한다.",
+            "confirmed_conditions": [{"condition_id": "COND-001"}],
+            "requirement_effects": [{"requirement_id": "REQ-FAN-001"}],
+        },
+    )
+    _write_json(
+        run_dir / "checkpoint1.json",
+        {"status": "REVIEW", "final_review_notes": ["사람 확인 1건"]},
+    )
+    _write_json(
+        run_dir / "agent2_test_design.json",
+        {
+            "test_cases": [
+                {
+                    "tc_id": "TC-CAND-001",
+                    "title": "강풍 표시 검증",
+                    "automation_candidate": True,
+                }
+            ],
+            "제외_범위": ["실제 장비 통신"],
+        },
+    )
+    _write_json(run_dir / "checkpoint2.json", {"status": "PASS"})
+    _write_json(
+        run_dir / "agent3_selection.json",
+        {"status": "SELECTED", "selected_tc_ids": ["TC-CAND-001"]},
+    )
+    _write_json(
+        run_dir / "agent3_run_summary.json",
+        {
+            "status": "PASS",
+            "executed_tc_ids": ["TC-CAND-001"],
+            "자동화_제외_TC": [],
+        },
+    )
+    _write_json(
+        run_dir / "validation_execution.json",
+        {
+            "status": "COMPLETED",
+            "candidate_results": [{"test_id": "TC-CAND-001", "status": "PASSED"}],
+            "regression_results": [],
+            "environment_precheck": {"test_id": "TC-ENV-000", "status": "PASSED"},
+        },
+    )
+    _write_json(
+        run_dir / "agent4_analysis.json",
+        {
+            "recommendation": "PASS",
+            "total_results": 2,
+            "product_result_count": 1,
+            "environment_result_count": 1,
+        },
+    )
+    _write_json(run_dir / "checkpoint4.json", {"status": "PASS"})
+    _write_json(
+        run_dir / "final_report.json",
+        {
+            "recommendation": "PASS",
+            "total_results": 2,
+            "product_result_count": 1,
+            "environment_result_count": 1,
+            "검토_항목": [],
+            "최종_확인_사항": ["CP1 사람 확인 1건"],
+        },
+    )
+    _write_json(
+        run_dir / "external_reporting.json",
+        {
+            "mode": "DRY_RUN",
+            "slack": {"status": "PREVIEW"},
+            "notion": {"status": "PREVIEW"},
+        },
+    )
+
+    summary = pipeline_ui.summarize_run(runs_root, run_id)
+
+    assert summary["request_id"] == "CR-UI-001"
+    assert summary["overall_status"] == "PASS"
+    assert summary["stages"]["agent1"]["status"] == "REVIEW"
+    assert "설계 TC 1건" in summary["stages"]["agent2"]["summary"]
+    assert "후보 시험 완료 1건" in summary["stages"]["agent3"]["summary"]
+    assert summary["stages"]["agent4"]["summary"] == "최종 판정 PASS · 외부 보고 DRY_RUN"
+    assert "Slack: PREVIEW / Notion: PREVIEW" in summary["stages"]["agent4"]["details"]
+
+
+def build_approvable_ui_run(
+    tmp_path: Path,
+) -> tuple[Path, Path, Path, str, str, str]:
+    runs_root = tmp_path / "runs"
+    approved_root = tmp_path / "approved_assets"
+    target_html = tmp_path / "virtual-controller.html"
+    target_html.write_text("<!doctype html><title>V2 target</title>", encoding="utf-8")
+    run_id = "RUN-20260829-140000-ABCDEF"
+    tc_id = "TC-CAND-001"
+    run_dir = runs_root / run_id
+    candidate_dir = run_dir / "agent3_candidates" / tc_id
+    candidate_file = candidate_dir / "candidates" / "test_tc_cand_001.py"
+    candidate_file.parent.mkdir(parents=True)
+    candidate_code = "def test_tc_cand_001():\n    assert True\n"
+    candidate_file.write_text(candidate_code, encoding="utf-8")
+    evidence_dir = candidate_dir / "evidence" / tc_id
+    evidence_dir.mkdir(parents=True)
+    evidence_files = []
+    evidence_hashes = {}
+    for name, content in (
+        ("trial-stdout.txt", b"1 passed"),
+        ("trial-stderr.txt", b""),
+        ("trial-final.png", b"PNG"),
+        ("trial-trace.zip", b"ZIP"),
+    ):
+        path = evidence_dir / name
+        path.write_bytes(content)
+        relative = path.relative_to(run_dir).as_posix()
+        evidence_files.append(relative)
+        evidence_hashes[relative] = _sha256_file(path)
+    _write_json(
+        run_dir / "agent2_test_design.json",
+        {
+            "test_cases": [
+                {
+                    "tc_id": tc_id,
+                    "title": "검증된 풍량 변경",
+                    "requirement_ids": ["REQ-FAN-001"],
+                    "expected_results": [
+                        {
+                            "result_id": "ER-001",
+                            "statement": "풍량 변경 결과가 화면에 표시된다.",
+                        }
+                    ],
+                    "automation_candidate": True,
+                }
+            ]
+        },
+    )
+    _write_json(
+        run_dir / "agent3_run_summary.json",
+        {
+            "status": "PASS",
+            "executed_tc_ids": [tc_id],
+            "entries": [
+                {"tc_id": tc_id, "status": "PASS", "checkpoint_status": "PASS"}
+            ],
+        },
+    )
+    candidate_sha256 = _sha256_file(candidate_file)
+    _write_json(
+        candidate_dir / "agent3_manifest.json",
+        {
+            "candidate_file": candidate_file.name,
+            "candidate_sha256": candidate_sha256,
+        },
+    )
+    _write_json(run_dir / "checkpoint4.json", {"status": "PASS"})
+    _write_json(run_dir / "final_report.json", {"recommendation": "PASS"})
+    _write_json(
+        run_dir / "validation_execution.json",
+        {
+            "status": "COMPLETED",
+            "candidate_results": [
+                {
+                    "test_id": tc_id,
+                    "status": "PASSED",
+                    "evidence_complete": True,
+                    "test_file": candidate_file.relative_to(run_dir).as_posix(),
+                    "test_sha256": candidate_sha256,
+                    "target_sha256": _sha256_file(target_html),
+                    "evidence_files": evidence_files,
+                    "evidence_sha256": evidence_hashes,
+                }
+            ],
+        },
+    )
+    return runs_root, approved_root, target_html, run_id, tc_id, candidate_code
+
+
+def test_pipeline_ui_human_approval_registers_immutable_tc_and_automation(
+    tmp_path: Path,
+) -> None:
+    runs_root, approved_root, target_html, run_id, tc_id, candidate_code = (
+        build_approvable_ui_run(tmp_path)
+    )
+    bridge = pipeline_ui.PipelineUiBridge(
+        runs_root=runs_root,
+        requests_root=tmp_path / "examples",
+        target_html=target_html,
+        allow_live_run=False,
+        allow_asset_approval=True,
+        approved_assets_root=approved_root,
+    )
+
+    record = bridge.decide_asset(
+        run_id,
+        tc_id,
+        decision="APPROVE",
+        reviewer="오세훈",
+        note="실행 증거와 복원 결과 확인",
+    )
+    repeated = bridge.decide_asset(
+        run_id,
+        tc_id,
+        decision="APPROVE",
+        reviewer="다른 입력",
+        note="중복 호출",
+    )
+
+    assert record["decision"] == "APPROVED"
+    assert record["official_tc_id"] == "TC-V2-001"
+    assert repeated == record
+    registry = json.loads((approved_root / "registry.json").read_text(encoding="utf-8"))
+    assert len(registry["assets"]) == 1
+    asset = registry["assets"][0]
+    assert asset["source_key"] == f"{run_id}:{tc_id}"
+    assert (approved_root / asset["automation_file"]).read_text(encoding="utf-8") == candidate_code
+    assert _sha256_file(approved_root / asset["automation_file"]) == asset["automation_sha256"]
+    approved_tc = json.loads(
+        (approved_root / asset["test_case_file"]).read_text(encoding="utf-8")
+    )
+    assert approved_tc["test_case"]["title"] == "검증된 풍량 변경"
+    summary = pipeline_ui.summarize_run(
+        runs_root,
+        run_id,
+        target_html=target_html,
+    )
+    assert summary["candidate_assets"][0]["decision"]["official_tc_id"] == "TC-V2-001"
+
+
+def test_approved_tc_registry_is_loaded_and_official_automation_is_reusable(
+    tmp_path: Path,
+) -> None:
+    approved_root = REPO_ROOT / "approved_assets"
+    approved, snapshot = pipeline.load_approved_regression_catalog(approved_root)
+
+    spec = next(item for item in approved if item.tc_id == "TC-V2-001")
+    assert spec.source == "APPROVED"
+    assert "REQ-FAN-001" in spec.requirement_ids
+    assert "TC-V2-001" in pipeline.render_existing_regression_context(approved)
+    assert snapshot["approved_assets"][0]["automation_sha256"] == spec.automation_sha256
+
+    result = pipeline.run_existing_regression(
+        spec,
+        approved_root / str(spec.automation_file),
+        REPO_ROOT / "product_baseline" / "virtual-controller.html",
+        tmp_path / "approved-evidence",
+        timeout_seconds=60,
+    )
+
+    assert result.status == pipeline.NeutralExecutionStatus.PASSED
+    assert result.test_file == spec.automation_file
+    assert result.test_sha256 == spec.automation_sha256
+    assert result.evidence_complete is True
+    assert any(path.endswith("trial-final.png") for path in result.evidence_files)
+    assert any(path.endswith("trial-trace.zip") for path in result.evidence_files)
+
+
+def test_pipeline_ui_requires_and_applies_srs_revision_with_asset_approval(
+    tmp_path: Path,
+) -> None:
+    runs_root, approved_root, target_html, run_id, tc_id, _ = build_approvable_ui_run(
+        tmp_path
+    )
+    srs_file = tmp_path / "SRS.md"
+    srs_file.write_text(
+        "# SRS\n\n| ID | 요구사항 | 인수 기준 |\n"
+        "|---|---|---|\n"
+        "| REQ-FAN-001 | 풍량 설정 | 기존 풍량 기준 |\n",
+        encoding="utf-8",
+    )
+    final_report_file = runs_root / run_id / "final_report.json"
+    _write_json(
+        final_report_file,
+        {
+            "recommendation": "PASS",
+            "SRS_개정_제안": [
+                {
+                    "proposal_id": "SRS-REV-001",
+                    "requirement_id": "REQ-FAN-001",
+                    "source_condition_ids": ["COND-001"],
+                    "current_acceptance_criteria": "기존 풍량 기준",
+                    "proposed_acceptance_criteria": "변경 풍량 기준",
+                    "reason": "승인된 풍량 변경을 기준 문서에 반영한다.",
+                }
+            ],
+        },
+    )
+
+    with pytest.raises(ValueError, match="SRS 개정 포함 승인"):
+        pipeline_ui.decide_candidate_asset(
+            runs_root,
+            approved_root,
+            target_html,
+            run_id,
+            tc_id,
+            srs_path=srs_file,
+            decision="APPROVE",
+            reviewer="검토자",
+            note="",
+        )
+
+    record = pipeline_ui.decide_candidate_asset(
+        runs_root,
+        approved_root,
+        target_html,
+        run_id,
+        tc_id,
+        srs_path=srs_file,
+        decision="APPROVE",
+        reviewer="검토자",
+        note="SRS 개정 문구와 실행 증거 확인",
+        approve_srs_revisions=True,
+    )
+
+    assert record["decision"] == "APPROVED"
+    assert record["srs_revision_applied"] is True
+    assert "변경 풍량 기준" in srs_file.read_text(encoding="utf-8")
+    registry = json.loads((approved_root / "registry.json").read_text(encoding="utf-8"))
+    asset = registry["assets"][0]
+    assert asset["srs_revision_before_sha256"] != asset["srs_revision_after_sha256"]
+    assert (approved_root / asset["srs_revision_file"]).is_file()
+    assert (runs_root / run_id / "srs_revision_decision.json").is_file()
+
+
+def test_pipeline_ui_hold_is_recorded_and_can_later_be_approved(tmp_path: Path) -> None:
+    runs_root, approved_root, target_html, run_id, tc_id, _ = build_approvable_ui_run(
+        tmp_path
+    )
+
+    held = pipeline_ui.decide_candidate_asset(
+        runs_root,
+        approved_root,
+        target_html,
+        run_id,
+        tc_id,
+        decision="HOLD",
+        reviewer="검토자",
+        note="요구사항 담당자 확인 필요",
+    )
+    approved = pipeline_ui.decide_candidate_asset(
+        runs_root,
+        approved_root,
+        target_html,
+        run_id,
+        tc_id,
+        decision="APPROVE",
+        reviewer="검토자",
+        note="확인 완료",
+    )
+
+    assert held["decision"] == "HELD"
+    assert not (approved_root / "registry.json").read_text(encoding="utf-8").count("HELD")
+    assert approved["decision"] == "APPROVED"
+    decisions = json.loads(
+        (runs_root / run_id / "asset_decisions.json").read_text(encoding="utf-8")
+    )
+    assert decisions["decisions"] == [approved]
+
+
+def test_pipeline_ui_blocks_asset_approval_for_failed_or_stale_evidence(
+    tmp_path: Path,
+) -> None:
+    runs_root, approved_root, target_html, run_id, tc_id, _ = build_approvable_ui_run(
+        tmp_path
+    )
+    _write_json(runs_root / run_id / "final_report.json", {"recommendation": "HOLD"})
+
+    with pytest.raises(ValueError, match="최종 권고"):
+        pipeline_ui.decide_candidate_asset(
+            runs_root,
+            approved_root,
+            target_html,
+            run_id,
+            tc_id,
+            decision="APPROVE",
+            reviewer="검토자",
+            note="",
+        )
+
+    _write_json(runs_root / run_id / "final_report.json", {"recommendation": "PASS"})
+    target_html.write_text("<!doctype html><title>changed</title>", encoding="utf-8")
+    with pytest.raises(ValueError, match="재검증"):
+        pipeline_ui.decide_candidate_asset(
+            runs_root,
+            approved_root,
+            target_html,
+            run_id,
+            tc_id,
+            decision="APPROVE",
+            reviewer="검토자",
+            note="",
+        )
+    assert not (approved_root / "registry.json").exists()
+
+
+def test_pipeline_ui_revalidates_stale_candidate_without_model_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs_root, approved_root, target_html, run_id, tc_id, _ = build_approvable_ui_run(
+        tmp_path
+    )
+    target_html.write_text("<!doctype html><title>UI updated</title>", encoding="utf-8")
+
+    def fake_trial(code_file, current_target, evidence_dir, *, timeout_seconds):
+        evidence_dir.mkdir(parents=True)
+        hashes = {}
+        for name, content in (
+            ("trial-stdout.txt", b"1 passed"),
+            ("trial-stderr.txt", b""),
+            ("trial-final.png", b"PNG2"),
+            ("trial-trace.zip", b"ZIP2"),
+        ):
+            path = evidence_dir / name
+            path.write_bytes(content)
+            hashes[name] = _sha256_file(path)
+        return pipeline.Agent3TrialResult(
+            outcome=pipeline.TrialOutcome.PASS,
+            exit_code=0,
+            duration_ms=10,
+            stdout_file="trial-stdout.txt",
+            stderr_file="trial-stderr.txt",
+            screenshot_file="trial-final.png",
+            trace_file="trial-trace.zip",
+            evidence_sha256=hashes,
+            evidence_complete=True,
+        )
+
+    monkeypatch.setattr(pipeline, "run_candidate_trial", fake_trial)
+
+    record = pipeline_ui.revalidate_candidate_asset(
+        runs_root,
+        target_html,
+        run_id,
+        tc_id,
+    )
+    summary = pipeline_ui.summarize_run(
+        runs_root,
+        run_id,
+        target_html=target_html,
+    )
+    approved = pipeline_ui.decide_candidate_asset(
+        runs_root,
+        approved_root,
+        target_html,
+        run_id,
+        tc_id,
+        decision="APPROVE",
+        reviewer="검토자",
+        note="현재 화면 재검증 확인",
+    )
+    latest = runs_root / run_id / "asset_revalidation" / tc_id / "latest.json"
+
+    assert record["outcome"] == "PASS"
+    assert record["target_sha256"] == _sha256_file(target_html)
+    assert summary["candidate_assets"][0]["approval_eligible"] is True
+    assert summary["candidate_assets"][0]["revalidation_required"] is False
+    assert approved["approval_revalidation_sha256"] == _sha256_file(latest)
+
+
+def test_pipeline_ui_rejects_unscoped_run_and_request_paths(tmp_path: Path) -> None:
+    bridge = pipeline_ui.PipelineUiBridge(
+        runs_root=tmp_path / "runs",
+        requests_root=tmp_path / "examples",
+        target_html=tmp_path / "virtual-controller.html",
+        allow_live_run=False,
+    )
+
+    with pytest.raises(ValueError, match="Run ID"):
+        pipeline_ui.summarize_run(tmp_path / "runs", "../outside")
+    with pytest.raises(ValueError, match="파일명"):
+        bridge.request_path("../change_request.json")
+    with pytest.raises(PermissionError, match="비활성화"):
+        bridge.start_live_run("change_request.json")
+
+
+def test_pipeline_ui_failure_message_is_safe_and_actionable(tmp_path: Path) -> None:
+    run_dir = tmp_path / "RUN-20260829-130000-ABCDEF"
+    run_dir.mkdir()
+    _write_json(
+        run_dir / "run_error.json",
+        {
+            "error_type": "Agent1Error",
+            "message": f"모델 연결 실패: {pipeline_ui.REPO_ROOT / 'private-input.json'}",
+        },
+    )
+
+    message = pipeline_ui._safe_run_error(run_dir)
+
+    assert message == "모델 연결 실패: <REPO_ROOT>\\private-input.json"
+    assert str(pipeline_ui.REPO_ROOT) not in message
+
+    (run_dir / "run_error.json").unlink()
+    nested = run_dir / "agent3_candidates" / "TC-CAND-001"
+    nested.mkdir(parents=True)
+    _write_json(
+        nested / "agent3_error.json",
+        {"tc_id": "TC-CAND-001", "message": "브라우저 종료 오류"},
+    )
+    assert pipeline_ui._safe_run_error(run_dir) == "TC-CAND-001: 브라우저 종료 오류"
+
+    (nested / "agent3_error.json").unlink()
+    _write_json(
+        run_dir / "agent3_run_summary.json",
+        {"entries": [{"tc_id": "TC-CAND-001", "trial_outcome": "TIMEOUT"}]},
+    )
+    assert pipeline_ui._safe_run_error(run_dir) == "TC-CAND-001: 후보 시험 TIMEOUT"
+
+
+def test_pipeline_ui_live_run_is_disabled_by_default() -> None:
+    args = pipeline_ui.build_parser().parse_args([])
+
+    assert args.host == "127.0.0.1"
+    assert args.port == 8765
+    assert args.allow_live_run is False
+    assert args.allow_asset_approval is False
+
+
+def test_pipeline_ui_prevents_parallel_live_runs_across_bridges(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    requests_root = tmp_path / "examples"
+    requests_root.mkdir()
+    _write_json(requests_root / "change_request.json", {"request_id": "CR-LOCK-001"})
+    target_html = tmp_path / "virtual-controller.html"
+    target_html.write_text("<!doctype html>", encoding="utf-8")
+    first = pipeline_ui.PipelineUiBridge(
+        runs_root=runs_root,
+        requests_root=requests_root,
+        target_html=target_html,
+        allow_live_run=True,
+    )
+    second = pipeline_ui.PipelineUiBridge(
+        runs_root=runs_root,
+        requests_root=requests_root,
+        target_html=target_html,
+        allow_live_run=True,
+    )
+
+    assert first.live_run_lock.acquire() is True
+    try:
+        with pytest.raises(RuntimeError, match="다른 로컬 브리지"):
+            second.start_live_run("change_request.json")
+    finally:
+        first.live_run_lock.release()
+    assert second.live_run_lock.acquire() is True
+    second.live_run_lock.release()
+
+
+def test_pipeline_ui_live_run_uses_agent1_to_4_order_without_external_send(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs_root = tmp_path / "runs"
+    requests_root = tmp_path / "examples"
+    requests_root.mkdir()
+    request_file = requests_root / "change_request.success.json"
+    _write_json(request_file, {"request_id": "CR-UI-LIVE-001"})
+    target_html = tmp_path / "virtual-controller.html"
+    target_html.write_text("<!doctype html>", encoding="utf-8")
+    bridge = pipeline_ui.PipelineUiBridge(
+        runs_root=runs_root,
+        requests_root=requests_root,
+        target_html=target_html,
+        allow_live_run=True,
+    )
+    run_id = "RUN-20260829-130000-ABCDEF"
+    commands: list[tuple[str, ...]] = []
+
+    def fake_command(*arguments: str) -> SimpleNamespace:
+        commands.append(arguments)
+        if arguments[0] == "pipeline":
+            (runs_root / run_id).mkdir(parents=True)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(bridge, "_command", fake_command)
+
+    bridge._run_pipeline(request_file)
+
+    assert [command[0] for command in commands] == ["pipeline", "execute", "agent4"]
+    assert commands[0][-2:] == ("--timeout", "90")
+    assert "--send" not in commands[-1]
+    assert bridge.state.snapshot()["phase"] == "COMPLETED"
+    assert bridge.state.snapshot()["run_id"] == run_id
+
+
+def test_v2_product_ui_routes_agent_buttons_to_real_run_bridge() -> None:
+    product_html = (
+        REPO_ROOT / "product_baseline" / "virtual-controller.html"
+    ).read_text(encoding="utf-8")
+
+    assert 'id="qa-live-modal"' in product_html
+    assert "qaLiveFetch('/api/qa/state')" in product_html
+    assert "if (openQaLiveModal('agent1')) return;" in product_html
+    assert "if (openQaLiveModal('agent2')) return;" in product_html
+    assert "if (openQaLiveModal('agent3')) return;" in product_html
+    assert "if (openQaLiveModal('agent4')) return;" in product_html
+    assert "if (openQaLiveModal('overview')) return;" in product_html
+    assert "function showQaLiveOverview()" in product_html
+    assert "Agent 1→4 실제 Run 상태입니다." in product_html
+    assert "setTowerStatus('실제 실행 실패', '#f87171')" in product_html
+    assert "setTowerStatus('실제 실행 완료', '#34d399')" in product_html
+    assert "확인: API Live 실행" in product_html
+    assert "qaLiveState.startApprovalArmed && !overview.running" in product_html
+    assert "window.confirm(" not in product_html
+    assert "외부 보고는 미리보기만 생성" in product_html
+    assert "저장 결과 보기" in product_html
+    assert "AI API 사용 없음" in product_html
+    assert "새 요구사항 실제 실행" in product_html
+    assert "AI API 비용 발생" in product_html
+    assert "후보 TC 공식 자산 판단" in product_html
+    assert "공식 TC·자동화 등록 승인" in product_html
+    assert "/asset-decision" in product_html
+    assert "현재 화면에서 후보 재검증" in product_html
+    assert "/asset-revalidation" in product_html
+    assert "확인: 공식 자산 등록" in product_html

@@ -273,6 +273,19 @@ class ExistingTestSelection(StrictModel):
     selection_reason: NonEmptyStr
 
 
+class SrsRevisionProposal(StrictModel):
+    """Agent 2 proposal that a person must approve before the baseline SRS changes."""
+
+    proposal_id: Annotated[str, StringConstraints(pattern=r"^SRS-REV-\d{3}$")]
+    requirement_id: RequirementId
+    source_condition_ids: list[
+        Annotated[str, StringConstraints(pattern=r"^COND-\d{3}$")]
+    ] = Field(min_length=1)
+    current_acceptance_criteria: NonEmptyStr
+    proposed_acceptance_criteria: NonEmptyStr
+    reason: NonEmptyStr
+
+
 def _tc_requested_modes(test_case: ProductTestCaseCandidate) -> list[str]:
     values = [
         value
@@ -320,6 +333,9 @@ class Agent2TestDesign(StrictModel):
     )
     human_review_notes: list[NonEmptyStr] = Field(
         default_factory=list, alias="중단_확인_사항"
+    )
+    srs_revision_proposals: list[SrsRevisionProposal] = Field(
+        default_factory=list, alias="SRS_개정_제안"
     )
 
 
@@ -590,6 +606,9 @@ class ValidationExecutionBundle(StrictModel):
     final_review_notes: list[NonEmptyStr] = Field(
         default_factory=list, alias="최종_확인_사항"
     )
+    srs_revision_proposals: list[SrsRevisionProposal] = Field(
+        default_factory=list, alias="SRS_개정_제안"
+    )
     automation_exclusions: list["AutomationExclusion"] = Field(
         default_factory=list, alias="자동화_제외_TC"
     )
@@ -651,6 +670,9 @@ class Agent4Analysis(StrictModel):
     final_review_notes: list[NonEmptyStr] = Field(
         default_factory=list, alias="최종_확인_사항"
     )
+    srs_revision_proposals: list[SrsRevisionProposal] = Field(
+        default_factory=list, alias="SRS_개정_제안"
+    )
     automation_exclusions: list[AutomationExclusion] = Field(
         default_factory=list, alias="자동화_제외_TC"
     )
@@ -683,6 +705,9 @@ class FinalReport(StrictModel):
     )
     final_review_notes: list[NonEmptyStr] = Field(
         default_factory=list, alias="최종_확인_사항"
+    )
+    srs_revision_proposals: list[SrsRevisionProposal] = Field(
+        default_factory=list, alias="SRS_개정_제안"
     )
     automation_exclusions: list[AutomationExclusion] = Field(
         default_factory=list, alias="자동화_제외_TC"
@@ -730,6 +755,11 @@ class ExistingRegressionSpec:
     test_function: str
     requirement_ids: tuple[str, ...]
     covered_behaviors: tuple[str, ...]
+    source: str = "BASELINE"
+    test_case_file: str | None = None
+    test_case_sha256: str | None = None
+    automation_file: str | None = None
+    automation_sha256: str | None = None
 
 
 EXISTING_REGRESSION_CATALOG = (
@@ -794,7 +824,156 @@ EXISTING_REGRESSION_BY_ID = {
 }
 
 
-def render_existing_regression_context() -> str:
+def _existing_regression_by_id(
+    catalog: tuple[ExistingRegressionSpec, ...],
+) -> dict[str, ExistingRegressionSpec]:
+    by_id = {item.tc_id: item for item in catalog}
+    if len(by_id) != len(catalog):
+        raise ValueError("기존 TC 카탈로그에 중복 ID가 있습니다.")
+    return by_id
+
+
+def _catalog_snapshot_entry(spec: ExistingRegressionSpec) -> dict[str, Any]:
+    return {
+        "tc_id": spec.tc_id,
+        "test_function": spec.test_function,
+        "requirement_ids": list(spec.requirement_ids),
+        "covered_behaviors": list(spec.covered_behaviors),
+        "source": spec.source,
+        "test_case_file": spec.test_case_file,
+        "test_case_sha256": spec.test_case_sha256,
+        "automation_file": spec.automation_file,
+        "automation_sha256": spec.automation_sha256,
+    }
+
+
+def _catalog_from_snapshot(payload: dict[str, Any]) -> tuple[ExistingRegressionSpec, ...]:
+    entries = payload.get("approved_assets") or []
+    if not isinstance(entries, list):
+        raise ValueError("승인 TC 카탈로그 Snapshot 형식이 올바르지 않습니다.")
+    approved: list[ExistingRegressionSpec] = []
+    for item in entries:
+        if not isinstance(item, dict) or item.get("source") != "APPROVED":
+            raise ValueError("승인 TC 카탈로그 Snapshot 항목이 올바르지 않습니다.")
+        approved.append(
+            ExistingRegressionSpec(
+                tc_id=str(item.get("tc_id") or ""),
+                test_function=str(item.get("test_function") or ""),
+                requirement_ids=tuple(item.get("requirement_ids") or []),
+                covered_behaviors=tuple(item.get("covered_behaviors") or []),
+                source="APPROVED",
+                test_case_file=str(item.get("test_case_file") or ""),
+                test_case_sha256=str(item.get("test_case_sha256") or ""),
+                automation_file=str(item.get("automation_file") or ""),
+                automation_sha256=str(item.get("automation_sha256") or ""),
+            )
+        )
+    catalog = (*EXISTING_REGRESSION_CATALOG, *approved)
+    _existing_regression_by_id(catalog)
+    return catalog
+
+
+def load_approved_regression_catalog(
+    approved_assets_root: Path,
+) -> tuple[tuple[ExistingRegressionSpec, ...], dict[str, Any]]:
+    """Load and verify immutable human-approved TC and automation assets."""
+
+    approved_assets_root = approved_assets_root.resolve()
+    registry_file = approved_assets_root / "registry.json"
+    if not registry_file.is_file():
+        return (), {"contract_version": "1.0", "approved_assets": []}
+    registry = json.loads(registry_file.read_text(encoding="utf-8"))
+    assets = registry.get("assets")
+    if not isinstance(assets, list):
+        raise ValueError("공식 자산 Registry의 assets 목록이 올바르지 않습니다.")
+    approved: list[ExistingRegressionSpec] = []
+    snapshot_entries: list[dict[str, Any]] = []
+    for asset in assets:
+        if not isinstance(asset, dict):
+            raise ValueError("공식 자산 Registry 항목이 JSON 객체가 아닙니다.")
+        tc_id = str(asset.get("official_tc_id") or "")
+        if not re.fullmatch(r"TC-V2-\d{3}", tc_id):
+            raise ValueError(f"공식 TC ID 형식이 올바르지 않습니다: {tc_id}")
+        resolved_files: dict[str, Path] = {}
+        for key in ("test_case_file", "automation_file"):
+            relative = str(asset.get(key) or "")
+            candidate = (approved_assets_root / relative).resolve()
+            try:
+                candidate.relative_to(approved_assets_root)
+            except ValueError as exc:
+                raise ValueError(f"{tc_id}의 {key} 경로가 공식 자산 폴더 밖입니다.") from exc
+            if not candidate.is_file():
+                raise ValueError(f"{tc_id}의 {key} 파일을 찾을 수 없습니다.")
+            expected_hash = str(asset.get(key.replace("_file", "_sha256")) or "")
+            if _sha256_file(candidate) != expected_hash:
+                raise ValueError(f"{tc_id}의 {key} SHA-256이 Registry와 다릅니다.")
+            resolved_files[key] = candidate
+        revision_relative = asset.get("srs_revision_file")
+        if revision_relative:
+            revision_file = (approved_assets_root / str(revision_relative)).resolve()
+            try:
+                revision_file.relative_to(approved_assets_root)
+            except ValueError as exc:
+                raise ValueError(f"{tc_id}의 SRS 개정 기록 경로가 자산 폴더 밖입니다.") from exc
+            if (
+                not revision_file.is_file()
+                or _sha256_file(revision_file)
+                != str(asset.get("srs_revision_sha256") or "")
+            ):
+                raise ValueError(f"{tc_id}의 SRS 개정 기록 SHA-256이 Registry와 다릅니다.")
+        tc_payload = json.loads(resolved_files["test_case_file"].read_text(encoding="utf-8"))
+        if tc_payload.get("official_tc_id") != tc_id:
+            raise ValueError(f"{tc_id}의 TC 파일 ID가 Registry와 다릅니다.")
+        test_case = tc_payload.get("test_case")
+        if not isinstance(test_case, dict):
+            raise ValueError(f"{tc_id}의 구조화 TC를 찾을 수 없습니다.")
+        try:
+            validated_test_case = ProductTestCaseCandidate.model_validate(test_case)
+        except ValidationError as exc:
+            raise ValueError(f"{tc_id}의 구조화 TC 계약이 올바르지 않습니다.") from exc
+        requirement_ids = tuple(validated_test_case.requirement_ids)
+        if list(requirement_ids) != list(asset.get("requirement_ids") or []):
+            raise ValueError(f"{tc_id}의 Requirement 목록이 Registry와 다릅니다.")
+        covered_behaviors = tuple(
+            item.statement for item in validated_test_case.expected_results
+        )
+        if not covered_behaviors:
+            raise ValueError(f"{tc_id}의 검증 동작을 찾을 수 없습니다.")
+        syntax = ast.parse(
+            resolved_files["automation_file"].read_text(encoding="utf-8")
+        )
+        test_functions = [
+            node.name
+            for node in syntax.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name.startswith("test_")
+        ]
+        if len(test_functions) != 1:
+            raise ValueError(f"{tc_id} 자동화에는 test_ 함수가 정확히 한 개여야 합니다.")
+        spec = ExistingRegressionSpec(
+            tc_id=tc_id,
+            test_function=test_functions[0],
+            requirement_ids=requirement_ids,
+            covered_behaviors=covered_behaviors,
+            source="APPROVED",
+            test_case_file=str(asset["test_case_file"]),
+            test_case_sha256=str(asset["test_case_sha256"]),
+            automation_file=str(asset["automation_file"]),
+            automation_sha256=str(asset["automation_sha256"]),
+        )
+        approved.append(spec)
+        snapshot_entries.append(_catalog_snapshot_entry(spec))
+    _existing_regression_by_id((*EXISTING_REGRESSION_CATALOG, *approved))
+    return tuple(approved), {
+        "contract_version": "1.0",
+        "registry_sha256": _sha256_file(registry_file),
+        "approved_assets": snapshot_entries,
+    }
+
+
+def render_existing_regression_context(
+    catalog: tuple[ExistingRegressionSpec, ...] = EXISTING_REGRESSION_CATALOG,
+) -> str:
     """Render the allowlisted existing TC inventory without local file paths."""
 
     return "\n".join(
@@ -806,7 +985,7 @@ def render_existing_regression_context() -> str:
         + item.test_function
         + " | 검증 동작: "
         + " / ".join(item.covered_behaviors)
-        for item in EXISTING_REGRESSION_CATALOG
+        for item in catalog
     )
 
 ENVIRONMENT_PRECHECK = ExistingRegressionSpec(
@@ -879,6 +1058,67 @@ def load_srs_requirements(path: Path) -> dict[str, SrsRequirement]:
     return requirements
 
 
+def apply_srs_revision_proposals(
+    srs_path: Path,
+    proposals: list[SrsRevisionProposal],
+    *,
+    write: bool,
+) -> dict[str, Any]:
+    """Validate and optionally atomically apply human-approved acceptance criteria."""
+
+    srs_path = srs_path.resolve()
+    if not srs_path.is_file():
+        raise ValueError("기준 SRS 파일을 찾을 수 없습니다.")
+    before_sha256 = _sha256_file(srs_path)
+    lines = srs_path.read_text(encoding="utf-8").splitlines()
+    by_requirement = {item.requirement_id: item for item in proposals}
+    if len(by_requirement) != len(proposals):
+        raise ValueError("SRS 개정 제안에 중복 Requirement가 있습니다.")
+    found: set[str] = set()
+    changed: list[str] = []
+    already_applied: list[str] = []
+    for index, line in enumerate(lines):
+        match = _REQUIREMENT_ROW.match(line)
+        if match is None:
+            continue
+        requirement_id, statement, acceptance_criteria = (
+            match.group(1), match.group(2).strip(), match.group(3).strip()
+        )
+        proposal = by_requirement.get(requirement_id)
+        if proposal is None:
+            continue
+        found.add(requirement_id)
+        if "|" in proposal.proposed_acceptance_criteria or "\n" in proposal.proposed_acceptance_criteria:
+            raise ValueError(f"{requirement_id} 제안 문구에 Markdown 표 구분자를 사용할 수 없습니다.")
+        if acceptance_criteria == proposal.proposed_acceptance_criteria:
+            already_applied.append(requirement_id)
+            continue
+        if acceptance_criteria != proposal.current_acceptance_criteria:
+            raise ValueError(
+                f"{requirement_id} 현재 인수 기준이 Agent 2 제안의 기준 원문과 다릅니다."
+            )
+        lines[index] = (
+            f"| {requirement_id} | {statement} | "
+            f"{proposal.proposed_acceptance_criteria} |"
+        )
+        changed.append(requirement_id)
+    missing = sorted(by_requirement.keys() - found)
+    if missing:
+        raise ValueError("기준 SRS에서 개정 대상 Requirement를 찾을 수 없습니다: " + ", ".join(missing))
+    after_text = "\n".join(lines) + "\n"
+    if write and changed:
+        _write_text_atomic(srs_path, after_text)
+    after_sha256 = _sha256_file(srs_path) if write else hashlib.sha256(
+        after_text.encode("utf-8")
+    ).hexdigest()
+    return {
+        "before_sha256": before_sha256,
+        "after_sha256": after_sha256,
+        "changed_requirement_ids": changed,
+        "already_applied_requirement_ids": already_applied,
+    }
+
+
 def render_srs_context(requirements: dict[str, SrsRequirement]) -> str:
     """Render only the machine-verifiable requirement rows for the model."""
     rows = ["ID | 요구사항 | 인수 기준"]
@@ -909,7 +1149,7 @@ AGENT1_SYSTEM_INSTRUCTIONS = """
 4. before_condition과 after_condition은 요청 값을 바꾸거나 보완하지 않습니다.
 5. change_summary는 Agent 2가 변경 목적을 바로 이해할 수 있게 한두 문장으로 작성합니다.
 6. confirmed_conditions에는 Agent 2가 TC의 판정 기준으로 사용할 수 있는 확정 조건만 한 항목씩 분리합니다. 테스트 절차나 새로운 기대값은 만들지 않습니다.
-7. acceptance_notes 중 제품의 긍정적인 판정 기준은 각각 별도 confirmed_condition으로 만들고 source_text에 해당 인수 조건 원문 전체를 한 글자도 합치거나 바꾸지 않고 기록합니다. `범위에 포함하지 않는다`, `제외한다`, `검증 대상이 아니다`처럼 범위를 제한하는 항목은 confirmed_condition으로 만들지 말고 excluded_scope에 원문 그대로 기록합니다. 시험 준비·선택·종료 후 복원 절차도 제품 기대 결과인 confirmed_condition으로 바꾸지 않습니다. 그 밖에 after_value와 description에만 있는 변경 후 범위·경계·모드별 정책도 별도 조건으로 포함합니다. 특히 하한~상한 범위는 두 경계를 모두 전달하고, 추가 조건의 source_type은 CHANGE_REQUEST, source_text는 해당 요청의 연속된 원문으로 기록합니다.
+7. acceptance_notes 중 제품의 긍정적인 판정 기준은 각각 별도 confirmed_condition으로 만들고 source_text에 해당 인수 조건 원문 전체를 한 글자도 합치거나 바꾸지 않고 기록합니다. `범위에 포함하지 않는다`, `제외한다`, `검증 대상이 아니다`처럼 범위를 제한하는 항목은 confirmed_condition으로 만들지 말고 excluded_scope에 원문 그대로 기록합니다. 시험 준비·선택·종료 후 복원 절차도 제품 기대 결과인 confirmed_condition으로 바꾸지 않지만 excluded_scope에도 넣지 않습니다. 해당 원문은 변경 요청에 보존되어 Agent 2가 TC 절차로 사용합니다. 그 밖에 after_value와 description에만 있는 변경 후 범위·경계·모드별 정책도 별도 조건으로 포함합니다. 특히 하한~상한 범위는 두 경계를 모두 전달하고, 추가 조건의 source_type은 CHANGE_REQUEST, source_text는 해당 요청의 연속된 원문으로 기록합니다.
 8. 기존 SRS 조건을 사용할 때는 source_type을 SRS로 지정하고 source_text는 연결 Requirement의 요구사항 또는 인수 기준에서 연속된 원문 일부를 그대로 사용합니다.
 9. 각 confirmed_condition의 requirement_ids와 requirement_effects에는 제공된 SRS에 존재하는 ID만 사용합니다.
 10. target_requirement_id는 requirement_effects에서 MODIFIED로 분류합니다.
@@ -1012,7 +1252,7 @@ class OpenAIAgent1:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent1-2-6",
+                prompt_cache_key="qa-v2-agent1-2-7",
                 input=[
                     {"role": "system", "content": AGENT1_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
@@ -1100,6 +1340,33 @@ _SCOPE_EXCLUSION_TEXT = re.compile(
 
 def _is_scope_exclusion_text(value: str) -> bool:
     return bool(_SCOPE_EXCLUSION_TEXT.search(value))
+
+
+_TEST_SETUP_NOTE = re.compile(
+    r"(?:"
+    r"(?:확인|준비|선택).*?시험을?\s*시작|"
+    r"시험\s*전.*?(?:확인|준비|선택)"
+    r")",
+    re.IGNORECASE,
+)
+_TEST_RESTORE_NOTE = re.compile(
+    r"(?:시험|검증)\s*(?:뒤|후|종료\s*후).*?(?:복원|원복)",
+    re.IGNORECASE,
+)
+
+
+def _is_test_setup_note(value: str) -> bool:
+    return bool(_TEST_SETUP_NOTE.search(value))
+
+
+def _is_test_restore_note(value: str) -> bool:
+    return bool(_TEST_RESTORE_NOTE.search(value))
+
+
+def _is_test_procedure_note(value: str) -> bool:
+    """Return True only for explicit test setup or post-test restoration notes."""
+
+    return _is_test_setup_note(value) or _is_test_restore_note(value)
 
 
 def _is_redundant_reconfirmation(question: str, request: ChangeRequest) -> bool:
@@ -1296,7 +1563,9 @@ def evaluate_checkpoint1(
         if condition.source_type == ConditionSource.CHANGE_REQUEST
     ]
     positive_acceptance_notes = [
-        note for note in request.acceptance_notes if not _is_scope_exclusion_text(note)
+        note
+        for note in request.acceptance_notes
+        if not _is_scope_exclusion_text(note) and not _is_test_procedure_note(note)
     ]
     scope_limit_acceptance_notes = [
         note for note in request.acceptance_notes if _is_scope_exclusion_text(note)
@@ -1464,7 +1733,7 @@ AGENT2_SYSTEM_INSTRUCTIONS = """
 2. requirement_effects가 NO_IMPACT인 Requirement는 테스트 범위에 포함하지 않습니다.
 3. MODIFIED는 변경 동작 검증 후보, UPDATE_REQUIRED는 변경으로 기대 결과·절차 수정이 필요한 후보, VERIFY는 기존 동작 회귀 선택으로 해석합니다.
 3-1. 기존 TC 카탈로그의 `검증 동작`이 VERIFY·유지 조건을 그대로 검증하면 관련_기존_TC로 선택하고 동일 내용을 TC-CAND로 다시 만들지 않습니다. Requirement ID만 같고 검증 동작이 다르면 재사용으로 판단하지 않습니다. 기존 TC가 변경된 기대 결과를 검증할 수 없을 때만 부족한 변경분 후보를 만듭니다.
-4. 모든 confirmed_condition을 test_cases 또는 관련_기존_TC의 source_condition_ids 중 최소 한 곳에 반영합니다. 실제로 바뀐 제품 판정 조건은 반드시 test_cases에 반영합니다. 준비·선택·복원 절차를 제품 기대 결과로 바꾸지 않습니다.
+4. 모든 confirmed_condition을 test_cases 또는 관련_기존_TC의 source_condition_ids 중 최소 한 곳에 반영합니다. 실제로 바뀐 제품 판정 조건은 반드시 test_cases에 반영합니다. 준비·선택·복원 절차를 제품 기대 결과로 바꾸지 않습니다. 변경 요청의 `[시험 절차 메모]`는 제외 범위가 아니며, 준비 메모는 preconditions 또는 steps에, 종료 후 복원 메모는 restore_steps에 원문 그대로 기록하고 restore_required=true로 설정합니다.
 5. 모든 기대 결과는 source_condition_ids로 제품 판정 근거를 연결합니다. 근거에 없는 수치·시간·문구·UI 동작을 추가하지 않습니다. 장비 선택 성공, 사전조건 준비 완료, 시험 종료 후 복원처럼 실행을 위한 절차는 steps·preconditions·restore_steps에만 두고, 변경 요청이 그 동작 자체의 제품 결과를 요구하지 않는 한 expected_results로 만들지 않습니다.
 5-1. 제출 전 각 TC를 자체 점검합니다. (a) TC의 requirement_ids는 그 TC의 source_condition_ids가 함께 근거를 가져야 하고, (b) 각 기대 결과의 source_condition_ids는 그 TC의 source_condition_ids 범위 안에 있어야 하며, (c) 각 기대 결과의 UI 표시·상태는 연결 Condition의 source_text 원문에 실제로 있어야 합니다. TC 수준 Condition에는 제품 판정 기준뿐 아니라 준비·복원 지시가 포함될 수 있으므로 모든 TC Condition을 억지로 expected_results에 다시 넣지 않습니다. 특히 UI·내부 상태 이중 검증 TC는 사용자가 요청한 UI 변경 결과와 그 동작을 뒷받침하는 내부 상태를 사용하고, 별도의 UI 상태 표시를 새로 만들지 않습니다.
 5-2. 모드가 사전조건의 실행 문맥이면 initial_mode에만 기록합니다. steps에서 모드를 실제로 설정·변경·전환·요청할 때만 단일 조건은 requested_mode, 묶음 조건은 requested_modes에 해당 모드를 기록해 Agent 3가 필요한 모드 행동을 계획하게 합니다. 사전조건과 같은 모드를 requested_mode에 복제해 불필요한 제품 동작을 만들지 않습니다.
@@ -1494,11 +1763,12 @@ AGENT2_SYSTEM_INSTRUCTIONS = """
 16. automation_candidate는 현재 가상 중앙제어 화면과 내부 상태 조회로 자동화 가능한지 판단한 후보 표시일 뿐이며 코드를 만들지 않습니다.
 16-1. CENTRAL 변경 검증에는 현재 단일 장비 MVP가 실행할 수 있도록 target_role=PRIMARY_TEST_DEVICE인 automation_candidate TC를 최소 한 건 포함합니다. 복수 장비 TC는 추가할 수 있지만 유일한 CENTRAL 후보로 만들지 않습니다.
 17. SRS 문구의 후속 개정 필요, 정확한 안내 문구 미지정처럼 기대 동작을 바꾸지 않고 현재 TC를 설계할 수 있는 참고 사항은 coverage_notes에 남깁니다.
-17-1. Agent 1의 excluded_scope와 `제외된_정보_부족`은 TC로 만들지 말고 Agent 2의 `제외_범위`와 `제외된_정보_부족`에 원문 그대로 인계합니다. 제외 범위의 상태 유지 여부를 확인하는 기대 결과도 새로 만들지 않습니다. 확정된 긍정적 변경 결과만 test_cases에 포함합니다.
+17-1. Agent 1의 excluded_scope와 `제외된_정보_부족`은 TC로 만들지 말고 Agent 2의 `제외_범위`와 `제외된_정보_부족`에 원문 그대로 인계합니다. 다만 시험 준비·종료 후 복원 문장이 과거 Agent 1 결과의 excluded_scope에 들어 있어도 실제 제외 범위로 인계하지 말고 규칙 4의 TC 절차로 보존합니다. 제외 범위의 상태 유지 여부를 확인하는 기대 결과도 새로 만들지 않습니다. 확정된 긍정적 변경 결과만 test_cases에 포함합니다.
 18. 현재 TC의 기대 결과와 실행 범위가 이미 근거로 확정됐지만 사람이 최종 보고에서 확인하면 좋은 사항은 `최종_확인_사항`에 남깁니다. 이 항목은 후속 자동 실행을 중단하지 않습니다.
 19. 서로 충돌하는 권한 입력, 기대 결과 미정처럼 TC 의미를 확정할 수 없어 후속 자동 진행을 중단해야 하는 항목만 `중단_확인_사항`에 남깁니다.
 20. UPDATE_REQUIRED 자체는 변경관리의 정상 결과이므로 그것만으로 `중단_확인_사항` 또는 `최종_확인_사항`을 만들지 않습니다.
 21. existing_tc_comparison_completed=true로 기록합니다. 관련_기존_TC에는 제공된 기존 TC ID만 사용하고 각 선택이 어떤 유지·영향 조건을 회귀 확인하는지 source_condition_ids와 selection_reason으로 설명합니다. 변경 대상 Requirement를 포함하는 기존 TC도 `검증 동작`을 대조하되 변경 후에도 그대로 유효한 경우에만 선택합니다. 재사용할 수 없으면 억지로 선택하지 말고 TC ID와 미선택 이유를 coverage_notes에 기록합니다.
+22. requirement_effects가 MODIFIED 또는 UPDATE_REQUIRED인 모든 Requirement는 `SRS_개정_제안`에 정확히 한 건씩 기록합니다. current_acceptance_criteria는 제공된 SRS 원문과 완전히 같아야 하며, proposed_acceptance_criteria는 확정 Condition과 변경 요청에 근거한 새 판정 문구여야 합니다. Requirement 문장 자체는 바꾸지 않습니다. source_condition_ids로 근거를 연결하고, 사람이 승인하기 전 SRS가 변경된 것처럼 표현하지 않습니다.
 """.strip()
 
 
@@ -1532,18 +1802,27 @@ class OpenAIAgent2:
         analysis: Agent1Analysis,
         requirements: dict[str, SrsRequirement],
         *,
+        existing_catalog: tuple[ExistingRegressionSpec, ...] = EXISTING_REGRESSION_CATALOG,
         previous_design: Agent2TestDesign | None = None,
         checkpoint_feedback: list[str] | None = None,
     ) -> Agent2Response:
+        procedure_notes = [
+            note for note in request.acceptance_notes if _is_test_procedure_note(note)
+        ]
+        rendered_procedure_notes = (
+            "\n".join(f"- {note}" for note in procedure_notes) or "없음"
+        )
         user_input = (
             "[검증된 변경 요청 원문]\n"
             f"{request.model_dump_json(indent=2)}\n\n"
+            "[시험 절차 메모]\n"
+            f"{rendered_procedure_notes}\n\n"
             "[CP1 통과 Agent 1 분석]\n"
             f"{analysis.model_dump_json(indent=2, by_alias=True)}\n\n"
             "[고정된 SRS Requirement]\n"
             f"{render_srs_context(requirements)}\n\n"
             "[기존 사람 작성·자동화 TC 카탈로그]\n"
-            f"{render_existing_regression_context()}"
+            f"{render_existing_regression_context(existing_catalog)}"
         )
         if previous_design is not None:
             feedback = "\n".join(f"- {item}" for item in (checkpoint_feedback or []))
@@ -1563,7 +1842,7 @@ class OpenAIAgent2:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-            prompt_cache_key="qa-v2-agent2-2-14",
+            prompt_cache_key="qa-v2-agent2-2-15",
                 input=[
                     {"role": "system", "content": AGENT2_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
@@ -1640,6 +1919,7 @@ def _normalize_agent2_technical_ids(
 def _normalize_agent2_verify_regressions(
     analysis: Agent1Analysis,
     design: Agent2TestDesign,
+    existing_catalog: tuple[ExistingRegressionSpec, ...] = EXISTING_REGRESSION_CATALOG,
 ) -> tuple[Agent2TestDesign, list[dict[str, Any]]]:
     """Deterministically add catalog regressions for Agent 1 VERIFY relations.
 
@@ -1657,7 +1937,7 @@ def _normalize_agent2_verify_regressions(
     selected_ids = {item.tc_id for item in design.related_existing_tests}
     additions: list[ExistingTestSelection] = []
     changes: list[dict[str, Any]] = []
-    for spec in EXISTING_REGRESSION_CATALOG:
+    for spec in existing_catalog:
         matched_requirements = sorted(
             verify_requirement_ids.intersection(spec.requirement_ids)
         )
@@ -1693,7 +1973,7 @@ def _normalize_agent2_verify_regressions(
     if not additions:
         return design, []
     catalog_order = {
-        spec.tc_id: index for index, spec in enumerate(EXISTING_REGRESSION_CATALOG)
+        spec.tc_id: index for index, spec in enumerate(existing_catalog)
     }
     selections = sorted(
         [*design.related_existing_tests, *additions],
@@ -1738,6 +2018,9 @@ def evaluate_checkpoint2(
     analysis: Agent1Analysis,
     design: Agent2TestDesign,
     requirements: dict[str, SrsRequirement],
+    *,
+    existing_catalog: tuple[ExistingRegressionSpec, ...] = EXISTING_REGRESSION_CATALOG,
+    require_srs_revision_proposals: bool = False,
 ) -> Checkpoint2Result:
     checks: list[CheckResult] = []
 
@@ -1787,10 +2070,11 @@ def evaluate_checkpoint2(
         for item in selection.source_condition_ids
     }
     referenced_conditions = candidate_conditions | existing_conditions
+    existing_by_id = _existing_regression_by_id(existing_catalog)
     selected_existing_specs = [
-        EXISTING_REGRESSION_BY_ID[item.tc_id]
+        existing_by_id[item.tc_id]
         for item in design.related_existing_tests
-        if item.tc_id in EXISTING_REGRESSION_BY_ID
+        if item.tc_id in existing_by_id
     ]
     covered_requirements = referenced_requirements | {
         requirement_id
@@ -2108,23 +2392,75 @@ def evaluate_checkpoint2(
     else:
         add("CP2-013", CheckStatus.PASS, "모든 TC가 초기 조건과 복원 기준을 가진 독립 실행 단위입니다.")
 
-    excluded_scope_matches = {
-        _normalize(item) for item in design.excluded_scope
-    } == {_normalize(item) for item in analysis.excluded_scope}
+    procedure_notes = [
+        note for note in request.acceptance_notes if _is_test_procedure_note(note)
+    ]
+    procedure_note_keys = {_normalize(item) for item in procedure_notes}
+    analysis_scope = {
+        _normalize(item)
+        for item in analysis.excluded_scope
+        if _normalize(item) not in procedure_note_keys
+    }
+    design_scope = {
+        _normalize(item)
+        for item in design.excluded_scope
+        if _normalize(item) not in procedure_note_keys
+    }
+    excluded_scope_matches = design_scope == analysis_scope
     excluded_gaps_match = {
         _normalize(item) for item in design.excluded_information_gaps
     } == {_normalize(item) for item in analysis.excluded_information_gaps}
-    if not excluded_scope_matches or not excluded_gaps_match:
+    excluded_procedure_notes = [
+        item for item in design.excluded_scope if _normalize(item) in procedure_note_keys
+    ]
+    setup_lines = {
+        _normalize(item)
+        for tc in design.test_cases
+        for item in [*tc.preconditions, *tc.steps]
+    }
+    restore_lines = {
+        _normalize(item)
+        for tc in design.test_cases
+        for item in tc.restore_steps
+        if tc.restore_required
+    }
+    missing_setup_notes = [
+        note
+        for note in procedure_notes
+        if _is_test_setup_note(note) and _normalize(note) not in setup_lines
+    ]
+    missing_restore_notes = [
+        note
+        for note in procedure_notes
+        if _is_test_restore_note(note) and _normalize(note) not in restore_lines
+    ]
+    if (
+        not excluded_scope_matches
+        or not excluded_gaps_match
+        or excluded_procedure_notes
+        or missing_setup_notes
+        or missing_restore_notes
+    ):
+        details: list[str] = []
+        if not excluded_scope_matches or not excluded_gaps_match:
+            details.append("실제 제외 범위 또는 정보 부족 인계 불일치")
+        if excluded_procedure_notes:
+            details.append("시험 절차를 제외 범위로 분류")
+        if missing_setup_notes:
+            details.append("사전 준비 절차 누락=" + " | ".join(missing_setup_notes))
+        if missing_restore_notes:
+            details.append("종료 후 복원 절차 누락=" + " | ".join(missing_restore_notes))
         add(
             "CP2-014",
             CheckStatus.FAIL,
-            "Agent 1의 제외 범위 또는 정보 부족이 Agent 2 제외 목록에 그대로 인계되지 않았습니다.",
+            "Agent 1 제외 항목과 변경 요청 시험 절차의 인계가 맞지 않습니다: "
+            + "; ".join(details),
         )
     else:
         add(
             "CP2-014",
             CheckStatus.PASS,
-            f"실행 제외 범위 {len(design.excluded_scope)}건과 정보 부족 {len(design.excluded_information_gaps)}건을 보존했습니다.",
+            f"실행 제외 범위 {len(design_scope)}건, 정보 부족 {len(design.excluded_information_gaps)}건과 시험 절차 {len(procedure_notes)}건을 올바르게 분리했습니다.",
         )
 
     grouping_errors: list[str] = []
@@ -2249,14 +2585,14 @@ def evaluate_checkpoint2(
             "중복 기존 TC=" + ",".join(duplicate_existing_ids)
         )
     unknown_existing_ids = sorted(
-        set(selected_existing_ids) - EXISTING_REGRESSION_BY_ID.keys()
+        set(selected_existing_ids) - existing_by_id.keys()
     )
     if unknown_existing_ids:
         existing_selection_errors.append(
             "카탈로그 밖 기존 TC=" + ",".join(unknown_existing_ids)
         )
     for selection in design.related_existing_tests:
-        spec = EXISTING_REGRESSION_BY_ID.get(selection.tc_id)
+        spec = existing_by_id.get(selection.tc_id)
         if spec is None:
             continue
         for condition_id in selection.source_condition_ids:
@@ -2377,6 +2713,70 @@ def evaluate_checkpoint2(
             CheckStatus.PASS,
             "제품 기대 결과가 긍정적 변경 조건과 원문 UI 근거 범위 안에 있습니다.",
         )
+
+    if require_srs_revision_proposals:
+        revision_errors: list[str] = []
+        required_revision_ids = {
+            effect.requirement_id
+            for effect in analysis.requirement_effects
+            if effect.relation
+            in {RequirementRelation.MODIFIED, RequirementRelation.UPDATE_REQUIRED}
+        }
+        proposal_ids = [item.proposal_id for item in design.srs_revision_proposals]
+        proposal_requirement_ids = [
+            item.requirement_id for item in design.srs_revision_proposals
+        ]
+        if len(proposal_ids) != len(set(proposal_ids)):
+            revision_errors.append("SRS 개정 제안 ID 중복")
+        if len(proposal_requirement_ids) != len(set(proposal_requirement_ids)):
+            revision_errors.append("Requirement별 SRS 개정 제안 중복")
+        missing = sorted(required_revision_ids - set(proposal_requirement_ids))
+        extra = sorted(set(proposal_requirement_ids) - required_revision_ids)
+        if missing:
+            revision_errors.append("개정 제안 누락=" + ",".join(missing))
+        if extra:
+            revision_errors.append("개정 대상 밖 제안=" + ",".join(extra))
+        for proposal in design.srs_revision_proposals:
+            requirement = requirements.get(proposal.requirement_id)
+            if requirement is None:
+                revision_errors.append(
+                    f"{proposal.proposal_id}:SRS에 없는 Requirement"
+                )
+                continue
+            if proposal.current_acceptance_criteria != requirement.acceptance_criteria:
+                revision_errors.append(
+                    f"{proposal.proposal_id}:현재 인수 기준 원문 불일치"
+                )
+            if (
+                proposal.proposed_acceptance_criteria.casefold()
+                == proposal.current_acceptance_criteria.casefold()
+            ):
+                revision_errors.append(
+                    f"{proposal.proposal_id}:변경되지 않은 인수 기준"
+                )
+            for condition_id in proposal.source_condition_ids:
+                condition = known_conditions.get(condition_id)
+                if condition is None:
+                    revision_errors.append(
+                        f"{proposal.proposal_id}:입력 밖 조건 {condition_id}"
+                    )
+                elif proposal.requirement_id not in condition.requirement_ids:
+                    revision_errors.append(
+                        f"{proposal.proposal_id}:{condition_id} Requirement 근거 불일치"
+                    )
+        if revision_errors:
+            add(
+                "CP2-018",
+                CheckStatus.FAIL,
+                "사람 승인용 SRS 개정 제안이 입력 근거와 맞지 않습니다: "
+                + "; ".join(revision_errors),
+            )
+        else:
+            add(
+                "CP2-018",
+                CheckStatus.PASS,
+                "MODIFIED·UPDATE_REQUIRED Requirement의 SRS 개정 전·후 문구와 근거가 구조화됐습니다.",
+            )
 
     statuses = {item.status for item in checks}
     if CheckStatus.ERROR in statuses:
@@ -2594,7 +2994,7 @@ class OpenAIAgent3:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent3-3-17",
+                prompt_cache_key="qa-v2-agent3-3-18",
                 input=[
                     {"role": "system", "content": AGENT3_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
@@ -3561,7 +3961,20 @@ def evaluate_checkpoint3_plan(
                     )
                     if part
                 )
-                if not _has_textual_link(observed_meaning, result.statement):
+                target_card_selector = f"#device-card-{plan.target_device_id}"
+                approved_target_card = (
+                    assertion.selector == target_card_selector
+                    and bool(
+                        re.search(
+                            r"(?:장비\s*카드|device\s*card)",
+                            result.statement,
+                            flags=re.IGNORECASE,
+                        )
+                    )
+                )
+                if not approved_target_card and not _has_textual_link(
+                    observed_meaning, result.statement
+                ):
                     fidelity_errors.append(
                         f"{assertion.result_id}: observed element has no textual link to the Expected Result"
                     )
@@ -4390,6 +4803,7 @@ def evaluate_compiled_candidate(
 # ---------------------------------------------------------------------------
 DEFAULT_SRS = Path("docs") / "01_PRODUCT_SRS.md"
 DEFAULT_RUNS_ROOT = Path("runs")
+DEFAULT_APPROVED_ASSETS_ROOT = Path("approved_assets")
 _RUN_ID_PATTERN = re.compile(r"^RUN-\d{8}-\d{6}-[A-F0-9]{6}$")
 
 
@@ -4627,12 +5041,14 @@ def _load_verified_agent1_run(run_dir: Path, run_id: str) -> tuple[
 def run_agent2(args: argparse.Namespace) -> int:
     run_dir = _resolve_run_dir(Path(args.runs_root), args.run_id)
     reservation_file = run_dir / "agent2_in_progress.json"
+    approved_catalog_file = run_dir / "approved_regression_catalog.json"
     immutable_outputs = [
         run_dir / "agent2_test_design.json",
         run_dir / "checkpoint2.json",
         run_dir / "agent2_manifest.json",
         run_dir / "agent2_technical_id_normalization.json",
         run_dir / "agent2_regression_selection_normalization.json",
+        approved_catalog_file,
         reservation_file,
     ]
     if any(path.exists() for path in immutable_outputs):
@@ -4640,6 +5056,13 @@ def run_agent2(args: argparse.Namespace) -> int:
     request, requirements, analysis, _, source_manifest = _load_verified_agent1_run(
         run_dir, args.run_id
     )
+    approved_assets_root = Path(
+        getattr(args, "approved_assets_root", DEFAULT_APPROVED_ASSETS_ROOT)
+    ).resolve()
+    approved_catalog, approved_snapshot = load_approved_regression_catalog(
+        approved_assets_root
+    )
+    existing_catalog = (*EXISTING_REGRESSION_CATALOG, *approved_catalog)
     try:
         with reservation_file.open("x", encoding="utf-8") as handle:
             json.dump(
@@ -4656,15 +5079,24 @@ def run_agent2(args: argparse.Namespace) -> int:
     except FileExistsError as exc:
         raise ValueError("이 Run의 Agent 2가 이미 진행 중입니다. 새 Agent 1 Run을 사용하세요.") from exc
 
+    _write_json(approved_catalog_file, approved_snapshot)
+
     agent = OpenAIAgent2(model=args.model)
     try:
-        response = agent.design(request, analysis, requirements)
+        response = agent.design(
+            request,
+            analysis,
+            requirements,
+            existing_catalog=existing_catalog,
+        )
         raw_design = response.design
         normalized_design, first_normalizations = _normalize_agent2_technical_ids(
             raw_design
         )
         normalized_design, first_regression_normalizations = (
-            _normalize_agent2_verify_regressions(analysis, normalized_design)
+            _normalize_agent2_verify_regressions(
+                analysis, normalized_design, existing_catalog
+            )
         )
         normalization_attempts: list[dict[str, Any]] = []
         regression_normalization_attempts: list[dict[str, Any]] = []
@@ -4703,7 +5135,12 @@ def run_agent2(args: argparse.Namespace) -> int:
                 }
             )
         checkpoint2 = evaluate_checkpoint2(
-            request, analysis, response.design, requirements
+            request,
+            analysis,
+            response.design,
+            requirements,
+            existing_catalog=existing_catalog,
+            require_srs_revision_proposals=True,
         )
         attempts = [
             {
@@ -4726,6 +5163,7 @@ def run_agent2(args: argparse.Namespace) -> int:
                 request,
                 analysis,
                 requirements,
+                existing_catalog=existing_catalog,
                 previous_design=response.design,
                 checkpoint_feedback=[
                     f"{item.rule_id} {item.status.value}: {item.message}"
@@ -4737,7 +5175,9 @@ def run_agent2(args: argparse.Namespace) -> int:
                 _normalize_agent2_technical_ids(raw_design)
             )
             normalized_design, retry_regression_normalizations = (
-                _normalize_agent2_verify_regressions(analysis, normalized_design)
+                _normalize_agent2_verify_regressions(
+                    analysis, normalized_design, existing_catalog
+                )
             )
             if retry_normalizations:
                 raw_file = run_dir / "agent2_test_design_model_raw_attempt_2.json"
@@ -4774,7 +5214,12 @@ def run_agent2(args: argparse.Namespace) -> int:
                     }
                 )
             checkpoint2 = evaluate_checkpoint2(
-                request, analysis, response.design, requirements
+                request,
+                analysis,
+                response.design,
+                requirements,
+                existing_catalog=existing_catalog,
+                require_srs_revision_proposals=True,
             )
             attempts.append(
                 {
@@ -4824,8 +5269,8 @@ def run_agent2(args: argparse.Namespace) -> int:
         _write_json(
             run_dir / "agent2_manifest.json",
             {
-                "contract_version": "2.9",
-                "prompt_version": "agent2-2.10",
+                "contract_version": "3.0",
+                "prompt_version": "agent2-2.11",
                 "run_id": args.run_id,
                 "source_stage": "AGENT_1_CP1",
                 "stage": "AGENT_2_CP2",
@@ -4849,6 +5294,10 @@ def run_agent2(args: argparse.Namespace) -> int:
                 "srs_sha256": source_manifest["srs_sha256"],
                 "agent1_analysis_sha256": source_manifest["agent1_analysis_sha256"],
                 "checkpoint1_sha256": source_manifest["checkpoint1_sha256"],
+                "approved_regression_catalog_sha256": _sha256_file(
+                    approved_catalog_file
+                ),
+                "srs_revision_contract": "1.0",
                 "agent2_design_sha256": _sha256_file(design_file),
                 "checkpoint2_sha256": _sha256_file(checkpoint2_file),
                 "created_at": datetime.now(timezone.utc).isoformat(),
@@ -4909,7 +5358,23 @@ def _load_verified_agent2_run(
     _verify_sha256(checkpoint_file, manifest.get("checkpoint2_sha256"), "Checkpoint 2")
     design = _read_json_model(design_file, Agent2TestDesign)
     checkpoint = _read_json_model(checkpoint_file, Checkpoint2Result)
-    recomputed = evaluate_checkpoint2(request, analysis, design, requirements)
+    catalog_file = run_dir / "approved_regression_catalog.json"
+    catalog_hash = manifest.get("approved_regression_catalog_sha256")
+    if catalog_hash is not None:
+        _verify_sha256(catalog_file, catalog_hash, "승인 TC 카탈로그 Snapshot")
+        existing_catalog = _catalog_from_snapshot(_read_json_payload(catalog_file))
+    else:
+        existing_catalog = EXISTING_REGRESSION_CATALOG
+    recomputed = evaluate_checkpoint2(
+        request,
+        analysis,
+        design,
+        requirements,
+        existing_catalog=existing_catalog,
+        require_srs_revision_proposals=(
+            manifest.get("srs_revision_contract") == "1.0"
+        ),
+    )
     if recomputed.model_dump(mode="json") != checkpoint.model_dump(mode="json"):
         raise ValueError("Stored Checkpoint 2 differs from the current CP2 rules.")
     if checkpoint.status != CheckStatus.PASS:
@@ -5010,17 +5475,13 @@ def run_candidate_trial(
         env["PYTHONIOENCODING"] = "utf-8"
         env["QA_TARGET_URL"] = target_html.resolve().as_uri()
         env["QA_EVIDENCE_DIR"] = str(evidence_dir.resolve())
+        command = [sys.executable, "-m", "pytest", isolated_candidate.name, "-q"]
         try:
-            completed = subprocess.run(
-                [sys.executable, "-m", "pytest", isolated_candidate.name, "-q"],
+            completed = _run_trial_subprocess(
+                command,
                 cwd=temp_root,
                 env=env,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=timeout_seconds,
-                shell=False,
+                timeout_seconds=timeout_seconds,
             )
             exit_code = completed.returncode
             stdout = redact_output(completed.stdout[-20000:], temp_root, target_html, evidence_dir)
@@ -5051,16 +5512,21 @@ def run_candidate_trial(
     screenshot = evidence_dir / "trial-final.png"
     trace = evidence_dir / "trial-trace.zip"
     if trace.is_file():
-        _redact_playwright_trace(
-            trace,
-            {
-                temp_root: "<TRIAL_WORKSPACE>",
-                Path.home(): "<USER_HOME>",
-                target_html: "<QA_TARGET_FILE>",
-                evidence_dir: "<EVIDENCE_DIR>",
-                code_file: "<CANDIDATE_FILE>",
-            },
-        )
+        try:
+            _redact_playwright_trace(
+                trace,
+                {
+                    temp_root: "<TRIAL_WORKSPACE>",
+                    Path.home(): "<USER_HOME>",
+                    target_html: "<QA_TARGET_FILE>",
+                    evidence_dir: "<EVIDENCE_DIR>",
+                    code_file: "<CANDIDATE_FILE>",
+                },
+            )
+        except zipfile.BadZipFile:
+            # 시간 초과로 쓰기가 중단된 Trace는 비밀정보 제거를 보장할 수
+            # 없으므로 신뢰 가능한 증거에 포함하지 않는다.
+            trace.unlink()
     evidence_files = [stdout_file, stderr_file]
     if screenshot.is_file():
         evidence_files.append(screenshot)
@@ -5077,6 +5543,69 @@ def run_candidate_trial(
         evidence_sha256={path.name: _sha256_file(path) for path in evidence_files},
         evidence_complete=screenshot.is_file() and trace.is_file(),
     )
+
+
+def _terminate_trial_process_tree(process: subprocess.Popen[str]) -> None:
+    """시간 초과된 pytest와 Playwright 자식 프로세스를 함께 정리한다."""
+
+    try:
+        import psutil
+    except ImportError:
+        process.kill()
+        process.wait(timeout=5)
+        return
+
+    try:
+        root = psutil.Process(process.pid)
+        processes = root.children(recursive=True) + [root]
+    except psutil.NoSuchProcess:
+        return
+    for item in reversed(processes):
+        try:
+            item.terminate()
+        except psutil.NoSuchProcess:
+            continue
+    _, alive = psutil.wait_procs(processes, timeout=3)
+    for item in alive:
+        try:
+            item.kill()
+        except psutil.NoSuchProcess:
+            continue
+    psutil.wait_procs(alive, timeout=3)
+
+
+def _run_trial_subprocess(
+    command: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str],
+    timeout_seconds: int,
+) -> subprocess.CompletedProcess[str]:
+    """Candidate Trial을 실행하고 제한 초과 시 전체 프로세스 트리를 종료한다."""
+
+    process = subprocess.Popen(
+        command,
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        shell=False,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        _terminate_trial_process_tree(process)
+        stdout, stderr = process.communicate()
+        raise subprocess.TimeoutExpired(
+            command,
+            timeout_seconds,
+            output=stdout,
+            stderr=stderr,
+        )
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
 def _agent3_cli_exit_code(
@@ -5275,7 +5804,7 @@ def run_agent3(args: argparse.Namespace) -> int:
                 )
                 if _sha256_file(target_html) != observation.target_sha256:
                     raise Agent3Error(
-                        "The read-only Project1 target changed during the isolated trial."
+                        "The read-only baseline target changed during the isolated trial."
                     )
                 if trial.outcome == TrialOutcome.PASS:
                     checkpoint.candidate_status = AutomationCandidateStatus.READY_FOR_EXECUTION
@@ -5346,12 +5875,13 @@ def run_agent3(args: argparse.Namespace) -> int:
 
 def select_existing_regressions(
     requirement_ids: list[str] | set[str] | tuple[str, ...],
+    catalog: tuple[ExistingRegressionSpec, ...] = EXISTING_REGRESSION_CATALOG,
 ) -> list[ExistingRegressionSpec]:
-    """Select only reusable Project1 regressions related to the approved TC."""
+    """Select only reusable baseline regressions related to the approved TC."""
     approved = set(requirement_ids)
     return [
         spec
-        for spec in EXISTING_REGRESSION_CATALOG
+        for spec in catalog
         if approved.intersection(spec.requirement_ids)
     ]
 
@@ -5491,7 +6021,7 @@ def _candidate_execution_record(
     if target_sha256 != agent3_manifest.get("target_sha256"):
         raise ValueError("검증 대상 HTML이 신규 자동화 후보 시험 후 변경됐습니다.")
     if agent3_manifest.get("project1_modified") is not False:
-        raise ValueError("Agent 3 실행에서 Project1 불변을 확인하지 못했습니다.")
+        raise ValueError("Agent 3 실행에서 기준 제품 불변을 확인하지 못했습니다.")
 
     candidate_name = agent3_manifest.get("candidate_file")
     if not isinstance(candidate_name, str):
@@ -5750,7 +6280,7 @@ def run_existing_regression(
     timeout_seconds: int,
     source: ExecutionSource = ExecutionSource.EXISTING_REGRESSION,
 ) -> NeutralExecutionResult:
-    """Run one allowlisted Project1 test from a copied, neutral workspace."""
+    """Run one allowlisted baseline test from a copied, neutral workspace."""
     baseline_test_file = baseline_test_file.resolve()
     target_html = target_html.resolve()
     evidence_dir = evidence_root / spec.tc_id
@@ -5788,6 +6318,8 @@ def run_existing_regression(
         }
         env["PYTHONUTF8"] = "0"
         env["PYTHONIOENCODING"] = "utf-8"
+        env["QA_TARGET_URL"] = isolated_target.as_uri()
+        env["QA_EVIDENCE_DIR"] = str(evidence_dir.resolve())
         try:
             completed = subprocess.run(
                 [
@@ -5862,9 +6394,13 @@ def run_existing_regression(
 
     _write_text_atomic(stdout_file, stdout)
     _write_text_atomic(stderr_file, stderr)
+    evidence_items = [stdout_file, stderr_file]
+    for name in ("trial-final.png", "trial-trace.zip"):
+        optional_evidence = evidence_dir / name
+        if optional_evidence.is_file():
+            evidence_items.append(optional_evidence)
     evidence_paths = [
-        stdout_file.relative_to(evidence_root.parent).as_posix(),
-        stderr_file.relative_to(evidence_root.parent).as_posix(),
+        path.relative_to(evidence_root.parent).as_posix() for path in evidence_items
     ]
     return NeutralExecutionResult(
         test_id=spec.tc_id,
@@ -5874,7 +6410,7 @@ def run_existing_regression(
         source_outcome=source_outcome,
         exit_code=exit_code,
         duration_ms=int((time.monotonic() - started) * 1000),
-        test_file=baseline_test_file.name,
+        test_file=spec.automation_file or baseline_test_file.name,
         test_sha256=_sha256_file(baseline_test_file),
         target_sha256=_sha256_file(target_html),
         reused=False,
@@ -5882,10 +6418,19 @@ def run_existing_regression(
         stderr_file=evidence_paths[1],
         evidence_files=evidence_paths,
         evidence_sha256={
-            evidence_paths[0]: _sha256_file(stdout_file),
-            evidence_paths[1]: _sha256_file(stderr_file),
+            relative: _sha256_file(path)
+            for relative, path in zip(evidence_paths, evidence_items, strict=True)
         },
-        evidence_complete=stdout_file.is_file() and stderr_file.is_file(),
+        evidence_complete=(
+            stdout_file.is_file()
+            and stderr_file.is_file()
+            and (
+                spec.source != "APPROVED"
+                or {"trial-final.png", "trial-trace.zip"}.issubset(
+                    {path.name for path in evidence_items}
+                )
+            )
+        ),
         exception_type=_exception_type_from_output(stdout, stderr),
         raw_message=_last_output_line(stdout, stderr),
     )
@@ -5905,10 +6450,53 @@ def _final_review_notes_for_validation(run_dir: Path) -> list[str]:
     return list(dict.fromkeys(notes))
 
 
+def _srs_revision_proposals_for_validation(
+    run_dir: Path,
+) -> list[SrsRevisionProposal]:
+    design = _read_json_model(run_dir / "agent2_test_design.json", Agent2TestDesign)
+    return list(design.srs_revision_proposals)
+
+
 def _excluded_scope_for_validation(run_dir: Path) -> tuple[list[str], list[str]]:
     """검증된 Agent 2 인계에 보존된 실행 제외 범위를 읽습니다."""
     design = _read_json_model(run_dir / "agent2_test_design.json", Agent2TestDesign)
     return list(design.excluded_scope), list(design.excluded_information_gaps)
+
+
+def _verified_existing_catalog_for_execution(
+    run_dir: Path, approved_assets_root: Path
+) -> tuple[tuple[ExistingRegressionSpec, ...], dict[str, Path]]:
+    """Rehydrate the Agent 2 catalog snapshot and verify selected file sources."""
+
+    manifest_file = run_dir / "agent2_manifest.json"
+    if not manifest_file.is_file():
+        return EXISTING_REGRESSION_CATALOG, {}
+    manifest = _read_json_payload(manifest_file)
+    snapshot_hash = manifest.get("approved_regression_catalog_sha256")
+    if snapshot_hash is None:
+        return EXISTING_REGRESSION_CATALOG, {}
+    snapshot_file = run_dir / "approved_regression_catalog.json"
+    _verify_sha256(snapshot_file, snapshot_hash, "승인 TC 카탈로그 Snapshot")
+    catalog = _catalog_from_snapshot(_read_json_payload(snapshot_file))
+    approved_assets_root = approved_assets_root.resolve()
+    files: dict[str, Path] = {}
+    for spec in catalog:
+        if spec.source != "APPROVED":
+            continue
+        if not spec.automation_file or not spec.automation_sha256:
+            raise ValueError(f"{spec.tc_id} 승인 자동화 Snapshot이 불완전합니다.")
+        automation_file = (approved_assets_root / spec.automation_file).resolve()
+        try:
+            automation_file.relative_to(approved_assets_root)
+        except ValueError as exc:
+            raise ValueError(f"{spec.tc_id} 승인 자동화 경로가 자산 폴더 밖입니다.") from exc
+        if (
+            not automation_file.is_file()
+            or _sha256_file(automation_file) != spec.automation_sha256
+        ):
+            raise ValueError(f"{spec.tc_id} 승인 자동화가 Agent 2 Snapshot과 다릅니다.")
+        files[spec.tc_id] = automation_file
+    return catalog, files
 
 
 def run_validation_execution(args: argparse.Namespace) -> int:
@@ -5920,10 +6508,13 @@ def run_validation_execution(args: argparse.Namespace) -> int:
         if args.baseline_tests
         else target_html.parent / "tests" / "test_controller.py"
     )
+    approved_assets_root = Path(
+        getattr(args, "approved_assets_root", DEFAULT_APPROVED_ASSETS_ROOT)
+    ).resolve()
     if not target_html.is_file():
         raise ValueError("검증 대상 HTML을 찾을 수 없습니다.")
     if not baseline_test_file.is_file():
-        raise ValueError("Project1 기존 테스트 파일을 찾을 수 없습니다.")
+        raise ValueError("기준 제품의 기존 테스트 파일을 찾을 수 없습니다.")
     final_outputs = (
         run_dir / "validation_execution.json",
         run_dir / "validation_manifest.json",
@@ -5939,6 +6530,12 @@ def run_validation_execution(args: argparse.Namespace) -> int:
     target_before = _sha256_file(target_html)
     baseline_before = _sha256_file(baseline_test_file)
     try:
+        existing_catalog, approved_automation_files = (
+            _verified_existing_catalog_for_execution(
+                run_dir, approved_assets_root
+            )
+        )
+        existing_by_id = _existing_regression_by_id(existing_catalog)
         stored_records, automation_exclusions, run_summary = (
             _candidate_execution_records(run_dir, args.run_id, target_html)
         )
@@ -5988,7 +6585,7 @@ def run_validation_execution(args: argparse.Namespace) -> int:
         )
         if design.existing_tc_comparison_completed:
             selected = [
-                EXISTING_REGRESSION_BY_ID[item.tc_id]
+                existing_by_id[item.tc_id]
                 for item in design.related_existing_tests
             ]
         else:
@@ -5999,7 +6596,7 @@ def run_validation_execution(args: argparse.Namespace) -> int:
                 for test_case in test_cases
                 for requirement_id in test_case.requirement_ids
             }
-            selected = select_existing_regressions(requirement_ids)
+            selected = select_existing_regressions(requirement_ids, existing_catalog)
         evidence_root = run_dir / "validation_evidence"
         precheck = run_existing_regression(
             ENVIRONMENT_PRECHECK,
@@ -6013,10 +6610,13 @@ def run_validation_execution(args: argparse.Namespace) -> int:
         blocked_reason: str | None = None
         if precheck.status == NeutralExecutionStatus.PASSED:
             for spec in selected:
+                regression_test_file = approved_automation_files.get(
+                    spec.tc_id, baseline_test_file
+                )
                 regression_results.append(
                     run_existing_regression(
                         spec,
-                        baseline_test_file,
+                        regression_test_file,
                         target_html,
                         evidence_root,
                         timeout_seconds=args.timeout,
@@ -6028,9 +6628,18 @@ def run_validation_execution(args: argparse.Namespace) -> int:
             blocked_reason = "ENVIRONMENT_PRECHECK_NOT_PASSED"
 
         if _sha256_file(target_html) != target_before:
-            raise RuntimeError("검증 실행 중 Project1 대상 HTML이 변경됐습니다.")
+            raise RuntimeError("검증 실행 중 기준 제품 HTML이 변경됐습니다.")
         if _sha256_file(baseline_test_file) != baseline_before:
-            raise RuntimeError("검증 실행 중 Project1 기존 테스트 파일이 변경됐습니다.")
+            raise RuntimeError("검증 실행 중 기준 제품 테스트 파일이 변경됐습니다.")
+        for spec in selected:
+            approved_file = approved_automation_files.get(spec.tc_id)
+            if (
+                approved_file is not None
+                and _sha256_file(approved_file) != spec.automation_sha256
+            ):
+                raise RuntimeError(
+                    f"검증 실행 중 승인 자동화 {spec.tc_id}가 변경됐습니다."
+                )
 
         excluded_scope, excluded_information_gaps = _excluded_scope_for_validation(run_dir)
         bundle = ValidationExecutionBundle(
@@ -6045,6 +6654,7 @@ def run_validation_execution(args: argparse.Namespace) -> int:
             excluded_scope=excluded_scope,
             excluded_information_gaps=excluded_information_gaps,
             final_review_notes=_final_review_notes_for_validation(run_dir),
+            srs_revision_proposals=_srs_revision_proposals_for_validation(run_dir),
             automation_exclusions=automation_exclusions,
             created_at=datetime.now(timezone.utc).isoformat(),
         )
@@ -6080,6 +6690,20 @@ def run_validation_execution(args: argparse.Namespace) -> int:
                 "validation_candidate_trial_sha256": None,
                 "baseline_test_file": baseline_test_file.name,
                 "baseline_test_sha256": baseline_before,
+                "approved_regression_catalog_sha256": (
+                    _sha256_file(run_dir / "approved_regression_catalog.json")
+                    if (run_dir / "approved_regression_catalog.json").is_file()
+                    else None
+                ),
+                "approved_regression_assets": [
+                    {
+                        "tc_id": spec.tc_id,
+                        "automation_file": spec.automation_file,
+                        "automation_sha256": spec.automation_sha256,
+                    }
+                    for spec in selected
+                    if spec.source == "APPROVED"
+                ],
                 "target_file": target_html.name,
                 "target_sha256": target_before,
                 "validation_execution_sha256": _sha256_file(execution_file),
@@ -6540,12 +7164,36 @@ def _human_review_markdown(
                 "",
             ]
         )
-    lines.extend(["## 4. 추가 확인 사항", ""])
+    lines.extend(["## 4. 기준 SRS 개정 승인", ""])
+    if report.srs_revision_proposals:
+        lines.extend(
+            [
+                "> 아래 문구는 Agent 2의 제안이며 자동으로 SRS에 반영되지 않습니다. 현재 문구와 제안 문구를 검토한 뒤 공식 자산 승인 화면에서 SRS 개정 포함 여부를 사람이 결정합니다.",
+                "",
+            ]
+        )
+        for proposal in report.srs_revision_proposals:
+            lines.extend(
+                [
+                    f"### `{_markdown_text(proposal.proposal_id)}` · `{_markdown_text(proposal.requirement_id)}`",
+                    "",
+                    f"- 현재 인수 기준: {_markdown_text(proposal.current_acceptance_criteria)}",
+                    f"- 제안 인수 기준: {_markdown_text(proposal.proposed_acceptance_criteria)}",
+                    f"- 근거 Condition: {', '.join(f'`{item}`' for item in proposal.source_condition_ids)}",
+                    f"- 개정 이유: {_markdown_text(proposal.reason)}",
+                    "- [ ] 이 인수 기준 개정을 승인함",
+                    "- 검토 메모: ____________________",
+                    "",
+                ]
+            )
+    else:
+        lines.extend(["SRS 개정 제안이 없습니다.", ""])
+    lines.extend(["## 5. 추가 확인 사항", ""])
     if report.final_review_notes:
         lines.extend(f"- {_markdown_text(item)}" for item in report.final_review_notes)
     else:
         lines.append("- 없음")
-    lines.extend(["", "## 5. 실행에서 제외된 항목", ""])
+    lines.extend(["", "## 6. 실행에서 제외된 항목", ""])
     if report.excluded_information_gaps:
         lines.append("### 정보 부족으로 제외")
         lines.append("")
@@ -6565,11 +7213,11 @@ def _human_review_markdown(
         lines.extend(["정보 부족 또는 자동화 한계로 제외된 TC가 없습니다.", ""])
     lines.extend(
         [
-            "## 6. 범위 경계",
+            "## 7. 범위 경계",
             "",
             *(f"- {_markdown_text(item)}" for item in report.excluded_scope),
             "",
-            "## 7. 원본 무결성 참조",
+            "## 8. 원본 무결성 참조",
             "",
             f"- `final_report.json` SHA-256: `{_sha256_file(run_dir / 'final_report.json')}`",
             f"- `validation_execution.json` SHA-256: `{_sha256_file(run_dir / 'validation_execution.json')}`",
@@ -7293,6 +7941,7 @@ def run_agent4(args: argparse.Namespace) -> int:
             excluded_scope=bundle.excluded_scope,
             excluded_information_gaps=bundle.excluded_information_gaps,
             final_review_notes=bundle.final_review_notes,
+            srs_revision_proposals=bundle.srs_revision_proposals,
             automation_exclusions=bundle.automation_exclusions,
             recommendation=_agent4_recommendation(findings, checkpoint_status),
             created_at=datetime.now(timezone.utc).isoformat(),
@@ -7314,6 +7963,7 @@ def run_agent4(args: argparse.Namespace) -> int:
             excluded_scope=analysis.excluded_scope,
             excluded_information_gaps=analysis.excluded_information_gaps,
             final_review_notes=analysis.final_review_notes,
+            srs_revision_proposals=analysis.srs_revision_proposals,
             automation_exclusions=analysis.automation_exclusions,
             recommendation=analysis.recommendation,
             checkpoint_status=checkpoint.status,
@@ -7612,6 +8262,9 @@ def run_pipeline(args: argparse.Namespace) -> int:
                 run_id=run_id,
                 runs_root=str(runs_root),
                 model=args.model,
+                approved_assets_root=getattr(
+                    args, "approved_assets_root", DEFAULT_APPROVED_ASSETS_ROOT
+                ),
             )
         )
         stage_exit_codes["agent2"] = agent2_exit
@@ -7811,13 +8464,18 @@ def build_parser() -> argparse.ArgumentParser:
     agent3.add_argument("--target-html", required=True, help="Read-only local virtual controller HTML path")
     agent3.add_argument("--runs-root", default=str(DEFAULT_RUNS_ROOT), help="Run artifact root")
     agent3.add_argument("--model", default=None, help="OpenAI model ID")
-    agent3.add_argument("--timeout", type=int, default=30, help="Isolated trial timeout in seconds")
+    agent3.add_argument("--timeout", type=int, default=90, help="Isolated trial timeout in seconds")
     agent3.add_argument("--preview-only", action="store_true", help="Inspect UI and write the exact model-input preview without calling the API")
     agent3.set_defaults(handler=run_agent3)
 
     pipeline = subparsers.add_parser(
         "pipeline",
         help="Agent 1→2→3, CP1→3, and the candidate trial in one command",
+    )
+    agent2.add_argument(
+        "--approved-assets-root",
+        default=str(DEFAULT_APPROVED_ASSETS_ROOT),
+        help="사람 승인 공식 TC·자동화 Registry 폴더",
     )
     pipeline.add_argument("--request", required=True, help="Change-request JSON path")
     pipeline.add_argument(
@@ -7832,8 +8490,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pipeline.add_argument("--srs", default=str(DEFAULT_SRS), help="Product SRS Markdown path")
     pipeline.add_argument("--runs-root", default=str(DEFAULT_RUNS_ROOT), help="Run artifact root")
+    pipeline.add_argument(
+        "--approved-assets-root",
+        default=str(DEFAULT_APPROVED_ASSETS_ROOT),
+        help="Human-approved TC and automation registry root",
+    )
     pipeline.add_argument("--model", default=None, help="OpenAI model ID shared by Agent 1→3")
-    pipeline.add_argument("--timeout", type=int, default=30, help="Isolated trial timeout in seconds")
+    pipeline.add_argument("--timeout", type=int, default=90, help="Isolated trial timeout in seconds")
     pipeline.set_defaults(handler=run_pipeline)
 
     execute = subparsers.add_parser(
@@ -7844,15 +8507,20 @@ def build_parser() -> argparse.ArgumentParser:
     execute.add_argument(
         "--target-html",
         required=True,
-        help="읽기 전용 Project1 virtual-controller.html 경로",
+        help="읽기 전용 V2 기준 제품 virtual-controller.html 경로",
     )
     execute.add_argument(
         "--baseline-tests",
         default=None,
-        help="Project1 tests/test_controller.py 경로. 생략 시 대상 HTML 옆 tests 폴더 사용",
+        help="기준 제품 tests/test_controller.py 경로. 생략 시 대상 HTML 옆 tests 폴더 사용",
     )
     execute.add_argument(
         "--runs-root", default=str(DEFAULT_RUNS_ROOT), help="실행 결과 저장 폴더"
+    )
+    execute.add_argument(
+        "--approved-assets-root",
+        default=str(DEFAULT_APPROVED_ASSETS_ROOT),
+        help="사람 승인 공식 TC·자동화 Registry 폴더",
     )
     execute.add_argument(
         "--timeout", type=int, default=60, help="기존 TC 한 건당 제한 시간(초)"

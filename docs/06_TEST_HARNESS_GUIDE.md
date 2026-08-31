@@ -10,6 +10,9 @@
 - 내부 인터페이스는 Assertion과 초기 상태 확인에만 사용합니다.
 - 모델에는 전체 HTML이나 임의 JavaScript 실행 권한을 주지 않습니다.
 - Project1 원본은 수정하지 않습니다.
+- Agent 3와 기존 회귀의 제품 대상은 V2가 소유한 `product_baseline/virtual-controller.html`입니다.
+- 기존 회귀 코드는 V2의 `product_baseline/tests/test_controller.py`에서 선택하고 실행 시 임시 Workspace에만 복사합니다.
+- 같은 HTML의 QA Agent 패널은 로컬 `qa_pipeline_ui`에서 실제 Run을 조회하는 표시 계층이며, 제품 조작·Assertion 하네스와 분리합니다.
 - TC에 없는 필드·값·경로를 새로 만들어 검증하지 않습니다.
 
 ## 3. UI 확인 방식
@@ -42,6 +45,8 @@ TC에 필요한 Selector와 하네스 키만 확인합니다. 매 Run마다 전�
 - UNCHECK
 
 새 기능을 지원하기 위해 전용 조작, 제품명, 모드값, Selector를 이 목록에 계속 추가하지 않습니다. 신규 기능은 실제 관찰한 요소가 위 범용 조작으로 표현될 때 계획하며, 생성 코드에도 해당 TC가 실제 사용한 조작과 Selector만 포함합니다. 자동화 지원 범위 확장은 기능명이 아니라 드래그·Canvas·복잡한 커스텀 위젯처럼 실제로 부족한 기술 동작을 기준으로 판단합니다.
+
+변경 후에만 나타나는 텍스트는 초기 UI Inventory에 없다는 이유만으로 차단하지 않습니다. 승인 TC가 `대상 장비 카드`를 명시하고 계획이 정확한 대상 ID의 `#device-card-{id}`를 읽는 경우에만 실행 후 텍스트 포함 검증을 허용합니다. 다른 장비 카드나 상위 컨테이너를 대신 읽는 계획은 계속 차단합니다.
 
 허용 목록 밖 조작, 쉘 명령, 파일 변경, 외부 네트워크 호출은 생성 코드에 포함할 수 없습니다.
 
@@ -82,9 +87,11 @@ Agent 3 계획은 묶음 TC의 Assertion을 `after_action_id`로 해당 조건�
 
 ## 7. 증거
 
-신뢰 가능한 Agent 3 완료 결과는 stdout, stderr, 최종 Screenshot, Playwright Trace, 각 증거 SHA-256, 복원 성공, Project1 대상 파일 불변을 가져야 합니다.
+신뢰 가능한 Agent 3 완료 결과는 stdout, stderr, 최종 Screenshot, Playwright Trace, 각 증거 SHA-256, 복원 성공, V2 기준 제품 파일 불변을 가져야 합니다.
 
 PASS와 PRODUCT_MISMATCH_CANDIDATE는 위 증거가 완전할 때만 다음 단계로 인계합니다.
+
+Candidate Trial의 기본 제한은 90초입니다. 제한을 넘기면 pytest와 Playwright 자식 프로세스를 함께 종료합니다. 종료 시점에 Trace ZIP 쓰기가 끝나지 않았다면 민감정보 제거를 보장할 수 없으므로 해당 Trace를 삭제하고 `TIMEOUT`·불완전 증거로 기록합니다.
 
 ## 8. 격리 한계
 

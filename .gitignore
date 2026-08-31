@@ -11,3 +11,4 @@ debug.log
 !.env.example
 runs/*
 !runs/.gitkeep
+product_baseline/reports/

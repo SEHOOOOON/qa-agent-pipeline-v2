@@ -32,6 +32,12 @@
 
 프로젝트 1은 사용자의 명시적인 수정 명령이 없는 한 **읽기 전용 기준 자산**으로 취급합니다. V2 구현을 위해 프로젝트 1의 HTML·테스트·문서를 조사할 수 있지만 임의로 수정하거나 실행 산출물을 덮어쓰지 않습니다.
 
+V2의 독립 실행에 필요한 V1 기준 자산은 `product_baseline/`에 둡니다. 복사 범위는
+`virtual-controller.html`, `pytest.ini`, `tests/conftest.py`,
+`tests/test_controller.py` 네 파일로 제한합니다. V1 포트폴리오 페이지·보고서·영상·
+Agent 4 코드·`.env`는 복사하지 않습니다. 이후 제품 변경은 사용자의 명시적 지시가
+있을 때 V2 HTML 복사본에만 적용합니다.
+
 Agent 평가 실험은 현재 후순위입니다. V2의 Agent 1~3 Live 흐름과 End-to-End 실행이 완성되기 전에는 평가 프로젝트를 주 작업으로 전환하지 않습니다.
 
 ## 4. 사실성 및 용어 규칙
@@ -45,6 +51,7 @@ Agent 평가 실험은 현재 후순위입니다. V2의 Agent 1~3 Live 흐름과
 - `PRODUCT_MISMATCH_CANDIDATE`는 제품 결함 확정이 아니라 기대 결과와 다른 관찰 후보입니다.
 - Candidate Workspace는 원본과 분리된 임시 실행 위치이지 컨테이너나 OS 권한 격리를 제공하는 보안 Sandbox가 아닙니다.
 - `examples/change_request.example.json`과 공개 Run의 AUTO 온도 변경은 연결 검증용 예시입니다. 대표 요구사항으로 고정하거나 코드에 하드코딩하지 않습니다.
+- 공개 잠금 Run은 제품 불일치 후보인 실패 증거로 유지합니다. 새 성공 후보는 실제 Live 실행 전 PASS로 표현하지 않습니다.
 
 ## 5. 코드·문서 정합성 규칙
 
