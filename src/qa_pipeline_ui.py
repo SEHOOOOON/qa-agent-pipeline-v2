@@ -415,6 +415,43 @@ def _run_srs_revision_proposals(run_dir: Path) -> list[Any]:
     return [SrsRevisionProposal.model_validate(item) for item in raw_items]
 
 
+def _candidate_srs_revision_proposals(
+    run_dir: Path, test_case: dict[str, Any]
+) -> list[Any]:
+    """Limit a Run's SRS proposals to the candidate being approved."""
+
+    requirement_ids = set(test_case.get("requirement_ids") or [])
+    condition_ids = set(test_case.get("source_condition_ids") or [])
+    return [
+        proposal
+        for proposal in _run_srs_revision_proposals(run_dir)
+        if proposal.requirement_id in requirement_ids
+        and bool(set(proposal.source_condition_ids).intersection(condition_ids))
+    ]
+
+
+def _restore_files_after_error(backups: dict[Path, bytes | None]) -> None:
+    """Compensate a failed multi-file asset approval without broad deletion."""
+
+    rollback_errors: list[str] = []
+    for path, original in reversed(list(backups.items())):
+        try:
+            if original is None:
+                path.unlink(missing_ok=True)
+                continue
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_name(path.name + ".rollback.tmp")
+            temporary.write_bytes(original)
+            temporary.replace(path)
+        except OSError as exc:
+            rollback_errors.append(f"{path.name}: {exc}")
+    if rollback_errors:
+        raise RuntimeError(
+            "공식 자산 승인 실패 뒤 원상 복구도 완료하지 못했습니다: "
+            + "; ".join(rollback_errors)
+        )
+
+
 def _next_official_tc_id(registry: list[dict[str, Any]]) -> str:
     used = {
         int(match.group(1))
@@ -428,7 +465,7 @@ def _next_official_tc_id(registry: list[dict[str, Any]]) -> str:
     return f"TC-V2-{number:03d}"
 
 
-def decide_candidate_asset(
+def _decide_candidate_asset_impl(
     runs_root: Path,
     approved_assets_root: Path,
     target_html: Path,
@@ -460,7 +497,9 @@ def decide_candidate_asset(
     validation = _candidate_validation(run_dir, tc_id)
     candidate_file = run_dir / str(validation.get("test_file") or "")
     reasons: list[str] = []
-    srs_revision_proposals = _run_srs_revision_proposals(run_dir)
+    srs_revision_proposals = _candidate_srs_revision_proposals(
+        run_dir, test_case
+    )
     srs_revision_preview: dict[str, Any] | None = None
     if normalized_decision == "APPROVE":
         test_case, validation, candidate_file, reasons = _candidate_approval_check(
@@ -690,6 +729,80 @@ def decide_candidate_asset(
         {"contract_version": "1.0", "run_id": run_id, "decisions": decisions},
     )
     return record
+
+
+def decide_candidate_asset(
+    runs_root: Path,
+    approved_assets_root: Path,
+    target_html: Path,
+    run_id: str,
+    tc_id: str,
+    *,
+    srs_path: Path = DEFAULT_SRS,
+    decision: str,
+    reviewer: str,
+    note: str,
+    approve_srs_revisions: bool = False,
+) -> dict[str, Any]:
+    """Apply one approval as a compensating multi-file transaction."""
+
+    run_dir = _run_directory(runs_root, run_id)
+    approved_assets_root = approved_assets_root.resolve()
+    registry_file = approved_assets_root / "registry.json"
+    registry_payload = _read_json(registry_file)
+    registry = [
+        item
+        for item in registry_payload.get("assets") or []
+        if isinstance(item, dict)
+    ]
+    source_key = f"{run_id}:{tc_id}"
+    registered = next(
+        (item for item in registry if item.get("source_key") == source_key),
+        None,
+    )
+    official_tc_id = (
+        str(registered.get("official_tc_id"))
+        if registered is not None
+        else _next_official_tc_id(registry)
+    )
+    slug = official_tc_id.lower().replace("-", "_")
+    watched_paths = [
+        srs_path.resolve(),
+        registry_file,
+        run_dir / "asset_decisions.json",
+        run_dir / "srs_revision_decision.json",
+        approved_assets_root / "test_cases" / f"{official_tc_id}.json",
+        approved_assets_root / "automation" / f"test_{slug}.py",
+        approved_assets_root / "srs_revisions" / f"{official_tc_id}.json",
+    ]
+    watched_paths.extend(
+        [path.with_name(path.name + ".tmp") for path in watched_paths]
+    )
+    backups = {
+        path: path.read_bytes() if path.is_file() else None
+        for path in dict.fromkeys(watched_paths)
+    }
+    try:
+        return _decide_candidate_asset_impl(
+            runs_root,
+            approved_assets_root,
+            target_html,
+            run_id,
+            tc_id,
+            srs_path=srs_path,
+            decision=decision,
+            reviewer=reviewer,
+            note=note,
+            approve_srs_revisions=approve_srs_revisions,
+        )
+    except Exception as original_error:
+        try:
+            _restore_files_after_error(backups)
+        except Exception as rollback_error:
+            raise RuntimeError(
+                f"공식 자산 승인 실패: {original_error}; 원상 복구 실패: {rollback_error}"
+            ) from original_error
+        raise
 
 
 def _checkpoint_stage(

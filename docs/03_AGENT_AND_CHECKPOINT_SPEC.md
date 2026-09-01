@@ -32,7 +32,7 @@ REVIEW는 확정 범위가 있으면 최종 확인 사항으로 남기고 실행
 
 ## 3. Agent 2 / CP2
 
-입력은 검증된 Agent 1 산출물, 확정 조건, 관련 SRS와 허용된 기존 사람 작성·자동화 TC 카탈로그입니다. 기존 TC 카탈로그에는 V1 기준 회귀와 사람 승인 Registry 자산의 TC ID·Requirement ID·함수명과 실제 검증 동작이 함께 제공됩니다. 승인 자산은 Registry 경로·파일 SHA-256·구조화 TC·단일 테스트 함수를 검증하고 Run별 `approved_regression_catalog.json` Snapshot으로 고정합니다.
+입력은 검증된 Agent 1 산출물, 확정 조건, 관련 SRS와 허용된 기존 사람 작성·자동화 TC 카탈로그입니다. 기존 TC 카탈로그에는 V1 기준 회귀와 사람 승인 Registry 자산의 TC ID·Requirement ID·함수명과 실제 검증 동작이 함께 제공됩니다. 승인 자산은 Registry 경로·파일 SHA-256·구조화 TC·단일 테스트 함수를 검증하고 Run별 `approved_regression_catalog.json` Snapshot으로 고정합니다. Agent 1은 각 Condition을 `변경`·`유지`·`보조_근거`로 표시하며 단어 집합 비교로 매핑·순서 변경을 유지로 추정하지 않습니다. 관련 기존 TC가 담당하는 유지 조건만으로 신규 Expected Result를 다시 만들면 CP2가 차단합니다.
 
 제품 기능 TC는 TC ID·목적·유형, Requirement·조건 ID, 중앙 관제 패널 경로, 대상 역할·시험 데이터, 조건 실행 방식, 초기 조건·단계·기대 결과, 3단계 QA 기준, 독립 실행·복원, 이중 검증 정책을 가집니다.
 
@@ -44,6 +44,7 @@ TC 구성 기준:
 - 순서 자체가 검증 대상인 전환은 `SEQUENTIAL_TRANSITION`으로 표시합니다. 단일 구간은 `SINGLE_FLOW`입니다.
 - 묶음 TC의 복수 모드·온도는 `requested_modes`·`requested_temperatures_c`에 빠짐없이 기록합니다.
 - 각 Expected Result는 관찰값 하나만 가지며 `verify_after_step`으로 판정할 단계에 연결합니다. Expected Result 분리는 TC 분리를 뜻하지 않습니다.
+- Condition 원문에 없는 `선택하고 적용할 수 있다` 같은 실행 행동 성공 문장은 Expected Result로 추가하지 않습니다. 요구사항 자체가 기능 가능 여부를 요구하면 이를 삭제하지 않고 적용 뒤 표시·값·활성 상태 같은 판정 가능한 관찰값으로 구체화합니다.
 - 서로 다른 Requirement 목적·제어 경로·무관한 실패 원인은 별도 TC로 분리합니다.
 
 CP2 핵심 검사:
@@ -61,7 +62,7 @@ CP2 핵심 검사:
 | 조건 처리 경로 | 모든 확정 Condition을 변경분 후보 또는 관련 기존 TC에 연결하고 조용한 누락 차단 |
 | SRS 개정 | MODIFIED·UPDATE_REQUIRED Requirement별 개정 전·후 인수 기준과 Condition 근거의 누락·중복·원문 불일치 차단 |
 
-Agent 1이 `VERIFY`로 확정한 Requirement와 카탈로그 검증 동작이 연결되면 해당 기존 TC를 결정론적으로 보충합니다. 모델이 직접 변경된 Requirement의 기존 TC를 제외한 판단은 자동으로 뒤집지 않습니다. 보충 내역은 `agent2_regression_selection_normalization.json`에 Requirement·Condition·TC ID와 함께 기록하며 제품 기대 결과는 바꾸지 않습니다.
+기존 회귀는 Agent 2가 Condition과 검증 동작을 대조해 `관련_기존_TC`에 명시한 선택만 사용합니다. Requirement ID만으로 다른 동작의 TC를 자동 보충하지 않으며, 빠진 Condition은 CP2 실패와 최대 1회 재작업으로 드러냅니다. 변경 후 동작을 기존 TC가 모두 검증하면 `test_cases=[]`와 관련 기존 TC만으로 CP2를 통과할 수 있습니다.
 
 중복 기술 ID는 의미·값·단계·Requirement를 바꾸지 않는 경우에만 결정론적으로 다시 번호를 매깁니다.
 
@@ -125,6 +126,7 @@ execute는 API를 호출하지 않습니다.
 - 현재 컴파일러 출력과 같으면 시험 결과 재사용
 - 다르면 현재 코드로 다시 컴파일해 별도 위치에서 재시험
 - Agent 2가 확정 조건과 V1·승인 공식 TC를 대조해 기록한 관련 기존 TC ID 선택
+- 신규 후보가 없거나 모두 제외돼도 선택된 기존 TC 실행과 제외 사유 보고 계속
 - TC-ENV-000 환경 사전 점검 후 기존 회귀 실행
 - V2 기준 HTML, V1 회귀 파일과 승인 자동화의 Snapshot·현재 Registry 해시 불변 확인
 
@@ -138,7 +140,7 @@ Agent 3 기본 대상은 `product_baseline/virtual-controller.html`입니다. `e
 
 Agent 4는 규칙 기반 분석기입니다.
 
-CP4는 Run ID·입력 해시, TC ID 중복, 실패 결과의 종료 코드·메시지·증거, 제품과 환경 결과 분리, Agent 3부터 검증 실행까지의 산출물 해시, 결과 합계와 보고 수치, 자동화 제외 TC의 비제품 집계를 검사합니다.
+CP4는 Run ID·입력 해시, TC ID 중복, 실패 결과의 종료 코드·메시지·증거, 제품과 환경 결과 분리, Agent 3부터 검증 실행까지의 산출물 해시, 결과 합계와 보고 수치, 자동화 제외 TC의 비제품 집계를 검사합니다. V1 기준 회귀는 기준 테스트 파일 SHA-256으로 검증합니다. 승인 공식 TC는 승인 카탈로그 Snapshot 자체의 SHA-256과 해당 항목의 자동화 경로·SHA-256을 모두 확인하며, 승인 자산이 있는데 카탈로그 해시가 없으면 CP4가 차단합니다. 실행된 신규 후보가 없고 자동화 제외만 있으면 결과가 모두 통과해도 최종 권고는 `HUMAN_REVIEW`입니다.
 
 최종 보고에는 제품·환경·고정 사례별 합계, 검토 항목, 제외 범위, 제외된 정보 부족, 자동화 제외 TC, 최종 확인 사항과 PASS·HOLD·HUMAN_REVIEW 권고가 들어갑니다.
 
@@ -177,10 +179,12 @@ Run에 남기며 공식 자산을 만들지 않고, 이미 승인된 자산은 �
 Agent 2의 `SRS_개정_제안`은 MODIFIED·UPDATE_REQUIRED Requirement마다 현재 인수 기준,
 제안 인수 기준, 근거 Condition과 사유를 가집니다. Agent 2→검증 실행→Agent 4 최종
 보고→`사람_최종_검토.md`까지 같은 구조로 전달합니다. 승인 화면은 개정 전·후를 표시하고,
-변경할 문구가 남아 있으면 별도 SRS 동의 없이는 공식 TC 승인을 차단합니다. 동의 시 해당
-Requirement 행의 인수 기준만 원문 일치 조건으로 원자 교체하고, Run 결정 기록과 공식
-SRS 개정 기록에 전·후 SHA-256을 남깁니다. 이미 반영된 동일 제안은 멱등 처리하며 다른
-문구로 바뀐 SRS에는 적용하지 않습니다.
+변경할 문구가 남아 있으면 별도 SRS 동의 없이는 공식 TC 승인을 차단합니다. 후보의
+Requirement·Condition과 연결된 제안만 적용 대상으로 삼습니다. 동의 시 해당 Requirement
+행의 인수 기준만 원문 일치 조건으로 교체하고, Run 결정 기록과 공식 SRS 개정 기록에 전·후
+SHA-256을 남깁니다. TC·자동화·Registry 기록까지 모두 성공해야 승인이 완료되며 중간 오류가
+나면 이 승인에서 바뀐 본 파일과 임시 파일을 원상복구합니다. 이미 반영된 동일 제안은 멱등
+처리하며 다른 문구로 바뀐 SRS에는 적용하지 않습니다.
 
 ## 8. Run 요약
 

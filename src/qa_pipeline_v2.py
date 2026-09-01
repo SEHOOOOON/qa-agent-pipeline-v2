@@ -67,6 +67,12 @@ class ConditionSource(str, Enum):
     SRS = "SRS"
 
 
+class ConditionChangeRole(str, Enum):
+    CHANGED = "변경"
+    UNCHANGED = "유지"
+    SUPPORTING = "보조_근거"
+
+
 class RequirementRelation(str, Enum):
     MODIFIED = "MODIFIED"
     UPDATE_REQUIRED = "UPDATE_REQUIRED"
@@ -105,6 +111,23 @@ class ConfirmedCondition(StrictModel):
     source_type: ConditionSource
     source_text: NonEmptyStr
     requirement_ids: list[RequirementId] = Field(min_length=1)
+    change_role: ConditionChangeRole | None = Field(
+        default=None, alias="변경_구분"
+    )
+
+    @model_validator(mode="after")
+    def infer_legacy_change_role(self) -> "ConfirmedCondition":
+        """Read historical Runs conservatively while new Runs provide an explicit role."""
+
+        if self.change_role is not None:
+            return self
+        if self.source_type == ConditionSource.SRS:
+            self.change_role = ConditionChangeRole.SUPPORTING
+        else:
+            # Missing metadata must not hide a real change.  Treat it as changed
+            # so CP2 asks for coverage instead of silently routing it to regression.
+            self.change_role = ConditionChangeRole.CHANGED
+        return self
 
 
 class RequirementEffect(StrictModel):
@@ -266,7 +289,7 @@ class ProductTestCaseCandidate(StrictModel):
 class ExistingTestSelection(StrictModel):
     """Existing human-authored TC selected for impacted regression, not regeneration."""
 
-    tc_id: Annotated[str, StringConstraints(pattern=r"^TC-[A-Z]+-\d{3}$")]
+    tc_id: Annotated[str, StringConstraints(pattern=r"^TC-[A-Z0-9]+-\d{3}$")]
     source_condition_ids: list[
         Annotated[str, StringConstraints(pattern=r"^COND-\d{3}$")]
     ] = Field(min_length=1)
@@ -317,7 +340,7 @@ def _is_grouped_test_case(test_case: ProductTestCaseCandidate) -> bool:
 
 class Agent2TestDesign(StrictModel):
     request_id: NonEmptyStr
-    test_cases: list[ProductTestCaseCandidate] = Field(min_length=1)
+    test_cases: list[ProductTestCaseCandidate] = Field(default_factory=list)
     existing_tc_comparison_completed: bool = False
     related_existing_tests: list[ExistingTestSelection] = Field(
         default_factory=list, alias="관련_기존_TC"
@@ -629,8 +652,6 @@ class ValidationExecutionBundle(StrictModel):
                 self.candidate_results = [self.candidate_result]
             else:
                 raise ValueError("candidate_result와 candidate_results[0]이 다릅니다.")
-        if not self.candidate_results:
-            raise ValueError("최소 한 건의 실행 가능한 신규 후보 결과가 필요합니다.")
         return self
 
 
@@ -1148,7 +1169,7 @@ AGENT1_SYSTEM_INSTRUCTIONS = """
 3. 현재 MVP는 MODIFIED 변경만 처리합니다.
 4. before_condition과 after_condition은 요청 값을 바꾸거나 보완하지 않습니다.
 5. change_summary는 Agent 2가 변경 목적을 바로 이해할 수 있게 한두 문장으로 작성합니다.
-6. confirmed_conditions에는 Agent 2가 TC의 판정 기준으로 사용할 수 있는 확정 조건만 한 항목씩 분리합니다. 테스트 절차나 새로운 기대값은 만들지 않습니다.
+6. confirmed_conditions에는 Agent 2가 TC의 판정 기준으로 사용할 수 있는 확정 조건만 한 항목씩 분리합니다. 테스트 절차나 새로운 기대값은 만들지 않습니다. 각 조건의 `변경_구분`은 변경 후 새로 검증할 내용이면 `변경`, 변경 전·후에 같은 동작을 회귀 확인하는 내용이면 `유지`, SRS 공통 규칙이나 실행 문맥을 뒷받침하는 내용이면 `보조_근거`로 명시합니다. 단어가 같다는 이유만으로 값의 대응 관계나 실행 순서가 바뀐 조건을 `유지`로 두지 않습니다.
 7. acceptance_notes 중 제품의 긍정적인 판정 기준은 각각 별도 confirmed_condition으로 만들고 source_text에 해당 인수 조건 원문 전체를 한 글자도 합치거나 바꾸지 않고 기록합니다. `범위에 포함하지 않는다`, `제외한다`, `검증 대상이 아니다`처럼 범위를 제한하는 항목은 confirmed_condition으로 만들지 말고 excluded_scope에 원문 그대로 기록합니다. 시험 준비·선택·종료 후 복원 절차도 제품 기대 결과인 confirmed_condition으로 바꾸지 않지만 excluded_scope에도 넣지 않습니다. 해당 원문은 변경 요청에 보존되어 Agent 2가 TC 절차로 사용합니다. 그 밖에 after_value와 description에만 있는 변경 후 범위·경계·모드별 정책도 별도 조건으로 포함합니다. 특히 하한~상한 범위는 두 경계를 모두 전달하고, 추가 조건의 source_type은 CHANGE_REQUEST, source_text는 해당 요청의 연속된 원문으로 기록합니다.
 8. 기존 SRS 조건을 사용할 때는 source_type을 SRS로 지정하고 source_text는 연결 Requirement의 요구사항 또는 인수 기준에서 연속된 원문 일부를 그대로 사용합니다.
 9. 각 confirmed_condition의 requirement_ids와 requirement_effects에는 제공된 SRS에 존재하는 ID만 사용합니다.
@@ -1252,7 +1273,7 @@ class OpenAIAgent1:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent1-2-7",
+                prompt_cache_key="qa-v2-agent1-2-8",
                 input=[
                     {"role": "system", "content": AGENT1_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
@@ -1732,9 +1753,9 @@ AGENT2_SYSTEM_INSTRUCTIONS = """
 1. 검증된 변경 요청 원문, Agent 1의 confirmed_conditions와 고정된 SRS만 사실 근거로 사용합니다.
 2. requirement_effects가 NO_IMPACT인 Requirement는 테스트 범위에 포함하지 않습니다.
 3. MODIFIED는 변경 동작 검증 후보, UPDATE_REQUIRED는 변경으로 기대 결과·절차 수정이 필요한 후보, VERIFY는 기존 동작 회귀 선택으로 해석합니다.
-3-1. 기존 TC 카탈로그의 `검증 동작`이 VERIFY·유지 조건을 그대로 검증하면 관련_기존_TC로 선택하고 동일 내용을 TC-CAND로 다시 만들지 않습니다. Requirement ID만 같고 검증 동작이 다르면 재사용으로 판단하지 않습니다. 기존 TC가 변경된 기대 결과를 검증할 수 없을 때만 부족한 변경분 후보를 만듭니다.
-4. 모든 confirmed_condition을 test_cases 또는 관련_기존_TC의 source_condition_ids 중 최소 한 곳에 반영합니다. 실제로 바뀐 제품 판정 조건은 반드시 test_cases에 반영합니다. 준비·선택·복원 절차를 제품 기대 결과로 바꾸지 않습니다. 변경 요청의 `[시험 절차 메모]`는 제외 범위가 아니며, 준비 메모는 preconditions 또는 steps에, 종료 후 복원 메모는 restore_steps에 원문 그대로 기록하고 restore_required=true로 설정합니다.
-5. 모든 기대 결과는 source_condition_ids로 제품 판정 근거를 연결합니다. 근거에 없는 수치·시간·문구·UI 동작을 추가하지 않습니다. 장비 선택 성공, 사전조건 준비 완료, 시험 종료 후 복원처럼 실행을 위한 절차는 steps·preconditions·restore_steps에만 두고, 변경 요청이 그 동작 자체의 제품 결과를 요구하지 않는 한 expected_results로 만들지 않습니다.
+3-1. 기존 TC 카탈로그의 `검증 동작`이 VERIFY·유지 조건 또는 변경 후 조건을 그대로 검증하면 관련_기존_TC로 선택하고 동일 내용을 TC-CAND로 다시 만들지 않습니다. Requirement ID만 같고 검증 동작이 다르면 재사용으로 판단하지 않습니다. 기존 TC가 변경 후 조건을 전부 검증하면 test_cases는 비워 두고 관련_기존_TC만 반환할 수 있습니다. 기존 TC가 변경된 기대 결과를 검증할 수 없을 때만 부족한 변경분 후보를 만듭니다. `변경_구분=유지` 조건은 관련_기존_TC로만 연결하고, `변경_구분=변경` 조건은 신규·수정 후보 또는 변경 후 동작을 이미 검증하는 기존 TC 중 한 경로로 연결합니다.
+4. 모든 confirmed_condition을 test_cases 또는 관련_기존_TC의 source_condition_ids 중 최소 한 곳에 반영합니다. 실제로 바뀐 제품 판정 조건은 신규·수정 후보 또는 변경 후 동작을 이미 그대로 검증하는 기존 TC 중 한 경로에 반영합니다. 준비·선택·복원 절차를 제품 기대 결과로 바꾸지 않습니다. 변경 요청의 `[시험 절차 메모]`는 제외 범위가 아니며, 준비 메모는 preconditions 또는 steps에, 종료 후 복원 메모는 restore_steps에 원문 그대로 기록하고 restore_required=true로 설정합니다.
+5. 모든 기대 결과는 source_condition_ids로 제품 판정 근거를 연결합니다. 근거에 없는 수치·시간·문구·UI 동작을 추가하지 않습니다. 장비 선택 성공, 사전조건 준비 완료, 시험 종료 후 복원처럼 실행을 위한 절차는 steps·preconditions·restore_steps에만 두고, 변경 요청이 그 동작 자체의 제품 결과를 요구하지 않는 한 expected_results로 만들지 않습니다. Condition 원문에 없는 `선택하고 적용할 수 있다`, `클릭할 수 있다`, `입력할 수 있다` 같은 실행 행동 성공 문장을 새 기대 결과로 만들지 않습니다. Condition 자체가 설정 가능·선택 가능 같은 제품 기능을 요구하면 이를 삭제하지 말고 버튼 활성 상태, 선택값 반영 또는 적용 뒤 상태처럼 실제로 판정할 관찰값으로 구체화합니다.
 5-1. 제출 전 각 TC를 자체 점검합니다. (a) TC의 requirement_ids는 그 TC의 source_condition_ids가 함께 근거를 가져야 하고, (b) 각 기대 결과의 source_condition_ids는 그 TC의 source_condition_ids 범위 안에 있어야 하며, (c) 각 기대 결과의 UI 표시·상태는 연결 Condition의 source_text 원문에 실제로 있어야 합니다. TC 수준 Condition에는 제품 판정 기준뿐 아니라 준비·복원 지시가 포함될 수 있으므로 모든 TC Condition을 억지로 expected_results에 다시 넣지 않습니다. 특히 UI·내부 상태 이중 검증 TC는 사용자가 요청한 UI 변경 결과와 그 동작을 뒷받침하는 내부 상태를 사용하고, 별도의 UI 상태 표시를 새로 만들지 않습니다.
 5-2. 모드가 사전조건의 실행 문맥이면 initial_mode에만 기록합니다. steps에서 모드를 실제로 설정·변경·전환·요청할 때만 단일 조건은 requested_mode, 묶음 조건은 requested_modes에 해당 모드를 기록해 Agent 3가 필요한 모드 행동을 계획하게 합니다. 사전조건과 같은 모드를 requested_mode에 복제해 불필요한 제품 동작을 만들지 않습니다.
 5-2-1. 기존 중앙 관제 온도·모드 흐름의 묶음 TC가 실행 전 모드·설정 온도를 요구사항으로 고정하지 않았지만 시험 중 두 값 중 하나를 변경하고 원상 복구해야 하면 restore_observed_hvac_state=true를 사용합니다. 이때 임의 initial_mode·initial_temperature_c를 만들지 말고 restore_steps에 `실행 직전 관찰한 모드와 설정 온도로 복원하고 적용한다`는 뜻을 명시합니다. 이 표시는 처음 보는 일반 기능의 내부 값을 임의로 복원하는 허가가 아닙니다.
@@ -1761,7 +1782,7 @@ AGENT2_SYSTEM_INSTRUCTIONS = """
 14. TC가 참조하는 Requirement와 Condition은 입력에 존재하는 ID만 사용합니다.
 15. confirmed_condition을 여러 TC가 공유할 수 있지만 동일 목적의 TC를 표현만 바꿔 중복 생성하지 않습니다.
 16. automation_candidate는 현재 가상 중앙제어 화면과 내부 상태 조회로 자동화 가능한지 판단한 후보 표시일 뿐이며 코드를 만들지 않습니다.
-16-1. CENTRAL 변경 검증에는 현재 단일 장비 MVP가 실행할 수 있도록 target_role=PRIMARY_TEST_DEVICE인 automation_candidate TC를 최소 한 건 포함합니다. 복수 장비 TC는 추가할 수 있지만 유일한 CENTRAL 후보로 만들지 않습니다.
+16-1. 신규·수정 후보가 필요한 경우에는 현재 단일 장비 MVP가 실행할 수 있도록 target_role=PRIMARY_TEST_DEVICE인 automation_candidate TC를 우선 설계합니다. 다만 변경 후 조건을 관련 기존 TC가 전부 검증하면 억지로 신규 후보를 만들지 않습니다.
 17. SRS 문구의 후속 개정 필요, 정확한 안내 문구 미지정처럼 기대 동작을 바꾸지 않고 현재 TC를 설계할 수 있는 참고 사항은 coverage_notes에 남깁니다.
 17-1. Agent 1의 excluded_scope와 `제외된_정보_부족`은 TC로 만들지 말고 Agent 2의 `제외_범위`와 `제외된_정보_부족`에 원문 그대로 인계합니다. 다만 시험 준비·종료 후 복원 문장이 과거 Agent 1 결과의 excluded_scope에 들어 있어도 실제 제외 범위로 인계하지 말고 규칙 4의 TC 절차로 보존합니다. 제외 범위의 상태 유지 여부를 확인하는 기대 결과도 새로 만들지 않습니다. 확정된 긍정적 변경 결과만 test_cases에 포함합니다.
 18. 현재 TC의 기대 결과와 실행 범위가 이미 근거로 확정됐지만 사람이 최종 보고에서 확인하면 좋은 사항은 `최종_확인_사항`에 남깁니다. 이 항목은 후속 자동 실행을 중단하지 않습니다.
@@ -1842,7 +1863,7 @@ class OpenAIAgent2:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-            prompt_cache_key="qa-v2-agent2-2-15",
+                prompt_cache_key="qa-v2-agent2-2-18",
                 input=[
                     {"role": "system", "content": AGENT2_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
@@ -1916,71 +1937,6 @@ def _normalize_agent2_technical_ids(
     return design.model_copy(update={"test_cases": normalized_cases}), changes
 
 
-def _normalize_agent2_verify_regressions(
-    analysis: Agent1Analysis,
-    design: Agent2TestDesign,
-    existing_catalog: tuple[ExistingRegressionSpec, ...] = EXISTING_REGRESSION_CATALOG,
-) -> tuple[Agent2TestDesign, list[dict[str, Any]]]:
-    """Deterministically add catalog regressions for Agent 1 VERIFY relations.
-
-    Agent 2 still decides whether a regression tied to the directly modified
-    Requirement remains reusable.  This normalizer only prevents an already
-    confirmed VERIFY relation from disappearing because of model wording
-    variation.
-    """
-
-    verify_requirement_ids = {
-        effect.requirement_id
-        for effect in analysis.requirement_effects
-        if effect.relation == RequirementRelation.VERIFY
-    }
-    selected_ids = {item.tc_id for item in design.related_existing_tests}
-    additions: list[ExistingTestSelection] = []
-    changes: list[dict[str, Any]] = []
-    for spec in existing_catalog:
-        matched_requirements = sorted(
-            verify_requirement_ids.intersection(spec.requirement_ids)
-        )
-        if not matched_requirements or spec.tc_id in selected_ids:
-            continue
-        source_condition_ids = [
-            condition.condition_id
-            for condition in analysis.confirmed_conditions
-            if set(condition.requirement_ids).intersection(matched_requirements)
-        ]
-        if not source_condition_ids:
-            continue
-        additions.append(
-            ExistingTestSelection(
-                tc_id=spec.tc_id,
-                source_condition_ids=list(dict.fromkeys(source_condition_ids)),
-                selection_reason=(
-                    "Agent 1이 VERIFY로 확정한 유지 Requirement "
-                    + ", ".join(matched_requirements)
-                    + "에 연결된 기존 검증 동작을 결정론적으로 회귀 확인합니다."
-                ),
-            )
-        )
-        selected_ids.add(spec.tc_id)
-        changes.append(
-            {
-                "tc_id": spec.tc_id,
-                "matched_requirement_ids": matched_requirements,
-                "source_condition_ids": list(dict.fromkeys(source_condition_ids)),
-                "reason": "AGENT1_VERIFY_RELATION",
-            }
-        )
-    if not additions:
-        return design, []
-    catalog_order = {
-        spec.tc_id: index for index, spec in enumerate(existing_catalog)
-    }
-    selections = sorted(
-        [*design.related_existing_tests, *additions],
-        key=lambda item: catalog_order[item.tc_id],
-    )
-    return design.model_copy(update={"related_existing_tests": selections}), changes
-
 # ---------------------------------------------------------------------------
 # Checkpoint 2: 테스트케이스 품질 검증
 # ---------------------------------------------------------------------------
@@ -1989,11 +1945,13 @@ _FORBIDDEN_CODE = re.compile(
     flags=re.IGNORECASE,
 )
 
-_UNCHANGED_CONDITION = re.compile(
-    r"(?:기존(?:과\s*같이)?|유지|변경\s*없|그대로)", re.IGNORECASE
-)
 _PROCEDURAL_SELECTION_RESULT = re.compile(
     r"선택(?:된다|되었|되어|상태)", re.IGNORECASE
+)
+_PROCEDURAL_ACTION_SUCCESS_RESULT = re.compile(
+    r"(?:선택|적용|클릭|입력|설정|변경|전환|요청|조작|복원)"
+    r"[^.!?\n]{0,40}(?:할\s*수\s*있|가능(?:하|해|했|됨|되))",
+    re.IGNORECASE,
 )
 _UI_DISPLAY_RESULT = re.compile(
     r"(?:(?:화면|\bUI\b)[^.!?]{0,80}(?:표시|보이|나타)|"
@@ -2006,11 +1964,15 @@ _UI_DISPLAY_AUTHORITY = re.compile(
 
 
 def _is_unchanged_condition(condition: ConfirmedCondition) -> bool:
-    return bool(
-        _UNCHANGED_CONDITION.search(
-            f"{condition.statement} {condition.source_text}"
-        )
-    )
+    return condition.change_role == ConditionChangeRole.UNCHANGED
+
+
+def _is_unchanged_condition_for_request(
+    condition: ConfirmedCondition,
+    request: ChangeRequest,
+) -> bool:
+    del request  # The role is structured by Agent 1; word-set similarity is unsafe.
+    return _is_unchanged_condition(condition)
 
 
 def evaluate_checkpoint2(
@@ -2068,6 +2030,11 @@ def evaluate_checkpoint2(
         item
         for selection in design.related_existing_tests
         for item in selection.source_condition_ids
+    }
+    changed_condition_ids = {
+        condition.condition_id
+        for condition in analysis.confirmed_conditions
+        if condition.change_role == ConditionChangeRole.CHANGED
     }
     referenced_conditions = candidate_conditions | existing_conditions
     existing_by_id = _existing_regression_by_id(existing_catalog)
@@ -2230,22 +2197,56 @@ def evaluate_checkpoint2(
             RequirementRelation.UPDATE_REQUIRED,
         }
     }
+    existing_covers_target_change = any(
+        request.target_requirement_id in spec.requirement_ids
+        and bool(
+            set(selection.source_condition_ids).intersection(changed_condition_ids)
+        )
+        for selection, spec in (
+            (selection, existing_by_id.get(selection.tc_id))
+            for selection in design.related_existing_tests
+        )
+        if spec is not None
+    )
     if "REQ-CONTROL-001" in candidate_required_requirements and not any(
         tc.control_path == ControlPath.CENTRAL and "REQ-CONTROL-001" in tc.requirement_ids
         for tc in design.test_cases
+    ) and not any(
+        "REQ-CONTROL-001" in spec.requirement_ids
+        and bool(set(selection.source_condition_ids).intersection(changed_condition_ids))
+        for selection, spec in (
+            (selection, existing_by_id.get(selection.tc_id))
+            for selection in design.related_existing_tests
+        )
+        if spec is not None
     ):
         path_errors.append("REQ-CONTROL-001 중앙 제어 TC 누락")
     required_change_paths: list[tuple[str, ControlPath]] = []
     if "REQ-CONTROL-001" in candidate_required_requirements:
         required_change_paths.append(("REQ-CONTROL-001", ControlPath.CENTRAL))
     for requirement_id, control_path in required_change_paths:
-        if not any(
+        candidate_has_path = any(
             tc.purpose == TcPurpose.CHANGE_VALIDATION
             and tc.control_path == control_path
             and request.target_requirement_id in tc.requirement_ids
             and requirement_id in tc.requirement_ids
             for tc in design.test_cases
-        ):
+        )
+        existing_has_path = any(
+            request.target_requirement_id in spec.requirement_ids
+            and requirement_id in spec.requirement_ids
+            and bool(
+                set(selection.source_condition_ids).intersection(
+                    changed_condition_ids
+                )
+            )
+            for selection, spec in (
+                (selection, existing_by_id.get(selection.tc_id))
+                for selection in design.related_existing_tests
+            )
+            if spec is not None
+        )
+        if not candidate_has_path and not existing_has_path:
             path_errors.append(f"{control_path.value} 경로의 직접 변경 검증 TC 누락")
     uncovered_requirements = sorted(active_requirements - covered_requirements)
     target_change_tests = [
@@ -2254,16 +2255,20 @@ def evaluate_checkpoint2(
         if request.target_requirement_id in tc.requirement_ids
         and tc.purpose == TcPurpose.CHANGE_VALIDATION
     ]
-    if uncovered_requirements or not target_change_tests or path_errors:
+    if (
+        uncovered_requirements
+        or (not target_change_tests and not existing_covers_target_change)
+        or path_errors
+    ):
         details = []
         if uncovered_requirements:
             details.append("미포함 Requirement=" + ",".join(uncovered_requirements))
-        if not target_change_tests:
+        if not target_change_tests and not existing_covers_target_change:
             details.append("대상 변경 검증 TC 없음")
         details.extend(path_errors)
         add("CP2-008", CheckStatus.FAIL, "변경 범위 또는 제어 경로가 불완전합니다: " + "; ".join(details))
     else:
-        add("CP2-008", CheckStatus.PASS, "변경 후보와 영향받는 기존 회귀 Requirement가 중앙 관제 패널 경로로 연결됩니다.")
+        add("CP2-008", CheckStatus.PASS, "변경 후보 또는 변경 후 동작을 이미 검증하는 기존 TC와 영향 Requirement가 중앙 관제 패널 경로로 연결됩니다.")
 
     text_fields = [
         value
@@ -2629,19 +2634,36 @@ def evaluate_checkpoint2(
             "VERIFY 유지 동작을 신규 후보로 중복 생성="
             + ",".join(verify_only_candidates)
         )
+    unchanged_condition_ids = {
+        condition.condition_id
+        for condition in analysis.confirmed_conditions
+        if _is_unchanged_condition_for_request(condition, request)
+    }
     direct_change_condition_ids = {
         condition.condition_id
         for condition in analysis.confirmed_conditions
-        if condition.source_type == ConditionSource.CHANGE_REQUEST
-        and not _is_unchanged_condition(condition)
+        if condition.change_role == ConditionChangeRole.CHANGED
     }
     misrouted_change_conditions = sorted(
-        direct_change_condition_ids - candidate_conditions
+        direct_change_condition_ids - candidate_conditions - existing_conditions
     )
     if misrouted_change_conditions:
         existing_selection_errors.append(
             "변경 조건의 신규·수정 후보 누락="
             + ",".join(misrouted_change_conditions)
+        )
+    duplicated_unchanged_results = [
+        f"{tc.tc_id}/{result.result_id}"
+        for tc in design.test_cases
+        for result in tc.expected_results
+        if result.source_condition_ids
+        and set(result.source_condition_ids).issubset(unchanged_condition_ids)
+        and set(result.source_condition_ids).intersection(existing_conditions)
+    ]
+    if duplicated_unchanged_results:
+        existing_selection_errors.append(
+            "관련 기존 TC로 선택한 유지 동작을 신규 기대 결과로 중복="
+            + ",".join(duplicated_unchanged_results)
         )
     if not design.existing_tc_comparison_completed:
         existing_selection_errors.append("기존 TC 대조 완료 표시 누락")
@@ -2687,15 +2709,22 @@ def evaluate_checkpoint2(
                 minimality_errors.append(
                     f"{tc.tc_id}/{result.result_id}:준비용 장비 선택을 제품 기대 결과로 확장"
                 )
+            source_authority = " ".join(
+                known_conditions[condition_id].source_text
+                for condition_id in result.source_condition_ids
+                if condition_id in known_conditions
+            )
+            if (
+                _PROCEDURAL_ACTION_SUCCESS_RESULT.search(result.statement)
+                and not _contains(source_authority, result.statement)
+            ):
+                minimality_errors.append(
+                    f"{tc.tc_id}/{result.result_id}:Condition 원문에 없는 실행 행동 성공을 제품 기대 결과로 확장"
+                )
             if (
                 result.observation_layer == ObservationLayer.UI
                 and _UI_DISPLAY_RESULT.search(result.statement)
             ):
-                source_authority = " ".join(
-                    known_conditions[condition_id].source_text
-                    for condition_id in result.source_condition_ids
-                    if condition_id in known_conditions
-                )
                 if not _UI_DISPLAY_AUTHORITY.search(source_authority):
                     minimality_errors.append(
                         f"{tc.tc_id}/{result.result_id}:Condition 원문에 없는 UI 표시 기대"
@@ -4327,10 +4356,14 @@ def compile_automation_candidate(
         [
             assertion
             for assertion in plan.assertions
-            if assertion.strategy in _GENERIC_ASSERTION_STRATEGIES
+            if (
+                assertion.strategy in _GENERIC_ASSERTION_STRATEGIES
+                or assertion.strategy
+                == AssertionStrategy.INTERNAL_DEVICE_FIELDS_EQUALS
+            )
             and assertion.observation_layer != ObservationLayer.NOTIFICATION
         ]
-        if generic_plan and restore_actions
+        if restore_actions
         else []
     )
     lines = [
@@ -4439,6 +4472,17 @@ def compile_automation_candidate(
         elif assertion.strategy == AssertionStrategy.INTERNAL_VALUE_EQUALS:
             lines.append(
                 f"{indent}{variable} = page.evaluate({_py_literal('() => ' + assertion.selector)})"
+            )
+        elif assertion.strategy == AssertionStrategy.INTERNAL_DEVICE_FIELDS_EQUALS:
+            field_names = sorted(
+                item.field_name for item in assertion.expected_fields
+            )
+            lines.append(
+                f"{indent}{variable} = page.evaluate(\"({{id, fields}}) => {{ const device = window.__vccs.devices.find(d => d.id === id); return Object.fromEntries(fields.map(field => [field, device ? device[field] : null])); }}\", "
+                + _py_literal(
+                    {"id": plan.target_device_id, "fields": field_names}
+                )
+                + ")"
             )
     action_blocks: list[tuple[str, list[str]]] = []
     for action in [item for item in plan.actions if item.phase != AutomationPhase.RESTORE]:
@@ -4696,6 +4740,17 @@ def compile_automation_candidate(
             actual = f"page.locator({_py_literal(assertion.selector)}).is_checked()"
         elif assertion.strategy == AssertionStrategy.UI_ENABLED_EQUALS:
             actual = f"page.locator({_py_literal(assertion.selector)}).is_enabled()"
+        elif assertion.strategy == AssertionStrategy.INTERNAL_DEVICE_FIELDS_EQUALS:
+            field_names = sorted(
+                item.field_name for item in assertion.expected_fields
+            )
+            actual = (
+                "page.evaluate(\"({id, fields}) => { const device = window.__vccs.devices.find(d => d.id === id); return Object.fromEntries(fields.map(field => [field, device ? device[field] : null])); }\", "
+                + _py_literal(
+                    {"id": plan.target_device_id, "fields": field_names}
+                )
+                + ")"
+            )
         else:
             actual = f"page.evaluate({_py_literal('() => ' + assertion.selector)})"
         lines.extend(
@@ -4956,7 +5011,7 @@ def run_agent1(args: argparse.Namespace) -> int:
             run_dir / "run_manifest.json",
             {
                 "contract_version": "2.4",
-                "prompt_version": "agent1-2.3",
+                "prompt_version": "agent1-2.4",
                 "run_id": run_id,
                 "stage": "AGENT_1_CP1",
                 "status": checkpoint.status.value,
@@ -5047,7 +5102,6 @@ def run_agent2(args: argparse.Namespace) -> int:
         run_dir / "checkpoint2.json",
         run_dir / "agent2_manifest.json",
         run_dir / "agent2_technical_id_normalization.json",
-        run_dir / "agent2_regression_selection_normalization.json",
         approved_catalog_file,
         reservation_file,
     ]
@@ -5093,13 +5147,7 @@ def run_agent2(args: argparse.Namespace) -> int:
         normalized_design, first_normalizations = _normalize_agent2_technical_ids(
             raw_design
         )
-        normalized_design, first_regression_normalizations = (
-            _normalize_agent2_verify_regressions(
-                analysis, normalized_design, existing_catalog
-            )
-        )
         normalization_attempts: list[dict[str, Any]] = []
-        regression_normalization_attempts: list[dict[str, Any]] = []
         if first_normalizations:
             raw_file = run_dir / "agent2_test_design_model_raw_attempt_1.json"
             _write_json(
@@ -5119,20 +5167,6 @@ def run_agent2(args: argparse.Namespace) -> int:
                 response_id=response.response_id,
                 model=response.model,
                 usage=response.usage,
-            )
-        elif first_regression_normalizations:
-            response = Agent2Response(
-                design=normalized_design,
-                response_id=response.response_id,
-                model=response.model,
-                usage=response.usage,
-            )
-        if first_regression_normalizations:
-            regression_normalization_attempts.append(
-                {
-                    "attempt": 1,
-                    "changes": first_regression_normalizations,
-                }
             )
         checkpoint2 = evaluate_checkpoint2(
             request,
@@ -5174,11 +5208,6 @@ def run_agent2(args: argparse.Namespace) -> int:
             normalized_design, retry_normalizations = (
                 _normalize_agent2_technical_ids(raw_design)
             )
-            normalized_design, retry_regression_normalizations = (
-                _normalize_agent2_verify_regressions(
-                    analysis, normalized_design, existing_catalog
-                )
-            )
             if retry_normalizations:
                 raw_file = run_dir / "agent2_test_design_model_raw_attempt_2.json"
                 _write_json(
@@ -5198,20 +5227,6 @@ def run_agent2(args: argparse.Namespace) -> int:
                     response_id=response.response_id,
                     model=response.model,
                     usage=response.usage,
-                )
-            elif retry_regression_normalizations:
-                response = Agent2Response(
-                    design=normalized_design,
-                    response_id=response.response_id,
-                    model=response.model,
-                    usage=response.usage,
-                )
-            if retry_regression_normalizations:
-                regression_normalization_attempts.append(
-                    {
-                        "attempt": 2,
-                        "changes": retry_regression_normalizations,
-                    }
                 )
             checkpoint2 = evaluate_checkpoint2(
                 request,
@@ -5245,23 +5260,6 @@ def run_agent2(args: argparse.Namespace) -> int:
                 },
             )
 
-        regression_normalization_file = (
-            run_dir / "agent2_regression_selection_normalization.json"
-        )
-        if regression_normalization_attempts:
-            _write_json(
-                regression_normalization_file,
-                {
-                    "contract_version": "1.0",
-                    "run_id": args.run_id,
-                    "stage": "AGENT_2_REGRESSION_SELECTION_NORMALIZATION",
-                    "scope": "Agent 1 VERIFY relations only",
-                    "changed_product_expectations": False,
-                    "attempts": regression_normalization_attempts,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                },
-            )
-
         design_file = run_dir / "agent2_test_design.json"
         checkpoint2_file = run_dir / "checkpoint2.json"
         _write_json(design_file, response.design.model_dump(mode="json", by_alias=True))
@@ -5270,7 +5268,7 @@ def run_agent2(args: argparse.Namespace) -> int:
             run_dir / "agent2_manifest.json",
             {
                 "contract_version": "3.0",
-                "prompt_version": "agent2-2.11",
+                "prompt_version": "agent2-2.14",
                 "run_id": args.run_id,
                 "source_stage": "AGENT_1_CP1",
                 "stage": "AGENT_2_CP2",
@@ -5282,11 +5280,6 @@ def run_agent2(args: argparse.Namespace) -> int:
                 "technical_id_normalization_sha256": (
                     _sha256_file(normalization_file)
                     if normalization_file.is_file()
-                    else None
-                ),
-                "regression_selection_normalization_sha256": (
-                    _sha256_file(regression_normalization_file)
-                    if regression_normalization_file.is_file()
                     else None
                 ),
                 "source_run_manifest_sha256": _sha256_file(run_dir / "run_manifest.json"),
@@ -6168,8 +6161,6 @@ def _candidate_execution_records(
             run_dir, run_id, target_html, artifact_dir
         )
         records.append((result, test_case, manifest, artifact_dir))
-    if not records:
-        raise ValueError("검증 실행으로 인계할 Agent 3 완료 후보가 없습니다.")
     exclusions = [
         AutomationExclusion.model_validate(item)
         for item in summary.get("자동화_제외_TC", [])
@@ -6645,7 +6636,7 @@ def run_validation_execution(args: argparse.Namespace) -> int:
         bundle = ValidationExecutionBundle(
             run_id=args.run_id,
             status=stage_status,
-            candidate_result=candidate_results[0],
+            candidate_result=(candidate_results[0] if candidate_results else None),
             candidate_results=candidate_results,
             environment_precheck=precheck,
             selected_regression_ids=[item.tc_id for item in selected],
@@ -6685,8 +6676,12 @@ def run_validation_execution(args: argparse.Namespace) -> int:
                     else None
                 ),
                 "source_agent3_artifacts": source_artifacts,
-                "candidate_reused": candidate_results[0].reused,
-                "validation_candidate_sha256": candidate_results[0].test_sha256,
+                "candidate_reused": (
+                    candidate_results[0].reused if candidate_results else None
+                ),
+                "validation_candidate_sha256": (
+                    candidate_results[0].test_sha256 if candidate_results else None
+                ),
                 "validation_candidate_trial_sha256": None,
                 "baseline_test_file": baseline_test_file.name,
                 "baseline_test_sha256": baseline_before,
@@ -6726,7 +6721,10 @@ def run_validation_execution(args: argparse.Namespace) -> int:
 
     print(f"Run ID: {args.run_id}")
     print(f"Validation execution: {stage_status.value}")
-    print("Candidate results: " + ", ".join(item.test_id for item in candidate_results))
+    print(
+        "Candidate results: "
+        + (", ".join(item.test_id for item in candidate_results) or "NONE")
+    )
     print(f"Candidate trials reused: {sum(item.reused for item in candidate_results)}/{len(candidate_results)}")
     print(f"Automation exclusions: {len(automation_exclusions)}")
     print(f"Related regressions selected: {len(selected)}")
@@ -6936,7 +6934,7 @@ def _agent4_new_source_chain_matches(
         return False
     summary_hash = manifest.get("source_agent3_run_summary_sha256")
     summary_file = run_dir / "agent3_run_summary.json"
-    if summary_hash is not None and (
+    if (
         not isinstance(summary_hash, str)
         or not summary_file.is_file()
         or _sha256_file(summary_file) != summary_hash
@@ -6971,6 +6969,78 @@ def _agent4_new_source_chain_matches(
             or _sha256_file(validation_trial) != validation_trial_hash
         ):
             return False
+    return True
+
+
+def _agent4_regression_source_chain_matches(
+    run_dir: Path,
+    bundle: ValidationExecutionBundle,
+    manifest: dict[str, Any],
+) -> bool:
+    baseline_hash = manifest.get("baseline_test_sha256")
+    if (
+        not isinstance(baseline_hash, str)
+        or bundle.environment_precheck.test_sha256 != baseline_hash
+    ):
+        return False
+
+    raw_approved = manifest.get("approved_regression_assets", [])
+    if not isinstance(raw_approved, list):
+        return False
+    approved_by_id: dict[str, dict[str, Any]] = {}
+    for item in raw_approved:
+        if not isinstance(item, dict) or not isinstance(item.get("tc_id"), str):
+            return False
+        tc_id = item["tc_id"]
+        if tc_id in approved_by_id:
+            return False
+        approved_by_id[tc_id] = item
+
+    regression_ids = {result.test_id for result in bundle.regression_results}
+    if not set(approved_by_id).issubset(regression_ids):
+        return False
+    for result in bundle.regression_results:
+        approved = approved_by_id.get(result.test_id)
+        if approved is None:
+            if result.test_sha256 != baseline_hash:
+                return False
+            continue
+        if (
+            approved.get("automation_file") != result.test_file
+            or approved.get("automation_sha256") != result.test_sha256
+        ):
+            return False
+
+    catalog_hash = manifest.get("approved_regression_catalog_sha256")
+    if approved_by_id and not isinstance(catalog_hash, str):
+        return False
+    if catalog_hash is not None:
+        catalog_file = run_dir / "approved_regression_catalog.json"
+        if (
+            not isinstance(catalog_hash, str)
+            or not catalog_file.is_file()
+            or _sha256_file(catalog_file) != catalog_hash
+        ):
+            return False
+        try:
+            snapshot_by_id = {
+                item.tc_id: item
+                for item in _catalog_from_snapshot(
+                    _read_json_payload(catalog_file)
+                )
+                if item.source == "APPROVED"
+            }
+        except (TypeError, ValueError, ValidationError):
+            return False
+        for tc_id, approved in approved_by_id.items():
+            snapshot = snapshot_by_id.get(tc_id)
+            if (
+                snapshot is None
+                or snapshot.automation_file != approved.get("automation_file")
+                or snapshot.automation_sha256
+                != approved.get("automation_sha256")
+            ):
+                return False
     return True
 
 
@@ -7735,11 +7805,8 @@ def run_agent4(args: argparse.Namespace) -> int:
                 result.target_sha256 == manifest.get("target_sha256")
                 for result in _validation_results(bundle)
             )
-            and bundle.environment_precheck.test_sha256
-            == manifest.get("baseline_test_sha256")
-            and all(
-                result.test_sha256 == manifest.get("baseline_test_sha256")
-                for result in bundle.regression_results
+            and _agent4_regression_source_chain_matches(
+                run_dir, bundle, manifest
             )
         )
         new_source_chain_matches = _agent4_new_source_chain_matches(
@@ -7929,6 +7996,13 @@ def run_agent4(args: argparse.Namespace) -> int:
                 )
             )
         status_counts = {status: sum(result.status == status for result in results) for status in NeutralExecutionStatus}
+        recommendation = _agent4_recommendation(findings, checkpoint_status)
+        if (
+            recommendation == FinalRecommendation.PASS
+            and not bundle.candidate_results
+            and bundle.automation_exclusions
+        ):
+            recommendation = FinalRecommendation.HUMAN_REVIEW
         analysis = Agent4Analysis(
             run_id=args.run_id,
             validation_execution_sha256=_sha256_file(execution_file),
@@ -7943,7 +8017,7 @@ def run_agent4(args: argparse.Namespace) -> int:
             final_review_notes=bundle.final_review_notes,
             srs_revision_proposals=bundle.srs_revision_proposals,
             automation_exclusions=bundle.automation_exclusions,
-            recommendation=_agent4_recommendation(findings, checkpoint_status),
+            recommendation=recommendation,
             created_at=datetime.now(timezone.utc).isoformat(),
         )
         analysis_file = run_dir / "agent4_analysis.json"
@@ -8310,7 +8384,13 @@ def run_pipeline(args: argparse.Namespace) -> int:
                 "contract_version": "1.1",
                 "run_id": run_id,
                 "stage": "AGENT_3_SELECTION",
-                "status": "SELECTED" if selected_tc_ids else "NOT_AUTOMATABLE",
+                "status": (
+                    "SELECTED"
+                    if selected_tc_ids
+                    else "NOT_AUTOMATABLE"
+                    if selection_candidates
+                    else "NOT_REQUIRED"
+                ),
                 "selected_tc_id": selected_tc_id,
                 "selected_tc_ids": selected_tc_ids,
                 "candidates": selection_candidates,
@@ -8318,21 +8398,44 @@ def run_pipeline(args: argparse.Namespace) -> int:
             },
         )
         if not selected_tc_ids:
-            stage_exit_codes["agent3"] = 2
+            summary_status = (
+                "EXCLUDED" if prefiltered_exclusions else "NOT_REQUIRED"
+            )
+            _write_json(
+                run_dir / "agent3_run_summary.json",
+                {
+                    "contract_version": "1.1",
+                    "run_id": run_id,
+                    "stage": "AGENT_3_RUN_SUMMARY",
+                    "status": summary_status,
+                    "selected_tc_ids": [],
+                    "executed_tc_ids": [],
+                    "entries": [],
+                    "자동화_제외_TC": prefiltered_exclusions,
+                    "target_file": target_html.name,
+                    "target_sha256": _sha256_file(target_html),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+            stage_exit_codes["agent3"] = 0
+            pipeline_status = "PARTIAL" if prefiltered_exclusions else "PASS"
             _write_orchestrator_manifest(
                 run_dir,
                 run_id,
-                status="STOPPED",
+                status=pipeline_status,
                 selected_tc_id=None,
                 target_html=target_html,
                 stage_exit_codes=stage_exit_codes,
-                stopped_at="agent3",
+                stopped_at=None,
             )
             print(f"Run ID: {run_id}")
-            print("Agent 3 selection: NO ELIGIBLE TC")
+            print(
+                "Agent 3 selection: "
+                + ("ALL CANDIDATES EXCLUDED" if prefiltered_exclusions else "NOT REQUIRED")
+            )
             print("Agent 3 model call: NOT EXECUTED")
             print(f"Orchestrator manifest: {run_dir / 'orchestrator_manifest.json'}")
-            return 2
+            return 0
 
         print("Agent 3 selected TCs: " + ", ".join(selected_tc_ids))
         candidates_root = run_dir / "agent3_candidates"
@@ -8375,8 +8478,8 @@ def run_pipeline(args: argparse.Namespace) -> int:
             "PASS"
             if successful_entries and not automation_exclusions
             else "PARTIAL"
-            if successful_entries
-            else "STOPPED"
+            if automation_exclusions
+            else "PASS"
         )
         summary_file = run_dir / "agent3_run_summary.json"
         _write_json(
@@ -8395,7 +8498,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
                 "created_at": datetime.now(timezone.utc).isoformat(),
             },
         )
-        agent3_exit = 0 if successful_entries else 2
+        agent3_exit = 0
         stage_exit_codes["agent3"] = agent3_exit
         status = run_status
         _write_orchestrator_manifest(
@@ -8405,7 +8508,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
             selected_tc_id=selected_tc_id,
             target_html=target_html,
             stage_exit_codes=stage_exit_codes,
-            stopped_at=None if agent3_exit == 0 else "agent3",
+            stopped_at=None,
         )
         print(f"Orchestrator status: {status}")
         print(f"Agent 3 completed candidates: {len(successful_entries)}")

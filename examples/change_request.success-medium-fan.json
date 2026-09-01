@@ -1,0 +1,23 @@
+{
+  "request_id": "CR-SUCCESS-FAN-002",
+  "change_type": "MODIFIED",
+  "target_requirement_id": "REQ-FAN-001",
+  "before_value": "적용 후 내부 fanSpeed는 선택한 코드와 같고, HIGH는 장비 카드에 사용자용 한글 라벨 강풍으로 표시됩니다.",
+  "after_value": "적용 후 내부 fanSpeed는 선택한 코드와 같고, MED는 장비 카드에 사용자용 한글 라벨 중풍으로, HIGH는 강풍으로 표시됩니다.",
+  "description": "MED 풍량의 사용자 화면 표시를 중풍으로 명시하고 내부 상태 코드는 MED로 유지합니다. 기존 HIGH 풍량의 강풍 표시와 내부 HIGH 상태는 변경하지 않습니다.",
+  "reason": "승인 공식 TC 재사용과 SRS 개정 제안이 실제 모델 End-to-End 실행에서 연결되는지 확인합니다.",
+  "acceptance_notes": [
+    "중앙 관제 패널에서 오류와 잠금이 없는 단일 장비를 대상으로 합니다.",
+    "첫 실행 기본 상태인 LOW 풍량을 확인한 뒤 시험을 시작합니다.",
+    "MED 풍량을 선택하고 적용한 직후 대상 장비 카드에 중풍이 표시되어야 합니다.",
+    "같은 시점에 대상 장비의 내부 fanSpeed는 MED여야 합니다.",
+    "기존 HIGH 풍량을 적용하면 장비 카드에 강풍이 표시되고 내부 fanSpeed는 HIGH인 동작을 유지합니다.",
+    "시험 뒤 대상 장비를 LOW 풍량으로 복원하고 적용합니다."
+  ],
+  "out_of_scope": [
+    "복수 장비 풍량 적용",
+    "LOW·AUTO 풍량 표시 규칙",
+    "벽면 리모컨 또는 로컬 조작",
+    "실제 장비 통신"
+  ]
+}
