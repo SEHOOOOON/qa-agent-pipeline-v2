@@ -22,7 +22,19 @@ qa-pipeline-v2 = "qa_pipeline_v2:main"
 qa-pipeline-ui = "qa_pipeline_ui:main"
 
 [tool.setuptools]
-py-modules = ["qa_pipeline_v2", "qa_pipeline_ui"]
+py-modules = [
+  "qa_pipeline_v2",
+  "qa_pipeline_ui",
+  "qa_pipeline_trace",
+  "qa_pipeline_io",
+  "qa_pipeline_contracts",
+  "qa_pipeline_agent1",
+  "qa_pipeline_agent2",
+  "qa_pipeline_agent3",
+  "qa_pipeline_execution",
+  "qa_pipeline_reporting",
+  "qa_pipeline_orchestrator",
+]
 package-dir = {"" = "src"}
 
 [tool.pytest.ini_options]

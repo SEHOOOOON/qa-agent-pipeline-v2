@@ -8,7 +8,13 @@
 
 ~~~text
 python -m pytest --collect-only -q
-tests/test_pipeline.py: 180
+tests/test_agent2.py: 39
+tests/test_agent3.py: 56
+tests/test_agent4_reporting.py: 20
+tests/test_integrity_cli.py: 5
+tests/test_orchestration_execution.py: 20
+tests/test_pipeline_ui.py: 16
+tests/test_srs_agent1.py: 24
 ~~~
 
 상세 목록은 [자동 테스트 카탈로그](07_TEST_CATALOG.md)에 있습니다.
@@ -56,14 +62,16 @@ tests/test_pipeline.py: 180
 ~~~powershell
 python -m pytest -q
 python -m pytest --collect-only -q
-python -m py_compile src/qa_pipeline_v2.py src/qa_pipeline_ui.py tests/test_pipeline.py
+python -m compileall -q src tests
 git diff --check
 git status --short
 ~~~
 
-실제 API Live Run은 자동 테스트와 별도입니다. API 호출 전에 입력 Preview와 비밀정보 포함 여부를 확인합니다. `RUN-20260827-114925-507176`은 Agent 1 REVIEW·CONTINUE, Agent 2 PASS, Agent 3 CP3 PASS·후보 시험, 환경 점검, 관련 기존 회귀 2건과 Agent 4를 완료했습니다. 최초 Slack·Notion Dry-run을 보존한 뒤 별도 전송 시도에서 Slack 1건·Notion 4건이 `SENT`였고, `사람_최종_검토.md`와 Manifest도 생성했습니다. Run 텍스트 검사에서는 API 키·로컬 사용자 경로 0건이었고 Project1 대상 HTML SHA-256은 `5D7649F401B1E721372E4ABDB8FDC65E4A3BD2D4E0FD0BD9E2C7161C9AA9B93C`으로 유지됐습니다. GitHub에서 최신 수치를 대조할 수 있도록 `examples/results/agent1-agent2-agent3-agent4-lock-disable/`에 단계별 상태, 핵심 관찰, 사람 검토 공개본, 실제 전송 상태와 원본·공개 파일 SHA-256을 포함한 최소 공개 증거 묶음을 둡니다.
+실제 API Live Run은 자동 테스트와 별도입니다. 최신 공개 `RUN-20260903-121213-4CCC7A`은 API 입력 재료의 비밀정보·로컬 경로 검사를 먼저 통과한 뒤 Agent 1~3을 실제 호출했습니다. Agent 1 첫 결과의 누락은 CP1 재작업으로 보완됐고, Agent 2는 신규 MED 검증과 승인 HIGH 회귀를 분리했습니다. 신규 후보·환경 점검·`TC-V2-001`이 모두 PASSED였으며 CP4·최종 권고 PASS, 자동화 제외·Finding 0건, Slack·Notion PREVIEW를 확인했습니다. 공개 최소 증거는 `examples/results/agent1-agent2-agent3-agent4-medium-fan/`에 둡니다.
 
-최신 성공 흐름 `RUN-20260829-054330-A18942`은 실제 중앙제어 Run 화면에서 시작했습니다. Agent 1은 첫 응답의 인수 조건 누락을 CP1이 차단해 1회 재작업한 뒤 REVIEW·CONTINUE, Agent 2·CP2와 Agent 3·CP3 및 신규 후보 Trial은 PASS였습니다. `execute`는 같은 후보 증거를 해시 확인 후 재사용하고 환경 점검을 통과했으며, Agent 4는 제품 결과 1건·환경 결과 1건을 모두 PASSED로 분류해 CP4·최종 권고 PASS, 검토 항목·자동화 제외 0건을 생성했습니다. 시험은 장비 카드 `강풍`과 내부 `fanSpeed=HIGH`를 확인한 뒤 LOW로 복원했으며, Slack·Notion은 Preview만 생성했습니다.
+역할별 파일 분리 후 로컬 Live `RUN-20260903-125732-ECE88F`로 같은 연결을 다시 검증했습니다. CP1·CP3가 첫 산출물 오류를 각각 차단하고 1회 재작성 뒤 전체 PASS가 됐으며, 신규 후보·환경 점검·승인 회귀 3건과 CP4·최종 권고가 모두 PASS였습니다. 재작성 2회를 포함한 Agent 1~3 누적 사용량은 63,022 tokens입니다. Candidate와 승인 기존 회귀 Trace ZIP의 사용자 경로·임시 작업폴더명·키 패턴은 모두 0건이었습니다.
+
+잠금 실패 사례와 실제 Slack·Notion 전송 증거는 `examples/results/agent1-agent2-agent3-agent4-lock-disable/`에 별도로 유지합니다. 성공·실패 Run의 상세 시행착오와 계약 변경 이유는 `DECISION_LOG.md`를 기준으로 하며 이 문서에는 현재 검증 범위만 둡니다.
 
 ## 6. 완료 판정
 
@@ -80,20 +88,6 @@ git status --short
 - README·내부 문서의 최신 수치와 공개 실행 증거 일치
 - git diff --check 통과
 
-테스트 통과는 실제 Live Run 성공을 뜻하지 않습니다. 과거 묶음 Live에서는 실행 직전 모드·온도 복원 계약이 없어 3건을 기술적으로 제외했지만, 현재는 V1 중앙 관제 온도·모드 흐름에 한해 런타임 `mode`·`setTemp` 저장·복원을 구현하고 실제 Playwright 시험으로 원상 복구를 확인했습니다. 이 보완 계약을 실제 모델이 생성하는 새 API Run으로 다시 확인하는 작업은 별도 비용을 발생시키므로 자동 테스트 결과와 구분합니다.
+테스트 통과는 실제 Live Run 성공을 뜻하지 않습니다. 자동 테스트 180건과 위 최신 Live를 모두 완료했기 때문에 현재 계약의 코드 검증과 실제 모델 연결 증거를 구분해 제시할 수 있습니다.
 
-잠금 변경 Run은 제품 불일치 후보인 실패 증거로 그대로 유지합니다.
-`examples/change_request.success-fan-speed.json`은 현재 V2 기준 제품에서 관찰되는
-`강풍` UI와 내부 `fanSpeed=HIGH`를 근거로 만든 변경 요청은 위 Live Run에서 실제 성공 결과를 확보했습니다. 오세훈 검토자 승인 뒤 `TC-V2-001` 정식 TC·자동화를 등록했습니다.
-
-중앙제어 Run·승인 화면 변경 뒤 최신 성공 후보를 현재 HTML에 API 호출 없이 다시 실행해
-54,781ms PASS와 완전한 Screenshot·Trace 증거를 확보했습니다. 재검증 증거와 Manifest의
-비밀정보·로컬 절대경로 패턴은 0건입니다. 등록된 자동화 파일도 현재 V2 HTML에 직접
-실행해 PASS했습니다.
-
-Registry 등록 자산은 파일·SHA-256·구조화 TC를 검증한 뒤 Agent 2 기존 TC 입력과 Run
-Snapshot에 합쳐집니다. 선택된 승인 자산은 `execute`에서 승인 Python으로 실제
-Playwright 재실행하며, `TC-V2-001`의 PASS와 Screenshot·Trace 생성을 자동 테스트에서
-확인했습니다. MODIFIED·UPDATE_REQUIRED의 SRS 개정 제안은 최종 사람 검토와 승인 화면에
-전달되며, 별도 SRS 동의 없이 공식 등록할 수 없습니다. 승인 시 기준 SRS 인수 기준과
-개정 기록의 전·후 해시를 함께 남기는 흐름도 자동 테스트로 확인했습니다.
+Registry 등록 자산은 파일·SHA-256·구조화 TC를 검증한 뒤 Agent 2 기존 TC 입력과 Run Snapshot에 합칩니다. 최신 Live에서 `TC-V2-001`의 검증 동작을 MED 신규 후보와 분리해 선택하고 승인 Python으로 다시 실행하는 흐름을 확인했습니다. SRS 개정 제안과 신규 후보 공식 등록은 자동 권고 PASS만으로 반영하지 않으며 사람의 별도 승인이 필요합니다.

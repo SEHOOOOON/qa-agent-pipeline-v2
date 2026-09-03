@@ -24,17 +24,7 @@
 | Agent 4 | 규칙 기반 결과 분류와 Slack·Notion 보고 | 분류·외부 보고를 유지하고 인계·증거 정합성 확인 추가 |
 | 실행 증거 | 고정 예시 중심 | 변경 요청별 Run 산출물과 SHA-256 |
 
-V2의 목적은 새로운 QA 방법론을 만드는 것이 아닙니다. 프로젝트 1의 절차에서 실제 모델 연결에 필요한 최소 보완만 추가합니다.
-
-V1에서 V2 독립 실행에 필요한 가상 중앙제어 HTML, Pytest 설정, 사람이 작성한
-기존 회귀 테스트와 실행 설정만 `product_baseline/`에 가져왔습니다. V2는 이 HTML을
-Agent 3 시험 대상으로 사용하고, Agent 2가 관련 있다고 선택한 기존 회귀만 같은
-폴더의 테스트 코드에서 실행합니다. V1 포트폴리오 페이지·보고서·영상·Agent 4
-코드·`.env`는 가져오지 않습니다.
-
-가상 중앙제어 HTML은 가져온 V1 제품 제어 동작과 기존 회귀 인터페이스를 유지하면서,
-V2에서만 팀장·Agent 1~4 버튼이 저장된 실제 Run 증거를 조회하는 패널로 확장됐습니다.
-Project1 원본은 변경하지 않았습니다.
+V2는 새로운 QA 방법론을 추가한 것이 아니라 V1 절차에 실제 모델 호출, 단계별 JSON 인계, 자동화 후보 생성과 실행 증거를 연결한 버전입니다. 독립 실행에 필요한 가상 중앙제어 HTML과 사람이 작성한 기존 회귀 자산만 `product_baseline/`에 두며 Project1 원본은 변경하지 않습니다.
 
 ## 단계별 동작
 
@@ -46,17 +36,11 @@ Project1 원본은 변경하지 않았습니다.
 | 기존 회귀 | Agent 2가 영향 관계를 기록한 기존 TC만 실행 | 환경 사전 점검 통과 |
 | Agent 4 / CP4 | 제품 불일치 후보, 자동화 오류, 환경 오류, 근거 부족을 분리하고 외부 보고 | 산출물·증거·집계 정합성 충족 뒤에만 전달 허용 |
 
-불명확한 요구사항 전체를 억지로 실행하지 않습니다. 확정된 범위는 계속 진행하고, 불명확한 범위나 자동화할 수 없는 TC만 제외해 최종 보고에 남깁니다. 실행 가능한 TC가 여러 건이면 서로 영향을 주지 않도록 한 건씩 처리합니다.
+운영 원칙은 세 가지입니다.
 
-기존 TC 카탈로그는 Requirement ID만 제공하지 않고 각 TC가 실제로 검증하는 동작을 함께 제공합니다. V1 기준 회귀와 사람이 승인한 `approved_assets/registry.json` 자산을 SHA-256으로 검증해 같은 입력에 합치며, Run에는 당시 카탈로그 Snapshot을 남깁니다. Agent 1은 각 확정 Condition을 `변경`·`유지`·`보조_근거`로 구조화하고 Agent 2는 카탈로그의 검증 동작이 현재 조건을 그대로 검증할 때만 기존 TC를 재사용합니다. 단어 집합이 비슷하다는 이유로 매핑·순서 변경을 유지로 판정하지 않습니다. 모든 확정 Condition은 변경분 후보 또는 관련 기존 TC에 연결되어야 하며, 기존 TC가 변경 후 동작을 전부 검증하면 신규 후보 없이 기존 TC만 다시 실행할 수 있습니다. 재사용할 수 없는 기존 TC는 억지로 선택하지 않고 사유를 남깁니다.
-
-기존 TC 선택은 Agent 2가 Condition과 실제 검증 동작을 대조한 명시적 결과만 사용합니다. Requirement ID가 같다는 이유만으로 다른 동작의 기존 TC를 자동 추가하지 않으며, 누락된 Condition은 CP2가 조용히 보충하지 않고 실패로 드러내 재작성을 요구합니다.
-
-TC는 입력값 하나마다 분리하지 않고 **하나의 관제점에서 하나의 업무 규칙을 검증하는 단위**로 설계합니다. 같은 범위의 하한·상한 또는 같은 비활성 규칙을 공유하는 여러 모드처럼 입력 조건만 다른 경우에는 한 TC의 독립 조건 구간으로 묶을 수 있습니다. 각 구간은 입력·행동·기대 결과를 분리하고, 필요한 중간 초기화와 결과 판정 시점을 명시합니다. Expected Result를 관찰값별로 나누는 것은 TC를 별도 생성한다는 뜻이 아닙니다.
-
-기존 중앙 관제 온도·모드 묶음 TC에서 초기 모드와 설정 온도가 요구사항에 고정되지 않았으면 값을 임의로 만들지 않습니다. 컴파일러가 시험 직전 실제 `mode`·`setTemp`를 저장하고 조건 실행 뒤 그 값으로 복원·적용한 다음 내부 상태가 원래 값과 같은지 확인합니다. 이 제한된 복원은 처음 보는 일반 기능의 내부 상태를 임의로 바꾸는 규칙으로 확대하지 않습니다.
-
-변경 요청의 시험 준비·종료 후 복원 문장은 제품 Expected Result로 만들거나 실행 제외 범위로 버리지 않습니다. Condition 원문에 없는 `선택하고 적용할 수 있다` 같은 실행 행동 성공 문장을 임의로 기대 결과에 추가하지 않고, 적용 뒤 화면·내부 상태 같은 실제 관찰값으로 판정합니다. 다만 요구사항 자체가 선택·설정 가능 여부를 요구하면 그 근거를 삭제하지 않습니다. Agent 2가 준비·복원 원문을 TC 절차로 보존하고 CP2가 누락을 검사합니다. 실행 전에는 아직 나타나지 않는 변경 후 문구도 승인 TC가 명시한 정확한 대상 장비 카드에서만 동적 UI 검증으로 허용합니다.
+- 확정된 범위는 계속 실행하고, 불명확하거나 자동화할 수 없는 TC만 제외해 마지막 보고에 남깁니다.
+- Agent 2는 Requirement ID뿐 아니라 실제 검증 동작을 비교해 유지되는 기존 TC는 재사용하고 변경분만 신규 후보로 만듭니다.
+- TC는 입력값 하나가 아니라 하나의 관제점·업무 규칙 단위로 설계하고, 각 조건 직후 판정과 시험 종료 후 상태 복원을 확인합니다.
 
 ## AI와 코드 생성의 역할
 
@@ -66,6 +50,10 @@ TC는 입력값 하나마다 분리하지 않고 **하나의 관제점에서 하
 - Agent 4는 생성형 AI가 아니라 규칙 기반 분석기입니다.
 
 이 구조는 AI의 의미 판단을 사용하면서도 Requirement ID, 기대값, 경계값, Assertion을 임의로 바꾸지 못하게 하기 위한 최소 통제입니다.
+
+## 코드 구조
+
+`qa_pipeline_v2`는 기존 import와 명령행 사용법을 유지하는 호환 진입점입니다. 실제 구현은 공통 계약, Agent 1, Agent 2, Agent 3, 실행·회귀, Agent 4·보고, Orchestrator로 나뉩니다. 테스트도 같은 역할 기준의 7개 파일로 분리하고 공통 fixture와 builder만 별도 지원 파일에서 공유합니다. 이 분리는 파일 위치만 바꾸며 Agent 계약·Checkpoint 판정·CLI 명령은 변경하지 않습니다.
 
 ## 유지하는 내부 안전장치
 
@@ -79,9 +67,7 @@ TC는 입력값 하나마다 분리하지 않고 **하나의 관제점에서 하
 - 기존 SRS·TC·자동화 원본 비수정
 - API 전송 Preview와 비밀정보 제외
 
-UI 확인은 모든 화면을 매번 조사하지 않습니다. 기존 지원 기능은 TC에 필요한 요소만 확인하고, 처음 보는 유사 기능만 안정적인 Selector와 읽기 가능한 상태를 제한적으로 동적 조사합니다.
-
-제품 규칙은 코드에 추가하지 않고 변경 요청·SRS·승인 TC에서 매번 받습니다. 신규 기능은 실제로 관찰한 UI 요소를 CLICK·FILL·SELECT_OPTION·CHECK 같은 공통 조작과 텍스트·값·활성 상태 검증으로 연결합니다. 처음 보는 기능명·값·Selector라는 이유만으로 제외하지 않으며, 실제 관찰한 표준 조작으로 구현 가능한지 먼저 판단합니다. V1 온도 전용 조작은 기존 기준 화면 호환에만 사용하며, 범용 TC의 생성 코드에는 사용하지 않는 온도 Selector나 helper를 넣지 않습니다.
+UI 조사는 선택한 TC에 필요한 요소로 제한합니다. 제품 규칙은 코드에 하드코딩하지 않고 변경 요청·SRS·승인 TC에서 받으며, 처음 보는 기능도 실제 화면에서 확인한 표준 UI 조작과 읽기 가능한 상태로 구현 가능한지 판단합니다.
 
 ## 현재 범위
 
@@ -129,46 +115,19 @@ python -m qa_pipeline_v2 execute `
 # 규칙 기반 Agent 4 보고(기본 Slack·Notion Dry-run·테스트 재실행 없음)
 python -m qa_pipeline_v2 agent4 --run-id "RUN-..."
 
-# CP4 통과 결과를 실제 Slack·Notion으로 전송
-python -m qa_pipeline_v2 agent4 --run-id "RUN-..." --send
-
-# 이미 Agent 4가 끝난 Run의 외부 보고만 Preview 또는 전송
+# 이미 끝난 Run의 외부 보고 또는 사람 검토 문서
 python -m qa_pipeline_v2 report --run-id "RUN-..."
-python -m qa_pipeline_v2 report --run-id "RUN-..." --send
-
-# 사람이 작성할 최종 검토 양식 생성
 python -m qa_pipeline_v2 human-review --run-id "RUN-..."
 
 # 가상 중앙제어 화면에서 저장된 실제 Run 조회(API 미호출)
 python -m qa_pipeline_ui
 # 브라우저에서 http://127.0.0.1:8765/ 열기
 
-# 저장 결과 조회와 사람 승인·보류 허용(API 미호출)
-python -m qa_pipeline_ui --allow-asset-approval
-
 # 새 AI 실행과 사람 승인·보류를 모두 허용
 python -m qa_pipeline_ui --allow-live-run --allow-asset-approval
 ~~~
 
-`python -m qa_pipeline_ui`의 기본 모드는 저장된 Run 조회 전용입니다. 화면의 팀장·Agent
-1~4 버튼을 누르면 선택한 Run의 Agent 산출물과 Checkpoint·실행·보고 상태가 표시됩니다.
-새 OpenAI API Run까지 화면에서 시작하려는 경우에만 `python -m qa_pipeline_ui
---allow-live-run`으로 실행합니다. 화면에서 다시 확인한 뒤 Agent 1→3, `execute`, 규칙 기반
-Agent 4가 순서대로 실행되며 Slack·Notion은 미리보기만 생성하고 실제 전송하지 않습니다.
-HTML 파일을 `file://`로 직접 열면 로컬 브리지가 없으므로 기존 데모 화면으로 동작합니다.
-
-실제 Run 패널은 `저장 결과 보기`, `새 요구사항 실제 실행`, `후보 TC 공식 자산 판단`을
-분리해 표시합니다. 공식 등록은 최종 권고·CP3·CP4·변경 검증·증거 파일 해시와 현재
-중앙제어 HTML 해시가 모두 맞는 PASS 후보에만 허용됩니다. 실행 뒤 HTML이 바뀌었으면
-`현재 화면에서 후보 재검증`으로 기존 Run을 덮어쓰지 않는 새 Screenshot·Trace를 먼저
-남깁니다. 이 재검증과 승인·보류는 OpenAI API를 호출하지 않습니다.
-
-승인 시 후보 TC와 검증된 Python을 `approved_assets/test_cases/`,
-`approved_assets/automation/`에 복사하고 `approved_assets/registry.json`에 출처 Run·후보
-TC·현재 제품·자산 SHA-256과 검토 기록을 남깁니다. 기존 사람 작성 회귀 파일과 원본 Run은
-덮어쓰지 않습니다. 보류는 Run의 `asset_decisions.json`에 사유만 기록하고 공식 자산을
-만들지 않으며, 이후 다시 승인할 수 있습니다. 이미 승인된 자산은 같은 화면에서 보류로
-되돌리지 못합니다.
+중앙제어 UI의 기본 모드는 저장된 Run 조회 전용입니다. `--allow-live-run`에서만 새 API 실행을 허용하고, `--allow-asset-approval`에서만 검증된 PASS 후보의 공식 자산 승인·보류를 허용합니다. 화면에서 실행하는 Agent 4 외부 보고는 미리보기이며 실제 전송은 CLI의 `--send`를 명시했을 때만 수행합니다.
 
 Agent 3 입력을 먼저 확인하려면 개별 명령의 `--preview-only`를 사용합니다. Preview는 API를 호출하지 않습니다.
 
@@ -188,22 +147,14 @@ python -m qa_pipeline_v2 agent3 `
 
 | 산출물 | 의미 |
 |---|---|
-| `agent1_change_analysis.json`, `checkpoint1.json` | 변경 분석과 CP1 결과 |
-| `agent2_test_design.json`, `checkpoint2.json` | 제품 기능 TC와 CP2 결과 |
-| `agent3_selection.json` | 실행 대상 TC와 제외 사유 |
-| `agent3_candidates/<tc-id>/` | TC별 UI 확인, 계획, 코드, 시험, 증거 |
-| `agent3_run_summary.json` | Agent 3 전체 실행·제외 요약 |
-| `validation_execution.json` | 신규 자동화와 관련 기존 회귀 결과 |
-| `agent4_analysis.json`, `checkpoint4.json` | 규칙 기반 분류와 CP4 결과 |
-| `final_report.json` | 사람에게 전달할 최종 결과 |
-| `사람_최종_검토.md`, `사람_최종_검토_manifest.json` | 기대·관찰·증거·판정 선택란과 자동 생성 원본 해시를 포함한 사람 최종 판단 양식. 사람이 작성한 뒤에는 자동 갱신이 덮어쓰지 않음 |
-| `slack_payload.json`, `notion_payload.json` | 비밀정보를 제외한 외부 보고 Payload |
-| `external_reporting.json` | Slack·Notion Preview·전송·차단·실패 상태와 Payload 해시 |
-| `asset_revalidation/<tc-id>/` | HTML 변경 뒤 승인 전에 현재 화면에서 다시 실행한 API 미사용 증거 |
-| `asset_decisions.json` | 후보 TC의 사람 승인·보류 기록 |
-| `approved_assets/registry.json` | 승인된 공식 TC·자동화의 출처와 불변 SHA-256 목록 |
-| `approved_regression_catalog.json` | 해당 Run에서 Agent 2가 대조한 승인 공식 TC Snapshot |
-| `srs_revision_decision.json` | 공식 자산 승인과 함께 사람이 승인한 SRS 개정 전·후 및 해시 |
+| `agent1_change_analysis.json`, `agent2_test_design.json` | 요구사항 분석과 제품 기능 TC |
+| `checkpoint1.json` ~ `checkpoint4.json` | 단계별 자동 검사 결과 |
+| `agent3_candidates/<tc-id>/`, `agent3_run_summary.json` | 자동화 계획·코드·시험 증거와 실행 요약 |
+| `validation_execution.json` | 신규 후보와 관련 기존 회귀 실행 결과 |
+| `agent4_analysis.json`, `final_report.json` | 원인 분류와 최종 권고 |
+| `사람_최종_검토.md` | 사람이 최종 판단할 항목과 증거 링크 |
+| `external_reporting.json` | Slack·Notion 미리보기 또는 전송 상태 |
+| `approved_assets/registry.json` | 사람이 승인한 공식 TC·자동화와 SHA-256 |
 
 `PRODUCT_MISMATCH_CANDIDATE`는 제품 결함 확정이 아니라 기대 결과와 다른 관찰 후보입니다. Checkpoint 통과 역시 사람의 최종 승인을 뜻하지 않습니다.
 
@@ -213,6 +164,7 @@ python -m qa_pipeline_v2 agent3 `
 |---|---|
 | [Agent 1→3 AUTO 온도 실행](examples/results/agent1-agent2-agent3-auto-temperature/README.md) | 실제 모델 계획, 결정론적 후보 코드, Candidate Trial과 증거 |
 | [Agent 1→4 잠금 설정 실행](examples/results/agent1-agent2-agent3-agent4-lock-disable/README.md) | 단계별 상태·사용량, 관련 기존 회귀, Agent 4 분류, 사람 검토 양식, Slack·Notion 실제 전송 상태 |
+| [Agent 1→4 MED 풍량 실행](examples/results/agent1-agent2-agent3-agent4-medium-fan/README.md) | 최신 계약의 실제 모델 실행, 신규 후보와 승인 TC 재사용 분리, 3건 PASS, SRS 개정 승인 대기 |
 
 실행 원본은 `runs/`에 보존하고 Git에서 제외합니다. 공개 예시는 비밀정보·로컬 절대경로·불필요한 대용량 증거를 제외한 최소 묶음이며, `public_manifest.json`으로 공개 파일의 SHA-256을 확인할 수 있습니다.
 
@@ -237,33 +189,6 @@ python -m pytest --collect-only -q
 git diff --check
 ~~~
 
-현재 자동 테스트 수는 **180건**입니다. Condition의 변경·유지·보조 역할, 기존 TC만 재실행하는 흐름, 모든 신규 후보가 제외돼도 최종 보고로 이어지는 흐름, 근거 있는 기능 요구 보존, 내부 장비 필드 복원, 승인 카탈로그 SHA-256, 후보별 SRS 개정 범위와 승인 실패 원상복구를 포함해 Agent 1~4·실행·승인 계약을 확인했습니다.
+현재 자동 테스트는 **180건**이며 역할별 소스·테스트 분리 후에도 모두 통과했습니다. 실제 Live `RUN-20260903-125732-ECE88F`에서는 Agent 1·3의 첫 산출물 오류를 Checkpoint가 차단해 재작성한 뒤, 신규 후보·환경 점검·승인 회귀와 CP4·최종 권고가 모두 PASS였습니다. Trace의 로컬 경로·키 패턴도 0건이었습니다.
 
-최신 성공 Live `RUN-20260829-054330-A18942`은 실제 중앙제어 Run 화면에서 시작했습니다. 풍량 변경분 TC 1건이 UI `강풍`·내부 `fanSpeed=HIGH`를 같은 적용 시점에 검증한 뒤 LOW로 복원했고, Agent 1~4, 후보 시험, 환경 점검, CP4와 최종 `PASS`를 완료했습니다. 자동화 제외와 별도 검토 항목은 0건이며, CP1의 변경 전 SRS 직접 근거 부족은 사람 최종 확인 사항으로 남겼습니다. Slack·Notion은 실제 전송하지 않고 Preview만 생성했습니다. Agent 1 첫 응답의 인수 조건 누락으로 1회 재작업이 발생해 모델 사용량은 Agent 1 11,069 + Agent 2 9,699 + Agent 3 18,885 = 39,653 tokens입니다. 잠금 Run의 제품 불일치 후보와 [공개 증거 묶음](examples/results/agent1-agent2-agent3-agent4-lock-disable/README.md)은 실패 사례로 유지합니다.
-
-중앙제어 Run 패널과 승인 화면을 추가한 뒤 위 후보는 현재 HTML에서 API 호출 없이 다시
-실행해 PASS했습니다. 승인 전 재검증은 54,781ms였고 Screenshot·Trace를 포함한 증거가
-완전하며 비밀정보·로컬 절대경로 패턴은 0건입니다. 오세훈 검토자가 승인해
-`TC-CAND-001`을 공식 자산 `TC-V2-001`로 등록했고, 복사된
-`approved_assets/automation/test_tc_v2_001.py`를 현재 V2 HTML에 독립 실행해 PASS를
-다시 확인했습니다.
-
-현재 공식 자산 Registry는 다음 Agent 2 실행 때 파일·SHA-256·구조화 TC를 검증한 뒤 기존
-TC 대조 입력에 합쳐집니다. Agent 2가 그 TC를 관련 회귀로 선택하면 `execute`는 Run에
-고정된 Snapshot과 현재 Registry 자동화 해시를 다시 확인하고 승인 Python을 실행합니다.
-`TC-V2-001`은 이 경로로 실제 Playwright 재실행 PASS와 Screenshot·Trace 생성을
-확인했습니다. MODIFIED·UPDATE_REQUIRED Requirement는 Agent 2가 SRS 인수 기준 개정
-전·후 문구와 Condition 근거를 구조화하며, Agent 4 보고·사람 최종 검토·중앙제어 승인
-화면까지 전달됩니다. 사람은 공식 TC 승인 시 SRS 개정을 별도로 체크해야 하며, 승인된
-문구만 기준 SRS와 변경 기록에 함께 반영됩니다. 기존 Run에는 이 신규 계약을 소급하지
-않습니다.
-
-2026-08-31 MED 풍량 Live 감사에서는 실제 모델이 신규 `중풍`·내부 `fanSpeed=MED`
-후보 1건과 승인 `TC-V2-001`의 HIGH 유지 회귀를 분리했고, 후보 Trial·환경 점검·
-`TC-MODE-001`·`TC-V2-001` 실행이 모두 PASS했습니다. 실행 중 발견한 TC ID 형식 충돌,
-행동 성공 문장의 Expected Result 확장, 변경 후 문구에 반복된 HIGH 유지 조건의 신규 후보
-중복, 승인 자동화 해시의 CP4 기준 테스트 오인 문제를 보완했습니다. 원본
-`RUN-20260831-122323-0F0460`의 최초 CP4 FAIL은 덮어쓰지 않았고, 동일 검증 입력의 임시
-재분석에서 수정된 CP4 PASS·최종 PASS·Slack/Notion PREVIEW를 확인했습니다. 외부 전송과
-공식 자산 승인은 수행하지 않았습니다. 이 Run의 Agent 1~3 모델 사용량은 총 41,203
-tokens입니다.
+공개 증거는 위 세 가지 성공·실패 사례에서 확인할 수 있습니다. 상세 Checkpoint 규칙과 시행착오는 [Agent·Checkpoint 명세](docs/03_AGENT_AND_CHECKPOINT_SPEC.md)와 [의사결정 기록](DECISION_LOG.md)에 보존합니다. Checkpoint PASS는 사람의 SRS·공식 자산 승인과 구분됩니다.

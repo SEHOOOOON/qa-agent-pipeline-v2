@@ -4,7 +4,6 @@
 
 ## 1. 사용자와 프로젝트 방향
 
-- 사용자 이름은 **오세훈**입니다.
 - 이 저장소의 목적은 프로젝트 1의 고정 산출물 시연을 실제 모델 기반 변경관리 QA 파이프라인으로 보완하는 것입니다.
 - 핵심 가치는 기능 수가 아니라 **입력 → Agent 산출물 → Checkpoint → 다음 단계 → 실행 증거**의 실제 연결과 사실성입니다.
 - 지나치게 감정적이거나 과장된 표현을 피합니다. `장난감`, `치열하게`, `심도 있게`, `완벽`, `완전 자율`, `품질 보장` 같은 표현 대신 `예시`, `검증`, `구현 범위`, `확인`, `제한`처럼 객관적인 용어를 사용합니다.
@@ -23,12 +22,9 @@
 
 ## 3. 프로젝트 경계
 
-- 현재 주 작업 저장소:
-  `C:\Users\훈\.gemini\antigravity\scratch\industrial-qa\qa-agent-pipeline-v2`
-- 프로젝트 1 기준 자산:
-  `C:\Users\훈\.gemini\antigravity\scratch\industrial-qa\portfolio_export`
-- Agent 평가 실험 저장소:
-  `C:\Users\훈\.gemini\antigravity\scratch\industrial-qa\agent-evaluation-framework`
+- 현재 주 작업 저장소: 이 저장소의 루트(`.`)
+- 프로젝트 1 기준 자산: 형제 저장소 `../portfolio_export`
+- Agent 평가 실험 저장소: 형제 저장소 `../agent-evaluation-framework`
 
 프로젝트 1은 사용자의 명시적인 수정 명령이 없는 한 **읽기 전용 기준 자산**으로 취급합니다. V2 구현을 위해 프로젝트 1의 HTML·테스트·문서를 조사할 수 있지만 임의로 수정하거나 실행 산출물을 덮어쓰지 않습니다.
 
@@ -38,7 +34,7 @@ V2의 독립 실행에 필요한 V1 기준 자산은 `product_baseline/`에 둡�
 Agent 4 코드·`.env`는 복사하지 않습니다. 이후 제품 변경은 사용자의 명시적 지시가
 있을 때 V2 HTML 복사본에만 적용합니다.
 
-Agent 평가 실험은 현재 후순위입니다. V2의 Agent 1~3 Live 흐름과 End-to-End 실행이 완성되기 전에는 평가 프로젝트를 주 작업으로 전환하지 않습니다.
+Agent 평가 실험은 별도 저장소의 범위입니다. 사용자가 명시적으로 요청하지 않으면 이 저장소 작업과 섞지 않습니다.
 
 ## 4. 사실성 및 용어 규칙
 
@@ -51,7 +47,8 @@ Agent 평가 실험은 현재 후순위입니다. V2의 Agent 1~3 Live 흐름과
 - `PRODUCT_MISMATCH_CANDIDATE`는 제품 결함 확정이 아니라 기대 결과와 다른 관찰 후보입니다.
 - Candidate Workspace는 원본과 분리된 임시 실행 위치이지 컨테이너나 OS 권한 격리를 제공하는 보안 Sandbox가 아닙니다.
 - `examples/change_request.example.json`과 공개 Run의 AUTO 온도 변경은 연결 검증용 예시입니다. 대표 요구사항으로 고정하거나 코드에 하드코딩하지 않습니다.
-- 공개 잠금 Run은 제품 불일치 후보인 실패 증거로 유지합니다. 새 성공 후보는 실제 Live 실행 전 PASS로 표현하지 않습니다.
+- 공개 잠금 Run은 제품 불일치 후보인 실패 증거로 유지합니다.
+- 공개 성공 Run은 실제 Live 실행과 CP4까지 완료된 결과만 사용하며, 사람의 SRS·공식 자산 승인은 자동 권고와 구분합니다.
 
 ## 5. 코드·문서 정합성 규칙
 
@@ -68,8 +65,8 @@ Agent 평가 실험은 현재 후순위입니다. V2의 Agent 1~3 Live 흐름과
 
 ## 6. 구현 원칙
 
-- 현재 규모에서는 `src/qa_pipeline_v2.py`와 `tests/test_pipeline.py` 중심의 단순한 구조를 유지합니다.
-- 독립된 보안 경계나 명확한 재사용 필요가 생기기 전에는 파일과 폴더를 과도하게 분리하지 않습니다.
+- 공개 진입점 `src/qa_pipeline_v2.py`와 CLI 호환성은 유지하고, 구현은 공통 계약·Agent 1·Agent 2·Agent 3·실행·Agent 4 보고·Orchestrator 경계로 분리합니다.
+- 테스트도 같은 역할 경계로 나누되 공유 builder와 fixture는 `tests/pipeline_test_support.py` 한 곳에서 관리합니다. 이 경계보다 더 작은 파일 분할은 명확한 재사용 필요가 생기기 전에는 추가하지 않습니다.
 - Agent 출력은 자유 형식 Markdown이 아니라 Pydantic 구조화 계약을 사용합니다.
 - 다음 단계는 앞 단계의 Checkpoint 통과 상태와 SHA-256 인계 무결성을 확인해야 합니다.
 - Agent가 제품 기대 결과, Requirement ID, 경계값을 임의로 바꾸지 못하게 합니다.

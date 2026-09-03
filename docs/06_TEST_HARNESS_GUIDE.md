@@ -93,6 +93,8 @@ PASS와 PRODUCT_MISMATCH_CANDIDATE는 위 증거가 완전할 때만 다음 단�
 
 Candidate Trial의 기본 제한은 90초입니다. 제한을 넘기면 pytest와 Playwright 자식 프로세스를 함께 종료합니다. 종료 시점에 Trace ZIP 쓰기가 끝나지 않았다면 민감정보 제거를 보장할 수 없으므로 해당 Trace를 삭제하고 `TIMEOUT`·불완전 증거로 기록합니다.
 
+현재 Trace 경로 정제는 Agent 3 Candidate Trial과 승인·V1 기존 회귀 실행에 동일하게 적용됩니다. ZIP 내부의 임시 Workspace, 사용자 홈, 대상 HTML, 원본 테스트와 증거 폴더 경로를 증거 해시 계산 전에 치환합니다. 정제를 보장할 수 없는 손상 Trace는 증거에서 제외합니다. 이 보완 전에 생성된 역사적 Run의 원본 Trace는 덮어쓰지 않으며 Git 공개 증거에도 포함하지 않습니다.
+
 ## 8. 격리 한계
 
 신규 코드는 원본과 분리된 임시 폴더와 별도 subprocess에서 실행합니다. 이는 파일 충돌을 줄이는 실행 분리이며 컨테이너, 네트워크 차단, OS 권한 격리를 제공하는 보안 Sandbox는 아닙니다.

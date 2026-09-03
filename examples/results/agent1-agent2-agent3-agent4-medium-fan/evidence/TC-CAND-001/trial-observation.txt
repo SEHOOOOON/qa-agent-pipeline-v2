@@ -1,0 +1,28 @@
+Run ID: RUN-20260903-121213-4CCC7A
+Request ID: CR-SUCCESS-FAN-002
+
+New candidate: TC-CAND-001
+Requirements: REQ-FAN-001, REQ-CONTROL-001, REQ-STATE-001
+
+Expected
+- ER-001: 대상 장비 카드에 중풍 표시
+- ER-002: 대상 장비 내부 fanSpeed=MED
+
+Observed
+- ER-001: mismatch 없음
+- ER-002: mismatch 없음
+- 시험 뒤 LOW 복원: mismatch 없음
+
+Candidate trial outcome: PASS
+Candidate trial stdout SHA-256:
+c55966d8295862c4d7622cc70dc24f6b19e09b79132311679363c0e247b2093f
+
+Approved existing regression: TC-V2-001
+- 장비 카드 강풍 표시와 내부 fanSpeed=HIGH 검증
+- Execution status: PASSED
+- Regression stdout SHA-256:
+4ec5281b8539f73c5b8b9e15bfcb8f2063e4874eb0c2983cb429603dba30ac49
+
+Agent 4 recommendation: PASS
+Automated finding count: 0
+Asset and SRS revision decision: PENDING

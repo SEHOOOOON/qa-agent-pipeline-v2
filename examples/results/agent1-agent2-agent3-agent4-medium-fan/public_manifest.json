@@ -1,0 +1,19 @@
+{
+  "contract_version": "1.0",
+  "publication_kind": "SANITIZED_EVIDENCE_MANIFEST",
+  "run_id": "RUN-20260903-121213-4CCC7A",
+  "files": {
+    "README.md": "414f7b4841e1787289f1d311e0c614b2a5785e9f44b7cb409b93aa6209ce56f3",
+    "public_result.json": "68bd5e46e724fb118314026eab029fdfb23ab4a7f19c3704716a0fd108bf5b82",
+    "external_reporting_summary.json": "d18d8b01a9daee2298dc6dac75785399926833ec62e11fb738ea083ad4205f87",
+    "사람_최종_검토_공개본.md": "119d53eb66603362994ded267aba4b321a9916c0b85467704cd4950b3bfd2f6e",
+    "evidence/TC-CAND-001/trial-observation.txt": "a3f43921d250e89d342c4fe9c143dbfe81b2a06df84ea3d145d57d322ff39b27"
+  },
+  "excluded": [
+    "API credentials",
+    "local absolute paths",
+    "full model artifacts",
+    "screenshots",
+    "Playwright trace"
+  ]
+}

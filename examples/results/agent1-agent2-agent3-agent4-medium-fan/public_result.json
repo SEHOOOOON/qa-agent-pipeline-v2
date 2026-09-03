@@ -1,0 +1,104 @@
+{
+  "contract_version": "1.0",
+  "publication_kind": "SANITIZED_EVIDENCE_SUMMARY",
+  "run_id": "RUN-20260903-121213-4CCC7A",
+  "request_id": "CR-SUCCESS-FAN-002",
+  "requirement_ids": [
+    "REQ-FAN-001",
+    "REQ-CONTROL-001",
+    "REQ-STATE-001"
+  ],
+  "pipeline": {
+    "agent1": {
+      "checkpoint": "PASS",
+      "handoff": "CONTINUE",
+      "model": "gpt-5.6-terra",
+      "attempt_count": 2,
+      "first_attempt_result": "CP1-008_FAIL_MISSING_ACCEPTANCE_NOTE",
+      "total_tokens": 11561
+    },
+    "agent2": {
+      "checkpoint": "PASS",
+      "model": "gpt-5.6-terra",
+      "attempt_count": 1,
+      "total_tokens": 10622,
+      "new_candidate_count": 1,
+      "related_regression_count": 1
+    },
+    "agent3": {
+      "checkpoint": "PASS",
+      "model": "gpt-5.6-terra",
+      "attempt_count": 1,
+      "total_tokens": 19028,
+      "executed_candidate_count": 1,
+      "automation_exclusion_count": 0
+    },
+    "agent4": {
+      "checkpoint": "PASS",
+      "implementation": "RULE_BASED_ANALYZER",
+      "recommendation": "PASS"
+    },
+    "total_model_tokens": 41211
+  },
+  "validation": {
+    "total_results": 3,
+    "product_result_count": 2,
+    "environment_result_count": 1,
+    "status_counts": {
+      "PASSED": 3,
+      "ASSERTION_FAILED": 0,
+      "EXECUTION_ERROR": 0,
+      "TIMEOUT": 0,
+      "SKIPPED": 0
+    },
+    "new_candidate": {
+      "TC-CAND-001": "PASSED"
+    },
+    "existing_regressions": {
+      "TC-V2-001": "PASSED"
+    },
+    "candidate_trial_reused": true,
+    "evidence_complete": true
+  },
+  "srs_revision": {
+    "proposal_id": "SRS-REV-001",
+    "requirement_id": "REQ-FAN-001",
+    "status": "PENDING_HUMAN_APPROVAL"
+  },
+  "human_review": {
+    "finding_count": 0,
+    "automatic_recommendation": "PASS",
+    "asset_decision": "PENDING",
+    "srs_revision_decision": "PENDING"
+  },
+  "external_reporting": {
+    "mode": "DRY_RUN",
+    "allowed": true,
+    "slack": {
+      "status": "PREVIEW",
+      "item_count": 1
+    },
+    "notion": {
+      "status": "PREVIEW",
+      "item_count": 3
+    }
+  },
+  "source_sha256": {
+    "request": "911d364a2f344acb7c94cf2fc272646b53471dbf065a886c0f23fe1f7c31a373",
+    "agent1_analysis": "1f61f7499d84902993c34cb886492c0d7255031ec2c44307e0343ec314992a84",
+    "checkpoint1": "a9e47169c580218d9a399e1c45e503b76db00d59eb11d089a455ed5ef148df76",
+    "agent2_design": "8867ccbfb4ef6ba85fc25d63ad781d843551e49c2f88f4e7ccd4bab81b80d90f",
+    "checkpoint2": "f36bda148a8ebe617a55341f07aa106c1e092c3b99f9f44d2720e371ed04f4fc",
+    "approved_regression_catalog": "d09d76eaebe3e8f0ad3d6897df6e5747a09ffd700a36ae35d520d3299faf97be",
+    "checkpoint3": "755f0d171aa6fad0170b19f03b8827b5d76e71de2cbbee5d7e1c414a9dbc8080",
+    "candidate_code": "dd7cfac42f0e0dfae5ddeb3dd2688a1bf6cbf3e5ad850c3644217e0b72df377a",
+    "target_html": "37576e40f6eb3304b6dea9b0577bd9761a9ee057aa5bfe5e6845a9f498700c47",
+    "trial_stdout": "c55966d8295862c4d7622cc70dc24f6b19e09b79132311679363c0e247b2093f",
+    "validation_execution": "567edabcef01ff3bd0a88208062750a990f51f0e954e02cc6fb3e045a8aaa99b",
+    "validation_manifest": "dffeb9c55918b155338e08c1704d65d48f2d8fc0078f510c92e228192558be45",
+    "agent4_analysis": "ed931370b6a16421847b9462f3374d87ecf23553fb19b3189271e05e7ce5091f",
+    "checkpoint4": "16dc61100a47e22c8219424961c0150275dbd7652938c0a1a1ef5d6573841e48",
+    "final_report": "061eef0f3c41ecce18888e81fd149259030d92aa2690c9a27e7083549018dc2d",
+    "generated_human_review": "32f68c320d8ba21371dd21a63623ee6e6aeda4f5d88047cba061c58100c10773"
+  }
+}
