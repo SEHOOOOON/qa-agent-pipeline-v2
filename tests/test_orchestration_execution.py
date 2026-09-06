@@ -3,6 +3,42 @@
 from pipeline_test_support import *
 
 
+def test_pipeline_keeps_manual_candidates_in_exclusions_without_agent3_call(tmp_path: Path, monkeypatch) -> None:
+    args = _pipeline_args(tmp_path)
+    Path(args.request).write_text("{}", encoding="utf-8")
+    Path(args.target_html).write_text("<html></html>", encoding="utf-8")
+    design = cp2_valid_design()
+    manual = design.test_cases[0].model_copy(update={
+        "automation_candidate": False, "automation_reason": "외부 장비 수동 확인 필요",
+    })
+    design = design.model_copy(update={"test_cases": [manual]})
+    selected, selection = pipeline_orchestrator._select_agent3_tcs(design)
+    assert selected == []
+
+    def fake_agent1(stage_args):
+        run_dir = Path(stage_args.runs_root) / stage_args.run_id
+        run_dir.mkdir(parents=True)
+        _write_json(run_dir / "run_manifest.json", {"run_id": stage_args.run_id})
+        return 0
+
+    def fake_agent2(stage_args):
+        _write_json(Path(stage_args.runs_root) / stage_args.run_id / "agent2_manifest.json",
+                    {"run_id": stage_args.run_id})
+        return 0
+
+    monkeypatch.setattr(pipeline_orchestrator, "run_agent1", fake_agent1)
+    monkeypatch.setattr(pipeline_orchestrator, "run_agent2", fake_agent2)
+    monkeypatch.setattr(pipeline_orchestrator, "_select_agent3_tcs_from_run", lambda *_: (selected, selection))
+    monkeypatch.setattr(pipeline_orchestrator, "run_agent3", lambda *_: pytest.fail("수동 TC 모델 호출 금지"))
+    assert pipeline.run_pipeline(args) == 0
+    run_dir = next((tmp_path / "runs").iterdir())
+    summary = json.loads((run_dir / "agent3_run_summary.json").read_text(encoding="utf-8"))
+    assert summary["executed_tc_ids"] == []
+    assert summary["자동화_제외_TC"][0]["tc_id"] == manual.tc_id
+    assert "외부 장비 수동 확인 필요" in summary["자동화_제외_TC"][0]["reason"]
+    assert summary["status"] == "EXCLUDED"
+
+
 def test_pipeline_parser_exposes_one_command_agent1_to_agent3() -> None:
     args = pipeline.build_parser().parse_args(
         [

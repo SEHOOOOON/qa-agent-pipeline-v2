@@ -841,7 +841,15 @@ def summarize_run(
     analysis4 = _read_json(run_dir / "agent4_analysis.json")
     checkpoint4 = _read_json(run_dir / "checkpoint4.json")
     report = _read_json(run_dir / "final_report.json")
-    reporting = _read_json(run_dir / "external_reporting.json")
+    reporting_history = [
+        item
+        for path in [
+            run_dir / "external_reporting.json",
+            *sorted((run_dir / "external_reporting_attempts").glob("*/external_reporting.json")),
+        ]
+        if (item := _read_json(path))
+    ]
+    reporting = reporting_history[-1] if reporting_history else {}
     manifest = _read_json(run_dir / "orchestrator_manifest.json")
     decisions = {
         item.get("tc_id"): item
@@ -946,6 +954,13 @@ def summarize_run(
                 if reporting
                 else ""
             ),
+            *[
+                f"이전 전송 {item.get('attempt_id') or '최초 기록'}: "
+                f"Slack {item.get('slack', {}).get('status', '-')} / "
+                f"Notion {item.get('notion', {}).get('status', '-')}"
+                for item in reporting_history[:-1]
+                if item.get("mode") == "SEND"
+            ],
         ],
     )
 
@@ -955,12 +970,17 @@ def summarize_run(
             continue
         tc_id = str(test_case.get("tc_id") or "")
         reasons: list[str]
+        srs_proposals: list[dict[str, Any]] = []
         try:
             _, _, _, reasons = _candidate_approval_check(
                 run_dir,
                 tc_id,
                 target_html=target_html,
             )
+            srs_proposals = [
+                proposal.model_dump(mode="json")
+                for proposal in _candidate_srs_revision_proposals(run_dir, test_case)
+            ]
         except (ValueError, OSError, json.JSONDecodeError) as exc:
             reasons = [str(exc)]
         decision = decisions.get(tc_id)
@@ -971,12 +991,14 @@ def summarize_run(
                 "approval_eligible": not reasons,
                 "eligibility_reasons": reasons,
                 "revalidation_required": any("재검증이 필요" in item for item in reasons),
-                "srs_revision_proposals": report.get("SRS_개정_제안") or [],
+                "srs_revision_proposals": srs_proposals,
                 "decision": decision,
             }
         )
 
     overall = recommendation if report else str(manifest.get("status") or stage3_status)
+    from qa_pipeline_reporting import build_run_test_rows
+
     return {
         "run_id": run_id,
         "request_id": request.get("request_id"),
@@ -991,6 +1013,7 @@ def summarize_run(
         },
         "human_review_document": "사람_최종_검토.md" if (run_dir / "사람_최종_검토.md").is_file() else None,
         "candidate_assets": candidate_assets,
+        "test_rows": build_run_test_rows(run_dir),
     }
 
 
@@ -1021,6 +1044,26 @@ class LiveRunState:
         with self.lock:
             for key, value in changes.items():
                 setattr(self, key, value)
+
+
+def _has_reportable_environment_failure(run_dir: Path, run_id: str) -> bool:
+    """정상적으로 저장된 환경 실패만 보고 단계로 넘깁니다. 증거 검사는 CP4가 담당합니다."""
+    from qa_pipeline_v2 import ValidationExecutionBundle
+
+    try:
+        execution_file = run_dir / "validation_execution.json"
+        bundle = ValidationExecutionBundle.model_validate(_read_json(execution_file))
+        manifest = _read_json(run_dir / "validation_manifest.json")
+        return (
+            bundle.run_id == manifest.get("run_id") == run_id
+            and bundle.status == manifest.get("status") == "BLOCKED"
+            and bundle.blocked_reason == "ENVIRONMENT_PRECHECK_NOT_PASSED"
+            and bundle.environment_precheck.status != "PASSED"
+            and not bundle.regression_results
+            and manifest.get("validation_execution_sha256") == _sha256_file(execution_file)
+        )
+    except (ValueError, OSError):
+        return False
 
 
 class PipelineUiBridge:
@@ -1200,7 +1243,11 @@ class PipelineUiBridge:
                 "--runs-root",
                 str(self.runs_root),
             )
-            if validation_result.returncode != 0:
+            environment_blocked = (
+                validation_result.returncode == 2
+                and _has_reportable_environment_failure(self.runs_root / run_id, run_id)
+            )
+            if validation_result.returncode != 0 and not environment_blocked:
                 raise RuntimeError(f"검증 실행 종료 코드: {validation_result.returncode}")
 
             self.state.update(
@@ -1219,7 +1266,11 @@ class PipelineUiBridge:
             self.state.update(
                 running=False,
                 phase="COMPLETED",
-                message="Agent 1→4 실행과 보고 미리보기 생성이 완료됐습니다.",
+                message=(
+                    "환경 점검 실패로 후속 테스트는 중단됐으며, 결과 분석과 보고 미리보기는 완료됐습니다."
+                    if environment_blocked
+                    else "Agent 1→4 실행과 보고 미리보기 생성이 완료됐습니다."
+                ),
             )
         except Exception as exc:  # 브리지 상태로 안전하게 전달
             self.state.update(running=False, phase="FAILED", message=str(exc))

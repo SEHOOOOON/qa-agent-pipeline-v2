@@ -52,6 +52,7 @@ AGENT2_SYSTEM_INSTRUCTIONS = """
 2. requirement_effects가 NO_IMPACT인 Requirement는 테스트 범위에 포함하지 않습니다.
 3. MODIFIED는 변경 동작 검증 후보, UPDATE_REQUIRED는 변경으로 기대 결과·절차 수정이 필요한 후보, VERIFY는 기존 동작 회귀 선택으로 해석합니다.
 3-1. 기존 TC 카탈로그의 `검증 동작`이 VERIFY·유지 조건 또는 변경 후 조건을 그대로 검증하면 관련_기존_TC로 선택하고 동일 내용을 TC-CAND로 다시 만들지 않습니다. Requirement ID만 같고 검증 동작이 다르면 재사용으로 판단하지 않습니다. 기존 TC가 변경 후 조건을 전부 검증하면 test_cases는 비워 두고 관련_기존_TC만 반환할 수 있습니다. 기존 TC가 변경된 기대 결과를 검증할 수 없을 때만 부족한 변경분 후보를 만듭니다. `변경_구분=유지` 조건은 관련_기존_TC로만 연결하고, `변경_구분=변경` 조건은 신규·수정 후보 또는 변경 후 동작을 이미 검증하는 기존 TC 중 한 경로로 연결합니다.
+3-2. 변경 조건을 기존 TC만으로 검증할 때는 조건에 명시된 상태 코드·수치가 기존 카탈로그의 검증 동작에도 있는지 확인합니다. 값이 다르거나 확인할 수 없으면 기존 TC를 재사용 근거로 삼지 말고 부족한 변경분을 후보로 설계합니다. 같은 값이 있어도 매핑·순서·기대 동작이 다르면 동일 검증이 아닙니다.
 4. 모든 confirmed_condition을 test_cases 또는 관련_기존_TC의 source_condition_ids 중 최소 한 곳에 반영합니다. 실제로 바뀐 제품 판정 조건은 신규·수정 후보 또는 변경 후 동작을 이미 그대로 검증하는 기존 TC 중 한 경로에 반영합니다. 준비·선택·복원 절차를 제품 기대 결과로 바꾸지 않습니다. 변경 요청의 `[시험 절차 메모]`는 제외 범위가 아니며, 준비 메모는 preconditions 또는 steps에, 종료 후 복원 메모는 restore_steps에 원문 그대로 기록하고 restore_required=true로 설정합니다.
 5. 모든 기대 결과는 source_condition_ids로 제품 판정 근거를 연결합니다. 근거에 없는 수치·시간·문구·UI 동작을 추가하지 않습니다. 장비 선택 성공, 사전조건 준비 완료, 시험 종료 후 복원처럼 실행을 위한 절차는 steps·preconditions·restore_steps에만 두고, 변경 요청이 그 동작 자체의 제품 결과를 요구하지 않는 한 expected_results로 만들지 않습니다. Condition 원문에 없는 `선택하고 적용할 수 있다`, `클릭할 수 있다`, `입력할 수 있다` 같은 실행 행동 성공 문장을 새 기대 결과로 만들지 않습니다. Condition 자체가 설정 가능·선택 가능 같은 제품 기능을 요구하면 이를 삭제하지 말고 버튼 활성 상태, 선택값 반영 또는 적용 뒤 상태처럼 실제로 판정할 관찰값으로 구체화합니다.
 5-1. 제출 전 각 TC를 자체 점검합니다. (a) TC의 requirement_ids는 그 TC의 source_condition_ids가 함께 근거를 가져야 하고, (b) 각 기대 결과의 source_condition_ids는 그 TC의 source_condition_ids 범위 안에 있어야 하며, (c) 각 기대 결과의 UI 표시·상태는 연결 Condition의 source_text 원문에 실제로 있어야 합니다. TC 수준 Condition에는 제품 판정 기준뿐 아니라 준비·복원 지시가 포함될 수 있으므로 모든 TC Condition을 억지로 expected_results에 다시 넣지 않습니다. 특히 UI·내부 상태 이중 검증 TC는 사용자가 요청한 UI 변경 결과와 그 동작을 뒷받침하는 내부 상태를 사용하고, 별도의 UI 상태 표시를 새로 만들지 않습니다.
@@ -161,7 +162,7 @@ class OpenAIAgent2:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent2-2-18",
+                prompt_cache_key="qa-v2-agent2-2-19",
                 input=[
                     {"role": "system", "content": AGENT2_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
@@ -273,6 +274,20 @@ def _is_unchanged_condition_for_request(
     return _is_unchanged_condition(condition)
 
 
+def _explicit_behavior_values(text: str) -> set[str]:
+    """재사용 비교용 명시 코드·수치만 추출합니다. 자연어 의미 판단을 대체하지 않습니다."""
+    text = re.sub(r"\b(?:REQ|TC|COND|ER)-[A-Z0-9-]+", "", text)
+    tokens = re.findall(
+        r"(?<![A-Za-z0-9_])(?:[A-Z][A-Z0-9_]*|true|false)(?![A-Za-z0-9_])"
+        r"|(?<![A-Za-z0-9_])-?\d+(?:\.\d+)?", text,
+    )
+    ignored = {"UI", "SRS", "TC", "QA", "API", "JSON", "HTML", "C"}
+    return {
+        f"{float(token):g}" if re.fullmatch(r"-?\d+(?:\.\d+)?", token) else token
+        for token in tokens if token not in ignored
+    }
+
+
 def evaluate_checkpoint2(
     request: ChangeRequest,
     analysis: Agent1Analysis,
@@ -281,6 +296,7 @@ def evaluate_checkpoint2(
     *,
     existing_catalog: tuple[ExistingRegressionSpec, ...] = EXISTING_REGRESSION_CATALOG,
     require_srs_revision_proposals: bool = False,
+    require_existing_behavior_values: bool = False,
 ) -> Checkpoint2Result:
     checks: list[CheckResult] = []
 
@@ -977,6 +993,28 @@ def evaluate_checkpoint2(
             "CP2-016",
             CheckStatus.PASS,
             "변경된 조건만 신규·수정 후보로 만들고 유지 조건은 기존 TC 선택으로 분리했습니다.",
+        )
+
+    if require_existing_behavior_values:
+        reuse_errors: list[str] = []
+        for condition_id in sorted(direct_change_condition_ids - candidate_conditions):
+            condition = known_conditions[condition_id]
+            behaviors = " ".join(
+                behavior
+                for selection in design.related_existing_tests
+                if condition_id in selection.source_condition_ids
+                for behavior in (
+                    existing_by_id[selection.tc_id].covered_behaviors
+                    if selection.tc_id in existing_by_id else ()
+                )
+            )
+            missing_values = _explicit_behavior_values(condition.statement) - _explicit_behavior_values(behaviors)
+            if missing_values:
+                reuse_errors.append(f"{condition_id}:기존 TC가 검사하지 않는 명시 값=" + ",".join(sorted(missing_values)))
+        add(
+            "CP2-019", CheckStatus.FAIL if reuse_errors else CheckStatus.PASS,
+            "기존 TC 재사용 근거 불일치: " + "; ".join(reuse_errors)
+            if reuse_errors else "기존 TC만 담당하는 변경 조건의 명시 코드·수치가 카탈로그 검증 동작에 있습니다.",
         )
 
     minimality_errors: list[str] = []

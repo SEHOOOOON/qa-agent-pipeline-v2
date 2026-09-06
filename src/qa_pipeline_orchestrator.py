@@ -146,7 +146,11 @@ def _select_agent3_tcs(
                     if eligibility.candidate_status is not None
                     else None
                 ),
-                "missing_capabilities": eligibility.missing_capabilities,
+                "missing_capabilities": (
+                    eligibility.missing_capabilities
+                    if test_case.automation_candidate
+                    else [test_case.automation_reason]
+                ),
                 "generic_discovery_required": (
                     eligibility.generic_discovery_required
                 ),
@@ -325,7 +329,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
         if explicit_tc_id is None:
             selected_set = set(selected_tc_ids)
             for item in selection_candidates:
-                if item.get("automation_candidate") and item.get("tc_id") not in selected_set:
+                if item.get("tc_id") not in selected_set:
                     prefiltered_exclusions.append(
                         AutomationExclusion(
                             tc_id=item["tc_id"],

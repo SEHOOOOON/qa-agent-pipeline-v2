@@ -99,7 +99,7 @@ def test_agent2_uses_structured_responses_api() -> None:
     assert response.usage["total_tokens"] == 300
     assert responses.kwargs["text_format"] is Agent2TestDesign
     assert responses.kwargs["store"] is False
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-18"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-19"
     agent2_input = responses.kwargs["input"][1]["content"]
     assert "[기존 사람 작성·자동화 TC 카탈로그]" in agent2_input
     assert "TC-TEMP-001" in agent2_input
@@ -187,6 +187,47 @@ def test_checkpoint2_allows_existing_tc_only_when_behavior_covers_change() -> No
     assert result.status == CheckStatus.PASS
     assert cp2_check(result, "CP2-008").status == CheckStatus.PASS
     assert cp2_check(result, "CP2-016").status == CheckStatus.PASS
+
+    guarded = evaluate_checkpoint2(
+        cp1_request(), analysis, design, cp2_requirements(),
+        existing_catalog=(*pipeline.EXISTING_REGRESSION_CATALOG, existing_spec),
+        require_existing_behavior_values=True,
+    )
+    assert guarded.status == CheckStatus.PASS
+    assert cp2_check(guarded, "CP2-019").status == CheckStatus.PASS
+
+
+def test_checkpoint2_rejects_existing_only_reuse_with_different_explicit_values() -> None:
+    analysis = cp2_analysis()
+    spec = pipeline.ExistingRegressionSpec(
+        tc_id="TC-V2-999", test_function="test_tc_v2_999",
+        requirement_ids=("REQ-TEMP-001", "REQ-STATE-001", "REQ-NOTIFY-001"),
+        covered_behaviors=("AUTO 16°C 미만 차단, 상태 유지, 차단 안내 검증",),
+        source="APPROVED",
+    )
+    design = Agent2TestDesign(
+        request_id=analysis.request_id, existing_tc_comparison_completed=True,
+        related_existing_tests=[ExistingTestSelection(
+            tc_id=spec.tc_id,
+            source_condition_ids=["COND-001", "COND-002", "COND-003"],
+            selection_reason="같은 Requirement를 검증한다.",
+        )], test_cases=[], coverage_summary="기존 TC 재사용",
+    )
+    kwargs = dict(existing_catalog=(*pipeline.EXISTING_REGRESSION_CATALOG, spec))
+    legacy = evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements(), **kwargs)
+    guarded = evaluate_checkpoint2(
+        cp1_request(), analysis, design, cp2_requirements(),
+        require_existing_behavior_values=True, **kwargs,
+    )
+    assert legacy.status == CheckStatus.PASS  # 역사적 계약을 소급 변경하지 않음
+    assert cp2_check(guarded, "CP2-019").status == CheckStatus.FAIL
+    assert pipeline._explicit_behavior_values("REQ-FAN-001 MED 18.0°C") == {"MED", "18"}
+    assert pipeline._explicit_behavior_values("HIGH 18°C") == {"HIGH", "18"}
+    candidate = evaluate_checkpoint2(
+        cp1_request(), analysis, cp2_valid_design(), cp2_requirements(),
+        require_existing_behavior_values=True,
+    )
+    assert candidate.status == CheckStatus.PASS
 
 def test_checkpoint2_requires_grounded_srs_revision_proposal_for_modified_requirement() -> None:
     proposal = pipeline.SrsRevisionProposal(

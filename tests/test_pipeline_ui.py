@@ -3,6 +3,39 @@
 from pipeline_test_support import *
 
 
+def test_run_test_rows_keep_design_type_failure_reason_and_manual_exclusions_separate(tmp_path: Path) -> None:
+    _write_json(tmp_path / "agent2_test_design.json", {
+        "test_cases": [
+            {"tc_id": "TC-CAND-001", "test_type": "NORMAL", "title": "정상 표시 검증",
+             "automation_candidate": True, "preconditions": ["장비 선택"],
+             "steps": ["설정 적용"], "expected_results": [{"statement": "새 값 표시"}],
+             "restore_steps": ["초기값 복원"]},
+            {"tc_id": "TC-CAND-002", "test_type": "BOUNDARY", "title": "수동 확인",
+             "automation_candidate": False, "automation_reason": "외부 장비 확인 필요"},
+        ], "관련_기존_TC": [{"tc_id": "TC-TEMP-001"}],
+    })
+    _write_json(tmp_path / "validation_execution.json", {
+        "created_at": "2026-09-06T00:00:00Z",
+        "candidate_results": [{"test_id": "TC-CAND-001", "status": "ASSERTION_FAILED"}],
+        "environment_precheck": {"test_id": "TC-ENV-000", "status": "PASSED"},
+        "자동화_제외_TC": [{"tc_id": "TC-CAND-002", "reason": "외부 장비 확인 필요"}],
+    })
+    _write_json(tmp_path / "final_report.json", {
+        "검토_항목": [{"test_id": "TC-CAND-001", "category": "PRODUCT_MISMATCH_CANDIDATE",
+                     "rationale": "표시가 기대와 다름"}],
+    })
+    rows = {row["tc_id"]: row for row in pipeline_reporting.build_run_test_rows(tmp_path)}
+    failed, manual, existing = rows["TC-CAND-001"], rows["TC-CAND-002"], rows["TC-TEMP-001"]
+    assert failed["category"] == "해피패스"  # 실패했다고 예외 TC로 바꾸지 않음
+    assert failed["classification"] == "제품 동작 불일치 후보"
+    assert failed["steps"] == ["설정 적용"] and failed["expected_results"] == ["새 값 표시"]
+    assert failed["priority"] == "미지정"
+    assert manual["status"] == "MANUAL_REVIEW" and manual["executed_at"] is None
+    assert manual["reason"] == "외부 장비 확인 필요"
+    assert existing["status"] == "NOT_EXECUTED" and existing["steps"] == []
+    assert rows["TC-ENV-000"]["category"] == "사전 점검"
+
+
 def test_v2_product_baseline_contains_only_runtime_assets() -> None:
     baseline_root = REPO_ROOT / "product_baseline"
     imported_files: list[str] = []
@@ -224,6 +257,31 @@ def test_approved_tc_registry_is_loaded_and_official_automation_is_reusable(
     assert any(path.endswith("trial-final.png") for path in result.evidence_files)
     assert any(path.endswith("trial-trace.zip") for path in result.evidence_files)
 
+def test_pipeline_ui_shows_latest_delivery_and_preserves_prior_send_history(tmp_path: Path) -> None:
+    runs_root = tmp_path / "runs"
+    run_id = "RUN-20260904-120000-ABCDEF"
+    run_dir = runs_root / run_id
+    _write_json(run_dir / "final_report.json", {"recommendation": "PASS"})
+    preview = {"mode": "DRY_RUN", "slack": {"status": "PREVIEW"}, "notion": {"status": "PREVIEW"}}
+    _write_json(run_dir / "external_reporting.json", preview)
+    original = (run_dir / "external_reporting.json").read_bytes()
+    attempts = run_dir / "external_reporting_attempts"
+    _write_json(attempts / "ATTEMPT-20260904-120001-000000-ABCDEF" / "external_reporting.json", {
+        "attempt_id": "ATTEMPT-20260904-120001-000000-ABCDEF",
+        "mode": "SEND", "slack": {"status": "SENT"}, "notion": {"status": "FAILED"},
+    })
+    stage = pipeline_ui.summarize_run(runs_root, run_id)["stages"]["agent4"]
+    assert stage["summary"] == "최종 판정 PASS · 외부 보고 SEND"
+    assert "Slack: SENT / Notion: FAILED" in stage["details"]
+
+    _write_json(attempts / "ATTEMPT-20260904-120002-000000-ABCDEF" / "external_reporting.json", preview)
+    stage = pipeline_ui.summarize_run(runs_root, run_id)["stages"]["agent4"]
+    assert stage["summary"] == "최종 판정 PASS · 외부 보고 DRY_RUN"
+    assert "Slack: PREVIEW / Notion: PREVIEW" in stage["details"]
+    assert any("이전 전송" in item and "Slack SENT / Notion FAILED" in item for item in stage["details"])
+    assert (run_dir / "external_reporting.json").read_bytes() == original
+
+
 def test_pipeline_ui_requires_and_applies_srs_revision_with_asset_approval(
     tmp_path: Path,
 ) -> None:
@@ -263,6 +321,10 @@ def test_pipeline_ui_requires_and_applies_srs_revision_with_asset_approval(
             ],
         },
     )
+
+    candidates = pipeline_ui.summarize_run(runs_root, run_id, target_html=target_html)["candidate_assets"]
+    displayed_proposals = next(item for item in candidates if item["tc_id"] == tc_id)["srs_revision_proposals"]
+    assert [item["proposal_id"] for item in displayed_proposals] == ["SRS-REV-001"]
 
     with pytest.raises(ValueError, match="SRS 개정 포함 승인"):
         pipeline_ui.decide_candidate_asset(
@@ -614,6 +676,73 @@ def test_pipeline_ui_live_run_uses_agent1_to_4_order_without_external_send(
     assert "--send" not in commands[-1]
     assert bridge.state.snapshot()["phase"] == "COMPLETED"
     assert bridge.state.snapshot()["run_id"] == run_id
+
+def test_pipeline_ui_reports_environment_block_without_external_send(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bridge = pipeline_ui.PipelineUiBridge(
+        runs_root=tmp_path / "runs", requests_root=tmp_path,
+        target_html=tmp_path / "virtual-controller.html", allow_live_run=True,
+    )
+    commands: list[tuple[str, ...]] = []
+
+    def fake_command(*arguments: str) -> SimpleNamespace:
+        commands.append(arguments)
+        if arguments[0] == "pipeline":
+            _write_agent4_inputs(tmp_path, precheck_status=pipeline.NeutralExecutionStatus.EXECUTION_ERROR)
+        if arguments[0] == "execute":
+            return SimpleNamespace(returncode=2)
+        if arguments[0] == "agent4":
+            # Agent 4 분석·CP4·보고 생성은 실제 코드로 확인하며 모델·외부 전송은 사용하지 않습니다.
+            return SimpleNamespace(returncode=pipeline.run_agent4(
+                SimpleNamespace(run_id=arguments[2], runs_root=str(bridge.runs_root))
+            ))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(bridge, "_command", fake_command)
+    bridge._run_pipeline(tmp_path / "change_request.json")
+    state = bridge.state.snapshot()
+    assert [command[0] for command in commands] == ["pipeline", "execute", "agent4"]
+    assert "--send" not in commands[-1]
+    assert state["phase"] == "COMPLETED"
+    assert "환경 점검 실패" in state["message"]
+    summary = pipeline_ui.summarize_run(bridge.runs_root, state["run_id"])
+    assert summary["overall_status"] == "HOLD"
+    assert summary["stages"]["agent4"]["status"] == "PASS"
+    assert "Slack: PREVIEW / Notion: PREVIEW" in summary["stages"]["agent4"]["details"]
+
+
+def test_pipeline_ui_stops_on_missing_or_damaged_failure_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for scenario in ("missing", "damaged"):
+        case_root = tmp_path / scenario
+        bridge = pipeline_ui.PipelineUiBridge(
+            runs_root=case_root / "runs", requests_root=case_root,
+            target_html=case_root / "virtual-controller.html", allow_live_run=True,
+        )
+        commands: list[str] = []
+
+        def fake_command(*arguments: str) -> SimpleNamespace:
+            commands.append(arguments[0])
+            if arguments[0] == "pipeline":
+                if scenario == "missing":
+                    (bridge.runs_root / "RUN-20260904-120000-ABCDEF").mkdir(parents=True)
+                else:
+                    run_dir, _ = _write_agent4_inputs(
+                        case_root, precheck_status=pipeline.NeutralExecutionStatus.EXECUTION_ERROR
+                    )
+                    manifest_file = run_dir / "validation_manifest.json"
+                    manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+                    manifest["validation_execution_sha256"] = "0" * 64
+                    _write_json(manifest_file, manifest)
+            return SimpleNamespace(returncode=2 if arguments[0] == "execute" else 0)
+
+        monkeypatch.setattr(bridge, "_command", fake_command)
+        bridge._run_pipeline(case_root / "change_request.json")
+        assert commands == ["pipeline", "execute"]
+        assert bridge.state.snapshot()["phase"] == "FAILED"
+
 
 def test_v2_product_ui_routes_agent_buttons_to_real_run_bridge() -> None:
     product_html = (

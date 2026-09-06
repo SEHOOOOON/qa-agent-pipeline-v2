@@ -70,6 +70,8 @@ CP2는 복수 입력값·단계 연결·초기화·판정 시점 같은 구조�
 
 변경 요청의 acceptance_notes 중 명시적인 시험 시작 전 확인과 시험 종료 후 복원은 제품 판정 Condition이나 제외 범위가 아닙니다. Agent 2는 준비 문장을 preconditions 또는 steps에, 복원 문장을 restore_steps에 원문 그대로 보존하고 `restore_required=true`로 기록합니다. CP2-014는 실제 제외 범위·정보 부족 인계와 이 시험 절차 보존을 분리해 검사합니다.
 
+신규 Agent 2 실행은 `existing_behavior_values_contract=1.0`을 기록합니다. CP2-019는 신규 후보 없이 기존 TC만 맡은 변경 조건의 명시적인 상태 코드·수치가 선택된 기존 TC의 검증 동작에 포함되는지 추가 검사합니다. Requirement ID만 같고 값이 다른 재사용은 차단하지만, 값의 포함 관계가 자연어 의미·매핑·순서의 완전한 일치를 증명하지는 않습니다. 모델의 의미 대조와 사람 검토는 유지합니다. 해당 계약이 없는 역사적 Run의 CP2를 소급 변경하지 않습니다.
+
 ## 4. Agent 3 / CP3
 
 입력은 CP2를 통과한 신규·수정 후보 TC 한 건, 관련 SRS 행, 해당 TC에 필요한 UI 확인 결과입니다. 관련 기존 회귀는 Agent 3 입력이 아니며 execute 단계에서 기존 코드를 실행합니다. API 키, 로컬 절대경로, 전체 HTML, Screenshot, Trace는 모델 입력에서 제외합니다.
@@ -144,7 +146,9 @@ CP4는 Run ID·입력 해시, TC ID 중복, 실패 결과의 종료 코드·메�
 
 최종 보고에는 제품·환경·고정 사례별 합계, 검토 항목, 제외 범위, 제외된 정보 부족, 자동화 제외 TC, 최종 확인 사항과 PASS·HOLD·HUMAN_REVIEW 권고가 들어갑니다.
 
-CP4 PASS와 최종 보고 해시가 일치할 때만 외부 보고를 허용합니다. 기본 실행은 `slack_payload.json`과 `notion_payload.json`을 생성하는 Dry-run이며, `--send`에서만 환경변수의 Slack Webhook과 Notion 자격정보를 사용합니다. Notion은 TC ID로 조회한 뒤 기존 페이지는 PATCH, 없는 TC는 POST합니다. 첫 `external_reporting.json`은 덮어쓰지 않으며 이후 시도는 `external_reporting_attempts/<ATTEMPT-ID>/`에 별도 저장하고 이전 보고 SHA-256을 참조합니다. 각 기록은 PREVIEW·SENT·SKIPPED·FAILED·BLOCKED 상태와 Payload SHA-256을 포함합니다.
+CP4 PASS와 최종 보고 해시가 일치할 때만 외부 보고를 허용합니다. 기본 실행은 `slack_payload.json`과 `notion_payload.json`을 생성하는 Dry-run이며, `--send`에서만 환경변수의 Slack Webhook과 Notion 자격정보를 사용합니다. Notion의 TC-ID 열에는 `Run ID:TC ID`를 저장하고 같은 실행의 같은 TC만 PATCH하며 다른 Run은 POST합니다. 기존 TC ID 단독 키의 과거 페이지는 수정하지 않습니다. 첫 `external_reporting.json`은 덮어쓰지 않으며 이후 시도는 `external_reporting_attempts/<ATTEMPT-ID>/`에 별도 저장하고 이전 보고 SHA-256을 참조합니다. 각 기록은 PREVIEW·SENT·SKIPPED·FAILED·BLOCKED 상태와 Payload SHA-256을 포함합니다.
+
+`automation_candidate=false`인 수동 확인 TC도 자동화 제외 목록에 사유와 함께 인계합니다. 모델을 호출하지 않으며, 다른 실행 가능 TC와 Agent 4 보고는 계속합니다. 실패 로그에 나오지 않은 개별 기대 결과는 통과로 추정하지 않고 판정 미확인으로 안내합니다. TC 유형(해피패스·엣지케이스·예외/결함·상태 정합성)은 설계값이고 실행 후 원인 분류와 별개입니다. Notion도 실패 여부로 TC 유형이나 우선순위를 새로 정하지 않습니다.
 
 `사람_최종_검토.md`는 최종 보고를 사람이 확정하기 위한 작성 양식입니다. 각 검토 항목의 기대 결과, Pytest 실패 메시지에서 추출한 실제 관찰, 상대 경로 증거 링크, 제품 수정·요구사항 보완·자동화 재검토·환경 재실행·종결 선택지와 검토자·기한란을 제공합니다. `사람_최종_검토_manifest.json`은 최종 보고·검증 실행과 자동 생성 원본 문서의 해시를 연결합니다. 사람이 작성란을 채워 문서 해시가 달라지면 그 변경은 정상적인 사람 판단 기록으로 취급하고 `human-review --refresh`는 덮어쓰기를 차단합니다. 아직 사람이 편집하지 않은 자동 생성 문서만 기존 Manifest 해시가 일치할 때 `--refresh`로 갱신할 수 있습니다.
 
@@ -159,6 +163,11 @@ JSON을 읽어 네 단계로 요약하는 표시 계층입니다. 브라우저�
 경우에도 허용된 `examples/change_request*.json`만 선택할 수 있고 임의 명령·경로를 받지
 않습니다. 실행 순서는 `pipeline` → `execute` → `agent4`이며 Agent 4는 `--send` 없이
 호출하므로 Slack·Notion은 Dry-run입니다.
+`execute` 종료 코드 2 중 환경 점검 실패로 저장된 BLOCKED 결과는 Run ID·상태·결과 해시를
+확인한 뒤 Agent 4로 넘깁니다. CP4의 증거 검사는 그대로 적용하며, 결과 누락·손상이나
+다른 실행 오류는 중단합니다. 보고 완료는 테스트 성공과 구분합니다.
+외부 보고 조회는 최초 파일과 `external_reporting_attempts/`의 후속 기록 중 최신 상태를
+표시하며, 이전 SEND 기록도 함께 표시해 후속 미리보기가 과거 전송 사실을 가리지 않게 합니다.
 
 후보 자산 판단은 별도 `--allow-asset-approval`에서만 활성화합니다. 등록 가능 조건은
 최종 권고 PASS, CP3·CP4 PASS, 변경 검증 PASSED, 완전한 Screenshot·Trace, 후보 Python·
@@ -180,13 +189,15 @@ Agent 2의 `SRS_개정_제안`은 MODIFIED·UPDATE_REQUIRED Requirement마다 �
 제안 인수 기준, 근거 Condition과 사유를 가집니다. Agent 2→검증 실행→Agent 4 최종
 보고→`사람_최종_검토.md`까지 같은 구조로 전달합니다. 승인 화면은 개정 전·후를 표시하고,
 변경할 문구가 남아 있으면 별도 SRS 동의 없이는 공식 TC 승인을 차단합니다. 후보의
-Requirement·Condition과 연결된 제안만 적용 대상으로 삼습니다. 동의 시 해당 Requirement
+Requirement·Condition과 연결된 제안만 화면 표시와 적용 대상으로 삼습니다. 동의 시 해당 Requirement
 행의 인수 기준만 원문 일치 조건으로 교체하고, Run 결정 기록과 공식 SRS 개정 기록에 전·후
 SHA-256을 남깁니다. TC·자동화·Registry 기록까지 모두 성공해야 승인이 완료되며 중간 오류가
 나면 이 승인에서 바뀐 본 파일과 임시 파일을 원상복구합니다. 이미 반영된 동일 제안은 멱등
 처리하며 다른 문구로 바뀐 SRS에는 적용하지 않습니다.
 
 ## 8. Run 요약
+
+중앙제어 화면의 TC 표는 `agent2_test_design.json`, 실행 결과, 자동화 제외 목록과 최종 분류를 결합한 `test_rows`를 사용합니다. 신규·관련 기존 TC 및 실제 실행된 환경 점검을 표시하고 유형 필터와 전제조건·절차·기대 결과·복원·관찰·증거 파일명 상세를 제공합니다. 승인 기존 TC의 상세 명세는 카탈로그에 기록된 해시와 현재 승인 파일이 일치할 때만 읽습니다. 기준 회귀에 상세 명세·유형이 없으면 미기록·미분류, 우선순위가 없으면 미지정으로 표시합니다. 시각은 개별 TC 수정일이 아니라 실행 묶음 기록 시각입니다.
 
 다중 TC를 한 번의 모델 응답으로 묶지 않습니다. 각 TC는 독립 모델 요청과 독립 산출물 폴더를 사용합니다.
 

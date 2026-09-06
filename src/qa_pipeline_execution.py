@@ -317,6 +317,7 @@ def run_agent2(args: argparse.Namespace) -> int:
             requirements,
             existing_catalog=existing_catalog,
             require_srs_revision_proposals=True,
+            require_existing_behavior_values=True,
         )
         attempts = [
             {
@@ -377,6 +378,7 @@ def run_agent2(args: argparse.Namespace) -> int:
                 requirements,
                 existing_catalog=existing_catalog,
                 require_srs_revision_proposals=True,
+                require_existing_behavior_values=True,
             )
             attempts.append(
                 {
@@ -410,7 +412,7 @@ def run_agent2(args: argparse.Namespace) -> int:
             run_dir / "agent2_manifest.json",
             {
                 "contract_version": "3.0",
-                "prompt_version": "agent2-2.14",
+                "prompt_version": "agent2-2.19",
                 "run_id": args.run_id,
                 "source_stage": "AGENT_1_CP1",
                 "stage": "AGENT_2_CP2",
@@ -433,6 +435,7 @@ def run_agent2(args: argparse.Namespace) -> int:
                     approved_catalog_file
                 ),
                 "srs_revision_contract": "1.0",
+                "existing_behavior_values_contract": "1.0",
                 "agent2_design_sha256": _sha256_file(design_file),
                 "checkpoint2_sha256": _sha256_file(checkpoint2_file),
                 "created_at": datetime.now(timezone.utc).isoformat(),
@@ -508,6 +511,9 @@ def _load_verified_agent2_run(
         existing_catalog=existing_catalog,
         require_srs_revision_proposals=(
             manifest.get("srs_revision_contract") == "1.0"
+        ),
+        require_existing_behavior_values=(
+            manifest.get("existing_behavior_values_contract") == "1.0"
         ),
     )
     if recomputed.model_dump(mode="json") != checkpoint.model_dump(mode="json"):

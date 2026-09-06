@@ -500,7 +500,7 @@ def _human_review_markdown(
         ):
             mismatch_result_ids = set(re.findall(r"ER-\d{3}", observation_detail))
             lines.extend(
-                f"- `{expected.result_id}`: 불일치가 기록되지 않아 해당 자동 검증은 통과했습니다."
+                f"- `{expected.result_id}`: 이 요약에서 개별 판정이 확인되지 않습니다. 원본 실행 증거를 확인해 주세요."
                 for expected in test_case.expected_results
                 if expected.result_id not in mismatch_result_ids
             )
@@ -749,12 +749,93 @@ def _slack_report_payload(report: FinalReport) -> dict[str, Any]:
     }
 
 
+def build_run_test_rows(run_dir: Path) -> list[dict[str, Any]]:
+    """저장된 Run의 설계·실행·분류를 합칩니다. 미실행을 통과로 추정하지 않습니다."""
+    def read(name: str) -> dict[str, Any]:
+        path = run_dir / name
+        return _read_json_payload(path) if path.is_file() else {}
+
+    design = read("agent2_test_design.json")
+    bundle = read("validation_execution.json")
+    report = read("final_report.json")
+    summary = read("agent3_run_summary.json")
+    cases = {item["tc_id"]: item for item in design.get("test_cases", [])}
+    catalog = _catalog_from_snapshot(read("approved_regression_catalog.json"))
+    specs = {item.tc_id: item for item in (*catalog, ENVIRONMENT_PRECHECK)}
+    approved_root = Path(__file__).resolve().parents[1] / "approved_assets"
+    for spec in catalog:
+        if spec.source != "APPROVED" or not spec.test_case_file:
+            continue
+        path = (approved_root / spec.test_case_file).resolve()
+        if (path.is_relative_to(approved_root.resolve()) and path.is_file()
+                and _sha256_file(path) == spec.test_case_sha256):
+            cases[spec.tc_id] = _read_json_payload(path).get("test_case", {})
+    results = {
+        item["test_id"]: item for item in [
+            *bundle.get("candidate_results", []),
+            *([bundle["candidate_result"]] if not bundle.get("candidate_results") and bundle.get("candidate_result") else []),
+            *([bundle["environment_precheck"]] if bundle.get("environment_precheck") else []),
+            *bundle.get("regression_results", []),
+        ]
+    }
+    exclusions = {
+        item["tc_id"]: item for item in (
+            bundle.get("자동화_제외_TC") or summary.get("자동화_제외_TC") or []
+        )
+    }
+    findings = {item.get("test_id"): item for item in report.get("검토_항목", [])}
+    labels = {
+        "PRODUCT_MISMATCH_CANDIDATE": "제품 동작 불일치 후보",
+        "AUTOMATION_EXECUTION_ISSUE": "자동화 실행 문제",
+        "ENVIRONMENT_ISSUE": "실행 환경 문제",
+        "INSUFFICIENT_EVIDENCE": "판정 근거 부족", "NOT_EXECUTED": "미실행",
+    }
+    types = {"NORMAL": "해피패스", "BOUNDARY": "엣지케이스", "EXCEPTION": "예외/결함", "STATE_CONSISTENCY": "상태 정합성"}
+    selected = design.get("관련_기존_TC") or design.get("related_existing_tests") or []
+    ids = list(dict.fromkeys([
+        *(["TC-ENV-000"] if "TC-ENV-000" in results else []),
+        *[item["tc_id"] for item in design.get("test_cases", [])],
+        *[item["tc_id"] for item in selected], *results, *exclusions,
+    ]))
+    rows = []
+    for tc_id in ids:
+        case, result, finding = cases.get(tc_id, {}), results.get(tc_id, {}), findings.get(tc_id, {})
+        spec = specs.get(tc_id)
+        excluded = exclusions.get(tc_id)
+        manual = case.get("automation_candidate") is False and tc_id.startswith("TC-CAND-")
+        status = result.get("status") or ("MANUAL_REVIEW" if manual else "NOT_EXECUTED")
+        category = "사전 점검" if tc_id == "TC-ENV-000" else types.get(case.get("test_type"), "미분류")
+        classification = labels.get(finding.get("category"), "")
+        if not classification:
+            classification = "정상 동작" if status == "PASSED" else "수동 확인 필요" if manual else "자동화 제외" if excluded else "분류 전" if result else "미실행"
+        expected = [item["statement"] for item in case.get("expected_results", [])]
+        if not expected and spec:
+            expected = list(spec.covered_behaviors)
+        rows.append({
+            "tc_id": tc_id, "category": category,
+            "title": case.get("title") or (spec.covered_behaviors[0] if spec and spec.covered_behaviors else tc_id),
+            "status": status, "priority": case.get("priority") or "미지정",
+            "classification": classification,
+            "reason": (finding.get("rationale") or (excluded or {}).get("reason")
+                       or (case.get("automation_reason") if manual else "") or result.get("raw_message") or ""),
+            "preconditions": case.get("preconditions") or [], "steps": case.get("steps") or [],
+            "expected_results": expected, "restore_steps": case.get("restore_steps") or [],
+            "requirement_ids": case.get("requirement_ids") or result.get("requirement_ids") or (list(spec.requirement_ids) if spec else []),
+            "source": "환경 점검" if tc_id == "TC-ENV-000" else "신규·수정 후보" if tc_id.startswith("TC-CAND-") else "기존 TC",
+            "executed_at": bundle.get("created_at") if result else None,
+            "duration_ms": result.get("duration_ms"),
+            "evidence_files": [name for name in result.get("evidence_files", []) if _safe_run_file(run_dir, name)],
+        })
+    return rows
+
+
 def _notion_report_records(
-    bundle: ValidationExecutionBundle, report: FinalReport
+    bundle: ValidationExecutionBundle, report: FinalReport, run_dir: Path | None = None
 ) -> list[dict[str, Any]]:
     findings_by_test = {
         item.test_id: item for item in report.findings if item.test_id is not None
     }
+    rows = {item["tc_id"]: item for item in build_run_test_rows(run_dir)} if run_dir else {}
     records: list[dict[str, Any]] = []
     for result in _validation_results(bundle):
         finding = findings_by_test.get(result.test_id)
@@ -770,6 +851,9 @@ def _notion_report_records(
                 ),
                 "recommendation": report.recommendation.value,
                 "evidence_complete": result.evidence_complete,
+                "title": rows.get(result.test_id, {}).get("title", result.test_id),
+                "test_category": rows.get(result.test_id, {}).get("category", "미분류"),
+                "priority": rows.get(result.test_id, {}).get("priority", "미지정"),
             }
         )
     return records
@@ -854,13 +938,14 @@ def _upsert_notion_reports(
     try:
         for record in records:
             tc_id = str(record["tc_id"])
+            execution_key = f"{record['run_id']}:{tc_id}"
             query_status, query_body = _http_json_request(
                 "POST",
                 f"https://api.notion.com/v1/data_sources/{data_source_id}/query",
                 {
                     "filter": {
                         "property": "TC-ID",
-                        "title": {"equals": tc_id},
+                        "title": {"equals": execution_key},
                     },
                     "page_size": 1,
                 },
@@ -869,22 +954,11 @@ def _upsert_notion_reports(
             if not 200 <= query_status < 300 or not isinstance(query_body, dict):
                 raise RuntimeError(f"Notion query HTTP {query_status}")
             finding = str(record["finding_category"])
-            category = (
-                "사전 점검"
-                if record["source"] == ExecutionSource.ENVIRONMENT_PRECHECK.value
-                else "예외/결함"
-                if record["result"]
-                in {
-                    NeutralExecutionStatus.ASSERTION_FAILED.value,
-                    NeutralExecutionStatus.EXECUTION_ERROR.value,
-                    NeutralExecutionStatus.TIMEOUT.value,
-                }
-                else "엣지케이스"
-            )
+            category = record.get("test_category", "미분류")
             properties = {
-                "TC-ID": {"title": [{"text": {"content": tc_id}}]},
+                "TC-ID": {"title": [{"text": {"content": execution_key}}]},
                 "테스트 제목": {
-                    "rich_text": [{"text": {"content": f"{tc_id} 변경 검증"}}]
+                    "rich_text": [{"text": {"content": str(record.get("title") or tc_id)[:2000]}}]
                 },
                 "실행 결과": {
                     "select": {"name": _notion_status_name(str(record["result"]))}
@@ -902,20 +976,9 @@ def _upsert_notion_reports(
                     ]
                 },
                 "구분": {"select": {"name": category}},
-                "우선 순위": {
-                    "select": {
-                        "name": (
-                            "P1"
-                            if record["result"]
-                            in {
-                                NeutralExecutionStatus.ASSERTION_FAILED.value,
-                                NeutralExecutionStatus.EXECUTION_ERROR.value,
-                            }
-                            else "P2"
-                        )
-                    }
-                },
             }
+            if record.get("priority") in {"P1", "P2", "P3"}:
+                properties["우선 순위"] = {"select": {"name": record["priority"]}}
             results = query_body.get("results", [])
             if results:
                 url = f"https://api.notion.com/v1/pages/{results[0]['id']}"
@@ -938,7 +1001,7 @@ def _upsert_notion_reports(
             destination="NOTION",
             status=ExternalDeliveryStatus.SENT,
             item_count=completed,
-            detail=f"TC ID 기준으로 Notion {completed}건을 Upsert했습니다.",
+            detail=f"Run ID와 TC ID 기준으로 Notion {completed}건을 Upsert했습니다.",
         )
     except Exception as exc:
         return ExternalDestinationResult(
@@ -1012,7 +1075,7 @@ def run_external_reporting(args: argparse.Namespace) -> int:
         )
     else:
         slack_payload = _slack_report_payload(report)
-        notion_records = _notion_report_records(bundle, report)
+        notion_records = _notion_report_records(bundle, report, run_dir)
         _write_json(slack_payload_file, slack_payload)
         _write_json(notion_payload_file, {"records": notion_records})
         if mode == "SEND":

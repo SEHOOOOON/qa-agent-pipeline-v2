@@ -3,6 +3,37 @@
 from pipeline_test_support import *
 
 
+def test_notion_preserves_separate_runs_and_retries_same_tc_without_reclassification(monkeypatch) -> None:
+    monkeypatch.setenv("NOTION_API_KEY", "test-only-not-a-secret")
+    monkeypatch.setenv("NOTION_DATA_SOURCE_ID", "test-data-source")
+    pages, writes, queries = {}, [], []
+
+    def fake_http(method, url, payload, **kwargs):
+        if url.endswith("/query"):
+            key = payload["filter"]["title"]["equals"]
+            queries.append(key)
+            return 200, {"results": [{"id": pages[key]}] if key in pages else []}
+        key = payload["properties"]["TC-ID"]["title"][0]["text"]["content"]
+        pages.setdefault(key, f"page-{len(pages) + 1}")
+        writes.append((method, payload["properties"]))
+        return 200, {"id": pages[key]}
+
+    monkeypatch.setattr(pipeline_reporting, "_http_json_request", fake_http)
+    record = {
+        "run_id": "RUN-A", "tc_id": "TC-CAND-001", "result": "ASSERTION_FAILED",
+        "finding_category": "PRODUCT_MISMATCH_CANDIDATE", "recommendation": "HUMAN_REVIEW",
+        "test_category": "해피패스", "title": "정상 표시 검증", "priority": "미지정",
+    }
+    for run_id in ("RUN-A", "RUN-B", "RUN-A"):
+        result = pipeline_reporting._upsert_notion_reports([{**record, "run_id": run_id}])
+        assert result.status == pipeline.ExternalDeliveryStatus.SENT
+    assert queries == ["RUN-A:TC-CAND-001", "RUN-B:TC-CAND-001", "RUN-A:TC-CAND-001"]
+    assert [method for method, _ in writes] == ["POST", "POST", "PATCH"]
+    assert len(pages) == 2
+    assert all(props["구분"]["select"]["name"] == "해피패스" for _, props in writes)
+    assert all("우선 순위" not in props for _, props in writes)
+
+
 def test_agent4_writes_consistent_pass_report_without_rerunning_tests(tmp_path: Path) -> None:
     run_dir, run_id = _write_agent4_inputs(
         tmp_path,
@@ -404,6 +435,8 @@ def test_agent4_marks_assertion_failure_as_product_mismatch_candidate(tmp_path: 
     assert "# 사람 최종 검토서" in review_text
     assert "제품 동작 불일치 후보" in review_text
     assert "UI remains at 18 degrees." in review_text
+    assert "개별 판정이 확인되지 않습니다" in review_text
+    assert "불일치가 기록되지 않아 해당 자동 검증은 통과" not in review_text
     assert "요구사항이 맞으며 제품 구현 수정이 필요함" in review_text
     assert "검토자: ____________________" in review_text
     assert "사람이 작성한 문서는 `--refresh`가 덮어쓰지 않습니다" in review_text

@@ -8,12 +8,12 @@
 
 ~~~text
 python -m pytest --collect-only -q
-tests/test_agent2.py: 39
+tests/test_agent2.py: 40
 tests/test_agent3.py: 56
-tests/test_agent4_reporting.py: 20
+tests/test_agent4_reporting.py: 21
 tests/test_integrity_cli.py: 5
-tests/test_orchestration_execution.py: 20
-tests/test_pipeline_ui.py: 16
+tests/test_orchestration_execution.py: 21
+tests/test_pipeline_ui.py: 20
 tests/test_srs_agent1.py: 24
 ~~~
 
@@ -88,6 +88,12 @@ git status --short
 - README·내부 문서의 최신 수치와 공개 실행 증거 일치
 - git diff --check 통과
 
-테스트 통과는 실제 Live Run 성공을 뜻하지 않습니다. 자동 테스트 180건과 위 최신 Live를 모두 완료했기 때문에 현재 계약의 코드 검증과 실제 모델 연결 증거를 구분해 제시할 수 있습니다.
+9월 4일 UI 연결 보완 후 자동 테스트는 183건입니다. 후속 전송 이력 표시, 환경 실패의 Agent 4 HOLD 보고 연결, 유효한 실패 결과가 없는 경우 중단을 검증하는 테스트 3건을 추가했고, 후보별 SRS 표시 검사는 기존 승인 테스트에 보강했습니다. 저장된 잠금 Run은 SEND·SENT, 최신 MED Run은 DRY_RUN·PREVIEW로 구분되는지도 읽기 전용으로 확인했습니다.
+
+테스트 통과는 실제 Live Run 성공을 뜻하지 않습니다. 9월 4일 검증은 모델 API와 Slack·Notion 실제 전송 없이 수행했으며, 위 9월 3일 Live 기록과 구분합니다.
+
+9월 6일 자동 테스트는 187건입니다. 신규 4건은 기존 TC의 다른 명시 값 재사용 차단, 수동 TC 제외 인계와 모델 미호출, Notion 실행별 보존·동일 실행 재전송, 표의 TC 유형·실패 원인·수동/미실행 분리를 검사합니다. 개별 기대 결과 PASS 추정 방지는 기존 Agent 4 실패 보고 테스트에 추가했습니다. 브라우저에서 저장된 MED 성공 및 잠금 실패 Run의 표·유형 필터·상세 펼침을 확인했습니다. 새 모델 API·실제 Slack/Notion 전송 검증은 포함하지 않습니다.
+
+동일 작업의 전체 실행은 187건 통과 1회 후 추가 실행에서 186건 통과·1건 실패(260.69초)를 기록했습니다. 실패한 `test_agent3_trial_distinguishes_product_mismatch`는 후보 시험의 20초 제한을 초과해 제품 불일치 후보 대신 TIMEOUT을 반환했습니다. 원본 stdout·stderr에는 원인을 특정할 출력이 없었으며, 같은 테스트의 단독 재실행은 1건 통과(34.45초)였습니다. 이 시간은 테스트 전체 경과 시간으로 내부 후보 시험 제한과 다릅니다. 원인 및 반복 안정성은 미확정이며 시간 제한·기대값·Assertion을 완화하지 않았습니다.
 
 Registry 등록 자산은 파일·SHA-256·구조화 TC를 검증한 뒤 Agent 2 기존 TC 입력과 Run Snapshot에 합칩니다. 최신 Live에서 `TC-V2-001`의 검증 동작을 MED 신규 후보와 분리해 선택하고 승인 Python으로 다시 실행하는 흐름을 확인했습니다. SRS 개정 제안과 신규 후보 공식 등록은 자동 권고 PASS만으로 반영하지 않으며 사람의 별도 승인이 필요합니다.

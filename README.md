@@ -2,6 +2,8 @@
 
 프로젝트 1의 QA 절차를 유지하면서, 고정 예시였던 Agent 산출물을 실제 모델 호출과 실행 증거로 연결한 MVP입니다.
 
+최신 기준: **2026-09-06 / V2** — TC 상세 결과 표·실행별 보고 보완. [현재 구현·검증·남은 작업](PROJECT_HANDOFF.md)과 [최신 커밋 이력](https://github.com/SEHOOOOON/qa-agent-pipeline-v2/commits/main/)을 함께 확인하세요. V1 포트폴리오의 고정 시연과 이 저장소의 현재 구현은 구분합니다.
+
 핵심 흐름은 다음과 같습니다.
 
 ~~~text
@@ -153,7 +155,7 @@ python -m qa_pipeline_v2 agent3 `
 | `validation_execution.json` | 신규 후보와 관련 기존 회귀 실행 결과 |
 | `agent4_analysis.json`, `final_report.json` | 원인 분류와 최종 권고 |
 | `사람_최종_검토.md` | 사람이 최종 판단할 항목과 증거 링크 |
-| `external_reporting.json` | Slack·Notion 미리보기 또는 전송 상태 |
+| `external_reporting.json`, `external_reporting_attempts/` | 최초 외부 보고와 후속 전송·미리보기 기록. 화면은 최신 상태와 이전 전송을 구분 |
 | `approved_assets/registry.json` | 사람이 승인한 공식 TC·자동화와 SHA-256 |
 
 `PRODUCT_MISMATCH_CANDIDATE`는 제품 결함 확정이 아니라 기대 결과와 다른 관찰 후보입니다. Checkpoint 통과 역시 사람의 최종 승인을 뜻하지 않습니다.
@@ -189,6 +191,6 @@ python -m pytest --collect-only -q
 git diff --check
 ~~~
 
-현재 자동 테스트는 **180건**이며 역할별 소스·테스트 분리 후에도 모두 통과했습니다. 실제 Live `RUN-20260903-125732-ECE88F`에서는 Agent 1·3의 첫 산출물 오류를 Checkpoint가 차단해 재작성한 뒤, 신규 후보·환경 점검·승인 회귀와 CP4·최종 권고가 모두 PASS였습니다. Trace의 로컬 경로·키 패턴도 0건이었습니다.
+현재 자동 테스트는 **187건**입니다. 전체 통과 1회를 확인했지만, 추가 전체 실행은 186건 통과·기존 Agent 3 시험 1건 시간 초과였고 해당 건의 단독 재실행은 통과했습니다. 반복 안정성 문제가 해결됐다는 뜻은 아닙니다. 9월 6일에는 수동 TC 제외 인계·기존 TC의 명시 값 대조·보고 문구·Notion 실행별 보존과 중앙제어 TC 상세 표를 보완했습니다. 새 API Live·외부 전송은 수행하지 않았습니다. 최근 실제 Live `RUN-20260903-125732-ECE88F`에서는 Agent 1·3의 첫 산출물 오류를 Checkpoint가 차단해 재작성한 뒤, 신규 후보·환경 점검·승인 회귀와 CP4·최종 권고가 모두 PASS였습니다. Trace의 로컬 경로·키 패턴도 0건이었습니다.
 
 공개 증거는 위 세 가지 성공·실패 사례에서 확인할 수 있습니다. 상세 Checkpoint 규칙과 시행착오는 [Agent·Checkpoint 명세](docs/03_AGENT_AND_CHECKPOINT_SPEC.md)와 [의사결정 기록](DECISION_LOG.md)에 보존합니다. Checkpoint PASS는 사람의 SRS·공식 자산 승인과 구분됩니다.
