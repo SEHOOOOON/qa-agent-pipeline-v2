@@ -40,7 +40,7 @@ V2는 새로운 QA 방법론을 추가한 것이 아니라 V1 절차에 실제 �
 
 운영 원칙은 세 가지입니다.
 
-- 확정된 범위는 계속 실행하고, 불명확하거나 자동화할 수 없는 TC만 제외해 마지막 보고에 남깁니다.
+- 앞 단계 계약을 통과한 확정 범위는 계속 실행하고, 불명확하거나 자동화할 수 없는 TC는 제외해 마지막 보고에 남깁니다. 인계 손상이나 Checkpoint 실패까지 무시하고 진행하지는 않습니다.
 - Agent 2는 Requirement ID뿐 아니라 실제 검증 동작을 비교해 유지되는 기존 TC는 재사용하고 변경분만 신규 후보로 만듭니다.
 - TC는 입력값 하나가 아니라 하나의 관제점·업무 규칙 단위로 설계하고, 각 조건 직후 판정과 시험 종료 후 상태 복원을 확인합니다.
 
@@ -51,7 +51,7 @@ V2는 새로운 QA 방법론을 추가한 것이 아니라 V1 절차에 실제 �
 - Playwright Python은 AI가 자유롭게 작성하지 않고 허용 목록 기반 컴파일러가 생성합니다.
 - Agent 4는 생성형 AI가 아니라 규칙 기반 분석기입니다.
 
-이 구조는 AI의 의미 판단을 사용하면서도 Requirement ID, 기대값, 경계값, Assertion을 임의로 바꾸지 못하게 하기 위한 최소 통제입니다.
+이 구조는 AI의 의미 판단을 사용하되 Requirement ID, 기대값, 경계값, Assertion의 변경을 검사하는 통제입니다. 구조·명시 값 검사는 자연어 의미의 완전한 일치나 모든 오생성의 차단을 보장하지 않습니다.
 
 ## 코드 구조
 
@@ -66,7 +66,7 @@ V2는 새로운 QA 방법론을 추가한 것이 아니라 V1 절차에 실제 �
 - TC와 자동화 계획의 값·근거 추적
 - 허용된 UI 조작·검증만 코드로 변환
 - 원본과 분리된 임시 위치에서 신규 코드 시험
-- 기존 SRS·TC·자동화 원본 비수정
+- 자동 생성·시험 중 기존 SRS·TC·자동화 원본 비수정(사람이 동의한 SRS 개정은 승인 절차에서 별도 반영)
 - API 전송 Preview와 비밀정보 제외
 
 UI 조사는 선택한 TC에 필요한 요소로 제한합니다. 제품 규칙은 코드에 하드코딩하지 않고 변경 요청·SRS·승인 TC에서 받으며, 처음 보는 기능도 실제 화면에서 확인한 표준 UI 조작과 읽기 가능한 상태로 구현 가능한지 판단합니다.
@@ -101,7 +101,8 @@ UI 조사는 선택한 TC에 필요한 요소로 제한합니다. 제품 규칙�
 OpenAI Python SDK는 `OPENAI_API_KEY` 환경변수를 읽습니다. 키를 코드·JSON·Git에 저장하지 않습니다.
 
 ~~~powershell
-python -m pip install ".[agent3,test]"
+python -m pip install ".[agent3,test]" pytest-playwright
+python -m playwright install chromium
 $env:OPENAI_API_KEY="본인의 API 키"
 
 # Agent 1~3과 신규 자동화 시험
@@ -130,6 +131,10 @@ python -m qa_pipeline_ui --allow-live-run --allow-asset-approval
 ~~~
 
 중앙제어 UI의 기본 모드는 저장된 Run 조회 전용입니다. `--allow-live-run`에서만 새 API 실행을 허용하고, `--allow-asset-approval`에서만 검증된 PASS 후보의 공식 자산 승인·보류를 허용합니다. 화면에서 실행하는 Agent 4 외부 보고는 미리보기이며 실제 전송은 CLI의 `--send`를 명시했을 때만 수행합니다.
+
+Python 3.10 이상이 필요합니다. 현재 패키지의 선택 의존성에는 기존 회귀 실행에 필요한 `pytest-playwright`가 빠져 있어 위 명령에서 별도 설치합니다. Chromium도 별도 설치가 필요합니다. 설치 절차는 [Playwright 공식 안내](https://playwright.dev/python/docs/intro)를 참고하세요.
+
+새로 복제한 저장소에는 로컬 `runs/`가 없어 저장 결과 목록이 비어 있을 수 있습니다. 공개 예시는 자동으로 불러오는 실행 원본이 아닙니다. HTML 파일만 직접 열면 고정 데모이며, 실제 Run 조회·API 실행·사람 승인은 위 로컬 서버를 통해 사용합니다. GitHub에서 코드를 보는 것만으로 서버가 실행되지는 않습니다. CLI에서는 `pipeline`이 Agent 1~3까지 담당하며 이후 `execute`, `agent4`를 순서대로 실행합니다.
 
 Agent 3 입력을 먼저 확인하려면 개별 명령의 `--preview-only`를 사용합니다. Preview는 API를 호출하지 않습니다.
 
@@ -166,9 +171,17 @@ python -m qa_pipeline_v2 agent3 `
 |---|---|
 | [Agent 1→3 AUTO 온도 실행](examples/results/agent1-agent2-agent3-auto-temperature/README.md) | 실제 모델 계획, 결정론적 후보 코드, Candidate Trial과 증거 |
 | [Agent 1→4 잠금 설정 실행](examples/results/agent1-agent2-agent3-agent4-lock-disable/README.md) | 단계별 상태·사용량, 관련 기존 회귀, Agent 4 분류, 사람 검토 양식, Slack·Notion 실제 전송 상태 |
-| [Agent 1→4 MED 풍량 실행](examples/results/agent1-agent2-agent3-agent4-medium-fan/README.md) | 최신 계약의 실제 모델 실행, 신규 후보와 승인 TC 재사용 분리, 3건 PASS, SRS 개정 승인 대기 |
+| [Agent 1→4 MED 풍량 실행](examples/results/agent1-agent2-agent3-agent4-medium-fan/README.md) | 2026-09-03 당시 계약의 실제 모델 실행, 신규 후보와 승인 TC 재사용 분리, 3건 PASS, SRS 개정 승인 대기 |
 
-실행 원본은 `runs/`에 보존하고 Git에서 제외합니다. 공개 예시는 비밀정보·로컬 절대경로·불필요한 대용량 증거를 제외한 최소 묶음이며, `public_manifest.json`으로 공개 파일의 SHA-256을 확인할 수 있습니다.
+실행 원본은 로컬 `runs/`에 보존하고 Git에서 제외합니다. 위 표는 공개 폴더 5개 중 대표 3개입니다. 잠금·MED 예시는 원본 전체가 아닌 정제한 최소 요약이며 `public_manifest.json`으로 공개 파일의 SHA-256을 확인할 수 있습니다. 이전 AUTO Agent 1→3 예시는 상세 JSON·Screenshot·Trace를 포함한 당시 묶음이며 같은 공개 Manifest 형식은 사용하지 않습니다. 각 예시의 상태·테스트 수·미구현 설명은 실행 당시 기록으로 읽어야 합니다. 과거 증거를 현재 계약으로 다시 실행한 결과로 바꾸지 않습니다.
+
+## 알려진 제한
+
+- 기존 TC만 선택한 경우, 요청의 준비·복원 메모를 검사하는 CP2가 신규 후보의 절차만 찾아 실행을 막을 수 있습니다.
+- SRS 반영은 신규 후보의 공식 자산 승인에 연결돼 있어, 기존 TC만 실행한 Run의 SRS를 단독 승인하는 경로는 없습니다.
+- 제품 기대값 불일치와 복원 실패가 동시에 발생하면 제품 불일치가 우선 분류됩니다. 복원 실패를 별도 원인으로 집계하는 보완은 남아 있습니다.
+
+이는 해결된 기능이 아니라 현재 구현의 제한입니다. 세부 조건은 [Agent·Checkpoint 명세](docs/03_AGENT_AND_CHECKPOINT_SPEC.md)를 참고하세요.
 
 ## 문서
 

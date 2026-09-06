@@ -15,6 +15,8 @@
 - 같은 HTML의 QA Agent 패널은 로컬 `qa_pipeline_ui`에서 실제 Run을 조회하는 표시 계층이며, 제품 조작·Assertion 하네스와 분리합니다.
 - TC에 없는 필드·값·경로를 새로 만들어 검증하지 않습니다.
 
+위 원칙은 Agent 3가 만드는 제품 시험 조작의 범위입니다. 실행기는 재현 가능한 시작 상태를 위해 브라우저 저장소를 초기화하며, 가져온 기존 회귀에는 준비·오류 주입용 하네스 호출도 있습니다. 이런 시험 준비를 실제 사용자 UI 조작으로 설명하지 않습니다.
+
 ## 3. UI 확인 방식
 
 ### 기존 지원 기능
@@ -76,10 +78,11 @@ TC에 필요한 Selector와 하네스 키만 확인합니다. 매 Run마다 전�
 5. 현재 조건의 시험 조작
 6. 해당 조건에 연결된 UI·내부 상태·알림 Assertion
 7. 묶음 TC이면 승인된 중간 초기화 또는 전환 후 5~6을 다음 조건에 반복
-8. 최종 제품 관찰 Screenshot과 Trace 기록
+8. 최종 제품 관찰 Screenshot 기록
 9. finally에서 최종 복원
 10. 복원 후 UI·내부 상태 재확인
-11. 대상 파일 해시 불변 확인
+11. 복원 과정까지 포함한 Trace 기록 종료
+12. 대상 파일 해시 불변 확인
 
 기존 중앙 관제 온도·모드 묶음 TC에서 초기값이 요구사항으로 고정되지 않았으면 `restore_observed_hvac_state` 계약을 사용할 수 있습니다. 컴파일러가 시험 조작 전에 대상 장비의 `mode`·`setTemp`를 읽어 메모리에만 저장하고, 마지막에 관찰된 모드 버튼·온도 버튼·적용 버튼으로 원래 값을 복원합니다. 복원 뒤 두 내부 값이 저장값과 일치해야 하며, API 입력·산출물에 임의 초기값을 만들지 않습니다. 이 계약은 V1에서 확인한 HVAC 인터페이스 전용이며 범용 내부 상태 직접 쓰기를 허용하지 않습니다.
 
@@ -87,13 +90,13 @@ Agent 3 계획은 묶음 TC의 Assertion을 `after_action_id`로 해당 조건�
 
 ## 7. 증거
 
-신뢰 가능한 Agent 3 완료 결과는 stdout, stderr, 최종 Screenshot, Playwright Trace, 각 증거 SHA-256, 복원 성공, V2 기준 제품 파일 불변을 가져야 합니다.
+Agent 3는 stdout, stderr, 최종 Screenshot, Playwright Trace와 각 증거 SHA-256을 기록하고, 복원 및 V2 기준 제품 파일 불변을 확인합니다. 복원 성공은 신뢰 가능한 시험을 위한 요구 조건입니다.
 
-PASS와 PRODUCT_MISMATCH_CANDIDATE는 위 증거가 완전할 때만 다음 단계로 인계합니다.
+PASS와 PRODUCT_MISMATCH_CANDIDATE는 필수 증거와 해시 검사 뒤 다음 단계로 인계합니다. 다만 현재 `evidence_complete`는 Screenshot·Trace 파일 존재 여부이며 복원 성공까지 뜻하지 않습니다. 제품 불일치와 복원 실패가 동시에 발생하면 제품 불일치가 우선 분류되는 제한이 있어, 해당 결과의 복원 로그를 따로 확인해야 합니다. 세부 제한은 [Agent·Checkpoint 명세](03_AGENT_AND_CHECKPOINT_SPEC.md)에 기록합니다.
 
 Candidate Trial의 기본 제한은 90초입니다. 제한을 넘기면 pytest와 Playwright 자식 프로세스를 함께 종료합니다. 종료 시점에 Trace ZIP 쓰기가 끝나지 않았다면 민감정보 제거를 보장할 수 없으므로 해당 Trace를 삭제하고 `TIMEOUT`·불완전 증거로 기록합니다.
 
-현재 Trace 경로 정제는 Agent 3 Candidate Trial과 승인·V1 기존 회귀 실행에 동일하게 적용됩니다. ZIP 내부의 임시 Workspace, 사용자 홈, 대상 HTML, 원본 테스트와 증거 폴더 경로를 증거 해시 계산 전에 치환합니다. 정제를 보장할 수 없는 손상 Trace는 증거에서 제외합니다. 이 보완 전에 생성된 역사적 Run의 원본 Trace는 덮어쓰지 않으며 Git 공개 증거에도 포함하지 않습니다.
+현재 Trace 경로 정제는 Agent 3 Candidate Trial과 승인·V1 기존 회귀 실행에 동일하게 적용됩니다. ZIP 내부의 임시 Workspace, 사용자 홈, 대상 HTML, 원본 테스트와 증거 폴더 경로를 증거 해시 계산 전에 치환합니다. 정제를 보장할 수 없는 손상 Trace는 증거에서 제외합니다. 보완 전 역사적 Run의 원본 Trace는 덮어쓰지 않습니다. 공개 잠금·MED 최소 묶음에는 Trace를 포함하지 않지만, 이전 AUTO Agent 1→3 공개 묶음에는 당시 Trace가 이미 포함되어 있습니다. 따라서 모든 공개 Run에서 Trace를 제외했다고 표현하지 않습니다.
 
 ## 8. 격리 한계
 
