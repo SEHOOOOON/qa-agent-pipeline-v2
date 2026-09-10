@@ -3,6 +3,29 @@
 from pipeline_test_support import *
 
 
+def test_compiled_observation_wait_handles_delayed_browser_state_without_reclicking():
+    import ast
+    from playwright.sync_api import sync_playwright
+    code = compile_automation_candidate("RUN-20260909-120000-ABCDEF", agent3_test_case(), agent3_plan())
+    tree = ast.parse(code)
+    helper = ast.Module(body=[node for node in tree.body if
+        isinstance(node, ast.ImportFrom) and node.module == "time"
+        or isinstance(node, ast.FunctionDef) and node.name == "_wait_for_observations"], type_ignores=[])
+    namespace = {}
+    exec(compile(helper, "generated_wait", "exec"), namespace)
+    with sync_playwright() as browser_api:
+        browser = browser_api.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.set_content('<button id="apply" onclick="window.clicks++; setTimeout(() => {document.querySelector(\'#value\').textContent=\'ready\'; window.state=\'ready\'}, 350)">apply</button><div id="value">pending</div><script>window.clicks=0;window.state="pending";</script>')
+        page.locator("#apply").click()
+        def observe():
+            return [] if page.locator("#value").inner_text() == "ready" and page.evaluate("window.state") == "ready" else ["not ready"]
+        assert namespace["_wait_for_observations"](page, observe) == []
+        assert page.evaluate("window.clicks") == 1
+        assert namespace["_wait_for_observations"](page, lambda: ["PRODUCT_MISMATCH: wrong value"]) == ["PRODUCT_MISMATCH: wrong value"]
+        browser.close()
+
+
 def test_agent3_uses_structured_plan_api() -> None:
     responses = Agent3FakeResponses()
     result = OpenAIAgent3(model="test-model", client=SimpleNamespace(responses=responses)).plan(

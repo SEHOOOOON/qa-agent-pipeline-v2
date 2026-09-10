@@ -99,7 +99,7 @@ def test_agent2_uses_structured_responses_api() -> None:
     assert response.usage["total_tokens"] == 300
     assert responses.kwargs["text_format"] is Agent2TestDesign
     assert responses.kwargs["store"] is False
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-19"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-20"
     agent2_input = responses.kwargs["input"][1]["content"]
     assert "[기존 사람 작성·자동화 TC 카탈로그]" in agent2_input
     assert "TC-TEMP-001" in agent2_input
@@ -195,6 +195,34 @@ def test_checkpoint2_allows_existing_tc_only_when_behavior_covers_change() -> No
     )
     assert guarded.status == CheckStatus.PASS
     assert cp2_check(guarded, "CP2-019").status == CheckStatus.PASS
+
+    request_with_procedures = cp1_request().model_copy(update={"acceptance_notes": [
+        "첫 실행 기본 상태인 LOW 풍량을 확인한 뒤 시험을 시작한다.",
+        "시험 뒤 대상 장비를 LOW 풍량으로 복원하고 적용한다.",
+    ]})
+    kwargs = dict(existing_catalog=(*pipeline.EXISTING_REGRESSION_CATALOG, existing_spec))
+    legacy = evaluate_checkpoint2(
+        request_with_procedures, analysis, design, cp2_requirements(),
+        allow_existing_procedure_review=False, **kwargs,
+    )
+    assert cp2_check(legacy, "CP2-014").status == CheckStatus.FAIL
+    reviewed = evaluate_checkpoint2(
+        request_with_procedures, analysis, design, cp2_requirements(), **kwargs,
+    )
+    assert reviewed.status == CheckStatus.PASS
+    assert "최종 사람 검토" in cp2_check(reviewed, "CP2-014").message
+    notes = pipeline._existing_test_procedure_review_notes(request_with_procedures, design)
+    assert len(notes) == 2
+    assert all(any(original in note for note in notes) for original in request_with_procedures.acceptance_notes)
+    assert all(existing_spec.tc_id in note and "자동 확정하지 않았습니다" in note for note in notes)
+    # 기존 TC 선택이 없거나 신규 후보가 있으면 준비·복원 검사를 건너뛰지 않습니다.
+    for other in (design.model_copy(update={"related_existing_tests": []}), cp2_valid_design()):
+        checked = evaluate_checkpoint2(request_with_procedures, analysis, other, cp2_requirements(), **kwargs)
+        assert cp2_check(checked, "CP2-014").status == CheckStatus.FAIL
+    excluded = design.model_copy(update={"excluded_scope": request_with_procedures.acceptance_notes})
+    assert cp2_check(evaluate_checkpoint2(
+        request_with_procedures, analysis, excluded, cp2_requirements(), **kwargs,
+    ), "CP2-014").status == CheckStatus.FAIL
 
 
 def test_checkpoint2_rejects_existing_only_reuse_with_different_explicit_values() -> None:
@@ -563,6 +591,38 @@ def test_checkpoint2_accepts_related_boundaries_as_one_grouped_tc() -> None:
     )
 
     assert result.status == CheckStatus.PASS
+    assert cp2_check(result, "CP2-015").status == CheckStatus.PASS
+
+def test_checkpoint2_pairs_double_assertions_at_the_same_step() -> None:
+    design = grouped_boundary_design()
+    tc = design.test_cases[0]
+    broken = tc.model_copy(update={"expected_results": [
+        result.model_copy(update={"verify_after_step": tc.steps[-1]})
+        if result.observation_layer == ObservationLayer.INTERNAL_STATE else result
+        for result in tc.expected_results
+    ]})
+    design = design.model_copy(update={"test_cases": [broken]})
+    result = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
+    assert cp2_check(result, "CP2-006").status == CheckStatus.FAIL
+    assert "판정 단계 불일치" in cp2_check(result, "CP2-006").message
+    historical = evaluate_checkpoint2(
+        cp1_request(), cp2_analysis(), design, cp2_requirements(),
+        require_double_assert_timing=False,
+    )
+    assert cp2_check(historical, "CP2-006").status == CheckStatus.PASS
+
+def test_checkpoint2_accepts_single_operation_with_separate_observations() -> None:
+    design = cp2_valid_design()
+    tc = design.test_cases[0]
+    tc = tc.model_copy(update={"expected_results": [
+        result.model_copy(update={"verify_after_step": tc.steps[-1]})
+        for result in tc.expected_results
+    ]})
+    result = evaluate_checkpoint2(
+        cp1_request(), cp2_analysis(), design.model_copy(update={"test_cases": [tc]}),
+        cp2_requirements(),
+    )
+    assert cp2_check(result, "CP2-006").status == CheckStatus.PASS
     assert cp2_check(result, "CP2-015").status == CheckStatus.PASS
 
 def test_checkpoint2_rejects_grouped_tc_without_reset_or_result_timing() -> None:

@@ -1581,6 +1581,7 @@ def compile_automation_candidate(
         "from __future__ import annotations",
         "",
         "import os",
+        "from time import monotonic",
     ]
     if needs_legacy_temperature_helpers:
         lines.append("import re")
@@ -1594,6 +1595,14 @@ def compile_automation_candidate(
             f"# SOURCE_TC: {test_case.tc_id}",
             "TARGET_URL = os.environ['QA_TARGET_URL']",
             "EVIDENCE_DIR = Path(os.environ['QA_EVIDENCE_DIR'])",
+            "",
+            "def _wait_for_observations(page, observe):",
+            "    deadline = monotonic() + 2.0",
+            "    while True:",
+            "        errors = observe()",
+            "        if not errors or monotonic() >= deadline:",
+            "            return errors",
+            "        page.wait_for_timeout(50)",
             "",
         ]
     )
@@ -1711,7 +1720,6 @@ def compile_automation_candidate(
                 lines.append(f"{indent}_set_temperature(page, {float(action.value)})")
         elif action.action_type == AutomationActionType.APPLY_COMMANDS:
             lines.append(f"{indent}page.locator({_py_literal(action.selector)}).click()")
-            lines.append(f"{indent}page.wait_for_timeout(100)")
         elif action.action_type == AutomationActionType.CLICK:
             lines.append(f"{indent}page.locator({_py_literal(action.selector)}).click()")
         elif action.action_type == AutomationActionType.FILL:
@@ -1849,14 +1857,24 @@ def compile_automation_candidate(
         assertion_blocks.append((assertion.after_action_id, lines[block_start:]))
         del lines[block_start:]
 
+    def append_observation_group(blocks: list[list[str]], prefix: str, errors: str) -> None:
+        if not blocks:
+            return
+        lines.append(f"{prefix}def observe():")
+        lines.append(f"{prefix}    {errors} = []")
+        for block in blocks:
+            lines.extend("    " + line for line in block)
+        lines.append(f"{prefix}    return {errors}")
+        lines.append(f"{prefix}{errors}.extend(_wait_for_observations(page, observe))")
+
     for action_id, block in action_blocks:
         lines.extend(block)
-        for after_action_id, assertion_block in assertion_blocks:
-            if after_action_id == action_id:
-                lines.extend(assertion_block)
-    for after_action_id, assertion_block in assertion_blocks:
-        if after_action_id is None:
-            lines.extend(assertion_block)
+        append_observation_group(
+            [block for after, block in assertion_blocks if after == action_id], indent, "mismatches"
+        )
+    append_observation_group(
+        [block for after, block in assertion_blocks if after is None], indent, "mismatches"
+    )
 
     lines.extend(
         [
@@ -1886,8 +1904,6 @@ def compile_automation_candidate(
             lines.append(
                 f"                page.locator({_py_literal(action.selector)}).click()"
             )
-            if action.action_type == AutomationActionType.APPLY_COMMANDS:
-                lines.append("                page.wait_for_timeout(100)")
         elif action.action_type == AutomationActionType.FILL:
             lines.append(
                 f"                page.locator({_py_literal(action.selector)}).fill(str({_py_literal(action.value)}))"
@@ -1911,13 +1927,13 @@ def compile_automation_candidate(
                     "                page.locator(observed_mode_selector).click()",
                     "                _set_temperature(page, float(observed_hvac_baseline['setTemp']))",
                     f"                page.locator({_py_literal(action.selector)}).click()",
-                    "                page.wait_for_timeout(100)",
                 ]
             )
         else:
             lines.append(
                 f"                _set_temperature(page, {float(action.value)})"
             )
+    restore_observation_start = len(lines)
     for action in restore_actions:
         if action.action_type in {
             AutomationActionType.FILL,
@@ -1996,6 +2012,9 @@ def compile_automation_candidate(
             ]
         )
     if restore_actions:
+        restore_block = lines[restore_observation_start:]
+        del lines[restore_observation_start:]
+        append_observation_group([restore_block], "                ", "restore_mismatches")
         lines.extend(
             [
                 "            except Exception as restore_error:",
@@ -2041,7 +2060,7 @@ def evaluate_compiled_candidate(
     for node in ast.walk(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             modules = [item.name.split('.')[0] for item in node.names] if isinstance(node, ast.Import) else [(node.module or '').split('.')[0]]
-            if any(module not in {"__future__", "os", "re", "pathlib", "playwright"} for module in modules):
+            if any(module not in {"__future__", "os", "re", "pathlib", "playwright", "time"} for module in modules):
                 unsafe.append("disallowed import: " + ", ".join(modules))
         if isinstance(node, ast.Call):
             name = node.func.id if isinstance(node.func, ast.Name) else node.func.attr if isinstance(node.func, ast.Attribute) else ""

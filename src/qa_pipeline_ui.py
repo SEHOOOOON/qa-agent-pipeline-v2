@@ -430,6 +430,105 @@ def _candidate_srs_revision_proposals(
     ]
 
 
+def _existing_srs_approval_check(run_dir: Path, target_html: Path) -> list[Any]:
+    """Only verified, existing-TC-only runs can approve SRS without creating a TC."""
+    import qa_pipeline_v2 as p
+    _, _, _, design, _, _ = p._load_verified_agent2_run(run_dir, run_dir.name)
+    report = p.FinalReport.model_validate(_read_json(run_dir / "final_report.json"))
+    analysis = p.Agent4Analysis.model_validate(_read_json(run_dir / "agent4_analysis.json"))
+    bundle = p.ValidationExecutionBundle.model_validate(_read_json(run_dir / "validation_execution.json"))
+    checkpoint = p.Checkpoint4Result.model_validate(_read_json(run_dir / "checkpoint4.json"))
+    manifest = _read_json(run_dir / "validation_manifest.json")
+    if design.test_cases or not design.related_existing_tests or bundle.candidate_results:
+        raise ValueError("SRS 단독 승인은 신규 후보 없이 기존 TC만 실행한 Run에서 가능합니다.")
+    if (
+        not (report.run_id == analysis.run_id == bundle.run_id == run_dir.name)
+        or report.recommendation.value != "PASS"
+        or analysis.recommendation != report.recommendation
+        or checkpoint.status.value != "PASS"
+        or report.checkpoint_status != checkpoint.status
+        or checkpoint.handoff_status.value != "CONTINUE"
+        or report.analysis_sha256 != _sha256_file(run_dir / "agent4_analysis.json")
+        or report.checkpoint4_sha256 != _sha256_file(run_dir / "checkpoint4.json")
+        or analysis.validation_execution_sha256 != _sha256_file(run_dir / "validation_execution.json")
+        or manifest.get("validation_execution_sha256") != analysis.validation_execution_sha256
+        or bundle.status.value != "COMPLETED"
+        or bundle.automation_exclusions or bundle.excluded_information_gaps
+        or bundle.srs_revision_proposals != design.srs_revision_proposals
+        or report.srs_revision_proposals != bundle.srs_revision_proposals
+        or analysis.srs_revision_proposals != report.srs_revision_proposals
+    ):
+        raise ValueError("SRS 승인에 필요한 최종 보고·인계·검증 범위가 일치하지 않습니다.")
+    results = [bundle.environment_precheck, *bundle.regression_results]
+    selected = {item.tc_id for item in design.related_existing_tests}
+    if (
+        {item.test_id for item in bundle.regression_results} != selected
+        or len(bundle.regression_results) != len(selected)
+        or any(item.status.value != "PASSED" for item in results)
+        or any(item.target_sha256 != _sha256_file(target_html) for item in results)
+        or p._agent4_evidence_issues(run_dir, results)
+        or not p._agent4_regression_source_chain_matches(run_dir, bundle, manifest)
+    ):
+        raise ValueError("기존 TC 실행 증거 또는 현재 제품 해시가 맞지 않습니다. 현재 제품에서 재실행해 주세요.")
+    proposals = report.srs_revision_proposals
+    covered_conditions = {condition for item in design.related_existing_tests for condition in item.source_condition_ids}
+    if not proposals or any(not set(item.source_condition_ids).issubset(covered_conditions) for item in proposals):
+        raise ValueError("기존 TC에 연결된 SRS 개정 제안이 없습니다.")
+    return proposals
+
+
+def decide_existing_srs(
+    runs_root: Path, approved_assets_root: Path, target_html: Path, run_id: str,
+    *, srs_path: Path, decision: str, reviewer: str, note: str,
+    approve_srs_revisions: bool = False,
+) -> dict[str, Any]:
+    run_dir = _run_directory(runs_root, run_id)
+    reviewer = _safe_text(reviewer, field_name="검토자", required=True, limit=80)
+    if decision not in {"APPROVE", "HOLD"}:
+        raise ValueError("승인 또는 보류만 선택할 수 있습니다.")
+    note = _safe_text(note, field_name="판단 메모", required=True, limit=500)
+    proposals = _existing_srs_approval_check(run_dir, target_html)
+    decision_file = run_dir / "srs_only_decision.json"
+    asset_file = approved_assets_root.resolve() / "srs_revisions" / f"{run_id}.json"
+    existing = _read_json(decision_file)
+    if existing.get("decision") == "APPROVED":
+        if decision != "APPROVE":
+            raise ValueError("이미 승인한 SRS를 보류로 되돌릴 수 없습니다.")
+        if not asset_file.is_file() or existing.get("record_sha256") != _sha256_file(asset_file):
+            raise ValueError("공식 SRS 승인 기록의 해시가 맞지 않습니다.")
+        return existing
+    if decision == "APPROVE" and not approve_srs_revisions:
+        raise ValueError("SRS 문구와 최종 검토 사항을 확인하고 반영 승인에 체크해 주세요.")
+    if asset_file.exists():
+        raise ValueError("이미 존재하는 공식 SRS 기록을 덮어쓸 수 없습니다.")
+    from qa_pipeline_v2 import apply_srs_revision_proposals
+    preview = apply_srs_revision_proposals(srs_path, proposals, write=False)
+    paths = [srs_path.resolve(), decision_file, asset_file]
+    paths += [path.with_name(path.name + ".tmp") for path in paths]
+    backups = {path: path.read_bytes() if path.is_file() else None for path in paths}
+    record = {
+        "contract_version": "1.0", "run_id": run_id,
+        "decision": "APPROVED" if decision == "APPROVE" else "HELD",
+        "reviewer": reviewer, "note": note,
+        "proposals": [item.model_dump(mode="json") for item in proposals],
+        "final_report_sha256": _sha256_file(run_dir / "final_report.json"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        if decision == "APPROVE":
+            result = apply_srs_revision_proposals(srs_path, proposals, write=True)
+            if any(result[key] != preview[key] for key in ("before_sha256", "changed_requirement_ids", "already_applied_requirement_ids")):
+                raise ValueError("승인 중 SRS 기준이 변경됐습니다.")
+            record.update(result)
+            _write_json_atomic(asset_file, record)
+            record["record_sha256"] = _sha256_file(asset_file)
+        _write_json_atomic(decision_file, record)
+    except Exception:
+        _restore_files_after_error(backups)
+        raise
+    return record
+
+
 def _restore_files_after_error(backups: dict[Path, bytes | None]) -> None:
     """Compensate a failed multi-file asset approval without broad deletion."""
 
@@ -929,11 +1028,13 @@ def summarize_run(
         report.get("recommendation") or analysis4.get("recommendation") or "대기"
     )
     report_mode = str(reporting.get("mode") or "미생성")
+    from qa_pipeline_reporting import verification_scope_summary
+    scope_summary = verification_scope_summary(report)
     stage4 = _checkpoint_stage(
         "결과 분석·보고",
         checkpoint4,
         summary=(
-            f"최종 판정 {recommendation} · 외부 보고 {report_mode}"
+            f"최종 권고 {recommendation} · {scope_summary} · 외부 보고 {report_mode}"
             if report or analysis4
             else "Agent 4 산출물이 아직 없습니다."
         ),
@@ -997,6 +1098,19 @@ def summarize_run(
         )
 
     overall = recommendation if report else str(manifest.get("status") or stage3_status)
+    srs_asset = None
+    if not test_cases and design.get("관련_기존_TC") and report.get("SRS_개정_제안"):
+        reasons = []
+        try:
+            _existing_srs_approval_check(run_dir, target_html)
+        except (ValueError, OSError, KeyError) as exc:
+            reasons = [str(exc)]
+        srs_asset = {
+            "tc_id": "SRS_ONLY", "title": "기존 TC 검증 · SRS 문서만 승인",
+            "approval_eligible": not reasons, "eligibility_reasons": reasons,
+            "srs_revision_proposals": report["SRS_개정_제안"],
+            "decision": _read_json(run_dir / "srs_only_decision.json") or None,
+        }
     from qa_pipeline_reporting import build_run_test_rows
 
     return {
@@ -1005,6 +1119,7 @@ def summarize_run(
         "description": request.get("description"),
         "target_requirement_id": request.get("target_requirement_id"),
         "overall_status": overall,
+        "verification_scope_summary": scope_summary,
         "stages": {
             "agent1": stage1,
             "agent2": stage2,
@@ -1013,6 +1128,7 @@ def summarize_run(
         },
         "human_review_document": "사람_최종_검토.md" if (run_dir / "사람_최종_검토.md").is_file() else None,
         "candidate_assets": candidate_assets,
+        "srs_revision_asset": srs_asset,
         "test_rows": build_run_test_rows(run_dir),
     }
 
@@ -1125,6 +1241,12 @@ class PipelineUiBridge:
         if not self.asset_approval_lock.acquire():
             raise RuntimeError("다른 로컬 브리지에서 자산 승인 처리가 진행 중입니다.")
         try:
+            if tc_id == "SRS_ONLY":
+                return decide_existing_srs(
+                    self.runs_root, self.approved_assets_root, self.target_html, run_id,
+                    srs_path=self.srs_path, decision=decision, reviewer=reviewer,
+                    note=note, approve_srs_revisions=approve_srs_revisions,
+                )
             return decide_candidate_asset(
                 self.runs_root,
                 self.approved_assets_root,

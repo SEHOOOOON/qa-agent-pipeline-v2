@@ -412,7 +412,7 @@ def run_agent2(args: argparse.Namespace) -> int:
             run_dir / "agent2_manifest.json",
             {
                 "contract_version": "3.0",
-                "prompt_version": "agent2-2.19",
+                "prompt_version": "agent2-2.20",
                 "run_id": args.run_id,
                 "source_stage": "AGENT_1_CP1",
                 "stage": "AGENT_2_CP2",
@@ -436,6 +436,8 @@ def run_agent2(args: argparse.Namespace) -> int:
                 ),
                 "srs_revision_contract": "1.0",
                 "existing_behavior_values_contract": "1.0",
+                "existing_procedure_review_contract": "1.0",
+                "double_assert_timing_contract": "1.0",
                 "agent2_design_sha256": _sha256_file(design_file),
                 "checkpoint2_sha256": _sha256_file(checkpoint2_file),
                 "created_at": datetime.now(timezone.utc).isoformat(),
@@ -514,6 +516,12 @@ def _load_verified_agent2_run(
         ),
         require_existing_behavior_values=(
             manifest.get("existing_behavior_values_contract") == "1.0"
+        ),
+        allow_existing_procedure_review=(
+            manifest.get("existing_procedure_review_contract") == "1.0"
+        ),
+        require_double_assert_timing=(
+            manifest.get("double_assert_timing_contract") == "1.0"
         ),
     )
     if recomputed.model_dump(mode="json") != checkpoint.model_dump(mode="json"):
@@ -1561,6 +1569,12 @@ def _final_review_notes_for_validation(run_dir: Path) -> list[str]:
     if design_file.is_file():
         design = _read_json_model(design_file, Agent2TestDesign)
         notes.extend(f"CP2: {note}" for note in design.final_review_notes)
+        manifest_file = run_dir / "agent2_manifest.json"
+        manifest = _read_json_payload(manifest_file) if manifest_file.is_file() else {}
+        if manifest.get("existing_procedure_review_contract") == "1.0":
+            request_file = run_dir / "request.json"
+            _verify_sha256(request_file, manifest.get("request_sha256"), "시험 절차 요청")
+            notes.extend(_existing_test_procedure_review_notes(_read_request(request_file), design))
     return list(dict.fromkeys(notes))
 
 

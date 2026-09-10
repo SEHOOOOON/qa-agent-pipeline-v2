@@ -3,6 +3,108 @@
 from pipeline_test_support import *
 
 
+def test_existing_srs_approval_requires_consent_and_creates_no_tc(tmp_path, monkeypatch):
+    run_dir, target, srs = build_existing_srs_review_run(tmp_path, monkeypatch)
+    assets = tmp_path / "approved"
+    bridge = pipeline_ui.PipelineUiBridge(
+        runs_root=run_dir.parent, requests_root=tmp_path, target_html=target,
+        allow_live_run=False, allow_asset_approval=False, approved_assets_root=assets, srs_path=srs,
+    )
+    kwargs = dict(decision="APPROVE", reviewer="검토자", note="기존 TC 절차와 SRS 확인")
+    with pytest.raises(PermissionError):
+        bridge.decide_asset(run_dir.name, "SRS_ONLY", **kwargs, approve_srs_revisions=True)
+    bridge.state.allow_asset_approval = True
+    with pytest.raises(ValueError, match="반영 승인"):
+        bridge.decide_asset(run_dir.name, "SRS_ONLY", **kwargs)
+    held = bridge.decide_asset(run_dir.name, "SRS_ONLY", **{**kwargs, "decision": "HOLD"})
+    assert held["decision"] == "HELD" and "기존 기준" in srs.read_text(encoding="utf-8")
+    record = bridge.decide_asset(run_dir.name, "SRS_ONLY", **kwargs, approve_srs_revisions=True)
+    assert record["decision"] == "APPROVED" and "변경 기준" in srs.read_text(encoding="utf-8")
+    assert not (assets / "registry.json").exists() and not (assets / "test_cases").exists()
+    assert bridge.decide_asset(run_dir.name, "SRS_ONLY", **kwargs, approve_srs_revisions=True) == record
+    assert pipeline_ui.summarize_run(run_dir.parent, run_dir.name, target_html=target)["srs_revision_asset"]["decision"] == record
+
+
+@pytest.mark.parametrize("damage", ["target", "evidence", "proposal", "srs"])
+def test_existing_srs_approval_rejects_changed_inputs(tmp_path, monkeypatch, damage):
+    run_dir, target, srs = build_existing_srs_review_run(tmp_path, monkeypatch)
+    if damage == "target":
+        target.write_text("changed", encoding="utf-8")
+    elif damage == "srs":
+        srs.write_text("| REQ-TEMP-001 | 온도 요구사항 | 다른 기준 |\n", encoding="utf-8")
+    elif damage == "proposal":
+        report = json.loads((run_dir / "final_report.json").read_text(encoding="utf-8"))
+        report["SRS_개정_제안"][0]["proposed_acceptance_criteria"] = "임의 기준"
+        _write_json(run_dir / "final_report.json", report)
+    else:
+        result = json.loads((run_dir / "validation_execution.json").read_text(encoding="utf-8"))
+        (run_dir / result["regression_results"][0]["stdout_file"]).write_text("changed", encoding="utf-8")
+    before = srs.read_bytes()
+    with pytest.raises(ValueError):
+        pipeline_ui.decide_existing_srs(run_dir.parent, tmp_path / "approved", target, run_dir.name,
+            srs_path=srs, decision="APPROVE", reviewer="검토자", note="확인", approve_srs_revisions=True)
+    assert srs.read_bytes() == before
+    assert not (run_dir / "srs_only_decision.json").exists()
+
+
+def test_existing_srs_approval_rolls_back_on_record_failure(tmp_path, monkeypatch):
+    run_dir, target, srs = build_existing_srs_review_run(tmp_path, monkeypatch)
+    before = srs.read_bytes()
+    original = pipeline_ui._write_json_atomic
+    def fail_record(path, payload):
+        if path.name == "srs_only_decision.json":
+            raise OSError("record write failed")
+        original(path, payload)
+    monkeypatch.setattr(pipeline_ui, "_write_json_atomic", fail_record)
+    assets = tmp_path / "approved"
+    with pytest.raises(OSError):
+        pipeline_ui.decide_existing_srs(run_dir.parent, assets, target, run_dir.name,
+            srs_path=srs, decision="APPROVE", reviewer="검토자", note="확인", approve_srs_revisions=True)
+    assert srs.read_bytes() == before
+    assert not (assets / "srs_revisions" / f"{run_dir.name}.json").exists()
+
+
+def test_existing_srs_approval_works_through_browser_and_http(tmp_path, monkeypatch):
+    import threading
+    from http.server import ThreadingHTTPServer
+    from playwright.sync_api import sync_playwright, expect
+    html = (REPO_ROOT / "product_baseline" / "virtual-controller.html").read_text(encoding="utf-8")
+    run_dir, target, srs = build_existing_srs_review_run(tmp_path, monkeypatch, target_content=html)
+    assets = tmp_path / "approved"
+    bridge = pipeline_ui.PipelineUiBridge(runs_root=run_dir.parent, requests_root=tmp_path,
+        target_html=target, allow_live_run=False, allow_asset_approval=True,
+        approved_assets_root=assets, srs_path=srs)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), pipeline_ui.make_handler(bridge))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    origin = f"http://127.0.0.1:{server.server_port}"
+    try:
+        with sync_playwright() as api:
+            browser = api.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1440, "height": 1100})
+            page.route("**/*", lambda route: route.continue_() if route.request.url.startswith(origin + "/") else route.abort())
+            page.goto(origin, wait_until="domcontentloaded")
+            page.wait_for_function("qaLiveState.run !== null")
+            page.evaluate("openQaLiveModal('agent4')")
+            expect(page.locator("#qa-live-candidate-select")).to_have_value("SRS_ONLY")
+            page.locator("#qa-live-reviewer").fill("테스트 검토자")
+            page.locator("#qa-live-approval-note").fill("문구와 기존 TC 절차 확인")
+            page.locator("#qa-live-srs-approve").check()
+            page.locator("#qa-live-approve-btn").click()
+            assert "기존 기준" in srs.read_text(encoding="utf-8")
+            page.locator("#qa-live-approve-btn").click()
+            expect(page.locator("#qa-live-approval-status")).to_contain_text("등록 완료: SRS 문서 개정")
+            expect(page.locator("#qa-live-approve-btn")).to_be_disabled()
+            assert "변경 기준" in srs.read_text(encoding="utf-8")
+            assert not (assets / "test_cases").exists()
+            page.screenshot(path=str(tmp_path / "srs-approval-ui.png"), full_page=True)
+            browser.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 def test_run_test_rows_keep_design_type_failure_reason_and_manual_exclusions_separate(tmp_path: Path) -> None:
     _write_json(tmp_path / "agent2_test_design.json", {
         "test_cases": [
@@ -177,7 +279,8 @@ def test_pipeline_ui_summarizes_real_run_artifacts(tmp_path: Path) -> None:
     assert summary["stages"]["agent1"]["status"] == "REVIEW"
     assert "설계 TC 1건" in summary["stages"]["agent2"]["summary"]
     assert "후보 시험 완료 1건" in summary["stages"]["agent3"]["summary"]
-    assert summary["stages"]["agent4"]["summary"] == "최종 판정 PASS · 외부 보고 DRY_RUN"
+    assert "최종 권고 PASS" in summary["stages"]["agent4"]["summary"]
+    assert "외부 보고 DRY_RUN" in summary["stages"]["agent4"]["summary"]
     assert "Slack: PREVIEW / Notion: PREVIEW" in summary["stages"]["agent4"]["details"]
 
 def test_pipeline_ui_human_approval_registers_immutable_tc_and_automation(
@@ -271,12 +374,12 @@ def test_pipeline_ui_shows_latest_delivery_and_preserves_prior_send_history(tmp_
         "mode": "SEND", "slack": {"status": "SENT"}, "notion": {"status": "FAILED"},
     })
     stage = pipeline_ui.summarize_run(runs_root, run_id)["stages"]["agent4"]
-    assert stage["summary"] == "최종 판정 PASS · 외부 보고 SEND"
+    assert "최종 권고 PASS" in stage["summary"] and "외부 보고 SEND" in stage["summary"]
     assert "Slack: SENT / Notion: FAILED" in stage["details"]
 
     _write_json(attempts / "ATTEMPT-20260904-120002-000000-ABCDEF" / "external_reporting.json", preview)
     stage = pipeline_ui.summarize_run(runs_root, run_id)["stages"]["agent4"]
-    assert stage["summary"] == "최종 판정 PASS · 외부 보고 DRY_RUN"
+    assert "최종 권고 PASS" in stage["summary"] and "외부 보고 DRY_RUN" in stage["summary"]
     assert "Slack: PREVIEW / Notion: PREVIEW" in stage["details"]
     assert any("이전 전송" in item and "Slack SENT / Notion FAILED" in item for item in stage["details"])
     assert (run_dir / "external_reporting.json").read_bytes() == original

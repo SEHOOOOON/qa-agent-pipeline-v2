@@ -1,7 +1,7 @@
 # 자동 테스트 카탈로그
 
-최종 확인: 2026-09-06
-실행 기준: `python -m pytest --collect-only -q` → **187건**
+최종 확인: 2026-09-10
+실행 기준: `python -m pytest --collect-only -q` → **201건**
 실제 정의 파일: `tests/test_srs_agent1.py`, `tests/test_agent2.py`, `tests/test_integrity_cli.py`, `tests/test_agent3.py`, `tests/test_orchestration_execution.py`, `tests/test_agent4_reporting.py`, `tests/test_pipeline_ui.py`
 
 이 문서는 현재 수집되는 자동 테스트를 사람이 확인하기 쉽게 정리한 목록입니다. 실행의 기준은 항상 테스트 코드와 Pytest 수집 결과이며, 테스트를 추가·삭제할 때는 이 문서도 같은 변경에서 갱신합니다.
@@ -10,11 +10,13 @@
 
 | 구성 | 수량 | 설명 |
 |---|---:|---|
-| 일반 테스트 함수 | 182 | 함수 하나가 Pytest 실행 1건 |
-| 파라미터 테스트 함수 | 1 | 아래 5개 Trial 결과를 각각 독립 실행 |
-| 합계 | **187** | 현재 Pytest 수집 수 |
+| 일반 테스트 함수 | 190 | 함수 하나가 Pytest 실행 1건 |
+| 파라미터 테스트 함수 | 3 | Trial 결과 5건·복원 실패 2건·SRS 입력 변조 4건 |
+| 합계 | **201** | 현재 Pytest 수집 수 |
 
 파라미터 테스트 `test_agent3_cli_exit_code_reflects_trial_trustworthiness`는 다음 다섯 결과를 별도 실행합니다: `PASS`, `PRODUCT_MISMATCH_CANDIDATE`, `AUTOMATION_ERROR`, `ENVIRONMENT_ERROR`, `TIMEOUT`.
+
+`test_agent4_reports_restore_failure_without_hiding_product_observation`는 복원 단독 실패와 제품 불일치·복원 동시 실패를 각각 검사합니다. 9월 7일 증가한 4건은 이 두 조합과 로그 오인·변조 방지, 기존 TC 절차 메모의 최종 보고 연결이며 제품 TC가 새로 생성된 수가 아닙니다.
 
 ## 1. 기준 자산·SRS·Agent 1·Checkpoint 1 (26건)
 
@@ -47,7 +49,7 @@
 | `test_scope_limited_acceptance_note_is_only_excluded` | 범위 제한 인수 조건을 확정 조건이 아닌 제외 범위로 전달 |
 | `test_scope_limited_acceptance_note_cannot_be_confirmed_condition` | 범위 제한 문구의 확정 조건 혼입 차단 |
 
-## 2. Agent 2·Checkpoint 2·인계 (47건)
+## 2. Agent 2·Checkpoint 2·인계 (49건)
 
 | 테스트 | 확인 내용 |
 |---|---|
@@ -60,7 +62,7 @@
 | `test_request_diff_recognizes_repeated_existing_clause_as_unchanged` | 변경 후 문구에 반복된 기존 절과 새 변경 절의 전·후 분리 |
 | `test_request_diff_treats_mapping_or_order_change_as_changed_without_explicit_role` | 단어가 비슷한 매핑·순서 변경을 유지로 오인하지 않는 안전 기본값 |
 | `test_valid_design_passes_checkpoint2` | 유효 TC 설계의 CP2 통과 |
-| `test_checkpoint2_allows_existing_tc_only_when_behavior_covers_change` | 변경 후 동작을 이미 검증하는 기존 TC만으로 CP2 통과 |
+| `test_checkpoint2_allows_existing_tc_only_when_behavior_covers_change` | 기존 TC 전용 CP2 통과·준비/복원 메모 최종 검토 인계·신규 후보 검사 유지·역사적 계약 보존 |
 | `test_checkpoint2_requires_grounded_srs_revision_proposal_for_modified_requirement` | MODIFIED Requirement의 근거 있는 SRS 개정 제안 필수 계약 |
 | `test_srs_revision_preview_apply_and_conflict_detection` | SRS 개정 미리보기·적용·멱등성과 원문 충돌 차단 |
 | `test_checkpoint2_routes_unchanged_condition_to_existing_tc` | 유지 조건을 신규 후보가 아닌 기존 TC ID로 연결 |
@@ -72,6 +74,8 @@
 | `test_checkpoint2_keeps_grounded_product_capability_result` | Condition 원문에 있는 제품 기능 가능 요구를 일괄 삭제하지 않음 |
 | `test_checkpoint2_rejects_ui_display_not_present_in_condition_source` | Condition 원문에 없는 UI 표시 기대 차단 |
 | `test_checkpoint2_accepts_related_boundaries_as_one_grouped_tc` | 동일 업무 규칙의 하한·상한 조건을 한 TC로 허용 |
+| `test_checkpoint2_pairs_double_assertions_at_the_same_step` | UI·내부 판정 시점 분리 차단과 역사적 계약 유지 |
+| `test_checkpoint2_accepts_single_operation_with_separate_observations` | 단일 조작의 분리된 UI·내부 기대 결과 허용 |
 | `test_checkpoint2_rejects_grouped_tc_without_reset_or_result_timing` | 묶음 TC의 중간 초기화·조건별 판정 시점 누락 차단 |
 | `test_checkpoint2_requires_explicit_runtime_restore_for_unknown_grouped_hvac_baseline` | 고정 초기값 없는 묶음 HVAC TC의 명시적 실행 전 상태 저장·복원 계약 |
 | `test_human_review_note_pauses_checkpoint2` | 사람 검토 메모의 PAUSE |
@@ -133,7 +137,9 @@
 | `test_legacy_central_plan_cannot_bypass_required_actions_with_generic_assertion` | 전용·범용 혼합 계획의 필수 중앙제어 순서 우회 차단 |
 | `test_specialized_action_source_text_must_be_an_approved_tc_line` | 전용 Action도 승인 TC 원문만 근거로 허용 |
 
-## 4. Agent 3 CP3·후보 시험·증거 (40건)
+## 4. Agent 3 CP3·후보 시험·증거 (41건)
+
+추가: `test_compiled_observation_wait_handles_delayed_browser_state_without_reclicking` — 실제 브라우저의 지연 반영 허용, 조작 한 번 유지, 지속 불일치 반환.
 
 | 테스트 | 확인 내용 |
 |---|---|
@@ -189,7 +195,7 @@
 | `test_execute_parser_exposes_validation_execution_command` | `execute` CLI Parser |
 | `test_current_candidate_trial_returns_technical_failure_for_agent4` | 후보 기술 실패를 예외 대신 중립 결과로 Agent 4에 전달 |
 
-## 6. Agent 4·CP4·최종 보고·외부 전달 (21건)
+## 6. Agent 4·CP4·최종 보고·외부 전달 (25건)
 
 | 테스트 | 확인 내용 |
 |---|---|
@@ -204,6 +210,9 @@
 | `test_agent4_reports_all_excluded_candidates_for_human_review` | 실행된 신규 후보가 없고 제외만 있으면 최종 사람 검토 권고 |
 | `test_agent4_passes_existing_only_execution_without_new_candidate` | 신규 후보가 필요 없는 기존 TC 전용 실행은 최종 PASS 가능 |
 | `test_agent4_marks_assertion_failure_as_product_mismatch_candidate` | Assertion 실패의 제품 불일치 후보 분류 |
+| `test_agent4_reports_restore_failure_without_hiding_product_observation` | 복원 단독·제품 불일치 동시 발생 2건의 HOLD 분류·두 관찰 보존·중복 집계 방지 |
+| `test_agent4_ignores_restore_marker_in_source_code_and_unverified_logs` | 소스 문자열을 실제 복원 실패로 오인하지 않고 변조 로그는 CP4 차단 |
+| `test_existing_only_procedure_notes_reach_final_human_review` | 기존 TC의 준비·복원 메모 원문이 최종 보고·검토서에 전달되고 요청 변조는 차단 |
 | `test_agent4_carries_non_blocking_review_notes_to_final_report` | 최종 확인 사항의 최종 보고 전달 |
 | `test_agent4_holds_when_environment_precheck_blocks_regressions` | 환경 차단 시 HOLD 권고 |
 | `test_agent4_rejects_validation_execution_hash_mismatch` | 실행 결과 SHA 불일치 차단 |
@@ -215,7 +224,14 @@
 | `test_agent4_rejects_broken_manifest_or_candidate_chain` | Agent 3→검증 Manifest 또는 실제 후보 파일 체인 불일치 차단 |
 | `test_agent4_rejects_passed_result_without_complete_evidence` | 완전한 증거 없는 PASS 결과 차단 |
 
-## 7. 중앙제어 실제 Run 연동·후보 자산 승인 (18건)
+## 7. 중앙제어 실제 Run 연동·후보 자산 승인 (25건)
+
+추가한 SRS 단독 승인 테스트:
+
+- `test_existing_srs_approval_requires_consent_and_creates_no_tc`: 기본 잠금·동의·보류·승인·멱등성과 TC 미생성
+- `test_existing_srs_approval_rejects_changed_inputs`: 현재 화면·증거·제안·SRS 변경 차단 4건
+- `test_existing_srs_approval_rolls_back_on_record_failure`: 기록 실패 시 SRS 원상복구
+- `test_existing_srs_approval_works_through_browser_and_http`: 실제 브라우저→HTTP→임시 SRS 승인, 두 단계 확인
 
 | 테스트 | 확인 내용 |
 |---|---|

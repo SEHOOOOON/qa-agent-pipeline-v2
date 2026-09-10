@@ -31,14 +31,33 @@ from qa_pipeline_agent2 import *
 from qa_pipeline_agent3 import *
 from qa_pipeline_execution import *
 
+def verification_scope_summary(payload: dict[str, Any]) -> str:
+    """Describe recorded execution scope, not semantic coverage of every requirement."""
+    if not payload:
+        return "검증 범위: 아직 결과 없음"
+    exclusions = payload.get("자동화_제외_TC") or payload.get("automation_exclusions") or []
+    gaps = payload.get("제외된_정보_부족") or payload.get("excluded_information_gaps") or []
+    if exclusions or gaps:
+        return f"미확인 항목 있음: 자동화 제외 {len(exclusions)}건 · 정보 부족 {len(gaps)}건"
+    if payload.get("checkpoint_status") != "PASS":
+        return "검증 범위: 최종 증거 확인 미완료"
+    counts = payload.get("status_counts") or {}
+    if any(value for key, value in counts.items() if key != "PASSED"):
+        return "실행 결과에 실패·미실행 있음: 개별 결과 확인 필요"
+    return "실행 대상 통과 · 기록된 자동화 제외·정보 부족 없음 (요구사항 전체 검증 보장은 아님)"
+
+
 def _validation_results(bundle: ValidationExecutionBundle) -> list[NeutralExecutionResult]:
     return [*bundle.candidate_results, bundle.environment_precheck, *bundle.regression_results]
 
 
 def _agent4_finding_for_result(
-    result: NeutralExecutionResult, finding_number: int
+    result: NeutralExecutionResult, finding_number: int,
+    *, failure_observations: dict[str, list[str]] | None = None,
 ) -> Agent4Finding | None:
-    if result.status == NeutralExecutionStatus.PASSED:
+    observations = failure_observations or {}
+    restore_failed = bool(observations.get("RESTORE_MISMATCH"))
+    if result.status == NeutralExecutionStatus.PASSED and not restore_failed:
         return None
     if result.source == ExecutionSource.ENVIRONMENT_PRECHECK:
         category = Agent4FindingCategory.ENVIRONMENT_ISSUE
@@ -46,6 +65,11 @@ def _agent4_finding_for_result(
     elif result.source_outcome == TrialOutcome.ENVIRONMENT_ERROR.value:
         category = Agent4FindingCategory.ENVIRONMENT_ISSUE
         rationale = "신규 후보 실행 환경 오류로 제품 결과를 판정할 수 없습니다."
+    elif restore_failed:
+        category = Agent4FindingCategory.AUTOMATION_EXECUTION_ISSUE
+        rationale = "증거 로그에서 복원 실패를 확인해 시험 결과를 보류합니다. 초기 상태 복구와 자동화 절차를 확인한 뒤 재실행해야 합니다."
+        if observations.get("PRODUCT_MISMATCH"):
+            rationale += " 제품 기대값 불일치 관찰도 함께 보존하며 제품 결함으로 확정하지 않습니다."
     elif result.status == NeutralExecutionStatus.ASSERTION_FAILED:
         category = Agent4FindingCategory.PRODUCT_MISMATCH_CANDIDATE
         rationale = "기대 결과와 관찰 결과가 달라 제품 불일치 후보로 분류합니다. 제품 결함 확정은 아닙니다."
@@ -228,11 +252,26 @@ def _agent4_new_source_chain_matches(
     artifacts = {
         item.get("tc_id"): item for item in raw_artifacts if isinstance(item, dict)
     }
+    if len(artifacts) != len(raw_artifacts):
+        return False
     if set(artifacts) != {item.test_id for item in bundle.candidate_results}:
         return False
     summary_hash = manifest.get("source_agent3_run_summary_sha256")
     summary_file = run_dir / "agent3_run_summary.json"
-    if (
+    if summary_hash is None and not summary_file.exists():
+        # The public single-TC agent3 CLI writes root artifacts, not a run summary.
+        # Do not accept a missing multi-candidate summary through this branch.
+        if len(raw_artifacts) != 1:
+            return False
+        single = raw_artifacts[0]
+        if (
+            single.get("agent3_manifest_file") != "agent3_manifest.json"
+            or single.get("agent3_trial_file") != "agent3_trial.json"
+            or single.get("agent3_manifest_sha256") != manifest.get("source_agent3_manifest_sha256")
+            or single.get("agent3_trial_sha256") != manifest.get("source_agent3_trial_sha256")
+        ):
+            return False
+    elif (
         not isinstance(summary_hash, str)
         or not summary_file.is_file()
         or _sha256_file(summary_file) != summary_hash
@@ -350,11 +389,11 @@ def _markdown_text(value: Any) -> str:
     return str(value).replace("\\", "\\\\").replace("|", "\\|").replace("\r", " ").replace("\n", " ").strip()
 
 
-def _human_review_observation(
-    run_dir: Path, result: NeutralExecutionResult | None
-) -> str:
-    if result is None:
-        return "실행 결과 상세가 연결되지 않았습니다."
+def _execution_failure_observations(
+    run_dir: Path, result: NeutralExecutionResult
+) -> dict[str, list[str]]:
+    """해시가 일치하는 로그의 실제 오류 행만 읽습니다(소스 코드·주석은 제외)."""
+    observations: dict[str, list[str]] = {}
     for relative_name in (result.stdout_file, result.stderr_file):
         if not relative_name:
             continue
@@ -363,23 +402,38 @@ def _human_review_observation(
             candidate.relative_to(run_dir.resolve())
         except ValueError:
             continue
-        if not candidate.is_file():
+        if (
+            not candidate.is_file()
+            or relative_name not in result.evidence_files
+            or _sha256_file(candidate) != result.evidence_sha256.get(relative_name)
+        ):
             continue
-        text = candidate.read_text(encoding="utf-8", errors="replace")[-12000:]
-        mismatch = re.search(
-            r"AssertionError:\s*PRODUCT_MISMATCH:\s*(.+)$",
+        text = candidate.read_text(encoding="utf-8", errors="replace")
+        for marker, detail in re.findall(
+            r"^[ \t]*(?:E[ \t]+)?(?:AssertionError:[ \t]*)?"
+            r"(PRODUCT_MISMATCH|RESTORE_MISMATCH):[ \t]*([^\r\n]+)$",
             text,
             flags=re.MULTILINE,
-        )
-        if mismatch:
-            return _markdown_text(mismatch.group(1)[:2000])
-        restore = re.search(
-            r"(?:AssertionError:\s*)?RESTORE_MISMATCH:\s*(.+)$",
-            text,
-            flags=re.MULTILINE,
-        )
-        if restore:
-            return _markdown_text(restore.group(1)[:2000])
+        ):
+            details = observations.setdefault(marker, [])
+            if detail not in details:
+                details.append(detail)
+    return observations
+
+
+def _human_review_observation(
+    run_dir: Path, result: NeutralExecutionResult | None
+) -> str:
+    if result is None:
+        return "실행 결과 상세가 연결되지 않았습니다."
+    observations = _execution_failure_observations(run_dir, result)
+    parts = [
+        f"{label}: {_markdown_text(' | '.join(observations[marker])[:2000])}"
+        for marker, label in (("PRODUCT_MISMATCH", "제품 불일치 관찰"), ("RESTORE_MISMATCH", "복원 실패"))
+        if marker in observations
+    ]
+    if parts:
+        return " / ".join(parts)
     return _markdown_text(result.raw_message or result.source_outcome)
 
 
@@ -431,6 +485,7 @@ def _human_review_markdown(
         f"| Run ID | `{_markdown_text(report.run_id)}` |",
         f"| Checkpoint 4 | `{report.checkpoint_status.value}` |",
         f"| 자동 권고 | `{report.recommendation.value}` |",
+        f"| 검증 범위 | {_markdown_text(verification_scope_summary(report.model_dump(mode='json', by_alias=True)))} |",
         f"| 전체 실행 결과 | {report.total_results}건 |",
         f"| 제품 결과 | {report.product_result_count}건 |",
         f"| 환경 점검 | {report.environment_result_count}건 |",
@@ -722,6 +777,7 @@ def _slack_report_payload(report: FinalReport) -> dict[str, Any]:
                         "type": "mrkdwn",
                         "text": f"*환경 점검*\n{report.environment_result_count}",
                     },
+                    {"type": "mrkdwn", "text": "*검증 범위*\n" + verification_scope_summary(report.model_dump(mode="json", by_alias=True))},
                 ],
             },
             {
@@ -850,6 +906,7 @@ def _notion_report_records(
                     finding.category.value if finding is not None else "NONE"
                 ),
                 "recommendation": report.recommendation.value,
+                "verification_scope_summary": verification_scope_summary(report.model_dump(mode="json", by_alias=True)),
                 "evidence_complete": result.evidence_complete,
                 "title": rows.get(result.test_id, {}).get("title", result.test_id),
                 "test_category": rows.get(result.test_id, {}).get("category", "미분류"),
@@ -969,7 +1026,7 @@ def _upsert_notion_reports(
                             "text": {
                                 "content": (
                                     f"Run {record['run_id']} | {record['result']} | "
-                                    f"{finding} | {record['recommendation']}"
+                                    f"{finding} | {record['recommendation']} | {record.get('verification_scope_summary', '')}"
                                 )[:2000]
                             }
                         }
@@ -1345,7 +1402,10 @@ def run_agent4(args: argparse.Namespace) -> int:
         )
         findings: list[Agent4Finding] = []
         for result in results:
-            finding = _agent4_finding_for_result(result, len(findings) + 1)
+            finding = _agent4_finding_for_result(
+                result, len(findings) + 1,
+                failure_observations=_execution_failure_observations(run_dir, result),
+            )
             if finding is not None:
                 findings.append(finding)
         if bundle.status == ValidationStageStatus.BLOCKED:
@@ -1360,8 +1420,7 @@ def run_agent4(args: argparse.Namespace) -> int:
         recommendation = _agent4_recommendation(findings, checkpoint_status)
         if (
             recommendation == FinalRecommendation.PASS
-            and not bundle.candidate_results
-            and bundle.automation_exclusions
+            and (bundle.automation_exclusions or bundle.excluded_information_gaps)
         ):
             recommendation = FinalRecommendation.HUMAN_REVIEW
         analysis = Agent4Analysis(

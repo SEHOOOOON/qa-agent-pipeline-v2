@@ -985,6 +985,8 @@ def _write_agent4_inputs(
     tmp_path: Path,
     *,
     include_candidate: bool = True,
+    candidate_stdout: str | None = None,
+    candidate_stderr: str | None = None,
     candidate_status: pipeline.NeutralExecutionStatus = pipeline.NeutralExecutionStatus.PASSED,
     precheck_status: pipeline.NeutralExecutionStatus = pipeline.NeutralExecutionStatus.PASSED,
     final_review_notes: list[str] | None = None,
@@ -1017,13 +1019,28 @@ def _write_agent4_inputs(
     def materialize_evidence(
         result: pipeline.NeutralExecutionResult,
     ) -> pipeline.NeutralExecutionResult:
+        if (
+            result.source == pipeline.ExecutionSource.NEW_AUTOMATION_CANDIDATE
+            and (candidate_stdout is not None or candidate_stderr is not None)
+        ):
+            # 별도 후보 로그가 환경·회귀 fixture의 공통 로그에 덮이지 않게 합니다.
+            names = {name: f"evidence/{result.test_id}/{Path(name).name}" for name in result.evidence_files}
+            result = result.model_copy(update={
+                "stdout_file": names[result.stdout_file],
+                "stderr_file": names[result.stderr_file],
+                "evidence_files": list(names.values()),
+            })
         hashes: dict[str, str] = {}
         for relative_name in result.evidence_files:
             evidence_file = run_dir / relative_name
             evidence_file.parent.mkdir(parents=True, exist_ok=True)
-            evidence_file.write_text(
-                f"evidence:{relative_name}\n", encoding="utf-8"
-            )
+            content = f"evidence:{relative_name}\n"
+            if result.source == pipeline.ExecutionSource.NEW_AUTOMATION_CANDIDATE:
+                if relative_name == result.stdout_file and candidate_stdout is not None:
+                    content = candidate_stdout
+                elif relative_name == result.stderr_file and candidate_stderr is not None:
+                    content = candidate_stderr
+            evidence_file.write_text(content, encoding="utf-8")
             hashes[relative_name] = _sha256_file(evidence_file)
         return result.model_copy(update={"evidence_sha256": hashes})
 
@@ -1224,5 +1241,36 @@ def build_approvable_ui_run(
         },
     )
     return runs_root, approved_root, target_html, run_id, tc_id, candidate_code
+
+def build_existing_srs_review_run(tmp_path, monkeypatch, *, target_content="<html>test</html>"):
+    proposal = pipeline.SrsRevisionProposal(
+        proposal_id="SRS-REV-001", requirement_id="REQ-TEMP-001",
+        source_condition_ids=["COND-001"], current_acceptance_criteria="기존 기준",
+        proposed_acceptance_criteria="변경 기준", reason="기존 TC로 검증한 조건의 문구 반영",
+    )
+    run_dir, run_id = _write_agent4_inputs(tmp_path, include_candidate=False, srs_revision_proposals=[proposal])
+    target = tmp_path / "target.html"
+    target.write_text(target_content, encoding="utf-8")
+    srs = tmp_path / "srs.md"
+    srs.write_text("| REQ-TEMP-001 | 온도 요구사항 | 기존 기준 |\n", encoding="utf-8")
+    execution = pipeline.ValidationExecutionBundle.model_validate_json((run_dir / "validation_execution.json").read_text(encoding="utf-8"))
+    execution = execution.model_copy(update={
+        "environment_precheck": execution.environment_precheck.model_copy(update={"target_sha256": _sha256_file(target)}),
+        "regression_results": [item.model_copy(update={"target_sha256": _sha256_file(target)}) for item in execution.regression_results],
+    })
+    _write_json(run_dir / "validation_execution.json", execution.model_dump(mode="json", by_alias=True))
+    manifest = json.loads((run_dir / "validation_manifest.json").read_text(encoding="utf-8"))
+    manifest.update(target_sha256=_sha256_file(target), validation_execution_sha256=_sha256_file(run_dir / "validation_execution.json"))
+    _write_json(run_dir / "validation_manifest.json", manifest)
+    design = pipeline.Agent2TestDesign.model_validate_json((run_dir / "agent2_test_design.json").read_text(encoding="utf-8"))
+    design = design.model_copy(update={"related_existing_tests": [pipeline.ExistingTestSelection(
+        tc_id="TC-TEMP-001", source_condition_ids=["COND-001"], selection_reason="기존 기준 검증",
+    )]})
+    _write_json(run_dir / "agent2_test_design.json", design.model_dump(mode="json", by_alias=True))
+    # Stage 1/2 verification has dedicated integration tests; keep this fixture focused on approval.
+    monkeypatch.setattr(pipeline, "_load_verified_agent2_run", lambda *_: (None, {}, None, design, None, {}))
+    assert pipeline.run_agent4(SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))) == 0
+    return run_dir, target, srs
+
 
 __all__ = [name for name in globals() if not name.startswith("__")]

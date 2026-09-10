@@ -48,6 +48,7 @@ AGENT2_SYSTEM_INSTRUCTIONS = """
 - 출력은 사람의 마지막 승인 전 변경 검증용 제품 TC 후보와 영향받는 기존 회귀 선택입니다.
 
 반드시 지킬 규칙:
+기존 TC 전용 실행 예외: test_cases가 비어 있고 관련_기존_TC만 있으면 준비·복원 메모를 넣기 위해 신규 TC를 만들지 않습니다. 실행기는 요청 원문의 시험 절차 메모를 마지막 사람 검토로 전달합니다. 기존 자동화가 해당 메모를 수행했다고 추정하지 않습니다. 기존 절차 변경이 필요함을 확인했다면 수정 후보를 설계하며, 후보가 있는 경우 아래 준비·복원 절차 보존 규칙을 그대로 적용합니다.
 1. 검증된 변경 요청 원문, Agent 1의 confirmed_conditions와 고정된 SRS만 사실 근거로 사용합니다.
 2. requirement_effects가 NO_IMPACT인 Requirement는 테스트 범위에 포함하지 않습니다.
 3. MODIFIED는 변경 동작 검증 후보, UPDATE_REQUIRED는 변경으로 기대 결과·절차 수정이 필요한 후보, VERIFY는 기존 동작 회귀 선택으로 해석합니다.
@@ -60,6 +61,7 @@ AGENT2_SYSTEM_INSTRUCTIONS = """
 5-2-1. 기존 중앙 관제 온도·모드 흐름의 묶음 TC가 실행 전 모드·설정 온도를 요구사항으로 고정하지 않았지만 시험 중 두 값 중 하나를 변경하고 원상 복구해야 하면 restore_observed_hvac_state=true를 사용합니다. 이때 임의 initial_mode·initial_temperature_c를 만들지 말고 restore_steps에 `실행 직전 관찰한 모드와 설정 온도로 복원하고 적용한다`는 뜻을 명시합니다. 이 표시는 처음 보는 일반 기능의 내부 값을 임의로 복원하는 허가가 아닙니다.
 5-3. 각 expected_result는 한 observation_layer에서 독립적으로 한 번 판정할 수 있는 관찰값 하나만 기술합니다. 화면 모드·화면 온도·대기값 반영·버튼 활성 상태처럼 서로 다른 관찰값을 한 Expected Result에 묶지 말고 고유한 ER ID로 분리합니다. 내부 장비 객체의 서로 연관된 여러 필드는 하나의 INTERNAL_STATE 결과로 함께 기록할 수 있습니다. Expected Result를 분리한다는 것은 TC 자체를 분리한다는 뜻이 아닙니다.
 5-4. 하나의 TC 안에 여러 조건 구간이 있으면 각 expected_result의 verify_after_step에 그 결과를 확인해야 하는 steps의 문장을 정확히 복사합니다. 마지막에 한꺼번에 확인하면 앞 조건의 결과가 사라질 수 있으므로, 조건별 실행 직후 판정 위치를 명시합니다.
+5-5. 같은 조작의 UI·내부 상태는 서로 다른 ER로 쓰되 같은 verify_after_step에 연결합니다. 관찰 계층이 다르다는 이유만으로 동일 조작을 반복하거나 중간 복원을 넣지 않습니다. 단일 조작의 이중 검증은 SINGLE_FLOW이며, 복수의 실제 시험 조건이 있을 때만 묶음으로 설계합니다.
 6. test_cases의 purpose는 CHANGE_VALIDATION만 사용합니다. 유지되는 기존 동작은 RELATED_REGRESSION 후보를 새로 만들지 말고 관련_기존_TC로 분리합니다.
 6-1. 범위 변경은 변경된 경계뿐 아니라 변경 후 범위의 하한과 상한을 각각 검증합니다. 같은 관제점의 같은 범위 규칙이면 하한·상한을 하나의 TC 안에서 조건 구간으로 묶을 수 있습니다.
 6-2. 현재 V2의 제품 조작 기준은 중앙 관제 패널 하나입니다. 모든 실행 TC는 control_path=CENTRAL을 사용하며 LOCAL·현장 리모컨 TC를 만들지 않습니다.
@@ -69,6 +71,7 @@ AGENT2_SYSTEM_INSTRUCTIONS = """
 7-3. 묶음 TC는 grouping_reason에 같은 TC로 처리하는 근거가 되는 공통 관제점·업무 규칙을 구체적으로 기록합니다. 서로 다른 Requirement 목적, 서로 다른 제어 경로, 실패 원인이 무관한 기능은 별도 TC로 분리합니다.
 7-4. 묶음 TC의 각 조건은 steps와 expected_results에서 구분되어야 합니다. 한 조건의 입력·행동·결과를 작성한 뒤 필요한 초기화 또는 전환을 거쳐 다음 조건을 작성합니다. 모든 결과를 TC 마지막 상태에서 한꺼번에 확인하도록 작성하지 않습니다.
 7-5. requested_modes와 requested_temperatures_c에는 묶음 TC가 실제로 요청하는 모든 모드·온도 값을 중복 없이 기록합니다. 단일 조건은 기존 requested_mode와 requested_temperature_c를 사용할 수 있습니다. test_data와 절차에 없는 값을 자동화 단계가 추정하게 하지 않습니다.
+7-6. 초기 준비·중간 초기화·최종 복원에만 쓰는 값은 시험 조건의 requested 값에 섞지 않습니다. 해당 절차와 초기값으로 기록합니다. 복원값을 요청 목록에 넣어 생긴 검사 오류는 그 값을 분리해 고치며, 오류를 피하려고 반복 시험 조건을 새로 만들지 않습니다.
 8. REQ-CONTROL-001을 검증하면 CENTRAL 경로에서 관제 패널을 통한 적용을 다룹니다. 과거 산출물의 LOCAL 값이나 REQ-LOCAL-*를 현재 SRS 근거로 추정하거나 새 TC로 확장하지 않습니다.
 9. target_role은 고정 장치 ID를 추측하지 말고 PRIMARY_TEST_DEVICE처럼 역할로 지정합니다.
 10. test_data에는 준비·요청에 필요한 모드와 온도를 구조화합니다. TC 절차 안에만 값을 숨기지 않으며, 여러 조건을 묶었으면 모든 조건 값을 복수형 필드에 기록합니다.
@@ -162,7 +165,7 @@ class OpenAIAgent2:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent2-2-19",
+                prompt_cache_key="qa-v2-agent2-2-20",
                 input=[
                     {"role": "system", "content": AGENT2_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
@@ -288,6 +291,20 @@ def _explicit_behavior_values(text: str) -> set[str]:
     }
 
 
+def _existing_test_procedure_review_notes(
+    request: ChangeRequest, design: Agent2TestDesign
+) -> list[str]:
+    """기존 TC 코드를 변경하거나 절차 수행을 추정하지 않고 원문을 인계합니다."""
+    if design.test_cases or not design.related_existing_tests:
+        return []
+    selected = ", ".join(dict.fromkeys(item.tc_id for item in design.related_existing_tests))
+    return list(dict.fromkeys(
+        f"기존 TC 시험 절차 확인 ({selected}): {note} "
+        "[기존 자동화의 해당 절차 수행 여부는 자동 확정하지 않았습니다. 증거를 확인해 주세요.]"
+        for note in request.acceptance_notes if _is_test_procedure_note(note)
+    ))
+
+
 def evaluate_checkpoint2(
     request: ChangeRequest,
     analysis: Agent1Analysis,
@@ -297,6 +314,8 @@ def evaluate_checkpoint2(
     existing_catalog: tuple[ExistingRegressionSpec, ...] = EXISTING_REGRESSION_CATALOG,
     require_srs_revision_proposals: bool = False,
     require_existing_behavior_values: bool = False,
+    allow_existing_procedure_review: bool = True,
+    require_double_assert_timing: bool = True,
 ) -> Checkpoint2Result:
     checks: list[CheckResult] = []
 
@@ -451,6 +470,15 @@ def evaluate_checkpoint2(
     policy_errors: list[str] = []
     for tc in design.test_cases:
         layers = {result.observation_layer for result in tc.expected_results}
+        if require_double_assert_timing and tc.double_assert_policy == DoubleAssertPolicy.REQUIRED:
+            # None means the existing single-flow end-of-test assertion point.
+            timing = {
+                layer: {result.verify_after_step for result in tc.expected_results
+                        if result.observation_layer == layer}
+                for layer in (ObservationLayer.UI, ObservationLayer.INTERNAL_STATE)
+            }
+            if timing[ObservationLayer.UI] != timing[ObservationLayer.INTERNAL_STATE]:
+                policy_errors.append(f"{tc.tc_id}:UI·내부 상태 이중 검증의 판정 단계 불일치; 같은 조작 직후 함께 확인 필요")
         requires_double_assert = (
             "REQ-STATE-001" in tc.requirement_ids
             or tc.test_type == TcType.STATE_CONSISTENCY
@@ -753,6 +781,14 @@ def evaluate_checkpoint2(
         for note in procedure_notes
         if _is_test_restore_note(note) and _normalize(note) not in restore_lines
     ]
+    procedure_review = (
+        _existing_test_procedure_review_notes(request, design)
+        if allow_existing_procedure_review else []
+    )
+    if procedure_review:
+        # 기존 코드에는 신규 TC의 절차 필드가 없습니다. 원문은 execute가 최종 검토로 인계합니다.
+        missing_setup_notes = []
+        missing_restore_notes = []
     if (
         not excluded_scope_matches
         or not excluded_gaps_match
@@ -779,7 +815,8 @@ def evaluate_checkpoint2(
         add(
             "CP2-014",
             CheckStatus.PASS,
-            f"실행 제외 범위 {len(design_scope)}건, 정보 부족 {len(design.excluded_information_gaps)}건과 시험 절차 {len(procedure_notes)}건을 올바르게 분리했습니다.",
+            f"실행 제외 범위 {len(design_scope)}건, 정보 부족 {len(design.excluded_information_gaps)}건과 시험 절차 {len(procedure_notes)}건을 올바르게 분리했습니다."
+            + (" 기존 TC의 시험 절차 메모는 수행 완료로 간주하지 않고 최종 사람 검토로 전달합니다." if procedure_review else ""),
         )
 
     grouping_errors: list[str] = []

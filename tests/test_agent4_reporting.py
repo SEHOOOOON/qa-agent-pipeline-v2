@@ -66,7 +66,7 @@ def test_agent4_writes_consistent_pass_report_without_rerunning_tests(tmp_path: 
     assert analysis.findings == []
     assert analysis.excluded_scope == ["정확한 차단 안내 문구"]
     assert analysis.excluded_information_gaps == ["정확한 안내 문구가 정의되지 않음"]
-    assert report.recommendation == pipeline.FinalRecommendation.PASS
+    assert report.recommendation == pipeline.FinalRecommendation.HUMAN_REVIEW
     assert report.total_results == analysis.total_results
     assert report.status_counts == analysis.status_counts
     assert report.product_result_count == 2
@@ -344,8 +344,27 @@ def test_agent4_verifies_multiple_agent3_source_artifacts(tmp_path: Path) -> Non
     }
 
     assert pipeline._agent4_new_source_chain_matches(run_dir, bundle, manifest) is True
+    valid_hash = source_artifacts[0]["agent3_trial_sha256"]
     source_artifacts[0]["agent3_trial_sha256"] = "f" * 64
     assert pipeline._agent4_new_source_chain_matches(run_dir, bundle, manifest) is False
+    source_artifacts[0]["agent3_trial_sha256"] = valid_hash
+    summary_file.unlink()
+    manifest["source_agent3_run_summary_sha256"] = None
+    assert pipeline._agent4_new_source_chain_matches(run_dir, bundle, manifest) is False
+
+    # A single nested candidate is still a summary-based run, not a CLI root run.
+    single_bundle = bundle.model_copy(update={"candidate_results": candidate_results[:1]})
+    manifest["source_agent3_artifacts"] = source_artifacts[:1]
+    assert pipeline._agent4_new_source_chain_matches(run_dir, single_bundle, manifest) is False
+    item = source_artifacts[0]
+    for name in ("agent3_manifest", "agent3_trial"):
+        relative = item[f"{name}_file"]
+        (run_dir / f"{name}.json").write_bytes((run_dir / relative).read_bytes())
+        item[f"{name}_file"] = f"{name}.json"
+        manifest[f"source_{name}_sha256"] = item[f"{name}_sha256"]
+    assert pipeline._agent4_new_source_chain_matches(run_dir, single_bundle, manifest) is True
+    (run_dir / "agent3_trial.json").write_text("{}", encoding="utf-8")
+    assert pipeline._agent4_new_source_chain_matches(run_dir, single_bundle, manifest) is False
 
 def test_agent4_reports_automation_exclusion_without_blocking_executed_results(
     tmp_path: Path,
@@ -365,9 +384,10 @@ def test_agent4_reports_automation_exclusion_without_blocking_executed_results(
     report = pipeline.FinalReport.model_validate_json(
         (run_dir / "final_report.json").read_text(encoding="utf-8")
     )
-    assert report.recommendation == pipeline.FinalRecommendation.PASS
+    assert report.recommendation == pipeline.FinalRecommendation.HUMAN_REVIEW
     assert report.findings == []
     assert report.automation_exclusions == [exclusion]
+    assert "미확인 항목 있음" in (run_dir / "사람_최종_검토.md").read_text(encoding="utf-8")
     raw_report = json.loads((run_dir / "final_report.json").read_text(encoding="utf-8"))
     assert "자동화_제외_TC" in raw_report
 
@@ -444,6 +464,83 @@ def test_agent4_marks_assertion_failure_as_product_mismatch_candidate(tmp_path: 
     assert pipeline.run_human_review_document(
         SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))
     ) == 0
+
+@pytest.mark.parametrize("combined", [False, True])
+def test_agent4_reports_restore_failure_without_hiding_product_observation(tmp_path: Path, combined: bool) -> None:
+    run_dir, run_id = _write_agent4_inputs(
+        tmp_path,
+        candidate_status=(pipeline.NeutralExecutionStatus.ASSERTION_FAILED if combined else pipeline.NeutralExecutionStatus.EXECUTION_ERROR),
+        candidate_stdout="E   AssertionError: PRODUCT_MISMATCH: ER-005: observed=17 expected=18\n" if combined else "",
+        candidate_stderr="RESTORE_MISMATCH: internal state was not restored\n",
+    )
+    assert pipeline.run_agent4(SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))) == 0
+    report = pipeline.FinalReport.model_validate_json((run_dir / "final_report.json").read_text(encoding="utf-8"))
+    assert report.checkpoint_status == pipeline.CheckStatus.PASS
+    assert report.recommendation == pipeline.FinalRecommendation.HOLD
+    assert report.total_results == 3
+    assert len(report.findings) == 1  # 같은 TC의 두 관찰을 두 번 실행한 것으로 집계하지 않습니다.
+    assert report.findings[0].category == pipeline.Agent4FindingCategory.AUTOMATION_EXECUTION_ISSUE
+    assert "복원 실패" in report.findings[0].rationale
+    review = (run_dir / "사람_최종_검토.md").read_text(encoding="utf-8")
+    assert "복원 실패" in review and "internal state was not restored" in review
+    if combined:
+        assert "제품 불일치 관찰" in review and "observed=17 expected=18" in review
+        assert "제품 기대값 불일치 관찰도 함께 보존" in report.findings[0].rationale
+    notion = (run_dir / "notion_payload.json").read_text(encoding="utf-8")
+    assert "AUTOMATION_EXECUTION_ISSUE" in notion
+
+
+def test_agent4_ignores_restore_marker_in_source_code_and_unverified_logs(tmp_path: Path) -> None:
+    run_dir, run_id = _write_agent4_inputs(
+        tmp_path, candidate_status=pipeline.NeutralExecutionStatus.ASSERTION_FAILED,
+        candidate_stdout="    restore_message = 'RESTORE_MISMATCH: ' + details\nE   AssertionError: PRODUCT_MISMATCH: ER-005: wrong value\n",
+    )
+    bundle = pipeline.ValidationExecutionBundle.model_validate_json((run_dir / "validation_execution.json").read_text(encoding="utf-8"))
+    result = bundle.candidate_results[0]
+    assert "RESTORE_MISMATCH" not in pipeline._execution_failure_observations(run_dir, result)
+    (run_dir / result.stderr_file).write_text("RESTORE_MISMATCH: forged\n", encoding="utf-8")
+    assert "RESTORE_MISMATCH" not in pipeline._execution_failure_observations(run_dir, result)
+    assert pipeline.run_agent4(SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))) == 2
+    report = pipeline.FinalReport.model_validate_json((run_dir / "final_report.json").read_text(encoding="utf-8"))
+    assert report.checkpoint_status == pipeline.CheckStatus.FAIL
+    assert report.recommendation == pipeline.FinalRecommendation.HOLD
+
+
+def test_existing_only_procedure_notes_reach_final_human_review(tmp_path: Path) -> None:
+    run_dir, run_id = _write_agent4_inputs(tmp_path, include_candidate=False)
+    request = cp1_request().model_copy(update={"acceptance_notes": [
+        "첫 실행 기본 상태인 LOW 풍량을 확인한 뒤 시험을 시작한다.",
+        "시험 뒤 대상 장비를 LOW 풍량으로 복원하고 적용한다.",
+    ]})
+    _write_json(run_dir / "request.json", request.model_dump(mode="json"))
+    design = pipeline.Agent2TestDesign.model_validate_json((run_dir / "agent2_test_design.json").read_text(encoding="utf-8"))
+    design.related_existing_tests = [pipeline.ExistingTestSelection(
+        tc_id="TC-TEMP-001", source_condition_ids=["COND-001"], selection_reason="기존 TC 재사용",
+    )]
+    _write_json(run_dir / "agent2_test_design.json", design.model_dump(mode="json", by_alias=True))
+    _write_json(run_dir / "agent2_manifest.json", {
+        "existing_procedure_review_contract": "1.0", "request_sha256": _sha256_file(run_dir / "request.json"),
+    })
+    notes = pipeline._final_review_notes_for_validation(run_dir)
+    assert len(notes) == 2
+    execution_file = run_dir / "validation_execution.json"
+    bundle = pipeline.ValidationExecutionBundle.model_validate_json(execution_file.read_text(encoding="utf-8"))
+    bundle.final_review_notes = notes
+    _write_json(execution_file, bundle.model_dump(mode="json", by_alias=True))
+    manifest_file = run_dir / "validation_manifest.json"
+    manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+    manifest["validation_execution_sha256"] = _sha256_file(execution_file)
+    _write_json(manifest_file, manifest)
+    assert pipeline.run_agent4(SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))) == 0
+    report = pipeline.FinalReport.model_validate_json((run_dir / "final_report.json").read_text(encoding="utf-8"))
+    assert report.final_review_notes == notes
+    review = (run_dir / "사람_최종_검토.md").read_text(encoding="utf-8")
+    assert all(note in review for note in request.acceptance_notes)
+    assert "자동 확정하지 않았습니다" in review
+    _write_json(run_dir / "request.json", cp1_request().model_dump(mode="json"))
+    with pytest.raises(ValueError, match="변경"):
+        pipeline._final_review_notes_for_validation(run_dir)
+
 
 def test_agent4_holds_candidate_automation_execution_issue(tmp_path: Path) -> None:
     run_dir, run_id = _write_agent4_inputs(
