@@ -1,0 +1,21 @@
+{
+  "contract_version": "1.0",
+  "publication_kind": "SANITIZED_APPROVAL_REVALIDATION_SUMMARY",
+  "source_run_id": "RUN-20260829-054330-A18942",
+  "source_tc_id": "TC-CAND-001",
+  "official_tc_id": "TC-V2-001",
+  "outcome": "PASS",
+  "exit_code": 0,
+  "duration_ms": 54781,
+  "candidate_sha256": "565e7f693d6d96f7ecf1989f6e82ddd6ca94feabe29b269a0d533934a8959f42",
+  "target_sha256": "c7b9b7bca36fa027589aeec5113117284f031992fe9b766ecbcd498bf0605038",
+  "evidence_complete": true,
+  "evidence_sha256": {
+    "trial-stdout.txt": "5586e83aeb645440123902e0f0c5ae0d014a15a05a9e746c512d327b11b6b000",
+    "trial-stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "trial-final.png": "22f5bf207fa335568ce01ab356e593336ce35df34a30eeccca07fdb4f64da85a",
+    "trial-trace.zip": "49b9ee0665d1c01dcaf1e57f41a01f5ec16e533822ddc3ffcd67c8a94cf8a7f8"
+  },
+  "source_revalidation_sha256": "96c5792d3776d0fcfacb06890c1331068af7ff516d901070e0fa01dafd32328e",
+  "created_at": "2026-08-30T02:11:26.016996+00:00"
+}

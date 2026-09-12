@@ -260,9 +260,13 @@ def _automation_exclusion_from_run_entry(entry: dict[str, Any]) -> dict[str, Any
 
 def run_pipeline(args: argparse.Namespace) -> int:
     """Run Agent 1→2 and continue every eligible Agent 3 candidate."""
-    run_id = _new_run_id()
+    run_id = getattr(args, "run_id", None) or _new_run_id()
+    if not re.fullmatch(r"RUN-\d{8}-\d{6}-[A-F0-9]{6}", run_id):
+        raise ValueError("허용된 Run ID가 아닙니다.")
     runs_root = Path(args.runs_root).resolve()
     run_dir = runs_root / run_id
+    if run_dir.exists():
+        raise ValueError("이미 존재하는 Run ID입니다. 기존 실행은 덮어쓰지 않습니다.")
     target_html = Path(args.target_html).resolve()
     if not target_html.is_file():
         raise ValueError(f"Agent 3 target HTML does not exist: {target_html.name}")
@@ -556,6 +560,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pipeline.add_argument("--srs", default=str(DEFAULT_SRS), help="Product SRS Markdown path")
     pipeline.add_argument("--runs-root", default=str(DEFAULT_RUNS_ROOT), help="Run artifact root")
+    pipeline.add_argument("--run-id", default=None, help="새 실행 ID (생략 시 자동 생성, 기존 ID 재사용 불가)")
     pipeline.add_argument(
         "--approved-assets-root",
         default=str(DEFAULT_APPROVED_ASSETS_ROOT),

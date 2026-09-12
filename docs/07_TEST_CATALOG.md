@@ -1,7 +1,7 @@
 # 자동 테스트 카탈로그
 
-최종 확인: 2026-09-10
-실행 기준: `python -m pytest --collect-only -q` → **201건**
+최종 확인: 2026-09-12
+실행 기준: `python -m pytest --collect-only -q` → **207건**
 실제 정의 파일: `tests/test_srs_agent1.py`, `tests/test_agent2.py`, `tests/test_integrity_cli.py`, `tests/test_agent3.py`, `tests/test_orchestration_execution.py`, `tests/test_agent4_reporting.py`, `tests/test_pipeline_ui.py`
 
 이 문서는 현재 수집되는 자동 테스트를 사람이 확인하기 쉽게 정리한 목록입니다. 실행의 기준은 항상 테스트 코드와 Pytest 수집 결과이며, 테스트를 추가·삭제할 때는 이 문서도 같은 변경에서 갱신합니다.
@@ -10,9 +10,9 @@
 
 | 구성 | 수량 | 설명 |
 |---|---:|---|
-| 일반 테스트 함수 | 190 | 함수 하나가 Pytest 실행 1건 |
+| 일반 테스트 함수 | 196 | 함수 하나가 Pytest 실행 1건 |
 | 파라미터 테스트 함수 | 3 | Trial 결과 5건·복원 실패 2건·SRS 입력 변조 4건 |
-| 합계 | **201** | 현재 Pytest 수집 수 |
+| 합계 | **207** | 현재 Pytest 수집 수 |
 
 파라미터 테스트 `test_agent3_cli_exit_code_reflects_trial_trustworthiness`는 다음 다섯 결과를 별도 실행합니다: `PASS`, `PRODUCT_MISMATCH_CANDIDATE`, `AUTOMATION_ERROR`, `ENVIRONMENT_ERROR`, `TIMEOUT`.
 
@@ -224,7 +224,7 @@
 | `test_agent4_rejects_broken_manifest_or_candidate_chain` | Agent 3→검증 Manifest 또는 실제 후보 파일 체인 불일치 차단 |
 | `test_agent4_rejects_passed_result_without_complete_evidence` | 완전한 증거 없는 PASS 결과 차단 |
 
-## 7. 중앙제어 실제 Run 연동·후보 자산 승인 (25건)
+## 7. 중앙제어 공개 데모·실제 Run 연동·후보 자산 승인 (31건)
 
 추가한 SRS 단독 승인 테스트:
 
@@ -244,15 +244,21 @@
 | `test_pipeline_ui_failure_message_is_safe_and_actionable` | 로컬 경로를 숨긴 Agent 3 TC별 실패·시간 초과 원인 표시 |
 | `test_pipeline_ui_live_run_is_disabled_by_default` | 로컬 브리지의 새 API 실행 기본 잠금 |
 | `test_pipeline_ui_prevents_parallel_live_runs_across_bridges` | 여러 로컬 브리지에서 같은 저장소 Live Run 중복 실행 차단 |
-| `test_pipeline_ui_live_run_uses_agent1_to_4_order_without_external_send` | 허용 모드의 Agent 1→3·검증·Agent 4 순서와 외부 전송 금지 |
+| `test_pipeline_ui_live_run_uses_agent1_to_4_order_without_external_send` | 순서·외부 전송 금지·설정 경로 전달·다른 Run 혼입 방지 |
+| `test_pipeline_ui_browser_recovers_polling_and_preserves_selected_run` | 브라우저 재접속·창 닫기·통신 장애 복구, 조회 선택과 응답 순서 보호 |
+| `test_public_demo_shows_one_v2_normal_change_without_api_or_file_registration` | 공개 MED 정상 변경 데모의 Agent 1~4·TC 상세·승인 미리보기와 API 호출·파일 등록 없음 |
+| `test_asset_approval_rejects_different_executed_code` | 다른 코드 해시의 실행 기록으로 공식 승인·재검증하지 않음 |
+| `test_report_uses_verified_tc_snapshot_and_legacy_custom_root` | TC 원문 보존·해시 확인, 과거 기록의 지정 폴더 사용 |
+| `test_browser_resets_cross_run_consent_and_separates_timeouts` | Run 변경 시 동의 초기화, 조회/처리 대기시간 분리, 설명 겹침 방지 |
+| `test_pipeline_explicit_run_id_is_forwarded_and_cannot_overwrite` | 명시 Run ID 인계·기존 ID 및 경로 우회 거부 |
 | `test_v2_product_ui_routes_agent_buttons_to_real_run_bridge` | 팀장·Agent 1~4 버튼의 실제 Run 패널 연결과 외부 보고 미리보기 고정 |
 | `test_pipeline_ui_human_approval_registers_immutable_tc_and_automation` | 사람 승인 시 후보 TC·자동화·Registry SHA-256 등록과 중복 승인 멱등성 |
-| `test_approved_tc_registry_is_loaded_and_official_automation_is_reusable` | 승인 Registry 자산 로딩·해시 검증과 공식 Python의 실제 Playwright 재실행·증거 생성 |
+| `test_approved_tc_registry_is_loaded_and_official_automation_is_reusable` | 승인 Registry·공개 재검증 요약 해시 검증과 공식 Python의 실제 Playwright 재실행·증거 생성 |
 | `test_pipeline_ui_requires_and_applies_srs_revision_with_asset_approval` | 현재 후보에 연결된 SRS 제안만 표시·동의·개정하고 다른 후보 제안은 보존 |
 | `test_pipeline_ui_rolls_back_all_asset_files_when_approval_copy_fails` | SRS·TC·자동화·Registry 승인 중 실패 시 본 파일과 임시 파일 원상복구 |
 | `test_pipeline_ui_hold_is_recorded_and_can_later_be_approved` | 보류 사유 기록, 공식 자산 미생성, 후속 승인 전환 |
 | `test_pipeline_ui_blocks_asset_approval_for_failed_or_stale_evidence` | 최종 실패·현재 HTML 해시 불일치 후보의 공식 등록 차단 |
-| `test_pipeline_ui_revalidates_stale_candidate_without_model_call` | HTML 변경 뒤 모델 호출 없는 후보 재검증과 승인 가능 상태 복구 |
+| `test_pipeline_ui_revalidates_stale_candidate_without_model_call` | HTML 변경 뒤 모델 호출 없는 후보 재검증, 공개 요약·원본 해시 기록과 승인 가능 상태 복구 |
 
 ## 갱신 규칙
 

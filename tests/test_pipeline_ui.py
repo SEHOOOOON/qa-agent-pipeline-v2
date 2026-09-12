@@ -3,6 +3,199 @@
 from pipeline_test_support import *
 
 
+def test_asset_approval_rejects_different_executed_code(tmp_path):
+    runs, assets, target, run_id, tc_id, _ = build_approvable_ui_run(tmp_path)
+    execution_file = runs / run_id / "validation_execution.json"
+    data = json.loads(execution_file.read_text(encoding="utf-8"))
+    data["candidate_results"][0]["test_sha256"] = "a" * 64
+    _write_json(execution_file, data)
+    with pytest.raises(ValueError, match="해시"):
+        pipeline_ui.decide_candidate_asset(runs, assets, target, run_id, tc_id,
+            decision="APPROVE", reviewer="테스트", note="검증")
+    with pytest.raises(ValueError, match="코드가 다릅니다"):
+        pipeline_ui.revalidate_candidate_asset(runs, target, run_id, tc_id)
+    assert not (assets / "registry.json").exists()
+
+
+def test_report_uses_verified_tc_snapshot_and_legacy_custom_root(tmp_path):
+    _, snapshot = pipeline.load_approved_regression_catalog(REPO_ROOT / "approved_assets")
+    entry = snapshot["approved_assets"][0]
+    tc_id = entry["tc_id"]
+    raw = entry["test_case_json"]
+    expected = json.loads(raw)["test_case"]
+    _write_json(tmp_path / "approved_regression_catalog.json", snapshot)
+    _write_json(tmp_path / "agent2_test_design.json", {"related_existing_tests": [{"tc_id": tc_id}]})
+    missing_root = tmp_path / "missing-assets"
+    rows = pipeline_reporting.build_run_test_rows(tmp_path, approved_assets_root=missing_root)
+    assert rows[0]["steps"] == expected["steps"]
+    assert rows[0]["title"] == expected["title"]
+    # Old Runs have no embedded source: use the explicitly configured folder.
+    del entry["test_case_json"]
+    legacy_file = missing_root / entry["test_case_file"]
+    legacy_file.parent.mkdir(parents=True)
+    legacy_file.write_bytes(raw.encode("utf-8"))
+    _write_json(tmp_path / "approved_regression_catalog.json", snapshot)
+    assert pipeline_reporting.build_run_test_rows(tmp_path, approved_assets_root=missing_root)[0]["steps"] == expected["steps"]
+    entry["test_case_json"] = raw + " "  # Do not hide a damaged snapshot using current files.
+    _write_json(tmp_path / "approved_regression_catalog.json", snapshot)
+    assert pipeline_reporting.build_run_test_rows(tmp_path, approved_assets_root=missing_root)[0]["steps"] == []
+
+
+def test_browser_resets_cross_run_consent_and_separates_timeouts():
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as api:
+        browser = api.chromium.launch(headless=True)
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page.route("https://**/*", lambda route: route.abort())
+        page.goto((REPO_ROOT / "product_baseline/virtual-controller.html").as_uri())
+        result = page.evaluate("""async () => {
+          qaLiveState.demoMode=false;
+          const limits=[];const nativeTimeout=AbortSignal.timeout;
+          AbortSignal.timeout=ms=>{limits.push(ms);return nativeTimeout(ms);};
+          window.fetch=async()=>({ok:true,json:async()=>({})});
+          await qaLiveFetch('/read');await qaLiveFetch('/revalidate',{method:'POST'});
+          const asset={tc_id:'TC-CAND-001',title:'mock',approval_eligible:true,srs_revision_proposals:[{requirement_id:'REQ',current_acceptance_criteria:'old',proposed_acceptance_criteria:'new'}]};
+          const first={run_id:'A',stages:{agent4:{name:'보고',status:'PASS',summary:'상세',details:Array(15).fill('검토 사항')}},candidate_assets:[asset]};
+          const second={...first,run_id:'B'};
+          qaLiveState.overview={allow_asset_approval:true};qaLiveState.run=first;qaLiveState.selectedStage='agent4';renderQaLiveRun();
+          document.getElementById('qa-live-modal').classList.add('show');
+          document.getElementById('qa-live-reviewer').value='검토자';
+          document.getElementById('qa-live-srs-approve').checked=true;
+          const sent=[];qaLiveFetch=async(path,options)=>{if(options?.method==='POST')sent.push(path);return second;};
+          await submitQaAssetDecision('APPROVE');
+          const armedBefore=qaLiveState.assetApprovalArmed;
+          await loadQaLiveRun('B');
+          const cleared=!qaLiveState.assetApprovalArmed && !document.getElementById('qa-live-srs-approve').checked;
+          await submitQaAssetDecision('APPROVE');
+          const list=document.getElementById('qa-live-detail-list').getBoundingClientRect();
+          const table=document.querySelector('.qa-live-results').getBoundingClientRect();
+          return {limits,armedBefore,cleared,sent,overlap:list.bottom>table.top};
+        }""")
+        assert result == dict(limits=[10000,180000], armedBefore=True, cleared=True, sent=[], overlap=False)
+        browser.close()
+
+
+def test_pipeline_ui_browser_recovers_polling_and_preserves_selected_run():
+    from playwright.sync_api import sync_playwright
+    html = (REPO_ROOT / "product_baseline/virtual-controller.html").read_text(encoding="utf-8")
+    with sync_playwright() as api:
+        browser = api.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.route("**/*", lambda route: route.fulfill(status=200, content_type="text/html", body=html)
+                   if route.request.url == "http://127.0.0.1:9998/" else route.abort())
+        page.goto("http://127.0.0.1:9998/", wait_until="domcontentloaded")
+        page.wait_for_function("document.getElementById('qa-live-connection').textContent.includes('상태 확인 불가')")
+        assert page.evaluate("qaLiveState.connected")  # HTTP 장애는 고정 데모로 대체하지 않음
+        result = page.evaluate("""async () => {
+          clearTimeout(qaLiveState.pollTimer); qaLiveState.pollTimer=null;
+          let calls=0, fail=false;
+          const state={running:true, allow_live_run:true, phase:'AGENT_1_TO_3', message:'running', run_id:'NEW', latest_run_id:'NEW'};
+          qaLiveFetch=async path=>{calls++; if(fail)throw Error('temporary');
+            if(path.endsWith('/state'))return state;
+            if(path.endsWith('/requests'))return {requests:[]};
+            return {runs:['NEW','OLD']};};
+          const originalLoad=loadQaLiveRun;
+          loadQaLiveRun=async ()=>{};
+          await initQaLiveBridge();
+          const initPoll=!!qaLiveState.pollTimer;
+          closeQaLiveModal();
+          const closedPoll=!!qaLiveState.pollTimer;
+          document.getElementById('qa-live-run-select').value='OLD';
+          await refreshQaLiveData();
+          const selected=document.getElementById('qa-live-run-select').value;
+          fail=true;
+          clearTimeout(qaLiveState.pollTimer);qaLiveState.pollTimer=null;
+          await refreshQaLiveData();
+          const retry=!!qaLiveState.pollTimer;
+          const disabled=document.getElementById('qa-live-start-btn').disabled;
+          fail=false;state.running=false;state.phase='COMPLETED';
+          await new Promise(resolve=>setTimeout(resolve,1700));
+          const recovered=qaLiveState.overview.phase==='COMPLETED' && !document.getElementById('qa-live-start-btn').disabled;
+          loadQaLiveRun=originalLoad;
+          let resolveOld;
+          qaLiveFetch=path=>path.endsWith('/OLD') ? new Promise(resolve=>resolveOld=resolve) : Promise.resolve({run_id:'NEW'});
+          renderQaLiveRun=()=>{};
+          const old=loadQaLiveRun('OLD');await loadQaLiveRun('NEW');
+          resolveOld({run_id:'OLD'});await old;
+          return {initPoll,closedPoll,selected,retry,disabled,recovered,lastRun:qaLiveState.run.run_id};
+        }""")
+        assert result == dict(initPoll=True, closedPoll=True, selected="OLD", retry=True,
+                              disabled=True, recovered=True, lastRun="NEW")
+        browser.close()
+
+
+def test_public_demo_shows_one_v2_normal_change_without_api_or_file_registration():
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as api:
+        browser = api.chromium.launch(headless=True)
+        page = browser.new_page(viewport={"width": 1440, "height": 1100})
+        page_errors: list[str] = []
+        page.on("pageerror", lambda error: page_errors.append(str(error)))
+        page.route("https://**/*", lambda route: route.abort())
+        page.goto((REPO_ROOT / "product_baseline/virtual-controller.html").as_uri(), wait_until="domcontentloaded")
+        page.wait_for_function("qaLiveState.demoMode && qaLiveState.run !== null")
+        result = page.evaluate("""async () => {
+          let fetchCalls=0;
+          window.fetch=async()=>{fetchCalls++;throw Error('공개 데모는 API를 호출하면 안 됩니다.');};
+          const stageStatuses=Object.fromEntries(
+            Object.entries(qaLiveState.run.stages).map(([key,value])=>[key,value.status])
+          );
+          const rows=qaLiveState.run.test_rows.map(row=>({id:row.tc_id,category:row.category,status:row.status}));
+          const visited=[];
+          for(const [id,stage] of [['agent-1-btn','agent1'],['agent-2-btn','agent2'],['agent-3-btn','agent3'],['agent-4-btn','agent4'],['agent-lead-btn','overview']]){
+            document.getElementById(id).click();visited.push(qaLiveState.selectedStage);closeQaLiveModal();
+          }
+          openQaLiveModal('agent2');
+          const agent2Title=document.getElementById('qa-live-detail-title').textContent;
+          openQaLiveModal('agent4');
+          document.getElementById('qa-live-reviewer').value='포트폴리오 방문자';
+          document.getElementById('qa-live-approval-note').value='정상 변경 결과 확인';
+          document.getElementById('qa-live-srs-approve').checked=true;
+          await submitQaAssetDecision('APPROVE');
+          const firstClickArmed=qaLiveState.assetApprovalArmed;
+          await submitQaAssetDecision('APPROVE');
+          return {
+            title:document.getElementById('qa-live-title').textContent,
+            description:qaLiveState.run.description,
+            requirementIds:[
+              qaLiveState.run.target_requirement_id,
+              ...qaLiveState.run.test_rows.flatMap(row=>row.requirement_ids),
+              qaLiveState.run.candidate_assets[0].srs_revision_proposals[0].requirement_id
+            ],
+            stageStatuses,rows,visited,agent2Title,firstClickArmed,fetchCalls,
+            decision:qaLiveState.run.candidate_assets[0].decision.decision,
+            agent4DecisionDetail:qaLiveState.run.stages.agent4.details.at(-1),
+            approvalStatus:document.getElementById('qa-live-approval-status').textContent,
+            message:document.getElementById('qa-live-message').textContent,
+            startDisabled:document.getElementById('qa-live-start-btn').disabled,
+            startLabel:document.getElementById('qa-live-start-btn').textContent
+          };
+        }""")
+        assert result["title"] == "✅ QA Pipeline V2 정상 변경 데모"
+        assert "중풍" in result["description"] and "MED" in result["description"]
+        assert set(result["requirementIds"]) == {"REQ-FAN-001"}
+        assert result["stageStatuses"] == {
+            "agent1": "PASS", "agent2": "PASS", "agent3": "COMPLETED", "agent4": "PASS"
+        }
+        assert result["rows"] == [
+            {"id": "TC-ENV-000", "category": "사전 점검", "status": "PASSED"},
+            {"id": "TC-CAND-001", "category": "정상 변경", "status": "PASSED"},
+        ]
+        assert result["visited"] == ["agent1", "agent2", "agent3", "agent4", "overview"]
+        assert result["agent2Title"].startswith("Agent 2 · TC 설계")
+        assert result["firstClickArmed"] is True
+        assert result["fetchCalls"] == 0
+        assert result["decision"] == "APPROVED"
+        assert result["agent4DecisionDetail"] == "후보 TC·SRS 승인 미리보기 완료 · 실제 자산 미반영"
+        assert "실제 SRS·TC 파일은 변경되지 않았습니다" in result["approvalStatus"]
+        assert "실제 SRS·TC·자동화 파일은 변경하지 않았습니다" in result["message"]
+        assert result["startDisabled"] is True
+        assert result["startLabel"] == "실제 실행은 로컬에서 사용"
+        assert page_errors == []
+        browser.close()
+
+
 def test_existing_srs_approval_requires_consent_and_creates_no_tc(tmp_path, monkeypatch):
     run_dir, target, srs = build_existing_srs_review_run(tmp_path, monkeypatch)
     assets = tmp_path / "approved"
@@ -343,7 +536,19 @@ def test_approved_tc_registry_is_loaded_and_official_automation_is_reusable(
     assert spec.source == "APPROVED"
     assert "REQ-FAN-001" in spec.requirement_ids
     assert "TC-V2-001" in pipeline.render_existing_regression_context(approved)
-    assert snapshot["approved_assets"][0]["automation_sha256"] == spec.automation_sha256
+    snapshot_asset = snapshot["approved_assets"][0]
+    assert snapshot_asset["automation_sha256"] == spec.automation_sha256
+    registry = json.loads((approved_root / "registry.json").read_text(encoding="utf-8"))
+    asset = registry["assets"][0]
+    provenance_file = approved_root / asset["approval_revalidation_file"]
+    provenance = json.loads(provenance_file.read_text(encoding="utf-8"))
+    assert provenance_file.is_file()
+    assert _sha256_file(provenance_file) == asset["approval_revalidation_sha256"]
+    assert provenance["source_revalidation_sha256"] == asset["source_revalidation_sha256"]
+    assert all(
+        "/" not in name and "\\" not in name
+        for name in provenance["evidence_sha256"]
+    )
 
     result = pipeline.run_existing_regression(
         spec,
@@ -526,6 +731,7 @@ def test_pipeline_ui_rolls_back_all_asset_files_when_approval_copy_fails(
     assert not (approved_root / "automation" / "test_tc_v2_001.py").exists()
     assert not (approved_root / "automation" / "test_tc_v2_001.py.tmp").exists()
     assert not (approved_root / "srs_revisions" / "TC-V2-001.json").exists()
+    assert not (approved_root / "provenance" / "TC-V2-001-revalidation-summary.json").exists()
     assert not (runs_root / run_id / "srs_revision_decision.json").exists()
     assert not (runs_root / run_id / "asset_decisions.json").exists()
 
@@ -654,12 +860,22 @@ def test_pipeline_ui_revalidates_stale_candidate_without_model_call(
         note="현재 화면 재검증 확인",
     )
     latest = runs_root / run_id / "asset_revalidation" / tc_id / "latest.json"
+    registry = json.loads((approved_root / "registry.json").read_text(encoding="utf-8"))
+    asset = registry["assets"][0]
+    provenance_file = approved_root / asset["approval_revalidation_file"]
+    provenance = json.loads(provenance_file.read_text(encoding="utf-8"))
 
     assert record["outcome"] == "PASS"
     assert record["target_sha256"] == _sha256_file(target_html)
     assert summary["candidate_assets"][0]["approval_eligible"] is True
     assert summary["candidate_assets"][0]["revalidation_required"] is False
-    assert approved["approval_revalidation_sha256"] == _sha256_file(latest)
+    assert approved["source_revalidation_sha256"] == _sha256_file(latest)
+    assert approved["approval_revalidation_sha256"] == _sha256_file(provenance_file)
+    assert provenance["source_revalidation_sha256"] == _sha256_file(latest)
+    assert provenance["evidence_sha256"] == {
+        Path(path).name: digest
+        for path, digest in record["evidence_sha256"].items()
+    }
 
 def test_pipeline_ui_rejects_unscoped_run_and_request_paths(tmp_path: Path) -> None:
     bridge = pipeline_ui.PipelineUiBridge(
@@ -760,14 +976,19 @@ def test_pipeline_ui_live_run_uses_agent1_to_4_order_without_external_send(
         requests_root=requests_root,
         target_html=target_html,
         allow_live_run=True,
+        srs_path=tmp_path / "custom-srs.md",
+        approved_assets_root=tmp_path / "custom-assets",
     )
     run_id = "RUN-20260829-130000-ABCDEF"
+    monkeypatch.setattr(pipeline_ui, "_new_run_id", lambda: run_id)
     commands: list[tuple[str, ...]] = []
 
     def fake_command(*arguments: str) -> SimpleNamespace:
         commands.append(arguments)
         if arguments[0] == "pipeline":
             (runs_root / run_id).mkdir(parents=True)
+            (runs_root / "RUN-20990101-000000-ABCDEF").mkdir()
+            assert arguments[arguments.index("--run-id") + 1] == run_id
         return SimpleNamespace(returncode=0)
 
     monkeypatch.setattr(bridge, "_command", fake_command)
@@ -777,12 +998,17 @@ def test_pipeline_ui_live_run_uses_agent1_to_4_order_without_external_send(
     assert [command[0] for command in commands] == ["pipeline", "execute", "agent4"]
     assert commands[0][-2:] == ("--timeout", "90")
     assert "--send" not in commands[-1]
+    assert commands[0][commands[0].index("--srs") + 1] == str(bridge.srs_path)
+    for command in commands[:2]:
+        assert command[command.index("--approved-assets-root") + 1] == str(bridge.approved_assets_root)
+    assert commands[1][2] == commands[2][2] == run_id
     assert bridge.state.snapshot()["phase"] == "COMPLETED"
     assert bridge.state.snapshot()["run_id"] == run_id
 
 def test_pipeline_ui_reports_environment_block_without_external_send(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(pipeline_ui, "_new_run_id", lambda: "RUN-20260817-030000-ABCDEF")
     bridge = pipeline_ui.PipelineUiBridge(
         runs_root=tmp_path / "runs", requests_root=tmp_path,
         target_html=tmp_path / "virtual-controller.html", allow_live_run=True,
@@ -819,6 +1045,7 @@ def test_pipeline_ui_stops_on_missing_or_damaged_failure_bundle(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     for scenario in ("missing", "damaged"):
+        monkeypatch.setattr(pipeline_ui, "_new_run_id", lambda: "RUN-20260817-030000-ABCDEF")
         case_root = tmp_path / scenario
         bridge = pipeline_ui.PipelineUiBridge(
             runs_root=case_root / "runs", requests_root=case_root,
@@ -830,7 +1057,7 @@ def test_pipeline_ui_stops_on_missing_or_damaged_failure_bundle(
             commands.append(arguments[0])
             if arguments[0] == "pipeline":
                 if scenario == "missing":
-                    (bridge.runs_root / "RUN-20260904-120000-ABCDEF").mkdir(parents=True)
+                    (bridge.runs_root / "RUN-20260817-030000-ABCDEF").mkdir(parents=True)
                 else:
                     run_dir, _ = _write_agent4_inputs(
                         case_root, precheck_status=pipeline.NeutralExecutionStatus.EXECUTION_ERROR
@@ -860,7 +1087,8 @@ def test_v2_product_ui_routes_agent_buttons_to_real_run_bridge() -> None:
     assert "if (openQaLiveModal('agent4')) return;" in product_html
     assert "if (openQaLiveModal('overview')) return;" in product_html
     assert "function showQaLiveOverview()" in product_html
-    assert "Agent 1→4 실제 Run 상태입니다." in product_html
+    assert "qaLiveState.demoMode ? '공개 데모' : '실제 Run'" in product_html
+    assert "QA Pipeline V2 정상 변경 데모" in product_html
     assert "setTowerStatus('실제 실행 실패', '#f87171')" in product_html
     assert "setTowerStatus('실제 실행 완료', '#34d399')" in product_html
     assert "확인: API Live 실행" in product_html

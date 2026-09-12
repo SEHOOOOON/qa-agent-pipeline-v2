@@ -1,5 +1,9 @@
 # Agent 1→3 Live Run — AUTO 온도 하한 변경
 
+`srs_snapshot.md`는 실행 당시 입력 원문이어서 내부 상대 링크도 당시 값으로 보존합니다.
+현재 문서는 [Project1 기준 자산 감사](../../../docs/05_PROJECT1_BASELINE_AUDIT.md)와
+[테스트 하네스 가이드](../../../docs/06_TEST_HARNESS_GUIDE.md)에서 확인할 수 있습니다.
+
 이 폴더는 `RUN-20260813-125229-31EB5F`의 Agent 1·2 공개 입력 체인에
 `agent3-3.4` 실제 모델 계획, CP3, 결정론적 Playwright 후보와 Candidate Trial
 증거를 연결한 공개 Run입니다.

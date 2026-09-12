@@ -805,7 +805,7 @@ def _slack_report_payload(report: FinalReport) -> dict[str, Any]:
     }
 
 
-def build_run_test_rows(run_dir: Path) -> list[dict[str, Any]]:
+def build_run_test_rows(run_dir: Path, *, approved_assets_root: Path = DEFAULT_APPROVED_ASSETS_ROOT) -> list[dict[str, Any]]:
     """저장된 Run의 설계·실행·분류를 합칩니다. 미실행을 통과로 추정하지 않습니다."""
     def read(name: str) -> dict[str, Any]:
         path = run_dir / name
@@ -816,12 +816,19 @@ def build_run_test_rows(run_dir: Path) -> list[dict[str, Any]]:
     report = read("final_report.json")
     summary = read("agent3_run_summary.json")
     cases = {item["tc_id"]: item for item in design.get("test_cases", [])}
-    catalog = _catalog_from_snapshot(read("approved_regression_catalog.json"))
+    snapshot = read("approved_regression_catalog.json")
+    catalog = _catalog_from_snapshot(snapshot)
+    saved_cases = {item["tc_id"]: item.get("test_case_json") for item in snapshot.get("approved_assets", [])}
     specs = {item.tc_id: item for item in (*catalog, ENVIRONMENT_PRECHECK)}
-    approved_root = Path(__file__).resolve().parents[1] / "approved_assets"
+    approved_root = approved_assets_root.resolve()
     for spec in catalog:
         if spec.source != "APPROVED" or not spec.test_case_file:
             continue
+        saved = saved_cases.get(spec.tc_id)
+        if isinstance(saved, str):
+            if hashlib.sha256(saved.encode("utf-8")).hexdigest() == spec.test_case_sha256:
+                cases[spec.tc_id] = json.loads(saved).get("test_case", {})
+            continue  # Never replace a damaged snapshot with unrelated current data.
         path = (approved_root / spec.test_case_file).resolve()
         if (path.is_relative_to(approved_root.resolve()) and path.is_file()
                 and _sha256_file(path) == spec.test_case_sha256):
@@ -1215,10 +1222,6 @@ def run_agent4(args: argparse.Namespace) -> int:
             manifest.get("stage") == "VALIDATION_EXECUTION"
             and manifest.get("status") == bundle.status.value
             and manifest.get("project1_modified") is False
-            and all(
-                result.target_sha256 == manifest.get("target_sha256")
-                for result in bundle.candidate_results
-            )
             and all(
                 result.target_sha256 == manifest.get("target_sha256")
                 for result in _validation_results(bundle)

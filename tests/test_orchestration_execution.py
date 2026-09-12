@@ -3,6 +3,26 @@
 from pipeline_test_support import *
 
 
+def test_pipeline_explicit_run_id_is_forwarded_and_cannot_overwrite(tmp_path, monkeypatch):
+    args = _pipeline_args(tmp_path)
+    Path(args.target_html).write_text("<html></html>", encoding="utf-8")
+    args.run_id = "RUN-20260911-120000-ABCDEF"
+    seen = []
+    def stop_at_agent1(stage_args):
+        seen.append(stage_args.run_id)
+        (Path(stage_args.runs_root) / stage_args.run_id).mkdir(parents=True)
+        return 2
+    monkeypatch.setattr(pipeline_orchestrator, "run_agent1", stop_at_agent1)
+    assert pipeline.run_pipeline(args) == 2
+    assert seen == [args.run_id]
+    with pytest.raises(ValueError, match="이미 존재"):
+        pipeline.run_pipeline(args)
+    args.run_id = "../outside"
+    with pytest.raises(ValueError, match="허용된"):
+        pipeline.run_pipeline(args)
+    assert len(seen) == 1
+
+
 def test_pipeline_keeps_manual_candidates_in_exclusions_without_agent3_call(tmp_path: Path, monkeypatch) -> None:
     args = _pipeline_args(tmp_path)
     Path(args.request).write_text("{}", encoding="utf-8")

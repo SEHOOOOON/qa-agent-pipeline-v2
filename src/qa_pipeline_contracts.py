@@ -985,7 +985,11 @@ def load_approved_regression_catalog(
             automation_sha256=str(asset["automation_sha256"]),
         )
         approved.append(spec)
-        snapshot_entries.append(_catalog_snapshot_entry(spec))
+        snapshot_entries.append({
+            **_catalog_snapshot_entry(spec),
+            # Preserve the verified source bytes as UTF-8 text for later reports.
+            "test_case_json": resolved_files["test_case_file"].read_bytes().decode("utf-8"),
+        })
     _existing_regression_by_id((*EXISTING_REGRESSION_CATALOG, *approved))
     return tuple(approved), {
         "contract_version": "1.0",

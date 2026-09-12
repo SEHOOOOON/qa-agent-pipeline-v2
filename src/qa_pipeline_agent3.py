@@ -604,11 +604,6 @@ _BLOCKING_TOAST_ACTUAL_TERMS = (
 )
 
 
-def _contains_any(value: str, terms: tuple[str, ...]) -> bool:
-    normalized = value.casefold()
-    return any(term.casefold() in normalized for term in terms)
-
-
 def evaluate_agent3_eligibility(
     test_case: ProductTestCaseCandidate,
 ) -> Agent3EligibilityResult:

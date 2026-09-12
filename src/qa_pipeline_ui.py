@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -18,6 +17,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
+from qa_pipeline_execution import _new_run_id
+from qa_pipeline_io import _sha256_file
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -39,14 +40,6 @@ def _read_json(path: Path) -> dict[str, Any]:
         return {}
     payload = json.loads(path.read_text(encoding="utf-8"))
     return payload if isinstance(payload, dict) else {}
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _write_json_atomic(path: Path, payload: Any) -> None:
@@ -321,7 +314,7 @@ def _candidate_approval_check(
             str(manifest.get("candidate_sha256") or ""),
             str(result.get("test_sha256") or ""),
         }
-        if candidate_sha256 not in expected_hashes or "" in expected_hashes:
+        if expected_hashes != {candidate_sha256}:
             reasons.append("자동화 후보 파일 해시가 실행 기록과 일치하지 않습니다.")
     if not target_html.is_file():
         reasons.append("현재 V2 중앙제어 HTML을 찾을 수 없습니다.")
@@ -356,6 +349,8 @@ def revalidate_candidate_asset(
     candidate_sha256 = _sha256_file(candidate_file)
     if candidate_sha256 != manifest.get("candidate_sha256"):
         raise ValueError("자동화 후보 파일 해시가 Agent 3 기록과 일치하지 않습니다.")
+    if candidate_sha256 != validation.get("test_sha256"):
+        raise ValueError("등록할 후보와 변경 검증에서 실행한 코드가 다릅니다. 일치하는 실행 기록이 필요합니다.")
     if not target_html.is_file():
         raise ValueError("현재 V2 중앙제어 HTML을 찾을 수 없습니다.")
 
@@ -666,9 +661,19 @@ def _decide_candidate_asset_impl(
             slug = official_tc_id.lower().replace("-", "_")
             test_case_file = approved_assets_root / "test_cases" / f"{official_tc_id}.json"
             automation_file = approved_assets_root / "automation" / f"test_{slug}.py"
-            if test_case_file.exists() or automation_file.exists():
+            provenance_file = (
+                approved_assets_root
+                / "provenance"
+                / f"{official_tc_id}-revalidation-summary.json"
+            )
+            if (
+                test_case_file.exists()
+                or automation_file.exists()
+                or provenance_file.exists()
+            ):
                 raise ValueError(
-                    "Registry에 없는 동일 공식 TC 파일이 이미 있어 안전하게 등록할 수 없습니다."
+                    "Registry에 없는 동일 공식 TC 또는 재검증 근거 파일이 이미 있어 "
+                    "안전하게 등록할 수 없습니다."
                 )
             srs_revision_result: dict[str, Any] | None = None
             srs_revision_asset_file: Path | None = (
@@ -758,11 +763,44 @@ def _decide_candidate_asset_impl(
                 if revalidation_file_value
                 else None
             )
-            revalidation_sha256 = (
+            source_revalidation_sha256 = (
                 _sha256_file(revalidation_file)
                 if revalidation_file is not None and revalidation_file.is_file()
                 else None
             )
+            revalidation_sha256 = None
+            if source_revalidation_sha256 is not None:
+                revalidation = _read_json(revalidation_file)
+                _write_json_atomic(
+                    provenance_file,
+                    {
+                        "contract_version": "1.0",
+                        "publication_kind": "SANITIZED_APPROVAL_REVALIDATION_SUMMARY",
+                        "source_run_id": run_id,
+                        "source_tc_id": tc_id,
+                        "official_tc_id": official_tc_id,
+                        "outcome": revalidation.get("outcome"),
+                        "exit_code": revalidation.get("exit_code"),
+                        "duration_ms": revalidation.get("duration_ms"),
+                        "candidate_sha256": revalidation.get("candidate_sha256"),
+                        "target_sha256": revalidation.get("target_sha256"),
+                        "evidence_complete": revalidation.get("evidence_complete"),
+                        "evidence_sha256": {
+                            Path(str(path)).name: digest
+                            for path, digest in (
+                                revalidation.get("evidence_sha256") or {}
+                            ).items()
+                        },
+                        "source_revalidation_sha256": source_revalidation_sha256,
+                        "created_at": revalidation.get("created_at"),
+                    },
+                )
+                revalidation_file_value = provenance_file.relative_to(
+                    approved_assets_root
+                ).as_posix()
+                revalidation_sha256 = _sha256_file(provenance_file)
+            else:
+                revalidation_file_value = None
             asset = {
                 "source_key": source_key,
                 "official_tc_id": official_tc_id,
@@ -777,6 +815,7 @@ def _decide_candidate_asset_impl(
                 "target_sha256": str(validation.get("target_sha256") or ""),
                 "approval_revalidation_file": revalidation_file_value,
                 "approval_revalidation_sha256": revalidation_sha256,
+                "source_revalidation_sha256": source_revalidation_sha256,
                 "reviewer": reviewer_text,
                 "approval_note": note_text,
                 "approved_at": created_at,
@@ -815,6 +854,7 @@ def _decide_candidate_asset_impl(
                     "test_case_sha256": test_case_sha256,
                     "automation_sha256": automation_sha256,
                     "approval_revalidation_sha256": revalidation_sha256,
+                    "source_revalidation_sha256": source_revalidation_sha256,
                     "srs_revision_applied": bool(srs_revision_proposals),
                 }
             )
@@ -873,6 +913,9 @@ def decide_candidate_asset(
         approved_assets_root / "test_cases" / f"{official_tc_id}.json",
         approved_assets_root / "automation" / f"test_{slug}.py",
         approved_assets_root / "srs_revisions" / f"{official_tc_id}.json",
+        approved_assets_root
+        / "provenance"
+        / f"{official_tc_id}-revalidation-summary.json",
     ]
     watched_paths.extend(
         [path.with_name(path.name + ".tmp") for path in watched_paths]
@@ -925,6 +968,7 @@ def summarize_run(
     run_id: str,
     *,
     target_html: Path = DEFAULT_TARGET_HTML,
+    approved_assets_root: Path = DEFAULT_APPROVED_ASSETS_ROOT,
 ) -> dict[str, Any]:
     """허용된 산출물만 읽어 브라우저 표시용 요약을 만듭니다."""
 
@@ -1129,7 +1173,7 @@ def summarize_run(
         "human_review_document": "사람_최종_검토.md" if (run_dir / "사람_최종_검토.md").is_file() else None,
         "candidate_assets": candidate_assets,
         "srs_revision_asset": srs_asset,
-        "test_rows": build_run_test_rows(run_dir),
+        "test_rows": build_run_test_rows(run_dir, approved_assets_root=approved_assets_root),
     }
 
 
@@ -1324,23 +1368,27 @@ class PipelineUiBridge:
         )
 
     def _run_pipeline(self, request_path: Path) -> None:
-        before = set(list_runs(self.runs_root))
+        run_id = _new_run_id()
+        self.state.update(run_id=run_id)
         try:
             pipeline_result = self._command(
                 "pipeline",
+                "--run-id",
+                run_id,
                 "--request",
                 str(request_path),
                 "--target-html",
                 str(self.target_html),
                 "--runs-root",
                 str(self.runs_root),
+                "--srs",
+                str(self.srs_path),
+                "--approved-assets-root",
+                str(self.approved_assets_root),
                 "--timeout",
                 str(UI_CANDIDATE_TIMEOUT_SECONDS),
             )
-            created = [run_id for run_id in list_runs(self.runs_root) if run_id not in before]
-            run_id = created[0] if created else None
-            self.state.update(run_id=run_id)
-            if pipeline_result.returncode != 0 or run_id is None:
+            if pipeline_result.returncode != 0 or not (self.runs_root / run_id).is_dir():
                 detail = (
                     _safe_run_error(self.runs_root / run_id)
                     if run_id is not None
@@ -1364,6 +1412,8 @@ class PipelineUiBridge:
                 str(self.target_html),
                 "--runs-root",
                 str(self.runs_root),
+                "--approved-assets-root",
+                str(self.approved_assets_root),
             )
             environment_blocked = (
                 validation_result.returncode == 2
@@ -1447,6 +1497,7 @@ def make_handler(bridge: PipelineUiBridge) -> type[BaseHTTPRequestHandler]:
                             bridge.runs_root,
                             path[len(prefix) :],
                             target_html=bridge.target_html,
+                            approved_assets_root=bridge.approved_assets_root,
                         )
                     )
                     return
@@ -1500,6 +1551,7 @@ def make_handler(bridge: PipelineUiBridge) -> type[BaseHTTPRequestHandler]:
                                 bridge.runs_root,
                                 revalidation_match.group(1),
                                 target_html=bridge.target_html,
+                                approved_assets_root=bridge.approved_assets_root,
                             ),
                         }
                     )
@@ -1522,6 +1574,7 @@ def make_handler(bridge: PipelineUiBridge) -> type[BaseHTTPRequestHandler]:
                             bridge.runs_root,
                             decision_match.group(1),
                             target_html=bridge.target_html,
+                            approved_assets_root=bridge.approved_assets_root,
                         ),
                     }
                 )
