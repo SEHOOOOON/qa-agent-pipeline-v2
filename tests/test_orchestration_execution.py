@@ -3,6 +3,217 @@
 from pipeline_test_support import *
 
 
+def test_agent3_precondition_feedback_repairs_only_unstated_context(tmp_path, monkeypatch):
+    case, valid, observation = precondition_guard_fixture()
+    source = "중앙 관제 패널에서 오류와 잠금이 없는 단일 장비를 대상으로 한다."
+    case.preconditions.append(source)
+    context = observation.verified_execution_context
+    context.device_state_available = context.target_device_visible = True
+    context.error_free = context.unlocked = context.online = True
+    valid.precondition_checks.extend(pipeline.PreconditionCheck(source_text=source,
+        read_kind="BASELINE_CONTEXT", selector=key, expected_value=True)
+        for key in ("error_free", "unlocked"))
+    invalid = valid.model_copy(deep=True)
+    invalid.precondition_checks.extend(pipeline.PreconditionCheck(source_text=source,
+        read_kind="BASELINE_CONTEXT", selector=key, expected_value=True)
+        for key in ("target_device_visible", "online"))
+    preserved = case.model_dump_json(), invalid.model_dump_json()
+    checkpoint = pipeline.evaluate_checkpoint3_plan(case, invalid, observation)
+    feedback = [item.message for item in checkpoint.checks if item.status == CheckStatus.FAIL]
+    assert len(feedback) == 1
+    for fragment in ("#4", "#5", "BASELINE_CONTEXT/online", "BASELINE_CONTEXT/target_device_visible", source, "error_free, unlocked"):
+        assert fragment in feedback[0]
+    assert pipeline.evaluate_checkpoint3_plan(case, valid, observation).status == CheckStatus.PASS
+    missing = valid.model_copy(deep=True)
+    missing.precondition_checks.pop()  # The stated unlocked condition is still mandatory.
+    assert pipeline.evaluate_checkpoint3_plan(case, missing, observation).status == CheckStatus.FAIL
+
+    run_id = "RUN-20260912-220000-ABCDEF"
+    run = tmp_path / run_id
+    _write_json(run / "agent2_manifest.json", {"run_id": run_id})
+    target = tmp_path / "target.html"
+    _write_text_atomic(target, "<!doctype html><title>fixture</title>")
+    observation.target_sha256 = _sha256_file(target)
+    monkeypatch.setattr(pipeline_execution, "_load_verified_agent2_run", lambda *_: (
+        None, {}, None, SimpleNamespace(test_cases=[case]), None, {"agent2_design_sha256": "a" * 64}))
+    monkeypatch.setattr(pipeline_execution, "inspect_target_ui", lambda *a, **kw: observation)
+    calls = []
+    def model_plan(*args, **kwargs):
+        if calls:
+            assert kwargs["checkpoint_feedback"] == feedback
+            assert kwargs["previous_plan"].model_dump_json() == preserved[1]
+        calls.append("model")
+        return pipeline.Agent3Response(plan=invalid if len(calls) == 1 else valid,
+            response_id=None, model="fixture", usage={})
+    monkeypatch.setattr(pipeline_execution, "OpenAIAgent3", lambda **kw: SimpleNamespace(plan=model_plan))
+    monkeypatch.setattr(pipeline_execution, "run_candidate_trial", lambda *a, **kw: calls.append("trial") or _trial(TrialOutcome.PASS))
+    assert pipeline.run_agent3(SimpleNamespace(run_id=run_id, runs_root=str(tmp_path), tc_id=case.tc_id,
+        target_html=str(target), model="fixture", timeout=60)) == 0
+    assert calls == ["model", "model", "trial"]
+    assert (case.model_dump_json(), invalid.model_dump_json()) == preserved
+    assert pipeline._read_json_payload(run / "agent3_manifest.json")["prompt_version"] == "agent3-3.22"
+    assert pipeline._read_json_payload(run / "agent3_automation_plan_attempt_1.json") == invalid.model_dump(mode="json")
+    assert pipeline._read_json_payload(run / "agent3_automation_plan_attempt_2.json") == valid.model_dump(mode="json")
+
+
+@pytest.mark.parametrize("include_proof", [False, True])
+def test_agent3_requires_proof_on_new_runs_and_records_it(tmp_path, monkeypatch, include_proof):
+    case, plan, observation = precondition_guard_fixture()
+    if not include_proof:
+        plan.precondition_checks = []
+    run_id = "RUN-20260912-190000-ABCDEF"
+    run = tmp_path / run_id
+    _write_json(run / "agent2_manifest.json", {"run_id": run_id})
+    target = tmp_path / "target.html"
+    _write_text_atomic(target, "<!doctype html><title>fixture</title>")
+    observation.target_sha256 = _sha256_file(target)
+    monkeypatch.setattr(pipeline_execution, "_load_verified_agent2_run", lambda *_: (
+        None, {}, None, SimpleNamespace(test_cases=[case]), None, {"agent2_design_sha256": "a" * 64}))
+    monkeypatch.setattr(pipeline_execution, "inspect_target_ui", lambda *a, **kw: observation)
+    calls = []
+    def model_plan(*args, **kwargs):
+        calls.append("model")
+        return pipeline.Agent3Response(plan=plan, response_id=None, model="fixture", usage={})
+    monkeypatch.setattr(pipeline_execution, "OpenAIAgent3", lambda **kw: SimpleNamespace(plan=model_plan))
+    monkeypatch.setattr(pipeline_execution, "run_candidate_trial", lambda *a, **kw: calls.append("trial") or _trial(TrialOutcome.PASS))
+    args = SimpleNamespace(run_id=run_id, runs_root=str(tmp_path), tc_id=case.tc_id,
+        target_html=str(target), model="fixture", timeout=60)
+    assert pipeline.run_agent3(args) == (0 if include_proof else 2)
+    manifest = pipeline._read_json_payload(run / "agent3_manifest.json")
+    assert manifest["precondition_proof_contract"] == "1.0"
+    assert calls == (["model", "trial"] if include_proof else ["model", "model"])
+    assert pipeline._read_json_payload(run / "agent3_automation_plan_attempt_1.json") == plan.model_dump(mode="json")
+    if include_proof:
+        # Even an unexpected checkpoint exception must leave the paid plan intact.
+        failed_id = "RUN-20260912-190001-ABCDEF"
+        failed_run = tmp_path / failed_id
+        _write_json(failed_run / "agent2_manifest.json", {"run_id": failed_id})
+        def broken_checkpoint(*args, **kwargs):
+            raise RuntimeError("injected checkpoint failure")
+        monkeypatch.setattr(pipeline_execution, "evaluate_checkpoint3_plan", broken_checkpoint)
+        args.run_id = failed_id
+        assert pipeline.run_agent3(args) == 1
+        assert pipeline._read_json_payload(failed_run / "agent3_automation_plan_attempt_1.json") == plan.model_dump(mode="json")
+    if not include_proof:
+        entry = pipeline_orchestrator._agent3_run_entry(run, case.tc_id, run, 2)
+        assert "사전조건 증명" in entry["reason"]
+        assert not (run / "agent3_error.json").exists()
+
+
+def test_missing_observed_interface_is_tc_exclusion_not_internal_error(tmp_path, monkeypatch):
+    case = agent3_test_case()
+    run_id = "RUN-20260912-120000-ABCDEF"
+    run = tmp_path / run_id
+    _write_json(run / "agent2_manifest.json", {"run_id": run_id})
+    monkeypatch.setattr(pipeline_execution, "_load_verified_agent2_run", lambda *_: (
+        None, {}, None, SimpleNamespace(test_cases=[case]), None, {"agent2_design_sha256": "a" * 64}))
+    def unavailable(*args, **kwargs):
+        raise pipeline.AutomationInterfaceUnavailable("required interface absent")
+    monkeypatch.setattr(pipeline_execution, "inspect_target_ui", unavailable)
+    args = SimpleNamespace(run_id=run_id, runs_root=str(tmp_path), tc_id=case.tc_id,
+        target_html=str(tmp_path / "target.html"), model=None, timeout=10)
+    assert pipeline.run_agent3(args) == 2
+    assert not (run / "agent3_error.json").exists()
+    entry = pipeline_orchestrator._agent3_run_entry(run, case.tc_id, run, 2)
+    assert entry["status"] == "STOPPED" and "required interface absent" in entry["reason"]
+    assert entry["candidate_status"] == "AUTOMATION_SUPPORT_EXTENSION_REQUIRED"
+    payload = pipeline._read_json_payload(run / "agent3_eligibility.json")
+    fields = pipeline.Agent3EligibilityResult.model_fields
+    pipeline.Agent3EligibilityResult.model_validate({key: value for key, value in payload.items() if key in fields})
+
+
+@pytest.mark.parametrize("mode", ["raise", "saved_error", "selection", "unknown"])
+def test_orchestrator_records_internal_errors_and_explicit_scope(tmp_path, monkeypatch, mode):
+    args = _pipeline_args(tmp_path)
+    _write_text_atomic(Path(args.target_html), "<html></html>")
+    selected = ["TC-CAND-003", "TC-CAND-004"]
+    calls = []
+    def agent1(a):
+        run = Path(a.runs_root) / a.run_id
+        run.mkdir(parents=True)
+        _write_json(run / "run_manifest.json", {"run_id": a.run_id})
+        return 0
+    def agent2(a):
+        _write_json(Path(a.runs_root) / a.run_id / "agent2_manifest.json", {"run_id": a.run_id})
+        return 0
+    def agent3(a):
+        calls.append(a.tc_id)
+        if mode == "raise":
+            raise RuntimeError("injected internal error")
+        if mode == "saved_error":
+            _write_json(Path(a.artifact_dir) / "agent3_error.json", {"error_type": "RuntimeError"})
+            return 1
+        _write_json(Path(a.artifact_dir) / "agent3_manifest.json", {"status": "PASS"})
+        _write_json(Path(a.artifact_dir) / "agent3_trial.json", {"outcome": "PASS"})
+        return 0
+    monkeypatch.setattr(pipeline_orchestrator, "run_agent1", agent1)
+    monkeypatch.setattr(pipeline_orchestrator, "run_agent2", agent2)
+    monkeypatch.setattr(pipeline_orchestrator, "run_agent3", agent3)
+    monkeypatch.setattr(pipeline_orchestrator, "_select_agent3_tcs_from_run",
+        lambda *_: (selected, [{"tc_id": item} for item in selected]))
+    if mode == "unknown":
+        args.tc_id = "TC-CAND-999"
+        with pytest.raises(ValueError, match="TC ID"):
+            pipeline.run_pipeline(args)
+        assert calls == []
+        return
+    if mode == "selection":
+        args.tc_id = selected[0]
+    exit_code = pipeline.run_pipeline(args)
+    run = next(Path(args.runs_root).iterdir())
+    summary = pipeline._read_json_payload(run / "agent3_run_summary.json")
+    if mode == "selection":
+        assert exit_code == 0 and summary["status"] == "PARTIAL"
+        assert summary["unselected_tc_ids"] == [selected[1]]
+        assert summary["자동화_제외_TC"][0]["tc_id"] == selected[1]
+    else:
+        assert calls == selected  # One failure does not discard the other candidate.
+        assert exit_code == 1 and summary["status"] == "ERROR"
+        assert summary["internal_error_tc_ids"] == selected
+        manifest = pipeline._read_json_payload(run / "orchestrator_manifest.json")
+        assert "agent3" not in manifest["completed_stages"]
+
+
+def test_error_manifest_preserves_original_error_with_broken_summary(tmp_path):
+    _write_text_atomic(tmp_path / "agent3_selection.json", "{broken")
+    pipeline_orchestrator._write_orchestrator_manifest(tmp_path, "RUN-20260912-120000-ABCDEF",
+        status="ERROR", selected_tc_id=None, target_html=tmp_path / "target.html",
+        stage_exit_codes={}, stopped_at="agent3", error=RuntimeError("original"))
+    result = pipeline._read_json_payload(tmp_path / "orchestrator_manifest.json")
+    assert result["error_type"] == "RuntimeError"
+    assert result["unreadable_artifacts"] == ["agent3_selection.json"]
+
+
+@pytest.mark.parametrize("stdout,status", [
+    ("1 passed\nUserWarning: previously skipped validation is enabled", "PASSED"),
+    ("1 skipped in 0.1s", "SKIPPED"),
+])
+def test_regression_skip_uses_result_summary_not_warning(tmp_path, monkeypatch, stdout, status):
+    monkeypatch.setattr(pipeline_execution, "_run_trial_subprocess",
+        lambda *a, **kw: SimpleNamespace(returncode=0, stdout=stdout, stderr=""))
+    result = pipeline.run_existing_regression(pipeline.EXISTING_REGRESSION_CATALOG[0],
+        REPO_ROOT / "product_baseline/tests/test_controller.py",
+        REPO_ROOT / "product_baseline/virtual-controller.html", tmp_path / "evidence", timeout_seconds=10)
+    assert result.status.value == status
+
+
+def test_regression_timeout_uses_process_tree_cleanup(tmp_path, monkeypatch):
+    calls = []
+    process = SimpleNamespace(returncode=None)
+    def communicate(timeout=None):
+        if timeout is not None:
+            raise subprocess.TimeoutExpired("fixture", timeout)
+        return "", ""
+    process.communicate = communicate
+    monkeypatch.setattr(pipeline_execution.subprocess, "Popen", lambda *a, **kw: process)
+    monkeypatch.setattr(pipeline_execution, "_terminate_trial_process_tree", lambda p: calls.append(p))
+    result = pipeline.run_existing_regression(pipeline.EXISTING_REGRESSION_CATALOG[0],
+        REPO_ROOT / "product_baseline/tests/test_controller.py",
+        REPO_ROOT / "product_baseline/virtual-controller.html", tmp_path / "evidence", timeout_seconds=10)
+    assert calls == [process]
+    assert result.status == pipeline.NeutralExecutionStatus.TIMEOUT
+
+
 def test_pipeline_explicit_run_id_is_forwarded_and_cannot_overwrite(tmp_path, monkeypatch):
     args = _pipeline_args(tmp_path)
     Path(args.target_html).write_text("<html></html>", encoding="utf-8")
@@ -487,7 +698,7 @@ def test_existing_regression_runs_from_a_copied_neutral_workspace(
         return SimpleNamespace(returncode=0, stdout=". [100%]\n1 passed\n", stderr="")
 
     monkeypatch.setenv("OPENAI_API_KEY", "must-not-reach-regression")
-    monkeypatch.setattr(pipeline.subprocess, "run", fake_run)
+    monkeypatch.setattr(pipeline_execution, "_run_trial_subprocess", fake_run)
     spec = next(
         item for item in pipeline.EXISTING_REGRESSION_CATALOG if item.tc_id == "TC-TEMP-001"
     )

@@ -113,10 +113,21 @@ class LiveRunFileLock:
     def __init__(self, lock_file: Path) -> None:
         self.lock_file = lock_file
         self._handle: Any | None = None
+        self._thread_lock = threading.Lock()
 
     def acquire(self) -> bool:
-        if self._handle is not None:
-            return True
+        if not self._thread_lock.acquire(blocking=False):
+            return False
+        try:
+            acquired = self._acquire_file()
+        except BaseException:
+            self._thread_lock.release()
+            raise
+        if not acquired:
+            self._thread_lock.release()
+        return acquired
+
+    def _acquire_file(self) -> bool:
         self.lock_file.parent.mkdir(parents=True, exist_ok=True)
         handle = self.lock_file.open("a+b")
         handle.seek(0, os.SEEK_END)
@@ -156,6 +167,7 @@ class LiveRunFileLock:
         finally:
             handle.close()
             self._handle = None
+            self._thread_lock.release()
 
 
 def _run_directory(runs_root: Path, run_id: str) -> Path:
@@ -217,6 +229,38 @@ def _candidate_validation(run_dir: Path, tc_id: str) -> dict[str, Any]:
     raise ValueError("선택한 후보 TC의 변경 검증 결과를 찾을 수 없습니다.")
 
 
+def _verify_candidate_sources(run_dir: Path, tc_id: str) -> None:
+    from qa_pipeline_execution import _load_verified_agent2_run, _read_json_model, _verify_sha256
+    from qa_pipeline_reporting import _verify_final_report_sources
+    from qa_pipeline_agent3 import evaluate_checkpoint3_plan
+    from qa_pipeline_agent2 import evaluate_checkpoint2
+    from qa_pipeline_contracts import Agent3AutomationPlan, UiObservation, CheckStatus
+
+    _verify_final_report_sources(run_dir, run_dir.name)
+    request, requirements, analysis, design, _, source = _load_verified_agent2_run(run_dir, run_dir.name)
+    current_cp2 = evaluate_checkpoint2(request, analysis, design, requirements)
+    if any(check.rule_id == "CP2-017" and check.status != CheckStatus.PASS for check in current_cp2.checks):
+        raise ValueError("신규 TC 기대 결과가 현재 요구사항 대조 규칙을 통과하지 못했습니다.")
+    test_case = next(item for item in design.test_cases if item.tc_id == tc_id)
+    candidate_dir = run_dir / "agent3_candidates" / tc_id
+    manifest = _read_json(candidate_dir / "agent3_manifest.json")
+    _verify_sha256(run_dir / "agent2_manifest.json", manifest.get("source_agent2_manifest_sha256"), "Agent 2 인계")
+    if manifest.get("source_agent2_design_sha256") != source.get("agent2_design_sha256"):
+        raise ValueError("후보 TC 설계 인계 해시가 다릅니다.")
+    for filename, key in (("agent3_automation_plan.json", "automation_plan_sha256"),
+                          ("agent3_ui_observation.json", "ui_observation_sha256"),
+                          ("checkpoint3.json", "checkpoint3_sha256")):
+        _verify_sha256(candidate_dir / filename, manifest.get(key), filename)
+    plan = _read_json_model(candidate_dir / "agent3_automation_plan.json", Agent3AutomationPlan)
+    observation = _read_json_model(candidate_dir / "agent3_ui_observation.json", UiObservation)
+    current_cp3 = evaluate_checkpoint3_plan(test_case, plan, observation, require_precondition_proof=True)
+    if current_cp3.status != CheckStatus.PASS:
+        proof_failed = any(check.rule_id == "CP3-006A" and check.status == CheckStatus.FAIL for check in current_cp3.checks)
+        if proof_failed:
+            raise ValueError("사전조건 증명이 없거나 부적합합니다. 현재 계약으로 계획·시험을 다시 확보해야 승인할 수 있습니다.")
+        raise ValueError("현재 검사 규칙에서 후보 자동화 계획을 승인할 수 없습니다.")
+
+
 def _candidate_approval_check(
     run_dir: Path,
     tc_id: str,
@@ -246,6 +290,10 @@ def _candidate_approval_check(
     candidate_root = (candidate_dir / "candidates").resolve()
     candidate_file = (candidate_root / str(candidate_name or "")).resolve()
     reasons: list[str] = []
+    try:
+        _verify_candidate_sources(run_dir, tc_id)
+    except (ValueError, OSError, StopIteration) as exc:
+        reasons.append(f"승인 원본 연결 검증 실패: {exc}")
     if final_report.get("recommendation") != "PASS":
         reasons.append("최종 권고가 PASS가 아닙니다.")
     if checkpoint4.get("status") != "PASS":
@@ -354,6 +402,7 @@ def revalidate_candidate_asset(
     if not target_html.is_file():
         raise ValueError("현재 V2 중앙제어 HTML을 찾을 수 없습니다.")
 
+    _verify_candidate_sources(run_dir, tc_id)
     from qa_pipeline_v2 import TrialOutcome, run_candidate_trial
 
     attempt_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
@@ -1057,6 +1106,11 @@ def summarize_run(
         ),
         "details": [
             *[f"선택 TC: {item}" for item in selected_ids],
+            *[f"{item.get('tc_id', '-')}: " + (
+                "사전조건 런타임 검사 포함 · 실제 값은 시험 로그에서 확인"
+                if item.get("precondition_proof_contract") == "1.0"
+                else "이전 계획 계약 · 새 사전조건 증명은 미확인")
+              for item in agent3_summary.get("entries", []) if isinstance(item, dict)],
             *[
                 f"{item.get('test_id', '-')}: {item.get('status', '-')}"
                 for item in validation_results
@@ -1141,7 +1195,12 @@ def summarize_run(
             }
         )
 
-    overall = recommendation if report else str(manifest.get("status") or stage3_status)
+    if report:
+        overall = recommendation
+    elif manifest.get("status") in {"STOPPED", "ERROR", "FAIL", "BLOCKED"}:
+        overall = str(manifest["status"])
+    else:
+        overall = "후속 검증 대기"
     srs_asset = None
     if not test_cases and design.get("관련_기존_TC") and report.get("SRS_개정_제안"):
         reasons = []
@@ -1508,6 +1567,20 @@ def make_handler(bridge: PipelineUiBridge) -> type[BaseHTTPRequestHandler]:
                 self._send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
 
         def do_POST(self) -> None:  # noqa: N802 - stdlib handler contract
+            # Only this loopback page may request costly runs or file approvals.
+            host = self.headers.get("Host", "")
+            port = self.server.server_address[1]
+            allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
+            if port == 80:
+                allowed_hosts.update({"127.0.0.1", "localhost"})
+            if (host not in allowed_hosts
+                    or self.headers.get("Origin") != f"http://{host}"
+                    or self.headers.get("Sec-Fetch-Site", "same-origin") != "same-origin"):
+                self._send_error_json(HTTPStatus.FORBIDDEN, "같은 로컬 페이지에서 보낸 요청만 허용합니다.")
+                return
+            if self.headers.get_content_type() != "application/json":
+                self._send_error_json(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, "application/json 요청만 허용합니다.")
+                return
             path = unquote(urlparse(self.path).path)
             decision_match = re.fullmatch(
                 r"/api/qa/runs/(RUN-\d{8}-\d{6}-[A-F0-9]{6})/asset-decision",

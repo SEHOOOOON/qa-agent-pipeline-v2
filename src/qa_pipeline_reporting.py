@@ -56,8 +56,9 @@ def _agent4_finding_for_result(
     *, failure_observations: dict[str, list[str]] | None = None,
 ) -> Agent4Finding | None:
     observations = failure_observations or {}
+    precondition_failed = bool(observations.get("PRECONDITION_NOT_MET"))
     restore_failed = bool(observations.get("RESTORE_MISMATCH"))
-    if result.status == NeutralExecutionStatus.PASSED and not restore_failed:
+    if result.status == NeutralExecutionStatus.PASSED and not restore_failed and not precondition_failed:
         return None
     if result.source == ExecutionSource.ENVIRONMENT_PRECHECK:
         category = Agent4FindingCategory.ENVIRONMENT_ISSUE
@@ -65,6 +66,9 @@ def _agent4_finding_for_result(
     elif result.source_outcome == TrialOutcome.ENVIRONMENT_ERROR.value:
         category = Agent4FindingCategory.ENVIRONMENT_ISSUE
         rationale = "신규 후보 실행 환경 오류로 제품 결과를 판정할 수 없습니다."
+    elif precondition_failed:
+        category = Agent4FindingCategory.AUTOMATION_EXECUTION_ISSUE
+        rationale = "사전조건의 실제 값이 맞지 않아 본 시험을 시작하지 않았습니다. 준비 상태와 자동화를 확인한 뒤 재실행해야 하며 제품 결함으로 판정하지 않습니다."
     elif restore_failed:
         category = Agent4FindingCategory.AUTOMATION_EXECUTION_ISSUE
         rationale = "증거 로그에서 복원 실패를 확인해 시험 결과를 보류합니다. 초기 상태 복구와 자동화 절차를 확인한 뒤 재실행해야 합니다."
@@ -411,7 +415,7 @@ def _execution_failure_observations(
         text = candidate.read_text(encoding="utf-8", errors="replace")
         for marker, detail in re.findall(
             r"^[ \t]*(?:E[ \t]+)?(?:AssertionError:[ \t]*)?"
-            r"(PRODUCT_MISMATCH|RESTORE_MISMATCH):[ \t]*([^\r\n]+)$",
+            r"(PRODUCT_MISMATCH|RESTORE_MISMATCH|PRECONDITION_NOT_MET):[ \t]*([^\r\n]+)$",
             text,
             flags=re.MULTILINE,
         ):
@@ -429,7 +433,7 @@ def _human_review_observation(
     observations = _execution_failure_observations(run_dir, result)
     parts = [
         f"{label}: {_markdown_text(' | '.join(observations[marker])[:2000])}"
-        for marker, label in (("PRODUCT_MISMATCH", "제품 불일치 관찰"), ("RESTORE_MISMATCH", "복원 실패"))
+        for marker, label in (("PRODUCT_MISMATCH", "제품 불일치 관찰"), ("RESTORE_MISMATCH", "복원 실패"), ("PRECONDITION_NOT_MET", "사전조건 불충족·본 시험 미실행"))
         if marker in observations
     ]
     if parts:
@@ -705,9 +709,42 @@ def _write_human_review_document(
     return document_file, manifest_file
 
 
+def _verify_final_report_sources(run_dir: Path, run_id: str) -> None:
+    """Recheck immutable inputs before consuming an already-produced report."""
+    report = _read_json_model(run_dir / "final_report.json", FinalReport)
+    analysis = _read_json_model(run_dir / "agent4_analysis.json", Agent4Analysis)
+    checkpoint = _read_json_model(run_dir / "checkpoint4.json", Checkpoint4Result)
+    bundle = _read_json_model(run_dir / "validation_execution.json", ValidationExecutionBundle)
+    manifest = _read_json_payload(run_dir / "validation_manifest.json")
+    execution_hash = _sha256_file(run_dir / "validation_execution.json")
+    if not (
+        run_id == report.run_id == analysis.run_id == bundle.run_id == manifest.get("run_id")
+        and report.analysis_sha256 == _sha256_file(run_dir / "agent4_analysis.json")
+        and report.checkpoint4_sha256 == _sha256_file(run_dir / "checkpoint4.json")
+        and analysis.validation_execution_sha256 == execution_hash == manifest.get("validation_execution_sha256")
+        and report.checkpoint_status == checkpoint.status
+    ):
+        raise ValueError("최종 보고와 실행 원본의 무결성이 일치하지 않습니다.")
+    for field in (set(FinalReport.model_fields) & set(Agent4Analysis.model_fields)) - {"created_at", "contract_version", "stage"}:
+        if getattr(report, field) != getattr(analysis, field):
+            raise ValueError(f"최종 보고가 Agent 4 분석과 다릅니다: {field}")
+    summary_hash = manifest.get("source_agent3_run_summary_sha256")
+    if summary_hash is not None:
+        _verify_sha256(run_dir / "agent3_run_summary.json", summary_hash, "Agent 3 요약")
+    if checkpoint.status == CheckStatus.PASS:
+        if (_agent4_new_source_chain_matches(run_dir, bundle, manifest) is False
+                or not _agent4_regression_source_chain_matches(run_dir, bundle, manifest)
+                or _agent4_evidence_issues(run_dir, _validation_results(bundle))):
+            raise ValueError("최종 보고의 후보·회귀·실행 증거 연결이 변경됐습니다.")
+    agent2_manifest_file = run_dir / "agent2_manifest.json"
+    if agent2_manifest_file.is_file() or (run_dir / "run_manifest.json").exists():
+        _load_verified_agent2_run(run_dir, run_id)
+
+
 def run_human_review_document(args: argparse.Namespace) -> int:
     """Create an idempotent, human-readable decision form from verified results."""
     run_dir = _resolve_run_dir(Path(args.runs_root), args.run_id)
+    _verify_final_report_sources(run_dir, args.run_id)
     report = _read_json_model(run_dir / "final_report.json", FinalReport)
     checkpoint = _read_json_model(run_dir / "checkpoint4.json", Checkpoint4Result)
     analysis_file = run_dir / "agent4_analysis.json"
@@ -1117,7 +1154,14 @@ def run_external_reporting(args: argparse.Namespace) -> int:
     report = _read_json_model(final_report_file, FinalReport)
     checkpoint = _read_json_model(checkpoint_file, Checkpoint4Result)
     bundle = _read_json_model(execution_file, ValidationExecutionBundle)
+    try:
+        _verify_final_report_sources(run_dir, args.run_id)
+        sources_verified = True
+    except (ValueError, OSError):
+        sources_verified = False
     allowed = (
+        sources_verified
+        and
         report.run_id == args.run_id == bundle.run_id
         and report.checkpoint_status == CheckStatus.PASS
         and checkpoint.status == CheckStatus.PASS

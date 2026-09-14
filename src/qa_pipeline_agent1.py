@@ -31,6 +31,9 @@ from qa_pipeline_contracts import *
 # Agent 1: 변경 요구사항 분석
 # ---------------------------------------------------------------------------
 AGENT1_SYSTEM_INSTRUCTIONS = """
+Preserve the quoted source's numbers and allow/block or enabled/disabled meaning in statement.
+Each SRS condition must have its quoted source in every listed Requirement; split separate sources into separate conditions.
+UNCHANGED request conditions must explicitly state maintenance (유지/변경 없음/unchanged/remain); do not label a new acceptance criterion UNCHANGED.
 당신은 운영 중인 가상 중앙제어 시스템의 변경 요구사항을 분석하는 Agent 1입니다.
 
 입력의 권한 관계:
@@ -55,6 +58,7 @@ AGENT1_SYSTEM_INSTRUCTIONS = """
 14. NO_IMPACT Requirement는 confirmed_conditions의 requirement_ids에 연결하지 않습니다.
 15. excluded_scope에는 요청에 명시된 제외 범위, 이번 변경과 무관한 범위, 또는 기대 결과가 불명확해 이번 실행에서 분리할 수 있는 범위를 기록합니다. 확정 조건과 제외 범위를 섞지 않습니다.
 16. 변경 요청 내부의 충돌, 필수 기대 동작 누락 또는 대상 Requirement 불일치가 있을 때만 information_gaps와 user_questions에 기록합니다. 명확한 확정 조건도 함께 있고 불명확한 범위를 별도로 격리할 수 있으면 PARTIAL_PROCEED를 선택하고, 이번 실행에서 제외하는 information_gaps 원문을 `제외된_정보_부족`에 같은 목록으로 기록합니다.
+16-1. 인수 조건 원문에 목표값 미정·미확정 등 정보 부족이 명시되어 있으면 해당 원문 전체를 information_gaps, 제외된_정보_부족, excluded_scope에 동일하게 보존하고 confirmed_conditions에는 넣지 않습니다. 명확한 인수 기준을 임의로 정보 부족으로 바꾸어 제외하지 않습니다.
 17. 변경 요청에 이미 명시된 값을 SRS에 없다는 이유로 다시 확정해 달라고 질문하지 않습니다.
 18. Toast 같은 안내 수단의 정확한 문구는 변경 요청이 문구 일치를 요구할 때만 필수 정보로 봅니다.
 19. 질문이 없고 변경 전 근거, 변경 후 정책과 전달할 확정 조건이 명확하면 PROCEED를 선택합니다. PARTIAL_PROCEED는 확정 조건을 Agent 2로 계속 전달하고 excluded_scope와 information_gaps만 최종 보고 대상으로 남깁니다. 핵심 기대 결과를 확정할 수 없어 분리 진행도 불가능할 때만 WAITING_FOR_USER를 선택합니다.
@@ -148,7 +152,7 @@ class OpenAIAgent1:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent1-2-8",
+                prompt_cache_key="qa-v2-agent1-2-9",
                 input=[
                     {"role": "system", "content": AGENT1_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
@@ -178,6 +182,61 @@ def _normalize(value: str) -> str:
 
 def _contains(container: str, expected: str) -> bool:
     return _normalize(expected) in _normalize(container)
+
+
+def _contains_fact(container: str, expected: str) -> bool:
+    """Quoted text may vary in spacing, but ON is not a token inside NONE."""
+    expected = expected.strip()
+    if not expected:
+        return False
+    pattern = r"\s*".join(re.escape(part) for part in expected.split())
+    if re.match(r"[A-Za-z0-9_]", expected[0]):
+        pattern = r"(?<![A-Za-z0-9_])" + pattern
+    if re.match(r"[A-Za-z0-9_]", expected[-1]):
+        pattern += r"(?![A-Za-z0-9_])"
+    return bool(re.search(pattern, container, re.I))
+
+
+def _numeric_facts(text: str) -> set[str]:
+    text = re.sub(r"\b(?:REQ|TC|COND|ER)-[A-Z0-9-]+", "", text)
+    return {f"{float(value):g}" for value in re.findall(r"(?<![\w.])-?\d+(?:\.\d+)?", text)}
+
+
+def _state_polarities(text: str, positive: str, negative: str) -> set[bool]:
+    """Recognize explicit state words, removing negative forms before positives."""
+    lowered = text.casefold()
+    for affirmative, negated in (("enabled", "disabled"), ("checked", "unchecked"), ("allowed", "blocked"), ("on", "off")):
+        lowered = re.sub(r"\bnot\s+" + affirmative + r"\b", negated, lowered)
+    result = {False} if re.search(negative, lowered) else set()
+    remainder = re.sub(negative, " ", lowered)
+    if re.search(positive, remainder):
+        result.add(True)
+    return result
+
+
+_STATE_WORD_PAIRS = (
+    (r"(?<![a-z_])true(?![a-z_])", r"(?<![a-z_])false(?![a-z_])"),
+    (r"활성|(?<![a-z_])enabled?(?![a-z_])", r"비활성|(?<![a-z_])disabled?(?![a-z_])"),
+    (r"허용|(?<![a-z_])allow(?:ed)?(?![a-z_])", r"차단|금지|(?<![a-z_])(?:block(?:ed)?|denied|forbidden)(?![a-z_])"),
+    (r"선택됨|체크됨|(?<![a-z_])checked(?![a-z_])", r"선택\s*해제|체크\s*해제|(?<![a-z_])unchecked(?![a-z_])"),
+    (r"켜짐|켠다|(?<![a-z_])on(?![a-z_])", r"꺼짐|끈다|(?<![a-z_])off(?![a-z_])"),
+)
+
+
+def _meaning_conflicts(source: str, derived: str) -> bool:
+    """Reject explicit one-state reversals, not claim general semantic equivalence.
+
+    Mixed conditions and grammatical negation need human/model interpretation;
+    they must not be reduced to a bag-of-words verdict.
+    """
+    if re.search(r"하지\s*않|되지\s*않|아니|\bnot\b", source + " " + derived, re.I):
+        return False
+    return any(
+        len(left := _state_polarities(source, positive, negative)) == 1
+        and len(right := _state_polarities(derived, positive, negative)) == 1
+        and left != right
+        for positive, negative in _STATE_WORD_PAIRS
+    )
 
 
 def _terms(value: str) -> set[str]:
@@ -283,6 +342,8 @@ def evaluate_checkpoint1(
     request: ChangeRequest,
     analysis: Agent1Analysis,
     requirements: dict[str, SrsRequirement],
+    *,
+    require_meaning_guard: bool = True,
 ) -> Checkpoint1Result:
     checks: list[CheckResult] = []
 
@@ -421,13 +482,14 @@ def evaluate_checkpoint1(
         if condition_ids.count(condition_id) > 1
     }
     request_authority = _request_authority_text(request)
+    contains_source = _contains_fact if require_meaning_guard else _contains
     for condition in analysis.confirmed_conditions:
         if condition.source_type == ConditionSource.CHANGE_REQUEST:
-            grounded = _contains(request_authority, condition.source_text)
+            grounded = contains_source(request_authority, condition.source_text)
         else:
             grounded = any(
                 requirement_id in requirements
-                and _contains(
+                and contains_source(
                     f"{requirements[requirement_id].statement} "
                     f"{requirements[requirement_id].acceptance_criteria}",
                     condition.source_text,
@@ -436,6 +498,21 @@ def evaluate_checkpoint1(
             )
         if not grounded:
             invalid_conditions.append(condition.condition_id)
+        if require_meaning_guard:
+            if (_meaning_conflicts(condition.source_text, condition.statement)
+                    or _numeric_facts(condition.statement) - _numeric_facts(condition.source_text)):
+                invalid_conditions.append(condition.condition_id + ": 원문과 분석의 값·의미 불일치")
+            if condition.source_type == ConditionSource.SRS and not all(
+                requirement_id in requirements and contains_source(
+                    f"{requirements[requirement_id].statement} {requirements[requirement_id].acceptance_criteria}",
+                    condition.source_text,
+                ) for requirement_id in condition.requirement_ids
+            ):
+                invalid_conditions.append(condition.condition_id + ": Requirement별 SRS 출처 누락")
+            if (condition.source_type == ConditionSource.CHANGE_REQUEST
+                    and condition.change_role == ConditionChangeRole.UNCHANGED
+                    and not re.search(r"유지|변경\s*없|그대로|unchanged|remain", condition.source_text, re.I)):
+                invalid_conditions.append(condition.condition_id + ": 유지 조건의 명시 근거 누락")
 
     if duplicate_condition_ids:
         add(
@@ -466,9 +543,23 @@ def evaluate_checkpoint1(
     scope_limit_acceptance_notes = [
         note for note in request.acceptance_notes if _is_scope_exclusion_text(note)
     ]
+    # Explicitly unresolved request notes may be handed off as gaps, not assertions.
+    # All three records must retain the request verbatim; clear criteria still belong
+    # in confirmed conditions even if the model labels them as a gap.
+    recorded_gaps = (
+        {_normalize(item) for item in analysis.information_gaps}
+        & {_normalize(item) for item in analysis.excluded_information_gaps}
+        & {_normalize(item) for item in analysis.excluded_scope}
+    ) if analysis.decision == AnalysisDecision.PARTIAL_PROCEED else set()
+    unresolved_notes = {
+        _normalize(note) for note in positive_acceptance_notes
+        if _normalize(note) in recorded_gaps
+        and re.search(r"미정|미확정|정하지\s*않|정해지지\s*않|정의되지\s*않|불명확|아직\s*결정", note)
+    }
     missing_acceptance_notes = [
         note
         for note in positive_acceptance_notes
+        if _normalize(note) not in unresolved_notes
         if not any(_normalize(note) == _normalize(source) for source in change_request_sources)
     ]
     required_ranges = _temperature_ranges(f"{request.after_value} {request.description}")

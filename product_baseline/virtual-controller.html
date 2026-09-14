@@ -4281,6 +4281,7 @@
     async function revalidateQaAsset() {
       const run = qaLiveState.run;
       if (!run) return;
+      const sequence = qaLiveState.loadSequence;
       const tcId = document.getElementById('qa-live-candidate-select').value;
       const status = document.getElementById('qa-live-approval-status');
       const button = document.getElementById('qa-live-revalidate-btn');
@@ -4292,17 +4293,20 @@
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({tc_id: tcId})
         });
+        if (sequence !== qaLiveState.loadSequence || qaLiveState.run?.run_id !== run.run_id) return;
         qaLiveState.run = payload.run;
         renderQaLiveRun();
       } catch (error) {
-        status.textContent = `현재 화면 재검증 실패: ${error.message}`;
+        if (sequence !== qaLiveState.loadSequence || qaLiveState.run?.run_id !== run.run_id) return;
         renderQaAssetApproval();
+        status.textContent = `현재 화면 재검증 실패: ${error.message}`;
       }
     }
 
     async function submitQaAssetDecision(decision) {
       const run = qaLiveState.run;
       if (!run) return;
+      const sequence = qaLiveState.loadSequence;
       const tcId = document.getElementById('qa-live-candidate-select').value;
       const reviewer = document.getElementById('qa-live-reviewer').value.trim();
       const note = document.getElementById('qa-live-approval-note').value.trim();
@@ -4357,9 +4361,11 @@
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({tc_id: tcId, decision, reviewer, note, approve_srs_revisions: approveSrsRevisions})
         });
+        if (sequence !== qaLiveState.loadSequence || qaLiveState.run?.run_id !== run.run_id) return;
         qaLiveState.run = payload.run;
         renderQaLiveRun();
       } catch (error) {
+        if (sequence !== qaLiveState.loadSequence || qaLiveState.run?.run_id !== run.run_id) return;
         document.getElementById('qa-live-approval-status').textContent = `판단 기록 실패: ${error.message}`;
       }
     }

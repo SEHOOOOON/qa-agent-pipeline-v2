@@ -35,6 +35,15 @@ from qa_pipeline_agent2 import *
 # Agent 3: Evidence-grounded automation planning
 # ---------------------------------------------------------------------------
 AGENT3_SYSTEM_INSTRUCTIONS = """
+Check only conditions stated in the approved TC preconditions; observed facts are available evidence, not additional requirements. Do not add online, visibility, login or selected-state checks merely because the inventory mentions them. A single-device target scope does not itself request a selectedUnitId assertion; an explicitly required selected state still needs its own observed proof.
+For BASELINE_CONTEXT, error_free applies to a stated no-error condition, unlocked to a stated unlocked condition, online only to explicit 온라인/online, and target_device_visible to a matching target-device/visibility phrase. Include all facts stated in a compound line, not every available context field. Unknown role/login conditions require their own observed read-only evidence, never the baseline context. Never rewrite the TC source to justify an extra check.
+Every READY plan must include precondition_checks covering EVERY exact TC preconditions line, including already-satisfied conditions and setup actions. Use multiple checks for multiple explicit values in a line. They execute after all PRECONDITION actions and BEFORE the first TEST action; setup actions alone are not proof. Each check has source_text, read_kind, selector, expected_value.
+Read kinds: UI_TEXT (contains grounded state/value, not a generic label), UI_VALUE (exact string), UI_CHECKED/UI_ENABLED (boolean), INTERNAL_VALUE (exact observed, TC-grounded scalar path), BASELINE_CONTEXT (selector target_device_visible/error_free/unlocked/online, expected_value=true, only for the matching observed baseline fact).
+If a stated precondition cannot be observed with these readers, return AUTOMATION_SUPPORT_EXTENSION_REQUIRED with that precise reason. Never delete, invent, or silently weaken preconditions. Product assertions cannot run in PRECONDITION phase.
+For state expectations, UI_TEXT_CONTAINS must include the expected state, never only a static control label. CONTROLS_DISABLED requires an explicitly disabled Expected Result. Generic fixed RESTORE checks compare against the prepared TC state immediately before TEST, while RESTORE_OBSERVED_HVAC restores the original pre-setup HVAC state.
+Implement every approved TEST and RESTORE operation in order. Trailing read-only verification steps are implemented by their corresponding assertions, not invented clicks.
+Use only selectors with match_count=1. A text assertion must check a meaningful product value or message, never only generic words such as 표시/state/text.
+Preserve negative boolean states: 비활성/disabled/unchecked are false, not true. Explicit true/false values take precedence over field names such as enabled.
 You are an Automation Engineer translating an approved product test case into a browser automation plan.
 
 Rules:
@@ -53,10 +62,10 @@ Rules:
 5. PRECONDITION actions establish only states explicitly required by the approved TC. A precondition already satisfied
    by ui_observation.verified_execution_context or initial UI/state values needs no action. The isolated runner clears
    localStorage and reloads the product before observation and trial. When the verified context confirms that the target
-   device exists, is visible, error-free, and unlocked, treat those baseline preconditions as satisfied and never demand
-   another selector or action for them. A mode or temperature value read from the target device in ui_observation.harness_values
-   also satisfies the same initial_mode or initial_temperature_c precondition. Values that differ from the observed clean state
-   still need approved setup actions.
+   device is ready, no extra setup action is needed for matching TC conditions, but their precondition_checks must still
+   verify the actual values before TEST. Use the matching BASELINE_CONTEXT readers without inventing extra conditions.
+   An observed mode or temperature can similarly ground an explicit initial value check; it does not replace runtime proof.
+   Values that differ from the observed clean state still need approved setup actions.
 6. TEST actions implement only the approved TC steps. Never assume a blocked request changes the value.
 7. Create RESTORE actions only when restore_required=true and use only the approved restore values.
    When test_data.restore_observed_hvac_state=true, create exactly one RESTORE_OBSERVED_HVAC action using
@@ -110,6 +119,10 @@ Rules:
 
 class Agent3Error(RuntimeError):
     """Raised when Agent 3 cannot create or validate an automation candidate."""
+
+
+class AutomationInterfaceUnavailable(Agent3Error):
+    """Observed target lacks required interfaces; exclude this TC, not the Run."""
 
 
 @dataclass(frozen=True)
@@ -227,14 +240,17 @@ class OpenAIAgent3:
                 f"{previous_plan.model_dump_json(indent=2)}\n\n"
                 "[Checkpoint 3 revision request]\n"
                 f"{feedback}\n"
-                "Keep all TC semantics and values unchanged; fix only the reported technical plan issues."
+                "Keep all TC semantics and values unchanged; fix only the reported technical plan issues. "
+                "For precondition feedback, repair the identified check and preserve valid checks. "
+                "Remove an extra check only when its condition is absent from the TC; never delete a stated condition. "
+                "A rejected extra check is not evidence that a different UI interface is missing."
             )
         try:
             response = self.client.responses.parse(
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent3-3-18",
+                prompt_cache_key="qa-v2-agent3-3-22",
                 input=[
                     {"role": "system", "content": AGENT3_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
@@ -367,20 +383,25 @@ def inspect_target_ui(
             """() => {
                 const devices = window.__vccs && Array.isArray(window.__vccs.devices)
                     ? window.__vccs.devices : [];
-                const device = devices.find(item => item && item.id === 1) || devices[0];
+                const device = devices.find(item => item && item.id === 1);
                 if (!device || typeof device !== 'object') return null;
                 return {
+                    id: device.id,
+                    index: devices.indexOf(device),
+                    mode: typeof device.mode === 'string' ? device.mode : null,
+                    setTemp: typeof device.setTemp === 'number' ? device.setTemp : null,
                     status: typeof device.status === 'string' ? device.status : null,
                     locked: typeof device.locked === 'boolean' ? device.locked : null,
                     errorCode: device.errorCode ?? null,
+                    hasErrorCode: Object.prototype.hasOwnProperty.call(device, 'errorCode'),
                 };
             }"""
         )
         state_available = isinstance(primary_state, dict)
         error_free = (
-            primary_state.get("status") != "ERROR"
+            primary_state.get("status") in {"STOP", "OPERATION", "OFFLINE"}
             and primary_state.get("errorCode") is None
-            if state_available
+            if state_available and primary_state.get("hasErrorCode") and primary_state.get("status") is not None
             else None
         )
         unlocked = (
@@ -401,6 +422,7 @@ def inspect_target_ui(
             target_device_visible=primary_visible,
             device_state_available=state_available,
             error_free=error_free,
+            online=primary_state.get("status") in {"OPERATION", "STOP", "ERROR"} if state_available else None,
             unlocked=unlocked,
             evidence=evidence,
         )
@@ -413,6 +435,7 @@ def inspect_target_ui(
             elements.append(
                 ObservedUiElement(
                     selector=selector,
+                    match_count=page.locator(selector).count(),
                     tag=locator.evaluate("el => el.tagName.toLowerCase()"),
                     text=(locator.inner_text() or "").strip(),
                     visible=locator.is_visible(),
@@ -461,6 +484,7 @@ def inspect_target_ui(
                         else if (tag === 'button' || role === 'button') hint = 'CLICK';
                         result.push({
                             selector,
+                            match_count: document.querySelectorAll(selector).length,
                             tag,
                             text: (element.innerText || element.textContent || '').trim().slice(0, 300),
                             visible,
@@ -489,6 +513,9 @@ def inspect_target_ui(
         )
         harness_keys = sorted(harness_to_observe & available_harness_keys)
         harness_values: dict[str, str | float | int | bool | None] = {}
+        if state_available:
+            prefix = f"window.__vccs.devices[{primary_state['index']}]"
+            harness_values.update({f"{prefix}.{name}": primary_state[name] for name in ("id", "mode", "setTemp")})
         device_state_fields: list[str] = []
         if "devices" in available_harness_keys:
             device_state_fields = page.evaluate(
@@ -496,7 +523,7 @@ def inspect_target_ui(
                     const devices = window.__vccs && Array.isArray(window.__vccs.devices)
                         ? window.__vccs.devices : [];
                     const fields = new Set();
-                    for (const device of devices) {
+                    for (const device of devices.filter(device => device && device.id === 1)) {
                         if (!device || typeof device !== 'object') continue;
                         for (const [key, value] of Object.entries(device)) {
                             if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key)
@@ -547,7 +574,7 @@ def inspect_target_ui(
             details.append("selector=" + ", ".join(sorted(missing_selectors)))
         if missing_harness:
             details.append("window.__vccs=" + ", ".join(sorted(missing_harness)))
-        raise Agent3Error("Required automation interfaces are missing from the observed UI: " + " / ".join(details))
+        raise AutomationInterfaceUnavailable("Required automation interfaces are missing from the observed UI: " + " / ".join(details))
     return UiObservation(
         target_file=target.name,
         target_sha256=_sha256_file(target),
@@ -815,20 +842,132 @@ def _scalar_value_is_grounded(
     if value is None:
         return False
     if isinstance(value, bool):
-        positive = ("true", "on", "checked", "enabled", "활성", "켜", "선택")
-        negative = ("false", "off", "unchecked", "disabled", "비활성", "꺼", "해제")
-        return _contains_any(source_text, positive if value else negative)
+        for index in (0, 1, 3, 4):
+            states = _state_polarities(source_text, *_STATE_WORD_PAIRS[index])
+            if states:
+                return states == {value}
+        return False
     if isinstance(value, (int, float)):
         return float(value) in {
             float(item) for item in re.findall(r"-?\d+(?:\.\d+)?", source_text)
         }
-    return _contains(source_text, str(value))
+    escaped = re.escape(str(value).casefold())
+    return bool(re.search(r"(?<![a-z0-9_])" + escaped + r"(?![a-z0-9_])", source_text.casefold()))
+
+
+_BASELINE_PRECONDITION_READS = {
+    "target_device_visible": (r"대상.*장비|장비.*표시|\bdevice\b", None),
+    "error_free": (r"오류.*없|오류.*없는|정상|error.free|no.error", "['STOP', 'OPERATION', 'OFFLINE'].includes(d.status) && d.errorCode === null"),
+    "unlocked": (r"잠금.*해제|잠금.*없|unlocked|no.lock", "d.locked === false"),
+    "online": (r"온라인|\bonline\b", "['OPERATION', 'STOP', 'ERROR'].includes(d.status)"),
+}
+
+
+def _precondition_proof_errors(test_case, plan, observation) -> list[str]:
+    """Check explicit proof mappings, not general natural-language equivalence."""
+    errors = []
+    approved = set(test_case.preconditions)
+    observed = {item.selector: item for item in observation.elements}
+    available_paths = build_agent3_model_input(test_case, observation, {})["ui_observation"]["harness_values"]
+    grouped = {line: [] for line in test_case.preconditions}
+    phases = {action.action_id: action.phase for action in plan.actions}
+    if AutomationPhase.TEST not in phases.values():
+        errors.append("precondition verification requires a distinct TEST phase")
+    if any(assertion.after_action_id and phases.get(assertion.after_action_id) == AutomationPhase.PRECONDITION for assertion in plan.assertions):
+        errors.append("product assertions cannot precede precondition verification")
+    for check_index, check in enumerate(plan.precondition_checks, 1):
+        if check.source_text not in approved:
+            errors.append("proof source_text is not an exact approved precondition")
+            continue
+        grouped[check.source_text].append(check)
+        if check.read_kind == PreconditionReadKind.BASELINE_CONTEXT:
+            binding = _BASELINE_PRECONDITION_READS.get(check.selector)
+            reason = None
+            if binding is None or check.expected_value is not True:
+                reason = "허용된 기본 문맥 항목과 expected_value=true를 사용해야 합니다."
+            elif re.search(r"로그인|관리자|인증|login|admin|authenticat", check.source_text, re.I):
+                reason = "로그인·권한 조건은 장비 기본 문맥으로 증명할 수 없습니다."
+            elif not re.search(binding[0], check.source_text, re.I):
+                matched = [key for key, (pattern, _) in _BASELINE_PRECONDITION_READS.items()
+                           if re.search(pattern, check.source_text, re.I)]
+                reason = (
+                    f"이 확인 항목은 원문의 조건과 연결되지 않습니다. 원문에 연결되는 기본 문맥: {', '.join(matched) or '없음'}. "
+                    "TC에 없는 추가 확인만 제거하고 명시된 조건·유효한 확인은 보존하세요. "
+                    "명시된 조건을 다른 읽기 방식으로도 확인할 수 없을 때만 지원 부족으로 판단하세요."
+                )
+            elif (not isinstance(getattr(observation.verified_execution_context, check.selector, None), bool)
+                  or (check.selector != "target_device_visible" and not observation.verified_execution_context.device_state_available)):
+                reason = "이 기본 문맥의 실제 관찰 근거가 없습니다. 조건을 충족했다고 추정하지 마세요."
+            if reason:
+                errors.append(f"사전조건 확인 #{check_index} [BASELINE_CONTEXT/{check.selector}] 원문={check.source_text!r}: {reason}")
+            continue
+        if not _scalar_value_is_grounded(check.expected_value, check.source_text):
+            errors.append("precondition expected value is not grounded in its source")
+        if check.read_kind == PreconditionReadKind.INTERNAL_VALUE:
+            if not _HARNESS_VALUE_PATH.fullmatch(check.selector) or check.selector not in available_paths:
+                errors.append("precondition internal path was not observed or grounded in the TC")
+            device_prefix = re.match(r"window\.__vccs\.devices\[\d+\]", check.selector)
+            if device_prefix and observation.harness_values.get(device_prefix.group() + ".id") != plan.target_device_id:
+                errors.append("precondition device index does not identify the observed target")
+        else:
+            element = observed.get(check.selector)
+            if element is None or element.match_count != 1:
+                errors.append("precondition selector must have exactly one observed match")
+                continue
+            meaning = " ".join([element.text, element.accessible_name or "", element.selector, element.action_hint])
+            if not _has_textual_link(meaning, check.source_text):
+                errors.append("precondition UI target has no textual link to its source")
+            if check.read_kind in {PreconditionReadKind.UI_CHECKED, PreconditionReadKind.UI_ENABLED} and not isinstance(check.expected_value, bool):
+                errors.append("precondition boolean observation requires a boolean value")
+            if check.read_kind == PreconditionReadKind.UI_ENABLED and _state_polarities(check.source_text, *_STATE_WORD_PAIRS[1]) != {check.expected_value}:
+                errors.append("enabled-state proof requires the same explicit enabled/disabled precondition")
+            if check.read_kind == PreconditionReadKind.UI_CHECKED and element.tag != "input":
+                errors.append("checked-state proof requires an observed input element")
+            if check.read_kind in {PreconditionReadKind.UI_TEXT, PreconditionReadKind.UI_VALUE} and not isinstance(check.expected_value, str):
+                errors.append("precondition text/value observation requires a string")
+            if check.read_kind == PreconditionReadKind.UI_TEXT:
+                for positive, negative in _STATE_WORD_PAIRS:
+                    state = _state_polarities(check.source_text, positive, negative)
+                    if len(state) == 1 and _state_polarities(str(check.expected_value), positive, negative) != state:
+                        errors.append("precondition text omits the required state")
+    for source, checks in grouped.items():
+        if not checks:
+            errors.append("missing runtime proof for precondition: " + source)
+            continue
+        required = _explicit_behavior_values(source) - {"PRIMARY_TEST_DEVICE", "CENTRAL_COMMAND_ALLOWED_ROLE"}
+        proved = set().union(*(_explicit_behavior_values(json.dumps(check.expected_value, ensure_ascii=False)) for check in checks))
+        if required - proved:
+            errors.append("precondition proof omits explicit values: " + ",".join(sorted(required - proved)))
+        if any(check.read_kind == PreconditionReadKind.BASELINE_CONTEXT for check in checks):
+            covered_context = {check.selector for check in checks if check.read_kind == PreconditionReadKind.BASELINE_CONTEXT}
+            required_context = {key for key, (pattern, _) in _BASELINE_PRECONDITION_READS.items() if re.search(pattern, source, re.I)}
+            if required_context - covered_context:
+                errors.append("baseline proof omits a stated context fact: " + ",".join(sorted(required_context - covered_context)))
+    return errors
+
+
+def _precondition_read_expression(check: PreconditionCheck, target_device_id: int) -> str:
+    if check.read_kind == PreconditionReadKind.BASELINE_CONTEXT:
+        if check.selector == "target_device_visible":
+            return f"page.locator('#device-card-{target_device_id} .card-body-split').is_visible()"
+        expression = _BASELINE_PRECONDITION_READS[check.selector][1]
+        script = f"id => {{ const d = window.__vccs?.devices?.find(item => item.id === id); return !!d && ({expression}); }}"
+        return f"page.evaluate({_py_literal(script)}, {target_device_id})"
+    if check.read_kind == PreconditionReadKind.INTERNAL_VALUE:
+        device_prefix = re.match(r"window\.__vccs\.devices\[\d+\]", check.selector)
+        if device_prefix:
+            return f"page.evaluate({_py_literal('() => ' + device_prefix.group() + '?.id === ' + str(target_device_id) + ' ? ' + check.selector + ' : null')})"
+        return f"page.evaluate({_py_literal('() => ' + check.selector)})"
+    method = {PreconditionReadKind.UI_TEXT: "inner_text", PreconditionReadKind.UI_VALUE: "input_value",
+              PreconditionReadKind.UI_CHECKED: "is_checked", PreconditionReadKind.UI_ENABLED: "is_enabled"}[check.read_kind]
+    return f"page.locator({_py_literal(check.selector)}).{method}()"
 
 
 def evaluate_checkpoint3_plan(
     test_case: ProductTestCaseCandidate,
     plan: Agent3AutomationPlan,
     observation: UiObservation,
+    *, require_precondition_proof: bool = True,
 ) -> Checkpoint3Result:
     if test_case.control_path != ControlPath.CENTRAL:
         return Checkpoint3Result(
@@ -880,6 +1019,11 @@ def evaluate_checkpoint3_plan(
     def add(rule_id: str, status: CheckStatus, message: str) -> None:
         checks.append(CheckResult(rule_id=rule_id, status=status, message=message))
 
+    if require_precondition_proof or plan.precondition_checks:
+        proof_errors = _precondition_proof_errors(test_case, plan, observation)
+        add("CP3-006A", CheckStatus.FAIL if proof_errors else CheckStatus.PASS,
+            " / ".join(proof_errors) if proof_errors else "Every precondition has a grounded read-only runtime check before TEST.")
+
     observed_selectors = {item.selector for item in observation.elements}
     observed_by_selector = {item.selector: item for item in observation.elements}
     if plan.tc_id == test_case.tc_id and plan.target_device_id == 1:
@@ -905,6 +1049,8 @@ def evaluate_checkpoint3_plan(
     )
     action_errors: list[str] = []
     for item in plan.actions:
+        if item.selector in observed_by_selector and observed_by_selector[item.selector].match_count != 1:
+            action_errors.append(f"{item.action_id}: selector must match exactly one element")
         approved_source = {
             AutomationPhase.PRECONDITION: test_case.preconditions,
             AutomationPhase.TEST: test_case.steps,
@@ -1100,13 +1246,22 @@ def evaluate_checkpoint3_plan(
         }
         if assertion.strategy not in allowed_strategies[result.observation_layer]:
             fidelity_errors.append(f"{assertion.result_id}: assertion strategy changed the observation meaning")
+        if assertion.strategy == AssertionStrategy.CONTROLS_DISABLED:
+            if _state_polarities(result.statement, *_STATE_WORD_PAIRS[1]) != {False}:
+                fidelity_errors.append(f"{assertion.result_id}: disabled strategy requires an explicit disabled expectation")
         if assertion.strategy == AssertionStrategy.UI_TEXT_CONTAINS:
+            for positive, negative in _STATE_WORD_PAIRS:
+                required_state = _state_polarities(result.statement, positive, negative)
+                if len(required_state) == 1 and _state_polarities(assertion.expected_text or "", positive, negative) != required_state:
+                    fidelity_errors.append(f"{assertion.result_id}: text assertion omits the expected product state")
             if not assertion.expected_text or not _contains(
                 result.statement, assertion.expected_text
             ):
                 fidelity_errors.append(
                     f"{assertion.result_id}: expected text is not grounded in the Expected Result"
                 )
+            elif not re.sub(r"표시|화면|상태|텍스트|확인|display|visible|text|state|\W", "", assertion.expected_text, flags=re.I):
+                fidelity_errors.append(f"{assertion.result_id}: expected text contains no product value or message")
             elif (
                 result.observation_layer == ObservationLayer.NOTIFICATION
                 and len(_terms(assertion.expected_text)) >= len(_terms(result.statement))
@@ -1186,6 +1341,8 @@ def evaluate_checkpoint3_plan(
         elif assertion.strategy in _GENERIC_ASSERTION_STRATEGIES:
             observed = observed_by_selector.get(assertion.selector)
             if observed is not None:
+                if observed.match_count != 1:
+                    fidelity_errors.append(f"{assertion.result_id}: selector must match exactly one element")
                 observed_meaning = " ".join(
                     part
                     for part in (
@@ -1284,6 +1441,27 @@ def evaluate_checkpoint3_plan(
         and not (tc_modes - set(_MODE_SELECTOR))
     )
     if not legacy_controller_flow:
+        for phase, lines in ((AutomationPhase.TEST, test_case.steps), (AutomationPhase.RESTORE, test_case.restore_steps)):
+            implemented = [_normalize(item.source_text) for item in plan.actions if item.phase == phase]
+            last_operation = max((i for i, line in enumerate(lines) if _normalize(line) in implemented), default=-1)
+            # A trailing read-only step is implemented by its mapped assertion,
+            # not by an invented click. Earlier observations still need ordering.
+            observation_steps = {
+                _normalize(result.verify_after_step) for result in test_case.expected_results
+                if result.verify_after_step and result.result_id in mapped_ids
+                and phase == AutomationPhase.TEST
+                and any(i > last_operation and _normalize(line) == _normalize(result.verify_after_step)
+                    and re.search(r"확인|조회|관찰|검사|\b(?:verify|read|observe|check)\b", line, re.I)
+                    and not re.search(r"선택하|적용하|입력하|변경하|설정하|누른|\b(?:click|apply|fill|select|set)\b", line, re.I)
+                    for i, line in enumerate(lines))
+            }
+            required = [_normalize(line) for line in lines if _normalize(line) not in observation_steps]
+            if any(line not in implemented for line in required):
+                sequence_errors.append(f"{phase.value}: approved step is missing from the plan")
+            elif [required.index(line) for line in implemented if line in required] != sorted(
+                required.index(line) for line in implemented if line in required
+            ):
+                sequence_errors.append(f"{phase.value}: approved step order changed")
         if not any(item.phase == AutomationPhase.TEST for item in plan.actions):
             sequence_errors.append("generic plan has no TEST action")
         if test_case.restore_required and not any(
@@ -1665,6 +1843,7 @@ def compile_automation_candidate(
             ]
         )
     restore_baselines: list[tuple[str, AutomationAssertion]] = []
+    baseline_start = len(lines)
     for index, assertion in enumerate(restore_assertions):
         variable = f"restore_baseline_{index}"
         restore_baselines.append((variable, assertion))
@@ -1699,6 +1878,7 @@ def compile_automation_candidate(
                 )
                 + ")"
             )
+    baseline_block = lines[baseline_start:]
     action_blocks: list[tuple[str, list[str]]] = []
     for action in [item for item in plan.actions if item.phase != AutomationPhase.RESTORE]:
         block_start = len(lines)
@@ -1862,7 +2042,44 @@ def compile_automation_candidate(
         lines.append(f"{prefix}    return {errors}")
         lines.append(f"{prefix}{errors}.extend(_wait_for_observations(page, observe))")
 
+    prepared_baseline_captured = False
+    phases_by_id = {action.action_id: action.phase for action in plan.actions}
+    has_preparation = any(action.phase == AutomationPhase.PRECONDITION for action in plan.actions)
+    preconditions_checked = False
     for action_id, block in action_blocks:
+        if has_preparation and not prepared_baseline_captured and phases_by_id[action_id] == AutomationPhase.TEST:
+            # Capture the prepared state even when its verification fails.
+            lines.extend(baseline_block)
+            prepared_baseline_captured = True
+        if not preconditions_checked and phases_by_id[action_id] == AutomationPhase.TEST and plan.precondition_checks:
+            lines.extend([f"{indent}precondition_values = {{}}",
+                          f"{indent}def observe_preconditions():",
+                          f"{indent}    precondition_errors = []"])
+            for index, check in enumerate(plan.precondition_checks, start=1):
+                expression = _precondition_read_expression(check, plan.target_device_id)
+                comparison = (f"{_py_literal(check.expected_value)} in str(precondition_actual)"
+                              if check.read_kind == PreconditionReadKind.UI_TEXT else
+                              f"type(precondition_actual) is type({_py_literal(check.expected_value)}) and precondition_actual == {_py_literal(check.expected_value)}")
+                if type(check.expected_value) in {float, int}:
+                    comparison = f"type(precondition_actual) in (int, float) and precondition_actual == {_py_literal(check.expected_value)}"
+                lines.extend([
+                    f"{indent}    # PRECONDITION: {index} {_safe_comment(check.source_text)}",
+                    f"{indent}    precondition_actual = {expression}",
+                    f"{indent}    precondition_values[{index}] = precondition_actual",
+                    f"{indent}    if not ({comparison}):",
+                    f"{indent}        precondition_errors.append('check {index} expected=' + repr({_py_literal(check.expected_value)}) + ' actual=' + repr(precondition_actual))",
+                ])
+            lines.extend([
+                f"{indent}    return precondition_errors",
+                f"{indent}precondition_errors = _wait_for_observations(page, observe_preconditions)",
+                f"{indent}for check_index, observed_value in precondition_values.items():",
+                f"{indent}    print('PRECONDITION_OBSERVED: ' + str(check_index) + ' ' + repr(observed_value))",
+                f"{indent}if precondition_errors:",
+                f"{indent}    page.screenshot(path=str(EVIDENCE_DIR / 'trial-final.png'), full_page=True)",
+                f"{indent}    raise AssertionError('PRECONDITION_NOT_MET: ' + ' | '.join(precondition_errors))",
+                f"{indent}print('PRECONDITIONS_VERIFIED: {len(plan.precondition_checks)}')",
+            ])
+            preconditions_checked = True
         lines.extend(block)
         append_observation_group(
             [block for after, block in assertion_blocks if after == action_id], indent, "mismatches"

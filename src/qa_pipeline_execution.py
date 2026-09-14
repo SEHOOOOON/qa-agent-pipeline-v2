@@ -153,7 +153,8 @@ def run_agent1(args: argparse.Namespace) -> int:
             run_dir / "run_manifest.json",
             {
                 "contract_version": "2.4",
-                "prompt_version": "agent1-2.4",
+                "meaning_guard_contract": "1.0",
+                "prompt_version": "agent1-2.9",
                 "run_id": run_id,
                 "stage": "AGENT_1_CP1",
                 "status": checkpoint.status.value,
@@ -227,7 +228,8 @@ def _load_verified_agent1_run(run_dir: Path, run_id: str) -> tuple[
     requirements = load_srs_requirements(srs_snapshot_file)
     analysis = _read_json_model(analysis_file, Agent1Analysis)
     checkpoint = _read_json_model(checkpoint_file, Checkpoint1Result)
-    recomputed = evaluate_checkpoint1(request, analysis, requirements)
+    recomputed = evaluate_checkpoint1(request, analysis, requirements,
+        require_meaning_guard=manifest.get("meaning_guard_contract") == "1.0")
     if recomputed.model_dump(mode="json") != checkpoint.model_dump(mode="json"):
         raise ValueError("현재 CP1 규칙으로 재검증한 결과가 저장된 Checkpoint 1과 다릅니다.")
     if checkpoint.status not in {CheckStatus.PASS, CheckStatus.REVIEW} or checkpoint.handoff_status != HandoffStatus.CONTINUE:
@@ -412,7 +414,7 @@ def run_agent2(args: argparse.Namespace) -> int:
             run_dir / "agent2_manifest.json",
             {
                 "contract_version": "3.0",
-                "prompt_version": "agent2-2.20",
+                "prompt_version": "agent2-2.22",
                 "run_id": args.run_id,
                 "source_stage": "AGENT_1_CP1",
                 "stage": "AGENT_2_CP2",
@@ -435,6 +437,8 @@ def run_agent2(args: argparse.Namespace) -> int:
                     approved_catalog_file
                 ),
                 "srs_revision_contract": "1.0",
+                "candidate_expectation_contract": "1.0",
+                "meaning_guard_contract": "1.0",
                 "existing_behavior_values_contract": "1.0",
                 "existing_procedure_review_contract": "1.0",
                 "double_assert_timing_contract": "1.0",
@@ -510,6 +514,8 @@ def _load_verified_agent2_run(
         analysis,
         design,
         requirements,
+        require_meaning_guard=manifest.get("meaning_guard_contract") == "1.0",
+        require_candidate_expectation_guard=manifest.get("candidate_expectation_contract") == "1.0",
         existing_catalog=existing_catalog,
         require_srs_revision_proposals=(
             manifest.get("srs_revision_contract") == "1.0"
@@ -582,7 +588,8 @@ def run_candidate_trial(
         env["PYTHONIOENCODING"] = "utf-8"
         env["QA_TARGET_URL"] = target_html.resolve().as_uri()
         env["QA_EVIDENCE_DIR"] = str(evidence_dir.resolve())
-        command = [sys.executable, "-m", "pytest", isolated_candidate.name, "-q"]
+        # Retain successful precondition observations as well as failure output.
+        command = [sys.executable, "-m", "pytest", isolated_candidate.name, "-q", "-rP"]
         try:
             completed = _run_trial_subprocess(
                 command,
@@ -596,6 +603,8 @@ def run_candidate_trial(
             combined = stdout + "\n" + stderr
             if exit_code == 0:
                 outcome = TrialOutcome.PASS
+            elif re.search(r"^[ \t]*(?:E[ \t]+)?AssertionError:[ \t]*PRECONDITION_NOT_MET:", combined, re.M):
+                outcome = TrialOutcome.AUTOMATION_ERROR
             elif "PRODUCT_MISMATCH:" in combined:
                 outcome = TrialOutcome.PRODUCT_MISMATCH_CANDIDATE
             elif any(
@@ -856,7 +865,8 @@ def run_agent3(args: argparse.Namespace) -> int:
 
         agent = OpenAIAgent3(model=args.model)
         response = agent.plan(test_case, observation, requirements)
-        checkpoint = evaluate_checkpoint3_plan(test_case, response.plan, observation)
+        _write_json(artifact_dir / "agent3_automation_plan_attempt_1.json", response.plan.model_dump(mode="json"))
+        checkpoint = evaluate_checkpoint3_plan(test_case, response.plan, observation, require_precondition_proof=True)
         attempts = [
             {
                 "attempt": 1,
@@ -867,7 +877,6 @@ def run_agent3(args: argparse.Namespace) -> int:
             }
         ]
         if checkpoint.status == CheckStatus.FAIL:
-            _write_json(artifact_dir / "agent3_automation_plan_attempt_1.json", response.plan.model_dump(mode="json"))
             _write_json(artifact_dir / "checkpoint3_attempt_1.json", checkpoint.model_dump(mode="json"))
             response = agent.plan(
                 test_case,
@@ -876,7 +885,8 @@ def run_agent3(args: argparse.Namespace) -> int:
                 previous_plan=response.plan,
                 checkpoint_feedback=[item.message for item in checkpoint.checks if item.status == CheckStatus.FAIL],
             )
-            checkpoint = evaluate_checkpoint3_plan(test_case, response.plan, observation)
+            _write_json(artifact_dir / "agent3_automation_plan_attempt_2.json", response.plan.model_dump(mode="json"))
+            checkpoint = evaluate_checkpoint3_plan(test_case, response.plan, observation, require_precondition_proof=True)
             attempts.append(
                 {
                     "attempt": 2,
@@ -925,7 +935,8 @@ def run_agent3(args: argparse.Namespace) -> int:
 
         manifest_payload = {
             "contract_version": "4.0",
-            "prompt_version": "agent3-3.12",
+            "precondition_proof_contract": "1.0",
+            "prompt_version": "agent3-3.22",
             "run_id": args.run_id,
             "source_stage": "AGENT_2_CP2",
             "stage": "AGENT_3_CP3_TRIAL",
@@ -955,6 +966,24 @@ def run_agent3(args: argparse.Namespace) -> int:
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         _write_json(artifact_dir / "agent3_manifest.json", manifest_payload)
+    except AutomationInterfaceUnavailable as exc:
+        unavailable = eligibility.model_copy(update={
+            "status": Agent3EligibilityStatus.NOT_AUTOMATABLE,
+            "candidate_status": AutomationCandidateStatus.AUTOMATION_SUPPORT_EXTENSION_REQUIRED,
+            "model_call_allowed": False,
+            "missing_capabilities": [str(exc)],
+            "extension_reasons": [str(exc)],
+        })
+        _write_json(eligibility_file, {
+            "contract_version": "3.2", "run_id": args.run_id,
+            "stage": "AGENT_3_ELIGIBILITY",
+            **unavailable.model_dump(mode="json"),
+            "source_agent2_manifest_sha256": _sha256_file(run_dir / "agent2_manifest.json"),
+            "source_agent2_design_sha256": source_manifest["agent2_design_sha256"],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        print(f"Agent 3 TC excluded: {exc}")
+        return 2
     except Exception as exc:
         _write_json(
             artifact_dir / "agent3_error.json",
@@ -1084,7 +1113,8 @@ def _candidate_execution_record(
     plan = _read_json_model(
         artifact_dir / "agent3_automation_plan.json", Agent3AutomationPlan
     )
-    current_checkpoint3 = evaluate_checkpoint3_plan(test_case, plan, observation)
+    current_checkpoint3 = evaluate_checkpoint3_plan(test_case, plan, observation,
+        require_precondition_proof=agent3_manifest.get("precondition_proof_contract") == "1.0")
     current_code = compile_automation_candidate(run_id, test_case, plan)
     current_static_checks = evaluate_compiled_candidate(test_case, current_code)
     current_checkpoint3.checks.extend(current_static_checks)
@@ -1238,6 +1268,8 @@ def _candidate_execution_records(
         return [(result, test_case, manifest, run_dir)], [], None
 
     summary = _read_json_payload(summary_file)
+    if summary.get("internal_error_tc_ids"):
+        raise ValueError("Agent 3 내부 오류가 있어 완료된 검증으로 인계할 수 없습니다.")
     if (
         summary.get("run_id") != run_id
         or summary.get("stage") != "AGENT_3_RUN_SUMMARY"
@@ -1426,7 +1458,7 @@ def run_existing_regression(
         env["QA_TARGET_URL"] = isolated_target.as_uri()
         env["QA_EVIDENCE_DIR"] = str(evidence_dir.resolve())
         try:
-            completed = subprocess.run(
+            completed = _run_trial_subprocess(
                 [
                     sys.executable,
                     "-m",
@@ -1440,12 +1472,7 @@ def run_existing_regression(
                 ],
                 cwd=temp_root,
                 env=env,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=timeout_seconds,
-                shell=False,
+                timeout_seconds=timeout_seconds,
             )
             exit_code = completed.returncode
             stdout = redact(
@@ -1465,7 +1492,7 @@ def run_existing_regression(
                 Path.home(),
             )
             combined = stdout + "\n" + stderr
-            if exit_code == 0 and re.search(r"\bskipped\b", combined, re.IGNORECASE):
+            if exit_code == 0 and re.search(r"(?m)^\s*(?:=+\s*)?(?:\d+ (?:passed|deselected|warnings?)(?:, )?\s*)*\d+ skipped(?:,|\s+in\s+|\s*=*$)", stdout):
                 status = NeutralExecutionStatus.SKIPPED
                 source_outcome = "PYTEST_SKIPPED"
             elif exit_code == 0:

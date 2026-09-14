@@ -13,7 +13,10 @@ from typing import Any
 
 def _write_text_atomic(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    # Keep the sibling name short: repeating the target name can exceed Windows'
+    # path limit even when the final artifact itself fits. Same-directory replace
+    # still preserves atomic publication and the original on write failure.
+    temp_path = path.with_name(f".{uuid.uuid4().hex}.tmp")
     try:
         temp_path.write_text(text, encoding="utf-8")
         os.replace(temp_path, path)

@@ -3,8 +3,102 @@
 from pipeline_test_support import *
 
 
-def test_asset_approval_rejects_different_executed_code(tmp_path):
-    runs, assets, target, run_id, tc_id, _ = build_approvable_ui_run(tmp_path)
+@pytest.mark.parametrize("operation", ["revalidate", "decision"])
+@pytest.mark.parametrize("failed", [False, True])
+def test_browser_ignores_previous_run_post_response(operation, failed):
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as api:
+        browser = api.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.route("https://**/*", lambda route: route.abort())
+        page.goto((REPO_ROOT / "product_baseline/virtual-controller.html").as_uri())
+        page.wait_for_function("qaLiveState.demoMode && qaLiveState.run !== null")
+        result = page.evaluate("""async ({operation,failed}) => {
+          const first=structuredClone(qaLiveState.run);first.run_id='A';
+          const second=structuredClone(first);second.run_id='B';
+          qaLiveState.demoMode=false;qaLiveState.run=first;
+          qaLiveState.overview={allow_asset_approval:true};renderQaLiveRun();
+          document.getElementById('qa-live-reviewer').value='tester';
+          document.getElementById('qa-live-approval-note').value='hold for review';
+          let resolve,reject;qaLiveFetch=()=>new Promise((ok,bad)=>{resolve=ok;reject=bad;});
+          const pending=operation==='revalidate'?revalidateQaAsset():submitQaAssetDecision('HOLD');
+          ++qaLiveState.loadSequence;qaLiveState.run=second;renderQaLiveRun();
+          const status=document.getElementById('qa-live-approval-status').textContent;
+          if(failed)reject(Error('old error'));else resolve({run:first});
+          await pending;
+          return {id:qaLiveState.run.run_id,unchanged:status===document.getElementById('qa-live-approval-status').textContent};
+        }""", {"operation": operation, "failed": failed})
+        assert result == {"id": "B", "unchanged": True}
+        browser.close()
+
+
+def test_shared_lock_rejects_overlapping_thread_and_is_reusable(tmp_path):
+    import threading
+    lock = pipeline_ui.LiveRunFileLock(tmp_path / "approval.lock")
+    assert lock.acquire()
+    acquired = []
+    thread = threading.Thread(target=lambda: acquired.append(lock.acquire()))
+    thread.start()
+    thread.join(timeout=3)
+    assert not thread.is_alive() and acquired == [False]
+    lock.release()
+    assert lock.acquire()
+    lock.release()
+
+
+def test_approval_rejects_unverified_pass_labels(tmp_path):
+    # Deliberately do not use the UI transaction fixture's source-verification stub.
+    run = tmp_path / "RUN-20260912-120000-ABCDEF"
+    _write_json(run / "final_report.json", {"recommendation": "PASS"})
+    with pytest.raises(ValueError):
+        pipeline_ui._verify_candidate_sources(run, "TC-CAND-001")
+
+
+@pytest.mark.parametrize("origin,host,content_type,status", [
+    ("http://127.0.0.1:8765", "127.0.0.1:8765", "application/json", 202),
+    ("https://untrusted.example", "127.0.0.1:8765", "application/json", 403),
+    ("null", "127.0.0.1:8765", "application/json", 403),
+    (None, "127.0.0.1:8765", "application/json", 403),
+    ("http://attacker.example:8765", "attacker.example:8765", "application/json", 403),
+    ("http://127.0.0.1:8765", "127.0.0.1:8765", "text/plain", 415),
+])
+def test_local_mutations_require_same_origin_json(origin, host, content_type, status):
+    import io
+    from email.message import Message
+    calls, responses = [], []
+    bridge = SimpleNamespace(start_live_run=lambda name: calls.append(name), overview=lambda: {})
+    handler_type = pipeline_ui.make_handler(bridge)
+    handler = handler_type.__new__(handler_type)
+    handler.server = SimpleNamespace(server_address=("127.0.0.1", 8765))
+    handler.path = "/api/qa/runs"
+    handler.headers = Message()
+    handler.headers["Host"] = host
+    if origin is not None:
+        handler.headers["Origin"] = origin
+    handler.headers["Content-Type"] = content_type
+    body = b'{"request_file":"fixture.json"}'
+    handler.headers["Content-Length"] = str(len(body))
+    handler.rfile = io.BytesIO(body)
+    handler._send_json = lambda payload, code=200: responses.append(int(code))
+    handler.do_POST()
+    assert responses == [status]
+    assert bool(calls) is (status == 202)
+
+
+def test_ui_waits_for_final_report_before_overall_pass(tmp_path):
+    run_id = "RUN-20260912-091420-ABCDEF"
+    run = tmp_path / run_id
+    for status in ("PASS", "COMPLETED", "SELECTED"):
+        _write_json(run / "orchestrator_manifest.json", {"status": status})
+        assert pipeline_ui.summarize_run(tmp_path, run_id)["overall_status"] == "후속 검증 대기"
+    _write_json(run / "orchestrator_manifest.json", {"status": "STOPPED"})
+    assert pipeline_ui.summarize_run(tmp_path, run_id)["overall_status"] == "STOPPED"
+    _write_json(run / "final_report.json", {"recommendation": "HUMAN_REVIEW"})
+    assert pipeline_ui.summarize_run(tmp_path, run_id)["overall_status"] == "HUMAN_REVIEW"
+
+
+def test_asset_approval_rejects_different_executed_code(tmp_path, monkeypatch):
+    runs, assets, target, run_id, tc_id, _ = build_approvable_ui_run(tmp_path, monkeypatch)
     execution_file = runs / run_id / "validation_execution.json"
     data = json.loads(execution_file.read_text(encoding="utf-8"))
     data["candidate_results"][0]["test_sha256"] = "a" * 64
@@ -477,10 +571,10 @@ def test_pipeline_ui_summarizes_real_run_artifacts(tmp_path: Path) -> None:
     assert "Slack: PREVIEW / Notion: PREVIEW" in summary["stages"]["agent4"]["details"]
 
 def test_pipeline_ui_human_approval_registers_immutable_tc_and_automation(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch,
 ) -> None:
     runs_root, approved_root, target_html, run_id, tc_id, candidate_code = (
-        build_approvable_ui_run(tmp_path)
+        build_approvable_ui_run(tmp_path, monkeypatch)
     )
     bridge = pipeline_ui.PipelineUiBridge(
         runs_root=runs_root,
@@ -591,10 +685,10 @@ def test_pipeline_ui_shows_latest_delivery_and_preserves_prior_send_history(tmp_
 
 
 def test_pipeline_ui_requires_and_applies_srs_revision_with_asset_approval(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch,
 ) -> None:
     runs_root, approved_root, target_html, run_id, tc_id, _ = build_approvable_ui_run(
-        tmp_path
+        tmp_path, monkeypatch
     )
     srs_file = tmp_path / "SRS.md"
     srs_file.write_text(
@@ -675,7 +769,7 @@ def test_pipeline_ui_rolls_back_all_asset_files_when_approval_copy_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runs_root, approved_root, target_html, run_id, tc_id, _ = build_approvable_ui_run(
-        tmp_path
+        tmp_path, monkeypatch
     )
     srs_file = tmp_path / "SRS.md"
     srs_file.write_text(
@@ -735,9 +829,9 @@ def test_pipeline_ui_rolls_back_all_asset_files_when_approval_copy_fails(
     assert not (runs_root / run_id / "srs_revision_decision.json").exists()
     assert not (runs_root / run_id / "asset_decisions.json").exists()
 
-def test_pipeline_ui_hold_is_recorded_and_can_later_be_approved(tmp_path: Path) -> None:
+def test_pipeline_ui_hold_is_recorded_and_can_later_be_approved(tmp_path: Path, monkeypatch) -> None:
     runs_root, approved_root, target_html, run_id, tc_id, _ = build_approvable_ui_run(
-        tmp_path
+        tmp_path, monkeypatch
     )
 
     held = pipeline_ui.decide_candidate_asset(
@@ -770,10 +864,10 @@ def test_pipeline_ui_hold_is_recorded_and_can_later_be_approved(tmp_path: Path) 
     assert decisions["decisions"] == [approved]
 
 def test_pipeline_ui_blocks_asset_approval_for_failed_or_stale_evidence(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch,
 ) -> None:
     runs_root, approved_root, target_html, run_id, tc_id, _ = build_approvable_ui_run(
-        tmp_path
+        tmp_path, monkeypatch
     )
     _write_json(runs_root / run_id / "final_report.json", {"recommendation": "HOLD"})
 
@@ -808,7 +902,7 @@ def test_pipeline_ui_revalidates_stale_candidate_without_model_call(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runs_root, approved_root, target_html, run_id, tc_id, _ = build_approvable_ui_run(
-        tmp_path
+        tmp_path, monkeypatch
     )
     target_html.write_text("<!doctype html><title>UI updated</title>", encoding="utf-8")
 

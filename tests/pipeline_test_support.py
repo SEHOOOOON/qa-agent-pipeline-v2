@@ -567,11 +567,20 @@ from qa_pipeline_v2 import (
     compile_automation_candidate,
     build_agent3_model_input,
     evaluate_agent3_eligibility,
-    evaluate_checkpoint3_plan,
     evaluate_compiled_candidate,
     inspect_target_ui,
     run_candidate_trial,
 )
+
+def evaluate_checkpoint3_plan(test_case, plan, observation, *, require_precondition_proof=False):
+    """Legacy plan fixtures isolate older CP3 rules; new proof tests opt in.
+
+    The production API defaults to strict proof checking. This adapter is only
+    for historical unit fixtures that intentionally contain no proof contract.
+    """
+    return pipeline.evaluate_checkpoint3_plan(test_case, plan, observation,
+        require_precondition_proof=require_precondition_proof)
+
 
 def agent3_test_case() -> ProductTestCaseCandidate:
     return ProductTestCaseCandidate.model_validate(
@@ -664,6 +673,31 @@ def agent3_observation() -> UiObservation:
         device_state_fields=["id", "mode", "setTemp"],
         observed_at="2026-08-13T00:00:00+00:00",
     )
+
+
+def generic_control_guard_fixture():
+    case = generic_new_control_test_case()
+    observation = agent3_observation()
+    observation.elements.append(ObservedUiElement(selector="#new-feature-toggle", tag="input",
+        text="새 제어", visible=True, enabled=True, action_hint="CHECK_OR_UNCHECK"))
+    observation.harness_values["window.__vccs.feature.enabled"] = False
+    plan = Agent3AutomationPlan(tc_id=case.tc_id, target_device_id=1, summary="범용 스위치 시험",
+        actions=[
+            AutomationAction(action_id="ACT-090", phase="TEST", action_type="CHECK", selector="#new-feature-toggle", source_text=case.steps[0]),
+            AutomationAction(action_id="ACT-091", phase="RESTORE", action_type="UNCHECK", selector="#new-feature-toggle", source_text=case.restore_steps[0]),
+        ], assertions=[
+            AutomationAssertion(result_id="ER-090", observation_layer="UI", strategy="UI_CHECKED_EQUALS", selector="#new-feature-toggle", expected_value=True),
+            AutomationAssertion(result_id="ER-091", observation_layer="INTERNAL_STATE", strategy="INTERNAL_VALUE_EQUALS", selector="window.__vccs.feature.enabled", expected_value=True),
+        ])
+    return case, plan, observation
+
+def precondition_guard_fixture():
+    case, plan, observation = generic_control_guard_fixture()
+    plan.precondition_checks = [pipeline.PreconditionCheck(
+        source_text=case.preconditions[0], read_kind="UI_CHECKED",
+        selector="#new-feature-toggle", expected_value=False,
+    )]
+    return case, plan, observation
 
 def agent3_plan() -> Agent3AutomationPlan:
     return Agent3AutomationPlan(
@@ -1154,7 +1188,11 @@ def _write_agent4_inputs(
 
 def build_approvable_ui_run(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[Path, Path, Path, str, str, str]:
+    # UI transaction unit fixture, not a full pipeline evidence fixture.
+    # Source-chain rejection is tested separately without this stub.
+    monkeypatch.setattr(pipeline_ui, "_verify_candidate_sources", lambda *_: None)
     runs_root = tmp_path / "runs"
     approved_root = tmp_path / "approved_assets"
     target_html = tmp_path / "virtual-controller.html"

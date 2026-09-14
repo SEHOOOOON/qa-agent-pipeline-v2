@@ -1,0 +1,10 @@
+{
+  "contract_version": "1.0",
+  "publication_kind": "SANITIZED_EVIDENCE_MANIFEST",
+  "run_id": "RUN-20260912-100402-5F1715",
+  "files": {
+    "public_result.json": "141a5d90077f7c1425336d809191a62aebbdce1ed0586ef4ab594376e03563c2",
+    "README.md": "0dd1246c1dadece22dc814bc2c67db13ebe512f090d62d8181365eb368e4c994"
+  },
+  "excluded": ["credentials", "external service destinations", "local absolute paths", "full model artifacts", "screenshots", "Playwright trace", "raw logs"]
+}

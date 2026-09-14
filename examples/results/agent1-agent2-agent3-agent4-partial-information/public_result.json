@@ -1,0 +1,68 @@
+{
+  "contract_version": "1.0",
+  "publication_kind": "SANITIZED_EVIDENCE_SUMMARY",
+  "run_id": "RUN-20260912-100402-5F1715",
+  "execution_date": "2026-09-12",
+  "request_summary": "MED 적용 시 중풍 표시와 내부 fanSpeed=MED를 검증하고, 목표 색상이 미정인 적용 완료 알림의 색상 변경도 요청했습니다.",
+  "agent1": {
+    "decision": "PARTIAL_PROCEED",
+    "checkpoint": "REVIEW",
+    "handoff": "CONTINUE"
+  },
+  "validation": {
+    "total_results": 3,
+    "product_result_count": 2,
+    "environment_result_count": 1,
+    "status_counts": {
+      "PASSED": 3,
+      "ASSERTION_FAILED": 0,
+      "EXECUTION_ERROR": 0,
+      "TIMEOUT": 0,
+      "SKIPPED": 0
+    },
+    "results": [
+      {
+        "test_id": "TC-CAND-001",
+        "source": "NEW_AUTOMATION_CANDIDATE",
+        "status": "PASSED"
+      },
+      {
+        "test_id": "TC-ENV-000",
+        "source": "ENVIRONMENT_PRECHECK",
+        "status": "PASSED"
+      },
+      {
+        "test_id": "TC-V2-001",
+        "source": "EXISTING_REGRESSION",
+        "status": "PASSED"
+      }
+    ]
+  },
+  "excluded_information_gaps": [
+    "적용 완료 알림의 색상을 변경해야 하지만 목표 색상은 미정입니다."
+  ],
+  "automation_exclusions": [],
+  "final_review_notes": [
+    "CP1: 변경 전 값이 대상 SRS 행에서 직접 확인되지 않습니다.",
+    "CP2: REQ-FAN-001 인수 기준에 MED의 사용자용 한글 표시 규칙을 추가하는 SRS 개정 제안은 사람의 승인 후 반영해야 합니다."
+  ],
+  "final": {
+    "checkpoint4": "PASS",
+    "recommendation": "HUMAN_REVIEW",
+    "registration_performed_in_this_run": false
+  },
+  "external_reporting": {
+    "slack": "PREVIEW",
+    "mode": "DRY_RUN",
+    "notion": "PREVIEW"
+  },
+  "source_sha256": {
+    "request.json": "01092c9d5dd701a401c0b2c439caa3d93396dbc90e03233c8ae051b755677503",
+    "agent1_change_analysis.json": "d5636203bbf70f6f88e745aa54367b9a6a98e468aa7f58f1eb6768ccb2978611",
+    "checkpoint1.json": "3830a1d467a8e55b422faf949eeea2b793e447b4b12c8cdaf266866326936dae",
+    "validation_execution.json": "583c5a076bdd77e376126e7c45136d40d8f9bf80b8baaa0c671a3122637202d5",
+    "checkpoint4.json": "16dc61100a47e22c8219424961c0150275dbd7652938c0a1a1ef5d6573841e48",
+    "final_report.json": "496f521cdd01953794d7e28a90dddda9d7db44ee0a7aa36e01e3a7a52cc27681",
+    "external_reporting.json": "39de0b70470ca07b37ee4f67b9b36af1f55c7085d1be64336299b4e2f763522a"
+  }
+}

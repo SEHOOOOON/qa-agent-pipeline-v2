@@ -452,6 +452,7 @@ class ObservedUiElement(StrictModel):
     accessible_name: str | None = None
     value: str | None = None
     checked: bool | None = None
+    match_count: int = Field(default=1, ge=0)
 
 
 class UiObservation(StrictModel):
@@ -478,6 +479,7 @@ class VerifiedExecutionContext(StrictModel):
     target_device_visible: bool = False
     device_state_available: bool = False
     error_free: bool | None = None
+    online: bool | None = None
     unlocked: bool | None = None
     evidence: list[NonEmptyStr] = Field(default_factory=list)
 
@@ -515,6 +517,22 @@ class Agent3PlanningStatus(str, Enum):
     AUTOMATION_SUPPORT_EXTENSION_REQUIRED = "AUTOMATION_SUPPORT_EXTENSION_REQUIRED"
 
 
+class PreconditionReadKind(str, Enum):
+    UI_TEXT = "UI_TEXT"
+    UI_VALUE = "UI_VALUE"
+    UI_CHECKED = "UI_CHECKED"
+    UI_ENABLED = "UI_ENABLED"
+    INTERNAL_VALUE = "INTERNAL_VALUE"
+    BASELINE_CONTEXT = "BASELINE_CONTEXT"
+
+
+class PreconditionCheck(StrictModel):
+    source_text: NonEmptyStr
+    read_kind: PreconditionReadKind
+    selector: NonEmptyStr
+    expected_value: str | float | int | bool
+
+
 class Agent3AutomationPlan(StrictModel):
     tc_id: Annotated[str, StringConstraints(pattern=r"^TC-CAND-\d{3}$")]
     target_device_id: int = Field(ge=1, le=16)
@@ -522,6 +540,7 @@ class Agent3AutomationPlan(StrictModel):
     planning_status: Agent3PlanningStatus = Agent3PlanningStatus.READY
     actions: list[AutomationAction] = Field(default_factory=list)
     assertions: list[AutomationAssertion] = Field(default_factory=list)
+    precondition_checks: list[PreconditionCheck] = Field(default_factory=list)
     extension_reasons: list[NonEmptyStr] = Field(default_factory=list)
     technical_notes: list[NonEmptyStr] = Field(default_factory=list)
 
@@ -533,7 +552,7 @@ class Agent3AutomationPlan(StrictModel):
             if self.extension_reasons:
                 raise ValueError("READY 자동화 계획에는 지원 범위 확장 사유를 넣지 않습니다.")
         else:
-            if self.actions or self.assertions:
+            if self.actions or self.assertions or self.precondition_checks:
                 raise ValueError("지원 범위 확장 요청에는 실행 동작이나 검증 조건을 넣지 않습니다.")
             if not self.extension_reasons:
                 raise ValueError("지원 범위 확장 요청에는 구체적인 사유가 필요합니다.")

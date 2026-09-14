@@ -55,11 +55,13 @@ Agent 평가 실험은 별도 저장소의 범위입니다. 사용자가 명시�
 코드 동작이나 상태가 변경되면 같은 작업에서 관련 문서를 함께 점검합니다.
 
 - 구현 상태·실행 방법: `README.md`
-- 범위·완료 기준: `docs/02_V2_MVP_DESIGN.md`
-- Agent·Checkpoint 계약: `docs/03_AGENT_AND_CHECKPOINT_SPEC.md`
-- 테스트 수·추적성·증거: `docs/04_TEST_AND_TRACEABILITY_PLAN.md`
-- Project1 기준 자산과 한계: `docs/05_PROJECT1_BASELINE_AUDIT.md`
-- Agent 3 UI·하네스·격리 실행 경계: `docs/06_TEST_HARNESS_GUIDE.md`
+- 시나리오·범위·Agent/Checkpoint·하네스·승인 계약: `docs/PROJECT_GUIDE.md`
+- 현재 검증·최신 Run·결과 위치·남은 과제: `PROJECT_HANDOFF.md`
+- 자동 테스트 목록: `docs/07_TEST_CATALOG.md`
+- 제품 기대 동작: `docs/01_PRODUCT_SRS.md`
+- 과거 결정·V1 감사: `DECISION_LOG.md`
+
+설명 문서는 README·PROJECT_GUIDE·PROJECT_HANDOFF 세 개로 유지합니다. 최신 실행 수치와 연대기는 인계 문서에만 두고 다른 설명 문서에 반복하지 않습니다. SRS·테스트 목록·과거 증거는 설명 문서와 구분해 보존합니다.
 
 문서의 계획을 구현 완료로 바꾸지 않습니다. 테스트 개수, 지원 범위, Run ID, 공개 산출물 수치는 실제 결과와 대조한 뒤 수정합니다.
 

@@ -1,7 +1,7 @@
 # 자동 테스트 카탈로그
 
 최종 확인: 2026-09-12
-실행 기준: `python -m pytest --collect-only -q` → **207건**
+실행 기준: `python -m pytest --collect-only -q` → **283건**
 실제 정의 파일: `tests/test_srs_agent1.py`, `tests/test_agent2.py`, `tests/test_integrity_cli.py`, `tests/test_agent3.py`, `tests/test_orchestration_execution.py`, `tests/test_agent4_reporting.py`, `tests/test_pipeline_ui.py`
 
 이 문서는 현재 수집되는 자동 테스트를 사람이 확인하기 쉽게 정리한 목록입니다. 실행의 기준은 항상 테스트 코드와 Pytest 수집 결과이며, 테스트를 추가·삭제할 때는 이 문서도 같은 변경에서 갱신합니다.
@@ -10,18 +10,70 @@
 
 | 구성 | 수량 | 설명 |
 |---|---:|---|
-| 일반 테스트 함수 | 196 | 함수 하나가 Pytest 실행 1건 |
-| 파라미터 테스트 함수 | 3 | Trial 결과 5건·복원 실패 2건·SRS 입력 변조 4건 |
-| 합계 | **207** | 현재 Pytest 수집 수 |
+| 일반 테스트 함수 | 220 | 함수 하나가 Pytest 실행 1건 |
+| 파라미터 테스트 함수 | 15 | 서로 다른 입력·실패 조합으로 실행 63건 |
+| 합계 | **283** | 현재 Pytest 수집 수 |
+
+### 긴 임시 경로 저장 오류: 추가 1건
+
+| 테스트 | 확인 내용 |
+|---|---|
+| `test_atomic_write_short_temp_preserves_original_on_failure` | 최종 경로는 유효하지만 이전 임시 이름이 260자를 넘는 경우 저장, 같은 폴더의 고유 임시 이름 사용, 교체 실패 시 원본 보존·임시 파일 정리 |
+
+기존 Agent 3 진입점·재작성 테스트에 검사 예외 전 첫 계획 보존과 두 번째 계획 보존도 추가했습니다. 새 제품 TC를 추가한 것은 아닙니다.
+
+### 사전조건 재작성 안내: 추가 1건
+
+| 테스트 | 확인 내용 |
+|---|---|
+| `test_agent3_precondition_feedback_repairs_only_unstated_context` | 오류 항목·원문·사유 전달, 모델 대역 재작성 뒤 시험 연결, 불필요한 온라인·표시 확인 제거와 필수 잠금 확인 누락 차단 구분, TC·첫 계획 원문 보존 |
+
+기존 `test_agent3_uses_structured_plan_api`도 최신 지침·재작성 안내의 실제 API 입력 구성 검사를 포함합니다. 실제 유료 모델을 호출하는 테스트는 아닙니다.
+
+### 사전조건 증명 계약: 추가 18개 실행 조합
+
+| 테스트 | 확인 내용 |
+|---|---|
+| `test_precondition_proof_rejects_unverified_plans` | 기본 CP3 증명 강제, 누락·원문·Selector·값·약한 문자·로그인 누락·상태 전략·판정 순서 8조합 |
+| `test_baseline_context_cannot_prove_administrator_login` | 장비 표시 문맥을 관리자 로그인 증명으로 대신하지 않음 |
+| `test_compound_baseline_precondition_needs_each_observed_fact` | 온라인·표시·오류·잠금 복합 문맥의 일부 확인만으로 통과시키지 않음 |
+| `test_narrow_inventory_exposes_target_initial_values_without_full_discovery` | 전체 UI 조사 없이 초기 대상 ID·모드·온도·온라인 문맥 관찰 |
+| `test_precondition_internal_device_reference_must_match_target_identity` | 다른 장비 배열 위치에서 읽은 값을 대상 장비 증명으로 사용하지 않음 |
+| `test_runtime_precondition_is_verified_before_product_test` | 실제 브라우저의 초기 상태 일치/불일치 2조합, 성공 관찰값 기록·본 시험 전 차단·필수 증거·제품 오분류 방지 |
+| `test_precondition_multiple_explicit_values_need_multiple_checks` | ADMIN·SOUTH처럼 한 문장의 여러 명시 값 중 하나만 증명하지 못함 |
+| `test_agent4_reports_precondition_failure_as_unexecuted_product_test` | 사전조건 불충족을 제품 결함 아닌 자동화 문제·HOLD로 보고하고 사람 문서에 표시 |
+| `test_agent3_requires_proof_on_new_runs_and_records_it` | 새 Agent 3 진입점의 증명 강제·기술 재작성 1회·미실행 제외·계약 Manifest 2조합 |
+
+기존 CP3 부문 단위 테스트는 사전조건 계약이 없는 과거 계획 fixture를 test-support 어댑터로 검사합니다. 운영 CP3 기본값은 증명 필수이며, 위 신규 테스트와 실제 실행 진입점에서는 이를 끄지 않습니다. 모델 대역으로 실행 순서를 확인한 테스트와 실제 브라우저 시험을 새 API Live로 해석하지 않습니다.
+
+### 9/12 후속 감사 보완: 18개 실행 조합
+
+| 테스트 | 확인 내용 |
+|---|---|
+| `test_new_tc_expected_value_requires_its_own_condition` | 연결 조건에 없는 코드·수치 기대값 차단 3조합 |
+| `test_new_tc_med_to_high_is_rejected_without_rejecting_med` | MED 정상 통과·HIGH 변경 차단·과거 계약 분리 |
+| `test_new_tc_range_allows_in_range_value_but_not_opposite_policy` | 범위 내 값 허용, 허용·차단 반전 차단 |
+| `test_boundary_input_in_expectation_is_not_confused_with_output` | 차단할 경계 입력과 허용된 출력값을 구분 |
+| `test_cp3_rejects_static_label_in_place_of_switch_state` | 상태 대신 고정 명칭만 검사하는 계획 차단 |
+| `test_cp3_rejects_disabled_strategy_for_enabled_expectation` | 활성 기대에 비활성 검사 전략을 연결하지 못함 |
+| `test_generic_restore_snapshot_follows_preparation` | 실제 브라우저에서 준비 전 ON→준비 OFF→시험 ON→복원 OFF 확인 |
+| `test_report_consumers_reject_changed_sources` | 실행 원본·최종 보고 변경 시 외부 보고와 검토 문서 재생성 차단 2조합 |
+| `test_shared_lock_rejects_overlapping_thread_and_is_reusable` | 같은 잠금 객체의 동시 진입 거절 및 정상 해제 후 재사용 |
+| `test_approval_rejects_unverified_pass_labels` | PASS 표시만 있는 불완전 기록의 승인 연결 검증 거절 |
+| `test_missing_observed_interface_is_tc_exclusion_not_internal_error` | UI 인터페이스 누락을 TC 제외로 기록, 내부 오류와 구분 |
+| `test_browser_ignores_previous_run_post_response` | 승인·재검증 성공/실패 지연 응답이 선택된 Run을 덮지 않음 4조합 |
+
+승인 파일 등록·원상복구 UI 단위 테스트는 원본 연결 검증 경계를 대체한 작은 fixture를 사용합니다. 그 테스트 통과를 전체 실행 증거의 진위 검증으로 해석하지 않습니다. 원본 검증 거절 테스트와 실제 Run 사본 대조 결과는 별도로 확인합니다.
 
 파라미터 테스트 `test_agent3_cli_exit_code_reflects_trial_trustworthiness`는 다음 다섯 결과를 별도 실행합니다: `PASS`, `PRODUCT_MISMATCH_CANDIDATE`, `AUTOMATION_ERROR`, `ENVIRONMENT_ERROR`, `TIMEOUT`.
 
 `test_agent4_reports_restore_failure_without_hiding_product_observation`는 복원 단독 실패와 제품 불일치·복원 동시 실패를 각각 검사합니다. 9월 7일 증가한 4건은 이 두 조합과 로그 오인·변조 방지, 기존 TC 절차 메모의 최종 보고 연결이며 제품 TC가 새로 생성된 수가 아닙니다.
 
-## 1. 기준 자산·SRS·Agent 1·Checkpoint 1 (26건)
+## 1. 기준 자산·SRS·Agent 1·Checkpoint 1 (27건)
 
 | 테스트 | 확인 내용 |
 |---|---|
+| `test_partial_unresolved_acceptance_is_handed_off_as_gap_not_condition` | 원문에 미정이 명시된 인수 조건의 제외 인계 허용, 제외 기록 누락·명확한 조건 무단 제외 차단 |
 | `test_v2_product_baseline_contains_only_runtime_assets` | V2의 V1 복사 자산이 독립 실행에 필요한 네 파일뿐인지 확인 |
 | `test_success_fan_speed_request_is_grounded_in_v2_baseline` | 새 풍량 성공 후보의 SRS Requirement·UI Selector·내부 적용 근거 존재 |
 | `test_loads_product_requirements_from_markdown` | Product SRS 요구사항 로딩 |
@@ -224,7 +276,7 @@
 | `test_agent4_rejects_broken_manifest_or_candidate_chain` | Agent 3→검증 Manifest 또는 실제 후보 파일 체인 불일치 차단 |
 | `test_agent4_rejects_passed_result_without_complete_evidence` | 완전한 증거 없는 PASS 결과 차단 |
 
-## 7. 중앙제어 공개 데모·실제 Run 연동·후보 자산 승인 (31건)
+## 7. 중앙제어 공개 데모·실제 Run 연동·후보 자산 승인 (32건)
 
 추가한 SRS 단독 승인 테스트:
 
@@ -247,6 +299,7 @@
 | `test_pipeline_ui_live_run_uses_agent1_to_4_order_without_external_send` | 순서·외부 전송 금지·설정 경로 전달·다른 Run 혼입 방지 |
 | `test_pipeline_ui_browser_recovers_polling_and_preserves_selected_run` | 브라우저 재접속·창 닫기·통신 장애 복구, 조회 선택과 응답 순서 보호 |
 | `test_public_demo_shows_one_v2_normal_change_without_api_or_file_registration` | 공개 MED 정상 변경 데모의 Agent 1~4·TC 상세·승인 미리보기와 API 호출·파일 등록 없음 |
+| `test_ui_waits_for_final_report_before_overall_pass` | Agent 3 통과를 전체 통과로 표시하지 않고 최종 보고 전 대기·중단 및 최종 권고를 구분 |
 | `test_asset_approval_rejects_different_executed_code` | 다른 코드 해시의 실행 기록으로 공식 승인·재검증하지 않음 |
 | `test_report_uses_verified_tc_snapshot_and_legacy_custom_root` | TC 원문 보존·해시 확인, 과거 기록의 지정 폴더 사용 |
 | `test_browser_resets_cross_run_consent_and_separates_timeouts` | Run 변경 시 동의 초기화, 조회/처리 대기시간 분리, 설명 겹침 방지 |
@@ -259,6 +312,24 @@
 | `test_pipeline_ui_hold_is_recorded_and_can_later_be_approved` | 보류 사유 기록, 공식 자산 미생성, 후속 승인 전환 |
 | `test_pipeline_ui_blocks_asset_approval_for_failed_or_stale_evidence` | 최종 실패·현재 HTML 해시 불일치 후보의 공식 등록 차단 |
 | `test_pipeline_ui_revalidates_stale_candidate_without_model_call` | HTML 변경 뒤 모델 호출 없는 후보 재검증, 공개 요약·원본 해시 기록과 승인 가능 상태 복구 |
+
+## 8. 코드 감사 후 명백한 오류 방지 (36건)
+
+기존 1~7절의 209건에 추가된 검증입니다. 제품 후보 TC가 늘어난 것이 아니라 검사기의 오류 차단·정상 허용 조합을 추가했습니다.
+
+| 테스트 | 실행 수 | 확인 내용 |
+|---|---:|---|
+| `test_cp1_rejects_explicit_meaning_and_source_errors` | 4 | 의미 반전·근거 밖 숫자·유지 역할·Requirement 출처 오류 차단, 과거 계약 구분 |
+| `test_source_quote_respects_code_and_number_boundaries` | 1 | ON/NONE·30/130 구분과 정상 한국어 조사 허용 |
+| `test_cp2_rejects_opposite_existing_behavior_and_srs_value` | 1 | 반대 동작 기존 TC 재사용과 잘못된 SRS 값 차단 |
+| `test_cp3_rejects_false_pass_plans` | 5 | 활성 반전·시험/복원 누락·약한 텍스트·중복 요소 차단, 정상 계획 통과 |
+| `test_scalar_guard_distinguishes_values` | 10 | 한국어·영어 긍정/부정, 명시 boolean과 필드명, 코드·숫자 구분 |
+| `test_inventory_counts_duplicate_selectors_and_target_only_fields` | 1 | 실제 브라우저의 중복 Selector 수집과 대상 장비 필드 한정 |
+| `test_orchestrator_records_internal_errors_and_explicit_scope` | 4 | 예외·저장 오류의 비정상 종료, 다른 후보 계속 처리, 명시 선택·없는 ID |
+| `test_error_manifest_preserves_original_error_with_broken_summary` | 1 | 손상 요약이 있어도 원래 오류 기록 |
+| `test_regression_skip_uses_result_summary_not_warning` | 2 | 경고문 skipped는 PASS 유지, 실제 요약 skipped는 미실행 |
+| `test_regression_timeout_uses_process_tree_cleanup` | 1 | 기존 회귀 시간 초과의 공통 프로세스 정리 호출·TIMEOUT 기록 |
+| `test_local_mutations_require_same_origin_json` | 6 | 정상 동일 출처 허용, 외부/null/누락 Origin·Host 위조·text/plain 거부 |
 
 ## 갱신 규칙
 

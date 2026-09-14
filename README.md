@@ -1,228 +1,80 @@
 # QA Agent Pipeline V2
 
-프로젝트 1의 QA 절차를 유지하면서, 고정 예시였던 Agent 산출물을 실제 모델 호출과 실행 증거로 연결한 MVP입니다.
+기존 SRS와 테스트케이스(TC)가 있는 가상 중앙제어 시스템에서, 변경 요구사항을 분석하고 변경분을 시험한 뒤 사람이 재사용할 테스트 자산을 승인하는 프로젝트입니다.
 
-최신 기준: **2026-09-10 / V2** — 보완 후 MED 요구사항으로 실제 Agent 1→4 실행·관련 회귀·최종 보고 PASS. [시나리오로 이해하는 처리 흐름](docs/08_SCENARIOS_AND_FLOW_GUIDE.md), [현재 구현·검증·남은 작업](PROJECT_HANDOFF.md)과 [최신 커밋 이력](https://github.com/SEHOOOOON/qa-agent-pipeline-v2/commits/main/)을 함께 확인하세요. V1 포트폴리오의 고정 시연과 이 저장소의 현재 구현은 구분합니다.
+V1의 QA 기준과 4-Agent 흐름에 실제 모델 호출·자동화 후보 생성·실행 증거를 연결한 MVP입니다.
 
-핵심 흐름은 다음과 같습니다.
+[V2 포트폴리오 페이지](https://sehooooon.github.io/qa-agent-pipeline-v2/project.html)는 소개·QA 기준·실행 흐름·사례·승인·설계 경험을 세로 스크롤로 읽는 정적 소개 페이지입니다. 영상은 준비 중이며, 페이지를 여는 것만으로 API 호출이나 자산 승인을 수행하지 않습니다. [페이지 원본](project.html)은 이 저장소에서 관리합니다.
 
-~~~text
-변경 요청
-  → Agent 1: 요구사항 분석
-  → Agent 2: 기존 TC 대조·변경분 TC 설계
-  → Agent 3: 신규·수정 후보 TC 자동화·시험
-  → 기존 관련 회귀 실행
-  → Agent 4: 결과 분류·최종 보고·Slack·Notion 전달
-  → 사람의 최종 확인
-~~~
+```text
+변경 요청 → Agent 1 요구사항 분석 → Agent 2 기존 TC 대조·변경분 설계
+         → Agent 3 자동화 계획·코드 생성·시험 → 관련 기존 TC 실행
+         → Agent 4 결과 분류·보고 → 사람의 SRS·공식 TC 승인
+```
 
-## 프로젝트 1과 V2의 관계
+## 먼저 읽을 문서 3개
 
-| 구분 | 프로젝트 1 | V2 |
+| 문서 | 읽는 목적 |
+|---|---|
+| 이 README | 프로젝트 소개와 실행 방법 |
+| [프로젝트 안내](docs/PROJECT_GUIDE.md) | 시나리오, QA 기준, Agent·Checkpoint 상세 로직, 사람 승인 |
+| [현재 상태와 다음 작업](PROJECT_HANDOFF.md) | 최신 검증 결과, 실행 증거 위치, 남은 과제 |
+
+제품 기준인 [SRS](docs/01_PRODUCT_SRS.md), [자동 테스트 목록](docs/07_TEST_CATALOG.md), [결정·시행착오 기록](DECISION_LOG.md), [작업 규칙](AGENTS.md)은 필요할 때 찾아보는 자료입니다. 현재 테스트 수와 최신 실행 결과는 인계 문서에서 관리합니다.
+
+## V1과 달라진 부분
+
+| 영역 | V1 | V2 |
 |---|---|---|
-| QA 기준 | 3단계 기준, 추적성, 독립성, UI·내부 이중 검증 | 그대로 유지 |
-| Agent 1·2 | 고정 산출물 시연 | OpenAI API 구조화 호출 |
-| Agent 3 | 사람이 작성한 기존 TC 실행 | AI가 실행 계획을 만들고 허용 목록 컴파일러가 Python 생성 |
-| Agent 4 | 규칙 기반 결과 분류와 Slack·Notion 보고 | 분류·외부 보고를 유지하고 인계·증거 정합성 확인 추가 |
-| 실행 증거 | 고정 예시 중심 | 변경 요청별 Run 산출물과 SHA-256 |
+| QA 기준 | 3단계 기준·추적성·독립성·UI/내부 상태 이중 검증 | 유지 |
+| Agent 1·2 | 고정 산출물 시연 | 실제 OpenAI API로 분석·TC 생성 |
+| Agent 3 | 사람이 작성한 기존 자동화 실행 | AI가 계획 작성, 허용 목록 컴파일러가 Python 생성·시험 |
+| Agent 4 | 규칙 기반 분류·Slack/Notion 보고 | 유지하며 인계·증거·집계 확인 추가 |
+| 최종 판단 | 시연 중심 | 사람이 SRS 개정·공식 TC 등록 승인 |
 
-V2는 새로운 QA 방법론을 추가한 것이 아니라 V1 절차에 실제 모델 호출, 단계별 JSON 인계, 자동화 후보 생성과 실행 증거를 연결한 버전입니다. 독립 실행에 필요한 가상 중앙제어 HTML과 사람이 작성한 기존 회귀 자산만 `product_baseline/`에 두며 Project1 원본은 변경하지 않습니다.
+V1은 Fixture 기반 Workflow Prototype입니다. V2에서도 Agent 4는 규칙 기반 분석기이며, Checkpoint 통과와 사람의 공식 승인은 별개입니다.
 
-## 단계별 동작
-
-| 단계 | 하는 일 | 계속 진행 조건 |
-|---|---|---|
-| Agent 1 / CP1 | 변경 전·후, 관련 요구사항, 확정 내용과 정보 부족을 구분 | 확정된 시험 범위가 있음 |
-| Agent 2 / CP2 | 기존 사람 TC와 확정 조건을 대조해 변경분 후보와 관련 기존 TC를 분리 | 3단계 QA 기준·추적성·독립성·조건별 판정·기존 TC 대조 충족 |
-| Agent 3 / CP3 | 신규·수정 후보만 필요한 UI를 확인하고 자동화 계획·코드·시험 증거 생성 | 계획·정적 검사 통과 및 신뢰 가능한 시험 결과 |
-| 기존 회귀 | Agent 2가 영향 관계를 기록한 기존 TC만 실행 | 환경 사전 점검 통과 |
-| Agent 4 / CP4 | 제품 불일치 후보, 자동화 오류, 환경 오류, 근거 부족을 분리하고 외부 보고 | 산출물·증거·집계 정합성 충족 뒤에만 전달 허용 |
-
-운영 원칙은 세 가지입니다.
-
-- 앞 단계 계약을 통과한 확정 범위는 계속 실행하고, 불명확하거나 자동화할 수 없는 TC는 제외해 마지막 보고에 남깁니다. 인계 손상이나 Checkpoint 실패까지 무시하고 진행하지는 않습니다.
-- Agent 2는 Requirement ID뿐 아니라 실제 검증 동작을 비교해 유지되는 기존 TC는 재사용하고 변경분만 신규 후보로 만듭니다.
-- TC는 입력값 하나가 아니라 하나의 관제점·업무 규칙 단위로 설계하고, 각 조건 직후 판정과 시험 종료 후 상태 복원을 확인합니다.
-
-## AI와 코드 생성의 역할
-
-- Agent 1·2는 구조화 JSON을 직접 생성합니다.
-- Agent 3 AI는 승인 TC와 실제 UI 확인 결과를 바탕으로 동작·검증 계획을 만들며, 묶음 TC는 각 조건 직후 검증한 다음 다음 조건으로 진행합니다.
-- Playwright Python은 AI가 자유롭게 작성하지 않고 허용 목록 기반 컴파일러가 생성합니다.
-- Agent 4는 생성형 AI가 아니라 규칙 기반 분석기입니다.
-
-Agent 4는 증거 로그에 제품 불일치와 복원 실패가 함께 있으면 복원 실패를 근거로 자동화 실행 문제·HOLD(보류)로 분류하고 두 관찰을 사람 검토서에 함께 남깁니다. 같은 TC를 두 번 실행한 것으로 집계하지 않습니다.
-
-이 구조는 AI의 의미 판단을 사용하되 Requirement ID, 기대값, 경계값, Assertion의 변경을 검사하는 통제입니다. 구조·명시 값 검사는 자연어 의미의 완전한 일치나 모든 오생성의 차단을 보장하지 않습니다.
-
-## 코드 구조
-
-`qa_pipeline_v2`는 기존 import와 명령행 사용법을 유지하는 호환 진입점입니다. 실제 구현은 공통 계약, Agent 1, Agent 2, Agent 3, 실행·회귀, Agent 4·보고, Orchestrator로 나뉩니다. 테스트도 같은 역할 기준의 7개 파일로 분리하고 공통 fixture와 builder만 별도 지원 파일에서 공유합니다. 이 분리는 파일 위치만 바꾸며 Agent 계약·Checkpoint 판정·CLI 명령은 변경하지 않습니다.
-
-## 유지하는 내부 안전장치
-
-사용자가 매번 이해해야 하는 별도 절차는 아니지만 다음 검사는 유지합니다.
-
-- Pydantic 구조화 계약
-- 앞 단계 산출물과 SHA-256 인계 확인
-- TC와 자동화 계획의 값·근거 추적
-- 허용된 UI 조작·검증만 코드로 변환
-- 원본과 분리된 임시 위치에서 신규 코드 시험
-- 자동 생성·시험 중 기존 SRS·TC·자동화 원본 비수정(사람이 동의한 SRS 개정은 승인 절차에서 별도 반영)
-- API 전송 Preview와 비밀정보 제외
-
-UI 조사는 선택한 TC에 필요한 요소로 제한합니다. 제품 규칙은 코드에 하드코딩하지 않고 변경 요청·SRS·승인 TC에서 받으며, 처음 보는 기능도 실제 화면에서 확인한 표준 UI 조작과 읽기 가능한 상태로 구현 가능한지 판단합니다.
-
-## 현재 범위
-
-포함:
-
-- `MODIFIED` 변경 요청
-- Agent 1~3 실제 모델 호출
-- 확정 범위의 다중 TC 독립 처리
-- 중앙 관제 패널 UI 기반 Playwright 후보 생성·시험
-- 관련 기존 회귀 선택 실행
-- Agent 4 규칙 기반 분류, 최종 보고와 Slack·Notion Dry-run/명시적 전송
-- PASS 후보의 현재 화면 재검증과 사람 승인 기반 공식 TC·자동화 자산 등록
-- 승인 공식 TC의 다음 Run 대조·선택·관련 회귀 재실행
-- MODIFIED·UPDATE_REQUIRED Requirement의 SRS 개정 제안, 최종 검토 전달과 자산 승인 시 동시 반영
-
-제외:
-
-- `ADDED`, `DELETED` 자동 처리
-- 벽면 리모컨·로컬 조작 경로
-- 모든 UI 기술의 자동 지원
-- 무제한 자동 수정과 Self-Healing
-- Full Regression 전체 실행
-- Checkpoint PASS만으로 사람 판단 없이 수행하는 정식 QA 자산 자동 등록
-- 중단된 Run을 이어 붙이는 재개 UI
-- 다중 모델 비교와 대규모 반복 평가
+현재 범위는 MODIFIED 요청, 중앙 관제 패널, 변경분 후보와 관련 기존 TC 실행입니다. ADDED·DELETED, 전체 회귀, 실제 장비 통신, 모든 UI 기술 지원과 무제한 자동 수정은 포함하지 않습니다. 반복 평가는 별도 프로젝트 2에서 다룹니다.
 
 ## 실행 방법
 
-OpenAI Python SDK는 `OPENAI_API_KEY` 환경변수를 읽습니다. 키를 코드·JSON·Git에 저장하지 않습니다.
+Python 3.10 이상이 필요합니다. OpenAI API 키는 실행 환경의 `OPENAI_API_KEY`에 설정합니다. 실제 모델 호출에는 비용이 발생합니다. 기본 모델은 `gpt-5.6-terra / medium`입니다.
 
-~~~powershell
-python -m pip install ".[agent3,test]" pytest-playwright
+```powershell
+python -m pip install ".[agent3,test]"
 python -m playwright install chromium
-$env:OPENAI_API_KEY="본인의 API 키"
 
-# Agent 1~3과 신규 자동화 시험
-python -m qa_pipeline_v2 pipeline `
-  --request "변경 요청 JSON 경로" `
-  --target-html "product_baseline/virtual-controller.html"
-
-# 완료된 신규 자동화와 관련 기존 회귀 실행(API 미호출)
-python -m qa_pipeline_v2 execute `
-  --run-id "RUN-..." `
-  --target-html "product_baseline/virtual-controller.html"
-
-# 규칙 기반 Agent 4 보고(기본 Slack·Notion Dry-run·테스트 재실행 없음)
-python -m qa_pipeline_v2 agent4 --run-id "RUN-..."
-
-# 이미 끝난 Run의 외부 보고 또는 사람 검토 문서
-python -m qa_pipeline_v2 report --run-id "RUN-..."
-python -m qa_pipeline_v2 human-review --run-id "RUN-..."
-
-# 가상 중앙제어 화면에서 저장된 실제 Run 조회(API 미호출)
+# 저장된 실제 Run 조회
 python -m qa_pipeline_ui
-# 브라우저에서 http://127.0.0.1:8765/ 열기
 
-# 새 AI 실행과 사람 승인·보류를 모두 허용
+# 새 API 실행과 사람 승인 기능 활성화
 python -m qa_pipeline_ui --allow-live-run --allow-asset-approval
-~~~
+```
 
-중앙제어 UI의 기본 모드는 저장된 Run 조회 전용입니다. `--allow-live-run`에서만 새 API 실행을 허용하고, `--allow-asset-approval`에서만 검증된 PASS 후보의 공식 자산 승인·보류를 허용합니다. 화면에서 실행하는 Agent 4 외부 보고는 미리보기이며 실제 전송은 CLI의 `--send`를 명시했을 때만 수행합니다.
+브라우저에서 `http://127.0.0.1:8765/`에 접속합니다. 새로 복제한 저장소에는 로컬 실행 기록이 없어 조회 목록이 비어 있을 수 있습니다. `pytest-playwright`는 agent3 설치 옵션에 포함됩니다. 실제 실행·승인 요청은 같은 로컬 페이지의 JSON 요청만 허용합니다.
 
-테스트는 별도 브라우저에서 수행하며 관제 화면의 장비 상태와 실시간 동기화하지 않습니다. 화면은 실행 요청·결과 조회용입니다. 실행 중 페이지 재접속·창 닫기 후에도 상태를 갱신하고, 연결 오류는 상태 확인 불가로 표시한 뒤 재시도합니다. 조회할 Run과 실행 중 Run을 구분하며, 후속 실행은 처음 지정한 Run ID만 사용합니다. 서버의 `--srs`·`--approved-assets-root`는 분석·실행·승인에 동일하게 전달합니다. 로컬 주소에서 HTTP 연결 장애가 나면 데모로 숨기지 않고 재연결 상태를 표시합니다.
+HTML을 직접 열거나 공개 웹 주소에 접속하면 MED 풍량 정상 변경의 저장된 데모가 표시됩니다. 데모 승인은 화면 시연이며 파일에 반영되지 않습니다. 실제 시험은 로컬 서버가 별도 브라우저에서 수행하고, 관제 화면에는 실행 상태와 결과가 표시됩니다.
 
-Python 3.10 이상이 필요합니다. 현재 패키지의 선택 의존성에는 기존 회귀 실행에 필요한 `pytest-playwright`가 빠져 있어 위 명령에서 별도 설치합니다. Chromium도 별도 설치가 필요합니다. 설치 절차는 [Playwright 공식 안내](https://playwright.dev/python/docs/intro)를 참고하세요.
+CLI에서는 다음 순서로 실행합니다.
 
-새로 복제한 저장소에는 로컬 `runs/`가 없어 저장 결과 목록이 비어 있을 수 있습니다. HTML 파일을 직접 열거나 공개 웹 주소로 접속하면 MED 풍량 정상 변경 1건을 사용한 V2 데모가 표시됩니다. 이 데모의 Agent 1~4 결과와 승인 조작은 저장 예시이며 API·제품 자동화·SRS·공식 TC 파일을 변경하지 않습니다. 실제 Run 조회·API 실행·사람의 공식 승인은 위 로컬 서버를 통해 사용합니다. GitHub에서 코드를 보는 것만으로 서버가 실행되지는 않습니다. CLI에서는 `pipeline`이 Agent 1~3까지 담당하며 이후 `execute`, `agent4`를 순서대로 실행합니다.
+```powershell
+python -m qa_pipeline_v2 pipeline --request "examples/change_request.success-medium-fan.json" --target-html "product_baseline/virtual-controller.html"
+python -m qa_pipeline_v2 execute --run-id "RUN-..." --target-html "product_baseline/virtual-controller.html"
+python -m qa_pipeline_v2 agent4 --run-id "RUN-..."
+```
 
-Agent 3 입력을 먼저 확인하려면 개별 명령의 `--preview-only`를 사용합니다. Preview는 API를 호출하지 않습니다.
+`pipeline`은 Agent 1~3, `execute`는 완료 후보 확인·관련 기존 회귀, `agent4`는 분류·최종 보고를 담당합니다. 후자의 두 명령은 모델을 호출하지 않습니다. Slack·Notion은 기본 미리보기이며 CLI에서 `--send`를 명시할 때 실제 전송합니다. 화면에서 시작한 실행은 외부 보고 미리보기까지 진행합니다.
 
-~~~powershell
-python -m qa_pipeline_v2 agent3 `
-  --run-id "RUN-..." `
-  --tc-id "TC-CAND-..." `
-  --target-html "product_baseline/virtual-controller.html" `
-  --preview-only
-~~~
+## 검증과 공개 증거
 
-기본 모델은 `gpt-5.6-terra`, 추론 강도는 `medium`입니다. 실제 API 호출은 비용을 발생시킵니다.
+새 후보는 본 시험 직전에 사전조건의 실제 값을 확인합니다. 증명을 연결하지 못한 TC는 제외 사유를 남기고, 실제 준비 상태가 다르면 제품 결함과 구분해 보고합니다. 과거 성공 Run이 새 사전조건 검증까지 받았다는 뜻은 아닙니다.
 
-## 주요 산출물
-
-결과는 Git에서 제외되는 `runs/RUN-.../`에 저장됩니다.
-
-| 산출물 | 의미 |
-|---|---|
-| `agent1_change_analysis.json`, `agent2_test_design.json` | 요구사항 분석과 제품 기능 TC |
-| `checkpoint1.json` ~ `checkpoint4.json` | 단계별 자동 검사 결과 |
-| `agent3_candidates/<tc-id>/`, `agent3_run_summary.json` | 자동화 계획·코드·시험 증거와 실행 요약 |
-| `validation_execution.json` | 신규 후보와 관련 기존 회귀 실행 결과 |
-| `agent4_analysis.json`, `final_report.json` | 원인 분류와 최종 권고 |
-| `사람_최종_검토.md` | 사람이 최종 판단할 항목과 증거 링크 |
-| `external_reporting.json`, `external_reporting_attempts/` | 최초 외부 보고와 후속 전송·미리보기 기록. 화면은 최신 상태와 이전 전송을 구분 |
-| `approved_assets/registry.json` | 사람이 승인한 공식 TC·자동화와 SHA-256 |
-| `approved_assets/provenance/` | 공식 등록 당시 현재 화면 재검증의 공개 가능 요약과 원본 기록 SHA-256 |
-
-`PRODUCT_MISMATCH_CANDIDATE`는 제품 결함 확정이 아니라 기대 결과와 다른 관찰 후보입니다. Checkpoint 통과 역시 사람의 최종 승인을 뜻하지 않습니다.
-
-## 공개 실행 증거
-
-| 공개 예시 | 확인 범위 |
-|---|---|
-| [Agent 1→3 AUTO 온도 실행](examples/results/agent1-agent2-agent3-auto-temperature/README.md) | 실제 모델 계획, 결정론적 후보 코드, Candidate Trial과 증거 |
-| [Agent 1→4 잠금 설정 실행](examples/results/agent1-agent2-agent3-agent4-lock-disable/README.md) | 단계별 상태·사용량, 관련 기존 회귀, Agent 4 분류, 사람 검토 양식, Slack·Notion 실제 전송 상태 |
-| [Agent 1→4 MED 풍량 실행](examples/results/agent1-agent2-agent3-agent4-medium-fan/README.md) | 2026-09-03 당시 계약의 실제 모델 실행, 신규 후보와 승인 TC 재사용 분리, 3건 PASS, SRS 개정 승인 대기 |
-
-실행 원본은 로컬 `runs/`에 보존하고 Git에서 제외합니다. 위 표는 공개 폴더 5개 중 대표 3개입니다. 잠금·MED 예시는 원본 전체가 아닌 정제한 최소 요약이며 `public_manifest.json`으로 공개 파일의 SHA-256을 확인할 수 있습니다. 이전 AUTO Agent 1→3 예시는 상세 JSON·Screenshot·Trace를 포함한 당시 묶음이며 같은 공개 Manifest 형식은 사용하지 않습니다. 각 예시의 상태·테스트 수·미구현 설명은 실행 당시 기록으로 읽어야 합니다. 과거 증거를 현재 계약으로 다시 실행한 결과로 바꾸지 않습니다.
-
-## 알려진 제한
-
-- 공식 등록할 후보 코드는 Agent 3와 변경 검증의 코드 해시 모두와 일치해야 합니다. 컴파일러 변경 등으로 두 코드가 다르면 원래 코드를 임의로 등록하지 않고 차단합니다.
-- 새 Run은 기존 승인 TC의 원문을 카탈로그에 보관해 보고에 사용합니다. 과거 Run에 원문이 없으면 자산 파일이 있어야 상세를 복원할 수 있으며, UI는 지정 자산 폴더를 사용합니다. 과거 CLI 보고의 기본 폴더 대체 읽기는 유지합니다.
-
-- 기존 TC만 선택한 경우 준비·복원 메모를 넣기 위해 신규 TC를 강제하지 않습니다. 메모는 원문 그대로 마지막 사람 검토로 전달하며, 기존 자동화가 그 절차까지 수행했는지는 자동 확정하지 않습니다.
-- 기존 TC만 실행한 Run도 현재 제품·실행 증거·인계가 유효하면 중앙제어 승인 화면에서 SRS 문구만 승인할 수 있습니다. 검토자·판단 메모·문구 반영 동의가 필요하며 TC·자동화는 새로 만들지 않습니다. 제품 해시가 달라졌으면 현재 제품으로 다시 실행해야 합니다.
-- 적용 후 결과는 같은 판정 단계의 관찰값을 최대 2초 동안 다시 읽습니다. 조작 재시도나 기대값 변경은 하지 않습니다. 실제 장비의 비동기 응답 완료·미변경 지속 시간까지 보장하는 범용 대기 계약은 아닙니다.
-
-자동으로 확인하는 범위와 사람이 판단할 범위를 구분합니다. 세부 조건은 [Agent·Checkpoint 명세](docs/03_AGENT_AND_CHECKPOINT_SPEC.md)를 참고하세요.
-
-## 문서
-
-| 문서 | 역할 |
-|---|---|
-| [시나리오와 처리 흐름 안내](docs/08_SCENARIOS_AND_FLOW_GUIDE.md) | 정상 변경·정보 부족·제품 불일치 사례, 처리 분기와 사람의 공식 등록을 쉽게 설명 |
-| [제품 SRS](docs/01_PRODUCT_SRS.md) | 제품 기대 동작과 인수 기준 |
-| [V2 MVP 설계](docs/02_V2_MVP_DESIGN.md) | V1 대비 유지·추가·제외 범위 |
-| [Agent·Checkpoint 명세](docs/03_AGENT_AND_CHECKPOINT_SPEC.md) | 단계별 입력·출력·판정 규칙 |
-| [테스트·추적성 계획](docs/04_TEST_AND_TRACEABILITY_PLAN.md) | 검증 범위와 완료 기준 |
-| [Project1 기준 자산 감사](docs/05_PROJECT1_BASELINE_AUDIT.md) | 기존 자산과 알려진 한계 |
-| [테스트 하네스 가이드](docs/06_TEST_HARNESS_GUIDE.md) | UI·내부 상태 확인 경계 |
-| [자동 테스트 카탈로그](docs/07_TEST_CATALOG.md) | 현재 수집되는 자동 테스트 목록 |
-| [V2 기준 화면](product_baseline/virtual-controller.html) | V1 제품 제어 동작·기존 회귀 인터페이스, 공개 정상 변경 데모, 로컬 V2 실제 Run 패널을 가진 가상 중앙제어 HTML |
-
-## 검증
-
-2026-09-12 공개 정상 변경 데모 보완 후 전체 **207건 통과**, 수집 207건을 확인했습니다. 공개 데모의 API 호출 0회·화면 승인 후 실제 파일 미변경과 로컬 Live 연결 모드 보존을 브라우저 테스트로 검증했습니다. 승인·통신 경계는 모의 입력을 포함한 검증이며 새 모델 Live·실제 공식 승인은 수행하지 않았습니다.
-
-2026-09-11 UI 연결 보완 후 전체 **203건 통과(79.77초)**, 수집·diff 검사 완료. 새 API Live 실행은 하지 않았습니다. HTML 해시 변경으로 과거 후보를 공식 승인하려면 현행 정책대로 현재 HTML 재검증이 필요합니다.
-
-~~~powershell
+```powershell
 python -m pytest -q
 python -m pytest --collect-only -q
 git diff --check
-~~~
+```
 
-현재 자동 테스트는 **207건**입니다. 9월 12일 승인 코드 불일치 차단·보고 TC 원문 및 지정 폴더·브라우저 승인 동의와 요청 대기시간·배치 검증에 공개 정상 변경 데모의 무통신·비반영 검증을 추가했습니다. 9월 11일에는 연결 복구·조회 선택·명시 Run ID 보호를 보완했습니다. 모의 입력을 포함한 자동 검증이며 새 API Live 성공을 뜻하지 않습니다. 자동화 제외·정보 부족이 남으면 최종 권고를 사람 검토로 표시하는 QA 기준은 유지합니다.
+[MED 성공 사례](examples/results/agent1-agent2-agent3-agent4-medium-fan/README.md)와 [잠금 불일치 사례](examples/results/agent1-agent2-agent3-agent4-lock-disable/README.md)는 실행 당시 공개 증거입니다. 최신 로컬 실행과 공개 예시의 날짜·상태는 [현재 상태](PROJECT_HANDOFF.md)에서 구분합니다. 자동 테스트 통과는 새 실제 API 실행의 성공을 뜻하지 않습니다.
 
-9월 10일 최신 실제 실행 `RUN-20260910-101352-9C9021`은 CP1~CP4와 최종 권고 PASS였습니다. MED 신규 후보·환경 점검·승인 HIGH 회귀 `TC-V2-001` 총 3건이 PASSED였으며 자동화 제외·정보 부족은 0건입니다. Agent 1은 대상 사전조건의 전달 누락으로 1회 재작성했고 Agent 2·3은 첫 산출물로 통과했습니다. `gpt-5.6-terra / medium` 총 4회 호출·43,419토큰을 기록했습니다. 제품 HTML은 실행 전후 동일하고 SRS·MED 공식 자산 승인은 대기 중입니다. Slack·Notion은 PREVIEW이며, 원본은 로컬 `runs/`에 보존합니다. 이번 실행은 CLI 경로이며 페이지 버튼 시작·누락 사례·기존 TC 전용 SRS 승인까지 새 Live로 검증했다는 뜻은 아닙니다.
-
-9월 8일 수정 전 실제 API 실행은 Agent 1·2 재작성 후 Agent 3를 별도 진단 위치에서 이어 실행했습니다. 신규 후보·환경 점검·승인 회귀는 통과했지만 TC의 이중 검증 시점 불일치와 단일 실행 인계 검사 실패가 있어 전체 성공으로 보지 않습니다. 이후 수정과 9월 10일 새 실행으로 정상 연결을 확인했으며, 과거 실패 기록은 보존합니다.
-
-이전 9월 6일에는 전체 187건 통과 후 추가 실행에서 186건 통과·Agent 3 시험 1건 시간 초과가 있었고 단독 재실행은 통과했습니다. 이번 전체 통과가 그 간헐적 시간 초과의 원인 해결을 뜻하지는 않습니다. 과거 실제 Live `RUN-20260903-125732-ECE88F`에서는 Agent 1·3의 첫 산출물 오류를 Checkpoint가 차단해 재작성한 뒤, 신규 후보·환경 점검·승인 회귀와 CP4·최종 권고가 모두 PASS였습니다. Trace의 로컬 경로·키 패턴도 0건이었습니다.
-
-공개 증거는 위 세 가지 성공·실패 사례에서 확인할 수 있습니다. 상세 Checkpoint 규칙과 시행착오는 [Agent·Checkpoint 명세](docs/03_AGENT_AND_CHECKPOINT_SPEC.md)와 [의사결정 기록](DECISION_LOG.md)에 보존합니다. Checkpoint PASS는 사람의 SRS·공식 자산 승인과 구분됩니다.
+[미정 조건이 남은 사례](examples/results/agent1-agent2-agent3-agent4-partial-information/README.md)는 실행한 시험이 통과해도 정보 부족이 남으면 사람 검토로 넘기는 흐름의 공개 요약입니다. 실행 통과와 요청 전체의 검증 완료를 구분합니다.

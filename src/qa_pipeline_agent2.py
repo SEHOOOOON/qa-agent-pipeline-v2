@@ -37,6 +37,9 @@ def _contains_any(value: str, terms: tuple[str, ...]) -> bool:
 # Agent 2: 제품 기능 테스트케이스 설계
 # ---------------------------------------------------------------------------
 AGENT2_SYSTEM_INSTRUCTIONS = """
+Every new Expected Result must preserve the codes, numbers and allow/block or enabled/disabled policy of its own source conditions. Test input values are not authority for expected outputs. Preserve initial values only when the source condition requires retention; do not replace a requested state with another supported product state.
+Existing TC reuse must preserve the requested allow/block and enabled/disabled behavior, not merely the same numbers.
+SRS revision proposals must use grounded numbers and preserve the meaning of their source conditions; do not introduce new limits.
 당신은 CP1을 통과한 변경 분석을 제품 기능 테스트케이스 후보로 바꾸는 Agent 2입니다.
 
 역할 경계:
@@ -165,7 +168,7 @@ class OpenAIAgent2:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent2-2-20",
+                prompt_cache_key="qa-v2-agent2-2-22",
                 input=[
                     {"role": "system", "content": AGENT2_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
@@ -316,6 +319,8 @@ def evaluate_checkpoint2(
     require_existing_behavior_values: bool = False,
     allow_existing_procedure_review: bool = True,
     require_double_assert_timing: bool = True,
+    require_meaning_guard: bool = True,
+    require_candidate_expectation_guard: bool = True,
 ) -> Checkpoint2Result:
     checks: list[CheckResult] = []
 
@@ -1046,6 +1051,8 @@ def evaluate_checkpoint2(
                 )
             )
             missing_values = _explicit_behavior_values(condition.statement) - _explicit_behavior_values(behaviors)
+            if require_meaning_guard and _meaning_conflicts(condition.statement, behaviors):
+                reuse_errors.append(f"{condition_id}:기존 TC 검증 동작의 의미가 반대입니다")
             if missing_values:
                 reuse_errors.append(f"{condition_id}:기존 TC가 검사하지 않는 명시 값=" + ",".join(sorted(missing_values)))
         add(
@@ -1087,6 +1094,43 @@ def evaluate_checkpoint2(
                 for condition_id in result.source_condition_ids
                 if condition_id in known_conditions
             )
+            if require_candidate_expectation_guard:
+                # Test inputs are not authority for expected outputs (e.g. an
+                # invalid boundary request must not become an allowed value).
+                expected_values = _explicit_behavior_values(result.statement)
+                authority_values = _explicit_behavior_values(source_authority)
+                if re.search(r"유지|변경되지|unchanged|retain", source_authority, re.I):
+                    authority_values |= _explicit_behavior_values(" ".join(tc.preconditions))
+                unsupported = expected_values - authority_values
+                # An ER may name the invalid *input* that is blocked. Only
+                # permit that grammatical use, not the same value as an output.
+                if _state_polarities(source_authority, *_STATE_WORD_PAIRS[2]) == {False}:
+                    input_values = _explicit_behavior_values(tc.test_data.model_dump_json())
+                    for value in list(unsupported & input_values):
+                        if not re.fullmatch(r"-?\d+(?:\.\d+)?", value):
+                            continue
+                        occurrences = [match for match in re.finditer(r"-?\d+(?:\.\d+)?", result.statement)
+                                       if float(match.group()) == float(value)]
+                        if occurrences and all(re.match(r"\s*(?:°?C|도)?\s*(?:요청|입력|request|input)", result.statement[match.end():], re.I) for match in occurrences):
+                            unsupported.discard(value)
+                ranges = re.findall(
+                    r"(-?\d+(?:\.\d+)?)\s*(?:°?C|도)?\s*(?:~|∼|～|에서|부터|to)\s*(-?\d+(?:\.\d+)?)",
+                    source_authority, re.I,
+                )
+                unsupported = {
+                    value for value in unsupported
+                    if not (re.fullmatch(r"-?\d+(?:\.\d+)?", value)
+                            and any(float(lo) <= float(value) <= float(hi) for lo, hi in ranges))
+                }
+                if unsupported:
+                    minimality_errors.append(
+                        f"{tc.tc_id}/{result.result_id}:연결된 조건에 없는 기대값="
+                        + ",".join(sorted(unsupported))
+                    )
+                if _meaning_conflicts(source_authority, result.statement):
+                    minimality_errors.append(
+                        f"{tc.tc_id}/{result.result_id}:연결된 조건과 기대 동작이 반대"
+                    )
             if (
                 _PROCEDURAL_ACTION_SUCCESS_RESULT.search(result.statement)
                 and not _contains(source_authority, result.statement)
@@ -1145,6 +1189,15 @@ def evaluate_checkpoint2(
                     f"{proposal.proposal_id}:SRS에 없는 Requirement"
                 )
                 continue
+            if require_meaning_guard:
+                sources = [known_conditions[c].source_text for c in proposal.source_condition_ids if c in known_conditions]
+                authority = " ".join([requirement.acceptance_criteria, *sources])
+                if proposal.requirement_id == request.target_requirement_id:
+                    authority += " " + request.after_value + " " + request.description
+                if _explicit_behavior_values(proposal.proposed_acceptance_criteria) - _explicit_behavior_values(authority):
+                    revision_errors.append(f"{proposal.proposal_id}:근거에 없는 개정 코드·수치")
+                if any(_meaning_conflicts(source, proposal.proposed_acceptance_criteria) for source in sources):
+                    revision_errors.append(f"{proposal.proposal_id}:변경 조건과 개정 문구의 의미가 반대입니다")
             if proposal.current_acceptance_criteria != requirement.acceptance_criteria:
                 revision_errors.append(
                     f"{proposal.proposal_id}:현재 인수 기준 원문 불일치"

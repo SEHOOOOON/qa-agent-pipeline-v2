@@ -1,8 +1,8 @@
 # Agent 1 → CP1 → Agent 2 → CP2 v2.2 실제 실행 결과
 
 `srs_snapshot.md`는 실행 당시 입력 원문이어서 내부 상대 링크도 당시 값으로 보존합니다.
-현재 문서는 [Project1 기준 자산 감사](../../../docs/05_PROJECT1_BASELINE_AUDIT.md)와
-[테스트 하네스 가이드](../../../docs/06_TEST_HARNESS_GUIDE.md)에서 확인할 수 있습니다.
+현재 문서는 [Project1 기준 자산 감사](../../../DECISION_LOG.md#v1-baseline-audit)와
+[테스트 하네스 가이드](../../../docs/PROJECT_GUIDE.md#6-agent-3-자동화-계획컴파일시험과-cp3)에서 확인할 수 있습니다.
 
 - Run ID: **RUN-20260813-125229-31EB5F**
 - 실행 방식: OpenAI API를 사용한 Live Run

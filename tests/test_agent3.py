@@ -3,6 +3,205 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("mutation", ["missing", "wrong_source", "unknown_selector", "wrong_value", "weak_text", "unproved_login", "enabled_instead_of_checked", "early_assertion"])
+def test_precondition_proof_rejects_unverified_plans(mutation):
+    case, plan, observation = precondition_guard_fixture()
+    assert evaluate_checkpoint3_plan(case, plan, observation, require_precondition_proof=True).status == CheckStatus.PASS
+    check = plan.precondition_checks[0]
+    if mutation == "missing":
+        plan.precondition_checks = []
+        assert pipeline.evaluate_checkpoint3_plan(case, plan, observation).status == CheckStatus.FAIL
+    elif mutation == "wrong_source":
+        check.source_text = "다른 사전조건"
+    elif mutation == "unknown_selector":
+        check.selector = "#not-observed"
+    elif mutation == "wrong_value":
+        check.expected_value = True
+    elif mutation == "weak_text":
+        check.read_kind = pipeline.PreconditionReadKind.UI_TEXT
+        check.expected_value = "새 제어"
+    elif mutation == "enabled_instead_of_checked":
+        check.read_kind = pipeline.PreconditionReadKind.UI_ENABLED
+    elif mutation == "early_assertion":
+        preparation = plan.actions[-1].model_copy(update={"action_id": "ACT-089", "phase": AutomationPhase.PRECONDITION, "source_text": case.preconditions[0]})
+        plan.actions.insert(0, preparation)
+        plan.assertions[0].after_action_id = preparation.action_id
+    else:
+        case.preconditions.append("관리자 권한으로 로그인되어 있어야 한다.")
+    checkpoint = evaluate_checkpoint3_plan(case, plan, observation, require_precondition_proof=True)
+    assert next(item for item in checkpoint.checks if item.rule_id == "CP3-006A").status == CheckStatus.FAIL
+
+
+def test_baseline_context_cannot_prove_administrator_login():
+    case, plan, observation = precondition_guard_fixture()
+    case.preconditions.append("관리자 권한으로 로그인된 대상 장비다.")
+    observation.verified_execution_context.target_device_visible = True
+    plan.precondition_checks.append(pipeline.PreconditionCheck(source_text=case.preconditions[-1],
+        read_kind="BASELINE_CONTEXT", selector="target_device_visible", expected_value=True))
+    checkpoint = evaluate_checkpoint3_plan(case, plan, observation, require_precondition_proof=True)
+    assert checkpoint.status == CheckStatus.FAIL
+
+
+def test_compound_baseline_precondition_needs_each_observed_fact():
+    case, plan, observation = precondition_guard_fixture()
+    source = "온라인 대상 장비는 오류와 잠금이 없는 상태다."
+    case.preconditions.append(source)
+    context = observation.verified_execution_context
+    context.target_device_visible = context.device_state_available = True
+    context.error_free = context.unlocked = context.online = True
+    plan.precondition_checks.append(pipeline.PreconditionCheck(source_text=source,
+        read_kind="BASELINE_CONTEXT", selector="target_device_visible", expected_value=True))
+    assert evaluate_checkpoint3_plan(case, plan, observation, require_precondition_proof=True).status == CheckStatus.FAIL
+    plan.precondition_checks.extend(pipeline.PreconditionCheck(source_text=source,
+        read_kind="BASELINE_CONTEXT", selector=key, expected_value=True) for key in ("error_free", "unlocked", "online"))
+    assert evaluate_checkpoint3_plan(case, plan, observation, require_precondition_proof=True).status == CheckStatus.PASS
+
+
+def test_narrow_inventory_exposes_target_initial_values_without_full_discovery():
+    observation = inspect_target_ui(REPO_ROOT / "product_baseline/virtual-controller.html",
+        required_selectors={"#device-card-1 .card-body-split"}, required_harness_keys={"devices"}, discover_generic=False)
+    assert observation.harness_values["window.__vccs.devices[0].id"] == 1
+    assert isinstance(observation.harness_values["window.__vccs.devices[0].mode"], str)
+    assert type(observation.harness_values["window.__vccs.devices[0].setTemp"]) in (int, float)
+    assert observation.verified_execution_context.online is True
+    assert not observation.generic_discovery
+
+
+def test_precondition_internal_device_reference_must_match_target_identity():
+    case, plan, observation = precondition_guard_fixture()
+    case.preconditions = ["mode 값은 AUTO다."]
+    observation.harness_values.update({"window.__vccs.devices[0].id": 2, "window.__vccs.devices[0].mode": "AUTO"})
+    plan.precondition_checks = [pipeline.PreconditionCheck(source_text=case.preconditions[0],
+        read_kind="INTERNAL_VALUE", selector="window.__vccs.devices[0].mode", expected_value="AUTO")]
+    assert evaluate_checkpoint3_plan(case, plan, observation, require_precondition_proof=True).status == CheckStatus.FAIL
+    observation.harness_values["window.__vccs.devices[0].id"] = 1
+    assert evaluate_checkpoint3_plan(case, plan, observation, require_precondition_proof=True).status == CheckStatus.PASS
+
+
+@pytest.mark.parametrize("initial_checked", [False, True])
+def test_runtime_precondition_is_verified_before_product_test(tmp_path, initial_checked):
+    case, plan, observation = precondition_guard_fixture()
+    assert evaluate_checkpoint3_plan(case, plan, observation, require_precondition_proof=True).status == CheckStatus.PASS
+    target = tmp_path / "switch.html"
+    _write_text_atomic(target, f'''<!doctype html><title>Proof fixture</title>
+        <input id="new-feature-toggle" type="checkbox" {'checked' if initial_checked else ''}
+        onchange="window.__vccs.feature.enabled=this.checked"><script>
+        window.__vccs={{feature:{{enabled:{str(initial_checked).lower()}}}}};</script>''')
+    candidate = tmp_path / "test_proof.py"
+    _write_text_atomic(candidate, compile_automation_candidate("RUN-20260912-180000-ABCDEF", case, plan))
+    trial = run_candidate_trial(candidate, target, tmp_path / "evidence", timeout_seconds=60)
+    assert trial.outcome == (TrialOutcome.AUTOMATION_ERROR if initial_checked else TrialOutcome.PASS)
+    assert trial.evidence_complete
+    stdout = (tmp_path / "evidence" / trial.stdout_file).read_text(encoding="utf-8")
+    if initial_checked:
+        assert "PRECONDITION_NOT_MET:" in stdout
+        observations = pipeline_reporting._execution_failure_observations(
+            tmp_path, pipeline.NeutralExecutionResult.model_validate({
+                **_neutral_execution_result("TC-CAND-090", pipeline.ExecutionSource.NEW_AUTOMATION_CANDIDATE,
+                    pipeline.NeutralExecutionStatus.EXECUTION_ERROR).model_dump(mode="json"),
+                "stdout_file": "evidence/" + trial.stdout_file, "stderr_file": "evidence/" + trial.stderr_file,
+                "evidence_files": ["evidence/" + name for name in trial.evidence_sha256],
+                "evidence_sha256": {"evidence/" + name: value for name, value in trial.evidence_sha256.items()},
+            }))
+        assert "PRECONDITION_NOT_MET" in observations
+        assert "PRODUCT_MISMATCH" not in observations
+    else:
+        assert "PRECONDITION_OBSERVED: 1 False" in stdout
+        assert "PRECONDITIONS_VERIFIED: 1" in stdout
+
+
+def test_precondition_multiple_explicit_values_need_multiple_checks():
+    case, plan, observation = precondition_guard_fixture()
+    case.preconditions = ["내부 role 값은 ADMIN이고 site 값은 SOUTH다."]
+    observation.harness_values.update({"window.__vccs.role": "ADMIN", "window.__vccs.site": "SOUTH"})
+    plan.precondition_checks = [pipeline.PreconditionCheck(source_text=case.preconditions[0],
+        read_kind="INTERNAL_VALUE", selector="window.__vccs.role", expected_value="ADMIN")]
+    assert evaluate_checkpoint3_plan(case, plan, observation, require_precondition_proof=True).status == CheckStatus.FAIL
+    plan.precondition_checks.append(pipeline.PreconditionCheck(source_text=case.preconditions[0],
+        read_kind="INTERNAL_VALUE", selector="window.__vccs.site", expected_value="SOUTH"))
+    assert evaluate_checkpoint3_plan(case, plan, observation, require_precondition_proof=True).status == CheckStatus.PASS
+
+
+def test_cp3_rejects_static_label_in_place_of_switch_state():
+    case, plan, observation = generic_control_guard_fixture()
+    plan.assertions[0].strategy = AssertionStrategy.UI_TEXT_CONTAINS
+    plan.assertions[0].expected_value = None
+    plan.assertions[0].expected_text = "새 제어"
+    assert evaluate_checkpoint3_plan(case, plan, observation).status == CheckStatus.FAIL
+
+
+def test_cp3_rejects_disabled_strategy_for_enabled_expectation():
+    case, plan, observation = agent3_test_case(), agent3_plan(), agent3_observation()
+    case.expected_results[0].statement = "온도 버튼은 활성 상태다."
+    plan.assertions[0] = AutomationAssertion(result_id=case.expected_results[0].result_id,
+        observation_layer="UI", strategy="CONTROLS_DISABLED", selector="#det-temp-down-btn")
+    assert evaluate_checkpoint3_plan(case, plan, observation).status == CheckStatus.FAIL
+
+
+def test_generic_restore_snapshot_follows_preparation(tmp_path, monkeypatch):
+    case, plan, _ = generic_control_guard_fixture()
+    case.preconditions = ["새 제어 스위치를 끈다."]
+    preparation = plan.actions[-1].model_copy(update={
+        "action_id": "ACT-089", "phase": AutomationPhase.PRECONDITION,
+        "source_text": case.preconditions[0],
+    })
+    plan.actions.insert(0, preparation)
+    code = compile_automation_candidate("RUN-20260912-120000-ABCDEF", case, plan)
+    assert code.index("# ACT-089 PRECONDITION") < code.rindex("restore_baseline_0 =") < code.index("# ACT-090 TEST")
+    target = tmp_path / "switch.html"
+    _write_text_atomic(target, '''<!doctype html><input id="new-feature-toggle" type="checkbox" checked
+        onchange="window.__vccs.feature.enabled=this.checked"><script>
+        window.__vccs={feature:{enabled:true}};</script>''')
+    monkeypatch.setenv("QA_TARGET_URL", target.as_uri())
+    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
+    namespace = {}
+    exec(compile(code, "generated_restore_check", "exec"), namespace)
+    namespace["test_tc_cand_090"]()
+
+
+@pytest.mark.parametrize("mutation", ["reverse", "missing_step", "missing_restore", "weak_text", "duplicate"])
+def test_cp3_rejects_false_pass_plans(mutation):
+    case, plan, observation = generic_control_guard_fixture()
+    assert evaluate_checkpoint3_plan(case, plan, observation).status == CheckStatus.PASS
+    if mutation == "reverse":
+        case.expected_results[0].statement = "새 제어 스위치는 비활성 상태다."
+        plan.assertions[0].strategy = AssertionStrategy.UI_ENABLED_EQUALS
+    elif mutation == "missing_step":
+        case.steps.append("저장 버튼을 누른다.")
+    elif mutation == "missing_restore":
+        case.restore_steps.append("복원 명령을 적용한다.")
+    elif mutation == "weak_text":
+        case.expected_results[0].statement = "새 제어 스위치에 사용 금지가 표시된다."
+        plan.assertions[0].strategy = AssertionStrategy.UI_TEXT_CONTAINS
+        plan.assertions[0].expected_value = None
+        plan.assertions[0].expected_text = "표시"
+    else:
+        observation.elements[-1].match_count = 2
+    assert evaluate_checkpoint3_plan(case, plan, observation).status == CheckStatus.FAIL
+
+
+@pytest.mark.parametrize("value,text,expected", [
+    (True, "비활성", False), (False, "비활성", True), (True, "unchecked", False),
+    (False, "enabled 값은 false다.", True), ("ON", "NONE", False), (30, "130°C", False),
+    (True, "켜짐", True), (False, "꺼짐", True),
+    (True, "not enabled", False), (False, "not enabled", True),
+])
+def test_scalar_guard_distinguishes_values(value, text, expected):
+    assert pipeline._scalar_value_is_grounded(value, text) is expected
+
+
+def test_inventory_counts_duplicate_selectors_and_target_only_fields(tmp_path):
+    target = tmp_path / "inventory.html"
+    _write_text_atomic(target, '''<!doctype html><html><head><title>Inventory</title></head><body>
+      <input aria-label="switch" type="checkbox"><input aria-label="switch" type="checkbox">
+      <script>window.__vccs={devices:[{id:2,unrelated:true},{id:1,enabled:false}]};</script>
+      </body></html>''')
+    observation = inspect_target_ui(target, required_selectors=set(), required_harness_keys=set(), discover_generic=True)
+    assert "unrelated" not in observation.device_state_fields
+    assert "enabled" in observation.device_state_fields
+    assert next(item for item in observation.elements if 'aria-label="switch"' in item.selector).match_count == 2
+
+
 def test_compiled_observation_wait_handles_delayed_browser_state_without_reclicking():
     import ast
     from playwright.sync_api import sync_playwright
@@ -34,8 +233,11 @@ def test_agent3_uses_structured_plan_api() -> None:
     assert result.plan.tc_id == "TC-CAND-003"
     assert responses.kwargs["text_format"] is Agent3AutomationPlan
     assert responses.kwargs["store"] is False
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent3-3-18"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent3-3-22"
     instructions = responses.kwargs["input"][0]["content"]
+    assert "Check only conditions stated in the approved TC preconditions" in instructions
+    assert "not every available context field" in instructions
+    assert "does not replace runtime proof" in instructions
     assert "SET_TEMPERATURE=#det-temp-display" in instructions
     assert "Generic UI actions are CLICK, FILL, SELECT_OPTION, CHECK, and UNCHECK" in instructions
     assert "AUTOMATION_SUPPORT_EXTENSION_REQUIRED" in instructions
@@ -49,6 +251,14 @@ def test_agent3_uses_structured_plan_api() -> None:
     assert "TOAST_BLOCKING" in instructions
     assert "disabled or 비활성 grounds UI_ENABLED_EQUALS" in instructions
     assert "RESTORE_OBSERVED_HVAC" in instructions
+    OpenAIAgent3(model="test-model", client=SimpleNamespace(responses=responses)).plan(
+        agent3_test_case(), agent3_observation(), {}, previous_plan=agent3_plan(),
+        checkpoint_feedback=["사전조건 확인 #2 [BASELINE_CONTEXT/online]: 원문 근거 없음"],
+    )
+    repair_input = responses.kwargs["input"][1]["content"]
+    assert "사전조건 확인 #2 [BASELINE_CONTEXT/online]" in repair_input
+    assert "repair the identified check and preserve valid checks" in repair_input
+    assert "never delete a stated condition" in repair_input
 
 def test_agent3_accepts_atomic_temperature_up_disabled_assertion() -> None:
     test_case = agent3_test_case()

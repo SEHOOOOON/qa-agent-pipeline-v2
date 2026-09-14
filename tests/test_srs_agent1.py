@@ -3,6 +3,29 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("mutation", ["reverse", "number", "role", "requirement"])
+def test_cp1_rejects_explicit_meaning_and_source_errors(mutation):
+    analysis = cp1_valid_analysis()
+    if mutation == "reverse":
+        analysis.confirmed_conditions[1].statement = "AUTO 모드에서 18°C 미만 요청은 허용한다."
+    elif mutation == "number":
+        analysis.confirmed_conditions[0].statement = "AUTO 모드에서 99°C는 허용한다."
+    elif mutation == "role":
+        analysis.confirmed_conditions[0].change_role = ConditionChangeRole.UNCHANGED
+    else:
+        analysis.confirmed_conditions[2].requirement_ids.append("REQ-CONTROL-001")
+        analysis.requirement_effects[1].relation = RequirementRelation.VERIFY
+    assert evaluate_checkpoint1(cp1_request(), analysis, cp1_requirements()).status == CheckStatus.FAIL
+    assert evaluate_checkpoint1(cp1_request(), analysis, cp1_requirements(), require_meaning_guard=False).status == CheckStatus.PASS
+
+
+def test_source_quote_respects_code_and_number_boundaries():
+    assert not pipeline._contains_fact("NONE", "ON")
+    assert not pipeline._contains_fact("130°C", "30°C")
+    assert pipeline._contains_fact("모드는 ON이다.", "ON")
+    assert pipeline._contains_fact("설정 온도는 30°C다.", "30°C")
+
+
 def test_loads_product_requirements_from_markdown() -> None:
     requirements = load_srs_requirements(REPO_ROOT / "docs" / "01_PRODUCT_SRS.md")
 
@@ -59,7 +82,7 @@ def test_agent1_uses_structured_responses_api() -> None:
     assert result.response_id == "resp_test"
     assert result.usage["total_tokens"] == 150
     assert responses.kwargs["text_format"] is Agent1Analysis
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent1-2-8"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent1-2-9"
     assert responses.kwargs["store"] is False
     instructions = responses.kwargs["input"][0]["content"]
     assert "현재 SRS는 변경 전 제품 상태" in instructions
@@ -362,6 +385,27 @@ def test_partial_proceed_without_excluded_scope_is_rejected() -> None:
         cp1_request(), mismatched, cp1_requirements()
     )
     assert cp1_check(mismatched_result, "CP1-010").status == CheckStatus.FAIL
+
+def test_partial_unresolved_acceptance_is_handed_off_as_gap_not_condition():
+    note = "적용 완료 알림의 색상을 변경해야 하지만 목표 색상은 미정입니다."
+    request = cp1_request().model_copy(update={"acceptance_notes": [*cp1_request().acceptance_notes, note]})
+    analysis = cp1_valid_analysis().model_copy(update={
+        "decision": AnalysisDecision.PARTIAL_PROCEED,
+        "excluded_scope": [note], "information_gaps": [note],
+        "excluded_information_gaps": [note], "user_questions": ["목표 색상은 무엇입니까?"],
+    })
+    result = evaluate_checkpoint1(request, analysis, cp1_requirements())
+    assert result.handoff_status == HandoffStatus.CONTINUE
+    assert cp1_check(result, "CP1-008").status == CheckStatus.PASS
+    for field in ("excluded_scope", "information_gaps", "excluded_information_gaps"):
+        broken = analysis.model_copy(update={field: []})
+        assert cp1_check(evaluate_checkpoint1(request, broken, cp1_requirements()), "CP1-008").status == CheckStatus.FAIL
+    clear = "적용 완료 알림은 파란색으로 표시되어야 합니다."
+    clear_request = request.model_copy(update={"acceptance_notes": [*cp1_request().acceptance_notes, clear]})
+    excluded_clear = analysis.model_copy(update={
+        "excluded_scope": [clear], "information_gaps": [clear], "excluded_information_gaps": [clear],
+    })
+    assert cp1_check(evaluate_checkpoint1(clear_request, excluded_clear, cp1_requirements()), "CP1-008").status == CheckStatus.FAIL
 
 def test_blocked_decision_blocks_agent2_handoff() -> None:
     analysis = cp1_valid_analysis().model_copy(

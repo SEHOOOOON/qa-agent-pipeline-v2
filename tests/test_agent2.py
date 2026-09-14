@@ -3,6 +3,72 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("expected", ["HIGH", "99", "17"])
+def test_new_tc_expected_value_requires_its_own_condition(expected):
+    design = cp2_valid_design()
+    design.test_cases[0].expected_results[0].statement = f"화면 값은 {expected}로 변경된다."
+    result = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
+    assert cp2_check(result, "CP2-017").status == CheckStatus.FAIL
+
+
+def test_new_tc_med_to_high_is_rejected_without_rejecting_med():
+    analysis, design = cp2_analysis(), cp2_valid_design()
+    condition = analysis.confirmed_conditions[0]
+    condition.statement = condition.source_text = "중풍(MED) 값이 화면에 표시된다."
+    expected = design.test_cases[0].expected_results[0]
+    expected.source_condition_ids = [condition.condition_id]
+    expected.statement = "중풍(MED) 값이 화면에 표시된다."
+    assert cp2_check(evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements()), "CP2-017").status == CheckStatus.PASS
+    expected.statement = "강풍(HIGH) 값이 화면에 표시된다."
+    assert cp2_check(evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements()), "CP2-017").status == CheckStatus.FAIL
+    # Historical reports retain their explicitly versioned original CP2 result.
+    assert cp2_check(evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements(), require_candidate_expectation_guard=False), "CP2-017").status == CheckStatus.PASS
+
+
+def test_new_tc_range_allows_in_range_value_but_not_opposite_policy():
+    analysis, design = cp2_analysis(), cp2_valid_design()
+    condition = analysis.confirmed_conditions[0]
+    condition.statement = condition.source_text = "18°C에서 30°C 입력을 허용한다."
+    expected = design.test_cases[0].expected_results[0]
+    expected.source_condition_ids = [condition.condition_id]
+    expected.statement = "24°C 입력을 허용한다."
+    assert cp2_check(evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements()), "CP2-017").status == CheckStatus.PASS
+    expected.statement = "24°C 입력을 차단한다."
+    assert cp2_check(evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements()), "CP2-017").status == CheckStatus.FAIL
+
+
+def test_boundary_input_in_expectation_is_not_confused_with_output():
+    analysis, design = cp2_analysis(), cp2_valid_design()
+    result = design.test_cases[0].expected_results[0]
+    result.source_condition_ids = ["COND-001"]
+    result.statement = "17°C 요청을 차단한다."
+    assert cp2_check(evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements()), "CP2-017").status == CheckStatus.PASS
+    result.statement = "17°C 요청을 차단하고 화면 온도는 17°C가 된다."
+    assert cp2_check(evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements()), "CP2-017").status == CheckStatus.FAIL
+
+
+def test_cp2_rejects_opposite_existing_behavior_and_srs_value():
+    analysis = cp2_analysis()
+    spec = pipeline.ExistingRegressionSpec(
+        tc_id="TC-V2-999", test_function="test_tc_v2_999",
+        requirement_ids=("REQ-TEMP-001", "REQ-STATE-001", "REQ-NOTIFY-001"),
+        covered_behaviors=("AUTO 18°C 미만 허용, 상태 유지, 안내 표시",), source="APPROVED",
+    )
+    design = Agent2TestDesign(request_id=analysis.request_id, existing_tc_comparison_completed=True,
+        related_existing_tests=[ExistingTestSelection(tc_id=spec.tc_id,
+            source_condition_ids=["COND-001", "COND-002", "COND-003"], selection_reason="기존 검증 재사용")],
+        test_cases=[], coverage_summary="기존 검증")
+    result = evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements(),
+        existing_catalog=(spec,), require_existing_behavior_values=True)
+    assert cp2_check(result, "CP2-019").status == CheckStatus.FAIL
+    design = cp2_valid_design()
+    design.srs_revision_proposals = [pipeline.SrsRevisionProposal(
+        proposal_id="SRS-REV-001", requirement_id="REQ-TEMP-001", source_condition_ids=["COND-001"],
+        current_acceptance_criteria="범위 밖 차단", proposed_acceptance_criteria="AUTO 모드 99°C 허용", reason="변경 반영")]
+    result = evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements(), require_srs_revision_proposals=True)
+    assert cp2_check(result, "CP2-018").status == CheckStatus.FAIL
+
+
 def test_existing_test_selection_accepts_versioned_official_tc_id():
     selection = ExistingTestSelection(
         tc_id="TC-V2-001",
@@ -99,7 +165,7 @@ def test_agent2_uses_structured_responses_api() -> None:
     assert response.usage["total_tokens"] == 300
     assert responses.kwargs["text_format"] is Agent2TestDesign
     assert responses.kwargs["store"] is False
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-20"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-22"
     agent2_input = responses.kwargs["input"][1]["content"]
     assert "[기존 사람 작성·자동화 TC 카탈로그]" in agent2_input
     assert "TC-TEMP-001" in agent2_input

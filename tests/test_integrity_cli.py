@@ -3,6 +3,29 @@
 from pipeline_test_support import *
 
 
+def test_atomic_write_short_temp_preserves_original_on_failure(tmp_path, monkeypatch):
+    import qa_pipeline_io as io
+    parent = tmp_path / ("p" * max(1, 210 - len(str(tmp_path)) - 1))
+    target = parent / "agent3_automation_plan_attempt_1.json"
+    original_write = Path.write_text
+    written = []
+    def limited_write(path, *args, **kwargs):
+        assert len(str(path)) < 260, "temporary path exceeded Windows limit"
+        written.append(path)
+        return original_write(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "write_text", limited_write)
+    io._write_json(target, {"original": True})
+    assert json.loads(target.read_text(encoding="utf-8")) == {"original": True}
+    def fail_replace(*args):
+        raise OSError("injected publication failure")
+    monkeypatch.setattr(io.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="publication failure"):
+        io._write_json(target, {"original": False})
+    assert json.loads(target.read_text(encoding="utf-8")) == {"original": True}
+    assert len(written) == 2 and written[0] != written[1]
+    assert all(path.parent == parent and not path.exists() for path in written)
+
+
 def test_verified_agent1_run_can_handoff_to_agent2(tmp_path: Path) -> None:
     run_dir, run_id = build_verified_agent1_run(tmp_path)
 

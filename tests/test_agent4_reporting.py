@@ -3,6 +3,34 @@
 from pipeline_test_support import *
 
 
+def test_agent4_reports_precondition_failure_as_unexecuted_product_test(tmp_path):
+    run_dir, run_id = _write_agent4_inputs(tmp_path,
+        candidate_status=pipeline.NeutralExecutionStatus.EXECUTION_ERROR,
+        candidate_stdout="E AssertionError: PRECONDITION_NOT_MET: check 1 expected=False actual=True\n")
+    assert pipeline.run_agent4(SimpleNamespace(run_id=run_id, runs_root=str(run_dir.parent))) == 0
+    report = pipeline.FinalReport.model_validate_json((run_dir / "final_report.json").read_text(encoding="utf-8"))
+    assert report.recommendation == pipeline.FinalRecommendation.HOLD
+    assert any("사전조건" in finding.rationale for finding in report.findings)
+    assert all(finding.category != pipeline.Agent4FindingCategory.PRODUCT_MISMATCH_CANDIDATE for finding in report.findings)
+    assert "사전조건 불충족·본 시험 미실행" in (run_dir / "사람_최종_검토.md").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("changed_file", ["validation_execution.json", "final_report.json"])
+def test_report_consumers_reject_changed_sources(tmp_path, changed_file):
+    run_dir, run_id = _write_agent4_inputs(tmp_path)
+    args = SimpleNamespace(run_id=run_id, runs_root=str(run_dir.parent), send=False)
+    assert pipeline.run_agent4(args) == 0
+    payload = json.loads((run_dir / changed_file).read_text(encoding="utf-8"))
+    if changed_file == "final_report.json":
+        payload["total_results"] += 1
+    else:
+        payload["created_at"] = "2026-09-12T12:00:00Z"
+    _write_json(run_dir / changed_file, payload)
+    assert pipeline.run_external_reporting(args) == 2
+    with pytest.raises(ValueError):
+        pipeline.run_human_review_document(args)
+
+
 def test_notion_preserves_separate_runs_and_retries_same_tc_without_reclassification(monkeypatch) -> None:
     monkeypatch.setenv("NOTION_API_KEY", "test-only-not-a-secret")
     monkeypatch.setenv("NOTION_DATA_SOURCE_ID", "test-data-source")
@@ -506,7 +534,9 @@ def test_agent4_ignores_restore_marker_in_source_code_and_unverified_logs(tmp_pa
     assert report.recommendation == pipeline.FinalRecommendation.HOLD
 
 
-def test_existing_only_procedure_notes_reach_final_human_review(tmp_path: Path) -> None:
+def test_existing_only_procedure_notes_reach_final_human_review(tmp_path: Path, monkeypatch) -> None:
+    # This fixture exercises note propagation, not the Agent 1/2 handoff.
+    monkeypatch.setattr(pipeline_reporting, "_load_verified_agent2_run", lambda *_: None)
     run_dir, run_id = _write_agent4_inputs(tmp_path, include_candidate=False)
     request = cp1_request().model_copy(update={"acceptance_notes": [
         "첫 실행 기본 상태인 LOW 풍량을 확인한 뒤 시험을 시작한다.",

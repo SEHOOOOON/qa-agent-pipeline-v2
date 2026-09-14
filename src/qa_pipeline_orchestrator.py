@@ -65,23 +65,31 @@ def _write_orchestrator_manifest(
         "stopped_at": stopped_at,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
+    def read_summary(path: Path) -> dict[str, Any]:
+        try:
+            return _read_json_payload(path)
+        except (ValueError, OSError):
+            if error is None:
+                raise
+            payload.setdefault("unreadable_artifacts", []).append(path.name)
+            return {}
     for key, path in stage_manifests.items():
         payload[key] = _sha256_file(path) if path.is_file() else None
     agent3_manifest_file = run_dir / "agent3_manifest.json"
     if agent3_manifest_file.is_file():
-        agent3_manifest = _read_json_payload(agent3_manifest_file)
+        agent3_manifest = read_summary(agent3_manifest_file)
         payload["candidate_status"] = agent3_manifest.get("candidate_status")
     trial_file = run_dir / "agent3_trial.json"
     if trial_file.is_file():
-        payload["trial_outcome"] = _read_json_payload(trial_file).get("outcome")
+        payload["trial_outcome"] = read_summary(trial_file).get("outcome")
     selection_file = run_dir / "agent3_selection.json"
     if selection_file.is_file():
         payload["agent3_selection_sha256"] = _sha256_file(selection_file)
-        selection = _read_json_payload(selection_file)
+        selection = read_summary(selection_file)
         payload["selected_tc_ids"] = selection.get("selected_tc_ids", [])
     summary_file = run_dir / "agent3_run_summary.json"
     if summary_file.is_file():
-        summary = _read_json_payload(summary_file)
+        summary = read_summary(summary_file)
         payload["agent3_run_summary_sha256"] = _sha256_file(summary_file)
         payload["executed_tc_ids"] = summary.get("executed_tc_ids", [])
         payload["자동화_제외_TC"] = summary.get("자동화_제외_TC", [])
@@ -219,6 +227,7 @@ def _agent3_run_entry(
         manifest = _read_json_payload(manifest_file)
         entry["checkpoint_status"] = manifest.get("status")
         entry["candidate_status"] = manifest.get("candidate_status")
+        entry["precondition_proof_contract"] = manifest.get("precondition_proof_contract")
         entry["manifest_sha256"] = _sha256_file(manifest_file)
         trial_file = artifact_dir / "agent3_trial.json"
         if trial_file.is_file():
@@ -230,9 +239,17 @@ def _agent3_run_entry(
             reasons = plan.get("extension_reasons")
             if isinstance(reasons, list) and reasons:
                 entry["reason"] = " / ".join(str(item) for item in reasons)
+        checkpoint_file = artifact_dir / "checkpoint3.json"
+        if entry["reason"] is None and checkpoint_file.is_file():
+            proof_failures = [check.get("message", "") for check in _read_json_payload(checkpoint_file).get("checks", [])
+                              if check.get("rule_id") == "CP3-006A" and check.get("status") == "FAIL"]
+            if proof_failures:
+                entry["reason"] = "사전조건 증명 누락 또는 부적합: " + " / ".join(proof_failures)
     eligibility_file = artifact_dir / "agent3_eligibility.json"
     if entry["reason"] is None and eligibility_file.is_file():
         eligibility = _read_json_payload(eligibility_file)
+        if entry["candidate_status"] is None:
+            entry["candidate_status"] = eligibility.get("candidate_status")
         missing = eligibility.get("missing_capabilities")
         if isinstance(missing, list) and missing:
             entry["reason"] = " / ".join(str(item) for item in missing)
@@ -329,7 +346,16 @@ def run_pipeline(args: argparse.Namespace) -> int:
             [explicit_tc_id] if explicit_tc_id is not None else auto_selected_ids
         )
         selected_tc_id = selected_tc_ids[0] if selected_tc_ids else None
+        planned_tc_ids = [item["tc_id"] for item in selection_candidates]
+        if explicit_tc_id is not None and explicit_tc_id not in planned_tc_ids:
+            raise ValueError("명시한 TC ID가 이번 설계에 없습니다.")
+        unselected_tc_ids = [tc_id for tc_id in planned_tc_ids if tc_id not in selected_tc_ids]
         prefiltered_exclusions: list[dict[str, Any]] = []
+        if explicit_tc_id is not None:
+            prefiltered_exclusions = [AutomationExclusion(
+                tc_id=tc_id, candidate_status=AutomationCandidateStatus.BLOCKED,
+                reason="사용자가 다른 TC만 명시해 이번 실행에서는 선택하지 않았습니다.",
+            ).model_dump(mode="json") for tc_id in unselected_tc_ids]
         if explicit_tc_id is None:
             selected_set = set(selected_tc_ids)
             for item in selection_candidates:
@@ -360,6 +386,8 @@ def run_pipeline(args: argparse.Namespace) -> int:
                 ),
                 "selected_tc_id": selected_tc_id,
                 "selected_tc_ids": selected_tc_ids,
+                "planned_tc_ids": planned_tc_ids,
+                "unselected_tc_ids": unselected_tc_ids,
                 "candidates": selection_candidates,
                 "created_at": datetime.now(timezone.utc).isoformat(),
             },
@@ -407,6 +435,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
         print("Agent 3 selected TCs: " + ", ".join(selected_tc_ids))
         candidates_root = run_dir / "agent3_candidates"
         run_entries: list[dict[str, Any]] = []
+        internal_errors: list[str] = []
         for tc_id in selected_tc_ids:
             artifact_dir = candidates_root / tc_id
             candidate_error: Exception | None = None
@@ -426,6 +455,9 @@ def run_pipeline(args: argparse.Namespace) -> int:
             except Exception as exc:
                 candidate_error = exc
                 candidate_exit = 1
+                internal_errors.append(tc_id)
+            if candidate_exit != 0 and (artifact_dir / "agent3_error.json").is_file() and tc_id not in internal_errors:
+                internal_errors.append(tc_id)
             run_entries.append(
                 _agent3_run_entry(
                     run_dir, tc_id, artifact_dir, candidate_exit, candidate_error
@@ -448,6 +480,8 @@ def run_pipeline(args: argparse.Namespace) -> int:
             if automation_exclusions
             else "PASS"
         )
+        if internal_errors:
+            run_status = "ERROR"
         summary_file = run_dir / "agent3_run_summary.json"
         _write_json(
             summary_file,
@@ -456,6 +490,9 @@ def run_pipeline(args: argparse.Namespace) -> int:
                 "run_id": run_id,
                 "stage": "AGENT_3_RUN_SUMMARY",
                 "status": run_status,
+                "internal_error_tc_ids": internal_errors,
+                "planned_tc_ids": planned_tc_ids,
+                "unselected_tc_ids": unselected_tc_ids,
                 "selected_tc_ids": selected_tc_ids,
                 "executed_tc_ids": [item["tc_id"] for item in successful_entries],
                 "entries": run_entries,
@@ -465,7 +502,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
                 "created_at": datetime.now(timezone.utc).isoformat(),
             },
         )
-        agent3_exit = 0
+        agent3_exit = 1 if internal_errors else 0
         stage_exit_codes["agent3"] = agent3_exit
         status = run_status
         _write_orchestrator_manifest(
