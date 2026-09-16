@@ -190,6 +190,39 @@ def cp1_requirements():
 def cp1_check(result, rule_id: str):
     return next(item for item in result.checks if item.rule_id == rule_id)
 
+
+def cp1_scope_case(*, direct=False, requirement_id="REQ-NOTIFY-001"):
+    """Grounded scope evidence, independent of a specific product control point."""
+    from qa_pipeline_contracts import RequirementScopeEvidence, ScopeBasis
+
+    request = cp1_request()
+    analysis = cp1_valid_analysis()
+    requirements = cp1_requirements()
+    statement = ("처리 결과와 일치하는 Toast를 표시합니다."
+                 if requirement_id == "REQ-NOTIFY-001"
+                 else "화면과 내부 상태가 일치합니다.")
+    requirements[requirement_id] = SrsRequirement(
+        requirement_id=requirement_id, statement=statement,
+        acceptance_criteria=statement,
+    )
+    if direct:
+        request.acceptance_notes.append(statement)
+    analysis.confirmed_conditions.append(ConfirmedCondition(
+        condition_id="COND-006", statement=statement, source_text=statement,
+        source_type=ConditionSource.CHANGE_REQUEST if direct else ConditionSource.SRS,
+        requirement_ids=[requirement_id],
+    ))
+    effect = next(item for item in analysis.requirement_effects
+                  if item.requirement_id == requirement_id)
+    effect.relation = RequirementRelation.VERIFY
+    effect.reason = "하한 변경으로 차단되는 요청의 처리 결과에 영향을 줄 수 있습니다."
+    effect.scope_evidence = RequirementScopeEvidence(
+        basis=ScopeBasis.DIRECT_REQUEST if direct else ScopeBasis.CHANGE_DEPENDENCY,
+        request_condition_ids=["COND-006"] if direct else ["COND-002"],
+        srs_source_text=statement,
+    )
+    return request, analysis, requirements
+
 from pathlib import Path
 
 from types import SimpleNamespace
@@ -298,6 +331,14 @@ class Agent2FakeResponses:
         )
 
 from qa_pipeline_v2 import evaluate_checkpoint2
+
+
+def evaluate_checkpoint2(*args, require_tc_detail=False, **kwargs):
+    """Keep historical CP2 unit fixtures separate from the new detail contract.
+
+    Production defaults to True; new detail and CLI tests exercise that path.
+    """
+    return pipeline.evaluate_checkpoint2(*args, require_tc_detail=require_tc_detail, **kwargs)
 
 from qa_pipeline_v2 import (
     Agent1Analysis,
@@ -468,6 +509,20 @@ def cp2_valid_design() -> Agent2TestDesign:
 def cp2_check(result, rule_id: str):
     return next(item for item in result.checks if item.rule_id == rule_id)
 
+
+def detailed_boundary_design():
+    design = cp2_valid_design()
+    tc = design.test_cases[0]
+    tc.steps = [
+        "중앙 관제 화면에서 대상 장비 카드를 선택한다.",
+        "제어 패널의 설정 온도 입력란에 17°C를 입력한다.",
+        "제어 패널의 적용 버튼을 누른다.",
+    ]
+    for result, target in zip(tc.expected_results, ["화면 온도", "내부 온도", "차단 안내"]):
+        result.verify_after_step = tc.steps[-1]
+        result.observation_target = target
+    return design
+
 def grouped_boundary_design() -> Agent2TestDesign:
     design = cp2_valid_design()
     test_case = design.test_cases[0]
@@ -537,6 +592,7 @@ def build_verified_agent1_run(tmp_path: Path) -> tuple[Path, str]:
         {
             "run_id": run_id,
             "stage": "AGENT_1_CP1",
+            "scope_guard_contract": "1.0",
             "status": checkpoint.status.value,
             "handoff_status": checkpoint.handoff_status.value,
             "request_sha256": _sha256_file(request_file),
@@ -697,6 +753,41 @@ def precondition_guard_fixture():
         source_text=case.preconditions[0], read_kind="UI_CHECKED",
         selector="#new-feature-toggle", expected_value=False,
     )]
+    return case, plan, observation
+
+
+def mixed_restore_comparison_fixture(connector="확인하고,"):
+    """Display labels differ from internal codes; UI restoration uses an observed baseline."""
+    case, plan, observation = precondition_guard_fixture()
+    case.preconditions = ["내부 fanSpeed의 초기값은 LOW이다."]
+    case.steps = ["풍량 입력란에 MED를 입력한다."]
+    operation = "풍량 입력란에 LOW를 입력해 복원한다."
+    ui_clause = f"복원 후 풍량 표시가 실행 전 상태와 같은지 {connector}"
+    internal_clause = "내부 fanSpeed가 초기값 LOW와 같은지 확인한다."
+    line = ui_clause + " " + internal_clause
+    case.restore_steps = [operation, line]
+    for result, target, statement in zip(case.expected_results, ["풍량 표시", "내부 fanSpeed"],
+                                      ["풍량 표시에 중풍이 표시된다.", "내부 fanSpeed는 MED이다."]):
+        result.observation_target = target
+        result.statement = statement
+        result.verify_after_step = case.steps[0]
+    plan.actions = [AutomationAction(action_id=f"ACT-{90+i:03}", phase=phase, action_type="FILL",
+        selector="#new-feature-toggle", value=value, source_text=source)
+        for i, (phase, value, source) in enumerate([("TEST", "MED", case.steps[0]), ("RESTORE", "LOW", operation)])]
+    plan.assertions = [AutomationAssertion(result_id="ER-090", observation_layer="UI",
+        strategy="UI_TEXT_CONTAINS", selector="#feature-label", expected_text="중풍", after_action_id="ACT-090"),
+        AutomationAssertion(result_id="ER-091", observation_layer="INTERNAL_STATE", strategy="INTERNAL_VALUE_EQUALS",
+            selector="window.__vccs.feature.fanSpeed", expected_value="MED", after_action_id="ACT-090")]
+    plan.precondition_checks = [pipeline.PreconditionCheck(source_text=case.preconditions[0], read_kind="INTERNAL_VALUE",
+        selector="window.__vccs.feature.fanSpeed", expected_value="LOW")]
+    plan.restore_confirmations = [pipeline.RestoreConfirmation(source_text=line, result_ids=["ER-090", "ER-091"], comparisons=[
+        pipeline.RestoreComparison(result_id="ER-090", source_excerpt=ui_clause, basis="OBSERVED_BASELINE"),
+        pipeline.RestoreComparison(result_id="ER-091", source_excerpt=internal_clause, basis="PROVED_INITIAL")])]
+    observation.harness_values = {"window.__vccs.feature.fanSpeed": "LOW"}
+    observation.elements[-1].text = "풍량 입력란"
+    observation.elements[-1].action_hint = "FILL"
+    observation.elements.append(ObservedUiElement(selector="#feature-label", tag="span",
+        text="풍량 표시 약풍", visible=True, enabled=True, action_hint="READ"))
     return case, plan, observation
 
 def agent3_plan() -> Agent3AutomationPlan:

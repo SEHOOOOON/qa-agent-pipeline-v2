@@ -3,6 +3,149 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("requirement_id", ["REQ-NOTIFY-001", "REQ-STATE-001"])
+def test_request_trace_only_keeps_requested_words_without_full_srs_scope(requirement_id):
+    from qa_pipeline_contracts import ScopeBasis
+    request, analysis, requirements = cp1_scope_case(direct=True, requirement_id=requirement_id)
+    condition = analysis.confirmed_conditions[-1]
+    request.acceptance_notes[-1] = "화면에 변경한 설정값을 표시합니다."
+    condition.statement = condition.source_text = request.acceptance_notes[-1]
+    effect = next(e for e in analysis.requirement_effects if e.requirement_id == requirement_id)
+    effect.scope_evidence.basis = ScopeBasis.REQUEST_TRACE_ONLY
+    result = evaluate_checkpoint1(request, analysis, requirements)
+    assert cp1_check(result, "CP1-011").status == CheckStatus.PASS
+    assert result.handoff_status == HandoffStatus.CONTINUE
+    assert evaluate_checkpoint1(request, analysis, requirements,
+                               allow_request_trace=False).handoff_status == HandoffStatus.BLOCKED
+
+
+@pytest.mark.parametrize("mutation", ["new_words", "srs_condition", "extra_condition",
+                                     "update", "missing_link", "invented_srs", "exclusion"])
+def test_request_trace_only_cannot_authorize_new_conditions(mutation):
+    from qa_pipeline_contracts import ScopeBasis
+    request, analysis, requirements = cp1_scope_case(direct=True)
+    condition = analysis.confirmed_conditions[-1]
+    effect = next(e for e in analysis.requirement_effects if e.requirement_id == "REQ-NOTIFY-001")
+    effect.scope_evidence.basis = ScopeBasis.REQUEST_TRACE_ONLY
+    if mutation == "new_words":
+        condition.statement += " 경고 색상도 표시합니다."
+    elif mutation == "srs_condition":
+        condition.source_type = ConditionSource.SRS
+    elif mutation == "extra_condition":
+        extra = condition.model_copy(deep=True)
+        extra.condition_id = "COND-007"
+        analysis.confirmed_conditions.append(extra)
+    elif mutation == "update":
+        effect.relation = RequirementRelation.UPDATE_REQUIRED
+    elif mutation == "missing_link":
+        condition.requirement_ids = [request.target_requirement_id]
+    elif mutation == "invented_srs":
+        effect.scope_evidence.srs_source_text = "없는 문장"
+    else:
+        request.acceptance_notes[-1] = "알림 검사는 제외한다."
+        condition.source_text = condition.statement = request.acceptance_notes[-1]
+    result = evaluate_checkpoint1(request, analysis, requirements)
+    assert cp1_check(result, "CP1-011").status == CheckStatus.FAIL
+    assert result.handoff_status == HandoffStatus.BLOCKED
+
+
+@pytest.mark.parametrize("requirement_id", ["REQ-NOTIFY-001", "REQ-STATE-001"])
+def test_scope_direct_request_passes_but_unrequested_dependency_pauses(requirement_id):
+    for direct in (True, False):
+        request, analysis, requirements = cp1_scope_case(
+            direct=direct, requirement_id=requirement_id,
+        )
+        result = evaluate_checkpoint1(request, analysis, requirements)
+        assert cp1_check(result, "CP1-011").status == (
+            CheckStatus.PASS if direct else CheckStatus.REVIEW
+        )
+        assert result.handoff_status == (
+            HandoffStatus.CONTINUE if direct else HandoffStatus.PAUSE
+        )
+        # An unresolved scope decision cannot escape via PARTIAL_PROCEED.
+        if not direct:
+            analysis.decision = AnalysisDecision.PARTIAL_PROCEED
+            analysis.excluded_scope = analysis.information_gaps = ["적용 범위 미정"]
+            analysis.excluded_information_gaps = ["적용 범위 미정"]
+            result = evaluate_checkpoint1(request, analysis, requirements)
+            assert result.handoff_status == HandoffStatus.PAUSE
+
+
+@pytest.mark.parametrize("mutation", [
+    "missing", "srs_condition", "unknown_condition", "duplicate_condition",
+    "invented_srs", "wrong_requirement", "excluded_request", "before_only",
+    "procedure_only",
+])
+def test_scope_rejects_unfounded_evidence(mutation):
+    request, analysis, requirements = cp1_scope_case(direct=True)
+    effect = next(item for item in analysis.requirement_effects
+                  if item.requirement_id == "REQ-NOTIFY-001")
+    if mutation == "missing":
+        effect.scope_evidence = None
+    elif mutation == "srs_condition":
+        analysis.confirmed_conditions[-1].source_type = ConditionSource.SRS
+    elif mutation == "unknown_condition":
+        effect.scope_evidence.request_condition_ids = ["COND-999"]
+    elif mutation == "duplicate_condition":
+        effect.scope_evidence.request_condition_ids *= 2
+    elif mutation == "invented_srs":
+        effect.scope_evidence.srs_source_text = "새로 만들어 낸 알림 규칙"
+    elif mutation == "wrong_requirement":
+        effect.scope_evidence.request_condition_ids = ["COND-001"]
+    else:
+        condition = analysis.confirmed_conditions[-1]
+        request.acceptance_notes.pop()
+        if mutation == "before_only":
+            request.before_value = condition.source_text
+        else:
+            note = ("알림 검사는 범위에 포함하지 않는다." if mutation == "excluded_request"
+                    else "시험 종료 후 대상 장비를 복원한다.")
+            request.acceptance_notes.append(note)
+            condition.source_text = condition.statement = note
+    result = evaluate_checkpoint1(request, analysis, requirements)
+    assert cp1_check(result, "CP1-011").status == CheckStatus.FAIL
+    assert result.handoff_status == HandoffStatus.BLOCKED
+
+
+def test_scope_does_not_accept_relabelled_dependency_or_shared_word_as_direct():
+    from qa_pipeline_contracts import ScopeBasis
+
+    request, analysis, requirements = cp1_scope_case()
+    effect = next(item for item in analysis.requirement_effects
+                  if item.requirement_id == "REQ-NOTIFY-001")
+    effect.scope_evidence.basis = ScopeBasis.DIRECT_REQUEST
+    # Merely linking a real request condition to another Requirement is not proof.
+    analysis.confirmed_conditions[1].requirement_ids.append("REQ-NOTIFY-001")
+    effect.scope_evidence.srs_source_text = "표시"
+    result = evaluate_checkpoint1(request, analysis, requirements)
+    assert cp1_check(result, "CP1-011").status == CheckStatus.REVIEW
+    assert result.handoff_status == HandoffStatus.PAUSE
+
+
+def test_scope_explicit_requirement_reference_and_update_are_supported():
+    request, analysis, requirements = cp1_scope_case(direct=True)
+    effect = next(item for item in analysis.requirement_effects
+                  if item.requirement_id == "REQ-NOTIFY-001")
+    note = "REQ-NOTIFY-001의 처리 결과 안내 문구를 변경합니다."
+    request.acceptance_notes[-1] = note
+    analysis.confirmed_conditions[-1].source_text = note
+    analysis.confirmed_conditions[-1].statement = note
+    effect.relation = RequirementRelation.UPDATE_REQUIRED
+    result = evaluate_checkpoint1(request, analysis, requirements)
+    assert result.handoff_status == HandoffStatus.CONTINUE
+    assert cp1_check(result, "CP1-011").status == CheckStatus.PASS
+
+
+def test_scope_guard_is_versioned_not_retroactive():
+    request, analysis, requirements = cp1_scope_case()
+    for item in analysis.requirement_effects:
+        item.scope_evidence = None
+    assert evaluate_checkpoint1(request, analysis, requirements).handoff_status == HandoffStatus.BLOCKED
+    historical = evaluate_checkpoint1(request, analysis, requirements, require_scope_guard=False)
+    assert historical.handoff_status == HandoffStatus.CONTINUE
+    assert len(historical.checks) == 10
+
+
 @pytest.mark.parametrize("mutation", ["reverse", "number", "role", "requirement"])
 def test_cp1_rejects_explicit_meaning_and_source_errors(mutation):
     analysis = cp1_valid_analysis()
@@ -16,7 +159,7 @@ def test_cp1_rejects_explicit_meaning_and_source_errors(mutation):
         analysis.confirmed_conditions[2].requirement_ids.append("REQ-CONTROL-001")
         analysis.requirement_effects[1].relation = RequirementRelation.VERIFY
     assert evaluate_checkpoint1(cp1_request(), analysis, cp1_requirements()).status == CheckStatus.FAIL
-    assert evaluate_checkpoint1(cp1_request(), analysis, cp1_requirements(), require_meaning_guard=False).status == CheckStatus.PASS
+    assert evaluate_checkpoint1(cp1_request(), analysis, cp1_requirements(), require_meaning_guard=False, require_scope_guard=False).status == CheckStatus.PASS
 
 
 def test_source_quote_respects_code_and_number_boundaries():
@@ -82,7 +225,7 @@ def test_agent1_uses_structured_responses_api() -> None:
     assert result.response_id == "resp_test"
     assert result.usage["total_tokens"] == 150
     assert responses.kwargs["text_format"] is Agent1Analysis
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent1-2-9"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent1-2-11"
     assert responses.kwargs["store"] is False
     instructions = responses.kwargs["input"][0]["content"]
     assert "현재 SRS는 변경 전 제품 상태" in instructions
@@ -107,7 +250,7 @@ def test_valid_analysis_passes_checkpoint1() -> None:
     result = evaluate_checkpoint1(cp1_request(), cp1_valid_analysis(), cp1_requirements())
 
     assert result.status == CheckStatus.PASS
-    assert len(result.checks) == 10
+    assert len(result.checks) == 11
     assert all(item.status == CheckStatus.PASS for item in result.checks)
 
 def test_missing_change_request_range_is_rejected() -> None:
@@ -417,7 +560,7 @@ def test_blocked_decision_blocks_agent2_handoff() -> None:
     assert result.status == CheckStatus.PASS
     assert result.handoff_status == HandoffStatus.BLOCKED
 
-def test_related_requirement_can_be_marked_update_required() -> None:
+def test_related_update_without_scope_evidence_is_rejected() -> None:
     requirements = cp1_requirements()
     related = requirements["REQ-NOTIFY-001"]
     conditions = [
@@ -442,8 +585,9 @@ def test_related_requirement_can_be_marked_update_required() -> None:
 
     result = evaluate_checkpoint1(cp1_request(), analysis, requirements)
 
-    assert result.status == CheckStatus.PASS
-    assert result.handoff_status == HandoffStatus.CONTINUE
+    assert cp1_check(result, "CP1-006").status == CheckStatus.PASS
+    assert cp1_check(result, "CP1-011").status == CheckStatus.FAIL
+    assert result.handoff_status == HandoffStatus.BLOCKED
 
 def test_proceed_with_open_question_is_recorded_for_final_review() -> None:
     analysis = cp1_valid_analysis().model_copy(

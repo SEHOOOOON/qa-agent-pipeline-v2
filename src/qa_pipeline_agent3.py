@@ -42,6 +42,9 @@ Read kinds: UI_TEXT (contains grounded state/value, not a generic label), UI_VAL
 If a stated precondition cannot be observed with these readers, return AUTOMATION_SUPPORT_EXTENSION_REQUIRED with that precise reason. Never delete, invent, or silently weaken preconditions. Product assertions cannot run in PRECONDITION phase.
 For state expectations, UI_TEXT_CONTAINS must include the expected state, never only a static control label. CONTROLS_DISABLED requires an explicitly disabled Expected Result. Generic fixed RESTORE checks compare against the prepared TC state immediately before TEST, while RESTORE_OBSERVED_HVAC restores the original pre-setup HVAC state.
 Implement every approved TEST and RESTORE operation in order. Trailing read-only verification steps are implemented by their corresponding assertions, not invented clicks.
+Keep original restore-operation lines unchanged. A trailing restore confirmation may name an existing Expected Result's exact observation_target and compare it with the pre-test state, or with an initial value already proved for that same target. The compiler performs these existing baseline comparisons; do not invent RESTORE clicks or new product Expected Results for confirmation-only lines. A new observation target or unsupported restore comparison requires support extension, not silent omission.
+For each confirmation-only restore line, add one restore_confirmations entry: copy the complete original line as source_text and list every existing ER result_id whose observation_target is confirmed by that line. Do not change the TC wording. These references execute the compiler's existing same-target restoration comparisons, not the product test's expected value. No new selector, expected value, notification, or Action is permitted for these entries. Keep each restore operation as an Action; a confirmation is not a substitute for a restore operation.
+For each referenced ER, comparisons must identify its exact source_excerpt (a contiguous clause of that original line containing only that observation_target) and basis. OBSERVED_BASELINE compares that same reader with its runtime pre-test snapshot and requires that clause to say pre-test/original state. PROVED_INITIAL compares with the initial value already proved by a matching precondition reader (or the supported initial-temperature contract); quote that value in the clause. Do not transfer an internal code to a UI label or borrow another clause's baseline wording. Cover the whole confirmation with these clauses, leaving only punctuation/conjunctions. If the TC confuses UI labels with internal codes, report that precise drafting problem; do not invent a label, edit the TC, or add a precondition.
 Use only selectors with match_count=1. A text assertion must check a meaningful product value or message, never only generic words such as 표시/state/text.
 Preserve negative boolean states: 비활성/disabled/unchecked are false, not true. Explicit true/false values take precedence over field names such as enabled.
 You are an Automation Engineer translating an approved product test case into a browser automation plan.
@@ -76,7 +79,9 @@ Rules:
    For a grouped TC, preserve the approved condition order. Set each assertion's after_action_id to the last action that
    implements its Expected Result's verify_after_step, so the compiler checks that condition before executing the next one.
    Different Expected Results for the same condition may share one after_action_id. Never postpone an earlier condition's
-   assertion until the final condition. For a single-flow TC, after_action_id may be omitted and assertions run at the end.
+   assertion until the final condition. New detailed TC results have observation_target: use that human-readable location
+   with the expected statement to choose observed evidence, and always set after_action_id to implement verify_after_step,
+   including SINGLE_FLOW. Only historical single-flow results without observation_target may omit after_action_id.
 8-1. INDEPENDENT_VARIANTS must execute every approved intermediate_reset_step before the next variant. A
    SEQUENTIAL_TRANSITION must keep the approved transition order because that order is part of the test meaning. Do not
    silently split, omit, merge, reorder, or reuse a previous condition's observed result.
@@ -250,7 +255,7 @@ class OpenAIAgent3:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent3-3-22",
+                prompt_cache_key="qa-v2-agent3-3-26",
                 input=[
                     {"role": "system", "content": AGENT3_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
@@ -963,11 +968,228 @@ def _precondition_read_expression(check: PreconditionCheck, target_device_id: in
     return f"page.locator({_py_literal(check.selector)}).{method}()"
 
 
+def _restore_comparison_coverage(test_case, plan) -> tuple[set[str], list[str]]:
+    """Validate each target's comparison independently; no new values or readers."""
+    lines = {line for line in test_case.restore_steps
+             if re.search(r"확인|비교|검사|검증|\b(?:verify|compare|check|confirm)\b", line, re.I)
+             and not re.search(r"선택하|적용하|입력하|변경하|설정하|복원하|누른|누르|켠다|끈다"
+                               r"|\b(?:click|apply|fill|select|set|restore|reset|uncheck)\b", line, re.I)}
+    links = {item.source_text: item for item in plan.restore_confirmations}
+    errors = []
+    if len(links) != len(plan.restore_confirmations) or set(links) != lines:
+        errors.append("복원 확인 원문 연결 누락·중복·변조: TC의 확인 문장마다 하나의 연결이 필요합니다.")
+    results = {result.result_id: result for result in test_case.expected_results}
+    for line in lines:
+        link = links.get(line)
+        if link is None:
+            continue
+        target_ids = {r.result_id for r in results.values()
+                      if r.observation_target and _contains(line, r.observation_target)}
+        ids = [item.result_id for item in link.comparisons]
+        if (not target_ids or set(link.result_ids) != target_ids or len(set(link.result_ids)) != len(link.result_ids)
+                or set(ids) != target_ids or len(ids) != len(set(ids))):
+            errors.append("복원 비교 연결 누락·중복: 언급한 모든 ER에 대상별 비교 방법이 필요합니다.")
+            continue
+        remainder = line
+        for comparison in link.comparisons:
+            result = results[comparison.result_id]
+            excerpt = comparison.source_excerpt
+            mentioned = {r.observation_target for r in results.values()
+                         if r.observation_target and _contains(excerpt, r.observation_target)}
+            if excerpt not in line or mentioned != {result.observation_target}:
+                errors.append(f"{result.result_id}: 비교 근거는 해당 대상 하나를 포함하는 TC 원문의 연속 구절이어야 합니다.")
+                continue
+            remainder = remainder.replace(excerpt, " ", 1)
+            # Keep operation positions and all runtime readers/values. This view only
+            # scopes language validation to one target so evidence cannot leak across clauses.
+            scoped_case = test_case.model_copy(deep=True)
+            scoped_case.expected_results = [result]
+            scoped_case.restore_steps = [excerpt if item == line else item
+                                         for item in test_case.restore_steps if item == line or item not in lines]
+            scoped_plan = plan.model_copy(deep=True)
+            scoped_plan.restore_confirmations = [RestoreConfirmation(source_text=excerpt, result_ids=[result.result_id])]
+            # A fake action using the whole confirmation must not disappear in the scoped view.
+            if any(_normalize(action.source_text) == _normalize(line) for action in plan.actions):
+                errors.append(f"{result.result_id}: 복원 확인을 조작으로 구현할 수 없습니다.")
+            _, scoped_errors = _restore_confirmation_coverage(scoped_case, scoped_plan, require_plan_links=True,
+                _comparison_basis=comparison.basis)
+            errors.extend(f"{result.result_id}: {error}" for error in scoped_errors)
+        remainder = re.sub(r"\b(?:and|then)\b|그리고|또한|및", " ", remainder, flags=re.I)
+        if re.search(r"\w", remainder):
+            errors.append("복원 확인 원문 중 연결되지 않은 내용이 있습니다: " + remainder.strip())
+    return {_normalize(line) for line in lines}, errors
+
+
+def _restore_confirmation_coverage(test_case, plan, *, require_plan_links=False,
+                                   require_comparison_basis=False, _comparison_basis=None) -> tuple[set[str], list[str]]:
+    """Recognize only confirmations already emitted by the guarded compiler.
+
+    This is deliberately a small vocabulary, not a natural-language restore
+    interpreter. Extra targets/values and mutation verbs remain fail-closed.
+    Historical combined operation/verification lines keep their action mapping.
+    """
+    if require_comparison_basis or any(item.comparisons for item in plan.restore_confirmations):
+        return _restore_comparison_coverage(test_case, plan)
+    read_only = {
+        index: line for index, line in enumerate(test_case.restore_steps)
+        if re.search((r"확인|비교|검사|검증|\b(?:verify|compare|check|confirm)\b" if _comparison_basis is not None else
+                      r"확인|비교|검사|\b(?:verify|compare)\b|\bcheck\b.+\b(?:baseline|initial|returned|matches|equals)\b"), line, re.I)
+        and not re.search(
+            r"선택하|적용하|입력하|변경하|설정하|복원하|누른|누르|켠다|끈다"
+            r"|\b(?:click|apply|fill|select|set|restore|reset|uncheck)\b", line, re.I
+        )
+    }
+    covered: set[str] = set()
+    errors: list[str] = []
+    links = {item.source_text: item for item in plan.restore_confirmations}
+    if require_plan_links:
+        if len(links) != len(plan.restore_confirmations):
+            errors.append("복원 확인 계획에 같은 원문이 중복 연결됐습니다.")
+        if set(links) != set(read_only.values()):
+            errors.append("복원 확인 문장과 restore_confirmations의 원문 목록이 다릅니다. "
+                          "확인 문장은 빠짐없이 연결하고 복원 조작을 확인으로 바꾸지 마세요.")
+    if not read_only:
+        return covered, errors
+    restore_actions = [action for action in plan.actions if action.phase == AutomationPhase.RESTORE]
+    last_operation = max((i for i in range(len(test_case.restore_steps)) if i not in read_only), default=-1)
+    assertions = {item.result_id: item for item in plan.assertions}
+    for index, line in read_only.items():
+        label = f"RESTORE confirmation {index + 1}"
+        if not restore_actions or last_operation < 0 or index < last_operation:
+            errors.append(f"{label}: confirmation must follow the approved restore operations")
+            continue
+        if any(_normalize(action.source_text) == _normalize(line) for action in plan.actions):
+            errors.append(f"{label}: read-only confirmation must not be implemented as an action")
+            continue
+        # Requiring the exact human-readable target prevents a generic 'check
+        # restoration' sentence from claiming an arbitrary additional check.
+        targets = [result for result in test_case.expected_results
+                   if result.observation_target and _contains(line, result.observation_target)]
+        if not targets:
+            errors.append(f"{label}: no existing Expected Result observation_target is identified")
+            continue
+        if require_plan_links:
+            link = links.get(line)
+            if (link is None or len(set(link.result_ids)) != len(link.result_ids)
+                    or set(link.result_ids) != {result.result_id for result in targets}):
+                errors.append(f"{label}: 원문에 명시한 모든 확인 대상의 ER ID를 정확히 연결하세요.")
+                continue
+        remainder = line
+        for result in sorted(targets, key=lambda item: len(item.observation_target), reverse=True):
+            remainder = re.sub(re.escape(result.observation_target), " ", remainder, flags=re.I)
+        comparison_text = remainder
+        baseline_comparison = bool(re.search(
+            r"시험\s*전|실행\s*전|실행\s*직전|초기\s*상태|원래\s*상태|원상태"
+            r"|pre[- ]?test|baseline|initial\s+state", comparison_text, re.I
+        ))
+        if _comparison_basis == RestoreComparisonBasis.OBSERVED_BASELINE and not baseline_comparison:
+            errors.append(f"{label}: 시험 전 관찰값 비교가 원문에 없습니다. 내부 코드를 화면 표시로 가정하지 마세요.")
+        if _comparison_basis == RestoreComparisonBasis.PROVED_INITIAL:
+            baseline_comparison = False
+        supported = True
+        for result in targets:
+            assertion = assertions.get(result.result_id)
+            temperature_restore = (
+                assertion is not None
+                and assertion.strategy in {AssertionStrategy.UI_TEMPERATURE, AssertionStrategy.INTERNAL_SET_TEMP}
+                and test_case.test_data.initial_temperature_c is not None
+                and any(action.action_type == AutomationActionType.SET_TEMPERATURE for action in plan.actions)
+            )
+            baseline_restore = (
+                assertion is not None
+                and assertion.observation_layer != ObservationLayer.NOTIFICATION
+                and assertion.strategy in (_GENERIC_ASSERTION_STRATEGIES | {AssertionStrategy.INTERNAL_DEVICE_FIELDS_EQUALS})
+            )
+            observed_hvac_restore = (
+                assertion is not None and assertion.strategy == AssertionStrategy.INTERNAL_SET_TEMP
+                and test_case.test_data.restore_observed_hvac_state
+                and any(action.action_type == AutomationActionType.RESTORE_OBSERVED_HVAC for action in restore_actions)
+            )
+            if not (temperature_restore or baseline_restore or observed_hvac_restore):
+                errors.append(f"{label}: {result.result_id} has no compiler restore comparison")
+                supported = False
+                continue
+            initial_values = []
+            if temperature_restore:
+                initial_values.append(test_case.test_data.initial_temperature_c)
+            reader_for_strategy = {
+                AssertionStrategy.UI_TEXT_CONTAINS: PreconditionReadKind.UI_TEXT,
+                AssertionStrategy.UI_VALUE_EQUALS: PreconditionReadKind.UI_VALUE,
+                AssertionStrategy.UI_CHECKED_EQUALS: PreconditionReadKind.UI_CHECKED,
+                AssertionStrategy.UI_ENABLED_EQUALS: PreconditionReadKind.UI_ENABLED,
+                AssertionStrategy.INTERNAL_VALUE_EQUALS: PreconditionReadKind.INTERNAL_VALUE,
+            }
+            for check in plan.precondition_checks:
+                if check.source_text not in test_case.preconditions:
+                    continue
+                same_reader = (check.read_kind == reader_for_strategy.get(assertion.strategy)
+                               and check.selector == assertion.selector)
+                device_field = (
+                    assertion.strategy == AssertionStrategy.INTERNAL_DEVICE_FIELDS_EQUALS
+                    and len(assertion.expected_fields) == 1
+                    and check.read_kind == PreconditionReadKind.INTERNAL_VALUE
+                    and re.fullmatch(r"window\.__vccs\.devices\[\d+\]\." + re.escape(assertion.expected_fields[0].field_name), check.selector)
+                )
+                if same_reader or device_field:
+                    initial_values.append(check.expected_value)
+            named_initial_value = False
+            for value in initial_values:
+                variants = [str(value)]
+                if type(value) in (int, float):
+                    variants.append(f"{value:g}")
+                for token in variants:
+                    pattern = (r"(?<![a-zA-Z0-9_.-])" + re.escape(token) + r"(?![a-zA-Z0-9_.])"
+                               if type(value) in (int, float) else
+                               r"(?<![a-zA-Z0-9_])" + re.escape(token) + r"(?![a-zA-Z0-9_])")
+                    if re.search(pattern, comparison_text, re.I):
+                        remainder = re.sub(pattern, " ", remainder, flags=re.I)
+                        named_initial_value = True
+            if not baseline_comparison and not named_initial_value:
+                errors.append(f"{label}: {result.result_id} has no matching proved initial value or baseline comparison")
+                supported = False
+        # Remove only the supported comparison vocabulary. Any new control,
+        # label, numeric value or negation left over must not be silently ignored.
+        if require_plan_links:
+            remainder = re.sub(r"(?:확인한|관찰한|기록한)(?=\s)", " ", remainder)
+        if _comparison_basis is not None:
+            remainder = re.sub(r"확인(?:하고|하며|하여|해서)|검사(?:하고|하며)|검증(?:한다|합니다|하고|하며)"
+                               r"|비교(?:하고|하며)|\bconfirm\b", "확인한다", remainder, flags=re.I)
+        remainder = re.sub(
+            r"복원\s*(?:후|뒤)|시험\s*전|실행\s*(?:직전|전)|초기\s*(?:상태|값)|원래\s*상태|원상태"
+            r"|동일한지|일치하는지|같은지|돌아왔는지|복구되었는지|복원되었는지|인지"
+            r"|비교(?:하여|해서|해)?|확인(?:합니다|한다)?|검사(?:합니다|한다)?"
+            r"|pre[- ]?test|baseline|initial\s+state|after\s+restoring|verify|check|compare|matches|equals|same|with|and"
+            r"|\b(?:state|value)\b|상태|값|으로|을|를|와|과|및|은|는|이|가|로|에|°c|℃",
+            " ", remainder, flags=re.I,
+        )
+        if require_plan_links:
+            # Descriptive wording may name the field already used by this TC.
+            # It cannot supply codes, numbers, new targets, or new expected values.
+            remainder = re.sub(r"표시|(?<![가-힣])서(?![가-힣])", " ", remainder)
+            operation_context = " ".join(test_case.steps)
+            result_context = " ".join(result.statement for result in targets)
+            initial_context = " ".join(test_case.preconditions)
+            for word in set(re.findall(r"[가-힣]{2,}", remainder)):
+                if word in operation_context and word in result_context and word in initial_context:
+                    remainder = re.sub(r"(?<![가-힣])" + re.escape(word) + r"(?![가-힣])", " ", remainder)
+        if re.search(r"[\w가-힣]", remainder):
+            errors.append(f"{label}: unsupported target, value or comparison wording" +
+                          (f" — 연결되지 않은 표현: {remainder.strip()}; 확인 대상·초기값 근거를 확인하세요."
+                           if require_plan_links else ""))
+            supported = False
+        if supported:
+            covered.add(_normalize(line))
+    return covered, errors
+
+
 def evaluate_checkpoint3_plan(
     test_case: ProductTestCaseCandidate,
     plan: Agent3AutomationPlan,
     observation: UiObservation,
     *, require_precondition_proof: bool = True,
+    require_restore_confirmation_detail: bool = True,
+    require_restore_plan_links: bool = False,
+    require_restore_comparison_basis: bool = False,
 ) -> Checkpoint3Result:
     if test_case.control_path != ControlPath.CENTRAL:
         return Checkpoint3Result(
@@ -1160,9 +1382,9 @@ def evaluate_checkpoint3_plan(
     anchoring_errors: list[str] = []
     for assertion in plan.assertions:
         result = results_by_id.get(assertion.result_id)
-        if _is_grouped_test_case(test_case) and assertion.after_action_id is None:
+        if (_is_grouped_test_case(test_case) or (result is not None and result.observation_target)) and assertion.after_action_id is None:
             anchoring_errors.append(
-                f"{assertion.result_id}: grouped-condition assertion has no after_action_id"
+                f"{assertion.result_id}: grouped/detailed-condition assertion has no after_action_id"
             )
             continue
         if assertion.after_action_id is None:
@@ -1421,6 +1643,18 @@ def evaluate_checkpoint3_plan(
         add("CP3-005", CheckStatus.PASS, "Mode and temperature values are unchanged from the TC.")
 
     sequence_errors: list[str] = []
+    restore_confirmations, confirmation_errors = (
+        _restore_confirmation_coverage(test_case, plan,
+            require_plan_links=require_restore_plan_links or bool(plan.restore_confirmations),
+            require_comparison_basis=require_restore_comparison_basis)
+        if require_restore_confirmation_detail else (set(), [])
+    )
+    explicit_comparisons = require_restore_comparison_basis or any(item.comparisons for item in plan.restore_confirmations)
+    if explicit_comparisons:
+        add("CP3-006B", CheckStatus.FAIL if confirmation_errors else CheckStatus.PASS,
+            " / ".join(confirmation_errors) if confirmation_errors else "복원 대상별 원문·비교 기준·실제 비교 연결을 확인했습니다.")
+    else:
+        sequence_errors.extend(confirmation_errors)
     phase_rank = {AutomationPhase.PRECONDITION: 0, AutomationPhase.TEST: 1, AutomationPhase.RESTORE: 2}
     ranks = [phase_rank[item.phase] for item in plan.actions]
     if ranks != sorted(ranks):
@@ -1455,7 +1689,9 @@ def evaluate_checkpoint3_plan(
                     and not re.search(r"선택하|적용하|입력하|변경하|설정하|누른|\b(?:click|apply|fill|select|set)\b", line, re.I)
                     for i, line in enumerate(lines))
             }
-            required = [_normalize(line) for line in lines if _normalize(line) not in observation_steps]
+            required = [_normalize(line) for line in lines
+                        if _normalize(line) not in observation_steps
+                        and not (phase == AutomationPhase.RESTORE and _normalize(line) in restore_confirmations)]
             if any(line not in implemented for line in required):
                 sequence_errors.append(f"{phase.value}: approved step is missing from the plan")
             elif [required.index(line) for line in implemented if line in required] != sorted(
@@ -1660,6 +1896,10 @@ def compile_automation_candidate(
     plan: Agent3AutomationPlan,
 ) -> str:
     """Compile a constrained plan into deterministic pytest + Playwright code."""
+    if plan.restore_confirmations:
+        _, link_errors = _restore_confirmation_coverage(test_case, plan, require_plan_links=True)
+        if link_errors:
+            raise Agent3Error("복원 확인 계획 연결 오류: " + " / ".join(link_errors))
     if test_case.control_path != ControlPath.CENTRAL:
         raise Agent3Error(
             "The guarded compiler accepts CENTRAL control-panel TCs only."
@@ -2252,6 +2492,13 @@ def compile_automation_candidate(
                 "",
             ]
         )
+    if restore_actions and plan.restore_confirmations:
+        lines.extend([
+            "            if not restore_mismatches and test_completed:",
+            "                print('RESTORE_CONFIRMATIONS_VERIFIED: ' + "
+            + _py_literal(",".join(sorted({result_id for item in plan.restore_confirmations for result_id in item.result_ids}))) + ")",
+            "",
+        ])
     return "\n".join(lines)
 
 

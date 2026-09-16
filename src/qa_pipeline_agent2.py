@@ -46,6 +46,8 @@ SRS revision proposals must use grounded numbers and preserve the meaning of the
 - 무엇을 어떤 조건에서 검증할지 설계합니다.
 - Playwright 코드, Selector, Python 코드나 자동화 구현은 작성하지 않습니다.
 - 입력으로 제공된 기존 TC 카탈로그와 변경 조건을 먼저 대조합니다.
+- 승인 TC 명세가 제공되면 검증 동작 요약뿐 아니라 사전조건·절차·기대결과·판정 시점·복원을 함께 대조합니다. 명세에 있는 절차를 요약에 없다는 이유로 누락된 것으로 판단하지 않습니다.
+- 기존 TC 명세는 재사용 판단 근거이지 이번 실행 성공의 증거가 아닙니다. 제공되지 않은 절차나 실제 수행 여부를 추정하지 않습니다.
 - test_cases에는 이번 변경으로 새로 필요하거나 기대 결과·절차가 달라져 수정이 필요한 변경 검증 후보만 작성합니다.
 - 유지되는 기존 동작은 새 TC로 다시 작성하지 않고 관련_기존_TC에 기존 TC ID와 연결 조건을 기록합니다.
 - 출력은 사람의 마지막 승인 전 변경 검증용 제품 TC 후보와 영향받는 기존 회귀 선택입니다.
@@ -54,6 +56,7 @@ SRS revision proposals must use grounded numbers and preserve the meaning of the
 기존 TC 전용 실행 예외: test_cases가 비어 있고 관련_기존_TC만 있으면 준비·복원 메모를 넣기 위해 신규 TC를 만들지 않습니다. 실행기는 요청 원문의 시험 절차 메모를 마지막 사람 검토로 전달합니다. 기존 자동화가 해당 메모를 수행했다고 추정하지 않습니다. 기존 절차 변경이 필요함을 확인했다면 수정 후보를 설계하며, 후보가 있는 경우 아래 준비·복원 절차 보존 규칙을 그대로 적용합니다.
 1. 검증된 변경 요청 원문, Agent 1의 confirmed_conditions와 고정된 SRS만 사실 근거로 사용합니다.
 2. requirement_effects가 NO_IMPACT인 Requirement는 테스트 범위에 포함하지 않습니다.
+2-1. scope_evidence.basis가 REQUEST_TRACE_ONLY인 연관 Requirement는 요청된 검사에 근거만 연결한 것입니다. 관련 SRS 전체를 새 검사로 추가하지 않습니다. 이 근거에 연결된 Condition을 기대결과로 사용할 때는 해당 Condition의 source_text 한 문장을 statement에 그대로 복사합니다. 관찰 위치·판정 단계는 observation_target·verify_after_step에 구체화하고, 다른 확인 내용은 덧붙이지 않습니다. Requirement 이름만 보고 알림이나 UI/내부 상태 검사를 추가하지 않습니다.
 3. MODIFIED는 변경 동작 검증 후보, UPDATE_REQUIRED는 변경으로 기대 결과·절차 수정이 필요한 후보, VERIFY는 기존 동작 회귀 선택으로 해석합니다.
 3-1. 기존 TC 카탈로그의 `검증 동작`이 VERIFY·유지 조건 또는 변경 후 조건을 그대로 검증하면 관련_기존_TC로 선택하고 동일 내용을 TC-CAND로 다시 만들지 않습니다. Requirement ID만 같고 검증 동작이 다르면 재사용으로 판단하지 않습니다. 기존 TC가 변경 후 조건을 전부 검증하면 test_cases는 비워 두고 관련_기존_TC만 반환할 수 있습니다. 기존 TC가 변경된 기대 결과를 검증할 수 없을 때만 부족한 변경분 후보를 만듭니다. `변경_구분=유지` 조건은 관련_기존_TC로만 연결하고, `변경_구분=변경` 조건은 신규·수정 후보 또는 변경 후 동작을 이미 검증하는 기존 TC 중 한 경로로 연결합니다.
 3-2. 변경 조건을 기존 TC만으로 검증할 때는 조건에 명시된 상태 코드·수치가 기존 카탈로그의 검증 동작에도 있는지 확인합니다. 값이 다르거나 확인할 수 없으면 기존 TC를 재사용 근거로 삼지 말고 부족한 변경분을 후보로 설계합니다. 같은 값이 있어도 매핑·순서·기대 동작이 다르면 동일 검증이 아닙니다.
@@ -65,6 +68,11 @@ SRS revision proposals must use grounded numbers and preserve the meaning of the
 5-3. 각 expected_result는 한 observation_layer에서 독립적으로 한 번 판정할 수 있는 관찰값 하나만 기술합니다. 화면 모드·화면 온도·대기값 반영·버튼 활성 상태처럼 서로 다른 관찰값을 한 Expected Result에 묶지 말고 고유한 ER ID로 분리합니다. 내부 장비 객체의 서로 연관된 여러 필드는 하나의 INTERNAL_STATE 결과로 함께 기록할 수 있습니다. Expected Result를 분리한다는 것은 TC 자체를 분리한다는 뜻이 아닙니다.
 5-4. 하나의 TC 안에 여러 조건 구간이 있으면 각 expected_result의 verify_after_step에 그 결과를 확인해야 하는 steps의 문장을 정확히 복사합니다. 마지막에 한꺼번에 확인하면 앞 조건의 결과가 사라질 수 있으므로, 조건별 실행 직후 판정 위치를 명시합니다.
 5-5. 같은 조작의 UI·내부 상태는 서로 다른 ER로 쓰되 같은 verify_after_step에 연결합니다. 관찰 계층이 다르다는 이유만으로 동일 조작을 반복하거나 중간 복원을 넣지 않습니다. 단일 조작의 이중 검증은 SINGLE_FLOW이며, 복수의 실제 시험 조건이 있을 때만 묶음으로 설계합니다.
+5-6. 처음 보는 QA 담당자가 재현할 수 있는 상세 초안을 작성합니다. 사전조건에는 대상·초기 상태를, steps에는 화면/조작 위치·대상·입력값·행동을 구체적으로 적습니다. 대상 선택 → 값 선택/입력 → 적용처럼 실제로 다른 조작은 별도 배열 항목으로 나눕니다. 선택·입력과 적용을 한 문장에 합치지 않습니다. 모든 클릭을 기계적으로 쪼개거나 모든 TC를 고정된 3단계로 만들지는 않습니다. 읽기 전용 시험에는 불필요한 선택·적용을 만들지 않습니다.
+5-7. 단일 흐름도 모든 expected_result에 verify_after_step을 명시하고 해당 steps 문장을 정확히 복사합니다. observation_target에는 '대상 장비 카드의 풍량 표시', '대상 장비의 내부 설정값'처럼 어디에서 확인하는지 적고, statement에도 그 확인 대상을 같은 표현으로 포함한 뒤 요구사항에 근거한 기대값·상태를 적습니다. 서로 다른 확인 위치의 결과는 별도 ER로 나눕니다. 반복 조건은 각 단계의 값·문맥을 명시해 판정할 단계가 하나로 식별되게 합니다.
+5-8. 준비·조작 확인은 preconditions·steps에 기록하고 제품 판정인 expected_results와 구분합니다. 입력에 근거 없는 화면명·버튼명·선택 표시·내부 필드명을 만들어 상세함을 채우지 않습니다. 복원은 restore_steps에서 복원 대상·초기값 또는 관찰한 원상태·적용·확인 방법을 설명하되 선택과 적용을 한 문장으로 묶어도 됩니다. 복원 실패를 제품 기대 결과로 추가하지 않습니다. 기존 승인 TC는 새 작성 형식에 맞추려고 덮어쓰거나 불필요하게 재생성하지 않습니다.
+5-9. 중앙 관제의 장비 값을 조작할 때는 대상 장비 선택을 값 선택/입력보다 앞의 별도 steps 항목에 씁니다. 입력에 이미 선택된 상태가 근거로 있으면 preconditions에 그 상태를 명시하고 불필요한 재선택은 하지 않습니다. '대상 장비에 MED를 선택한다'는 풍량 선택이지 장비 선택 설명이 아닙니다. 요청의 준비·복원 원문 메모는 그대로 보존하고, 추가 설명·복원 확인은 별도 항목에 씁니다. 복원 확인에는 기존 기대결과의 observation_target과 같은 확인 위치, 초기값 또는 실행 전 관찰값과 비교하는 방법을 적습니다. '복원한다', '결과를 확인한다'로 끝내지 않습니다. 초기값 확인과 복원 확인은 제품 기대결과에 추가하지 않습니다.
+5-10. 복원 확인은 대상마다 비교 기준을 구분합니다. 내부 코드와 사용자 화면 표시가 같다고 가정하지 않습니다. 화면 초기 표시의 명시 근거가 없으면 '대상 장비 카드가 실행 전 상태와 같은지 확인한다'처럼 같은 화면의 시험 전 관찰값과 비교합니다. 내부 초기값은 해당 내부 관찰 대상과 원문에 명시한 초기값으로 확인합니다. 각 대상과 비교 방법을 한 구절에 완결하고, 여러 구절은 '확인하고', '확인하며' 등으로 연결하거나 별도 문장으로 적을 수 있습니다. 다른 대상의 구절에 있는 초기값/시험 전 상태 표현을 빌려 쓰지 않습니다. 근거 없는 표시명이나 사전조건을 추가하지 않습니다.
 6. test_cases의 purpose는 CHANGE_VALIDATION만 사용합니다. 유지되는 기존 동작은 RELATED_REGRESSION 후보를 새로 만들지 말고 관련_기존_TC로 분리합니다.
 6-1. 범위 변경은 변경된 경계뿐 아니라 변경 후 범위의 하한과 상한을 각각 검증합니다. 같은 관제점의 같은 범위 규칙이면 하한·상한을 하나의 TC 안에서 조건 구간으로 묶을 수 있습니다.
 6-2. 현재 V2의 제품 조작 기준은 중앙 관제 패널 하나입니다. 모든 실행 TC는 control_path=CENTRAL을 사용하며 LOCAL·현장 리모컨 TC를 만들지 않습니다.
@@ -95,6 +103,28 @@ SRS revision proposals must use grounded numbers and preserve the meaning of the
 20. UPDATE_REQUIRED 자체는 변경관리의 정상 결과이므로 그것만으로 `중단_확인_사항` 또는 `최종_확인_사항`을 만들지 않습니다.
 21. existing_tc_comparison_completed=true로 기록합니다. 관련_기존_TC에는 제공된 기존 TC ID만 사용하고 각 선택이 어떤 유지·영향 조건을 회귀 확인하는지 source_condition_ids와 selection_reason으로 설명합니다. 변경 대상 Requirement를 포함하는 기존 TC도 `검증 동작`을 대조하되 변경 후에도 그대로 유효한 경우에만 선택합니다. 재사용할 수 없으면 억지로 선택하지 말고 TC ID와 미선택 이유를 coverage_notes에 기록합니다.
 22. requirement_effects가 MODIFIED 또는 UPDATE_REQUIRED인 모든 Requirement는 `SRS_개정_제안`에 정확히 한 건씩 기록합니다. current_acceptance_criteria는 제공된 SRS 원문과 완전히 같아야 하며, proposed_acceptance_criteria는 확정 Condition과 변경 요청에 근거한 새 판정 문구여야 합니다. Requirement 문장 자체는 바꾸지 않습니다. source_condition_ids로 근거를 연결하고, 사람이 승인하기 전 SRS가 변경된 것처럼 표현하지 않습니다.
+작성 수준 예시 (아래는 기존 필드의 일부만 발췌한 형식 참고이며 이번 입력의 제품 기준이 아닙니다):
+예시 A의 입력이 '오류·잠금 없는 단일 장비, 초기 LOW, MED 적용 직후 카드 중풍·내부 fanSpeed=MED, 종료 후 LOW 복원'을 명시한 경우:
+preconditions:
+- 중앙 관제 패널에서 오류와 잠금이 없는 단일 장비를 대상으로 합니다.
+- 첫 실행 기본 상태인 LOW 풍량을 확인한 뒤 시험을 시작합니다.
+steps:
+1. 중앙 관제 화면에서 시험할 대상 장비 카드를 선택한다.
+2. 선택한 장비의 제어 패널에서 풍량을 MED로 선택한다.
+3. 제어 패널의 적용 버튼을 눌러 선택한 풍량을 대상 장비에 적용한다.
+expected_results:
+- ER-001: 대상 장비 카드의 풍량 표시에 중풍이 표시된다. observation_target='대상 장비 카드의 풍량 표시', observation_layer=UI.
+- ER-002: 대상 장비의 내부 fanSpeed는 MED이다. observation_target='대상 장비의 내부 fanSpeed', observation_layer=INTERNAL_STATE.
+두 결과의 verify_after_step에는 3번 문장을 번호 없이 정확히 복사하고 각 source_condition_ids는 이번 입력의 해당 제품 조건에 연결합니다. 사람이 보는 3-1·3-2는 단계별 결과 표기이며 JSON의 ER ID를 바꾸지 않습니다.
+restore_steps:
+- 시험 뒤 대상 장비를 LOW 풍량으로 복원하고 적용합니다.
+- 복원 후 대상 장비의 내부 fanSpeed가 초기값 LOW로 돌아왔는지 확인한다.
+화면 복원도 확인할 경우에는 '복원 후 대상 장비 카드의 풍량 표시가 실행 전 상태와 같은지 확인한다'를 별도 확인 문장으로 씁니다. 내부 LOW 코드로 화면 표시명을 추정하지 않습니다.
+대상 선택 성공·알림·선택 색상·LOW의 한글 표시를 새 expected_results로 만들지 않습니다. HIGH 유지 조건을 검증하는 승인 TC가 있다면 관련_기존_TC로 재사용합니다.
+
+예시 B: 입력이 '초기 설정 온도 24°C, 30°C 적용 후 카드·내부 설정 온도 30°C'를 요구하면 대상 선택 → 설정 온도 30°C 입력 → 적용으로 작성합니다. 적용 직후 카드 설정 온도와 내부 설정 온도를 각각 확인합니다. 복원은 대상 장비에 초기 24°C를 적용한 뒤 같은 내부 설정 온도가 24°C인지 확인합니다. 예시 A의 풍량·MED·LOW·문구를 복사하지 않습니다.
+예시 C: 입력이 현재 상태를 조회하는 읽기 전용 시험이면 조회 단계와 그 단계의 기대결과만 작성합니다. 대상 선택이 실제로 필요한 경우만 기록하며 값 입력·적용·복원을 억지로 추가하지 않습니다.
+세 예시는 상세한 작성 방식만 보여줍니다. 값·화면명·필드명·조건 ID·초기 상태는 반드시 현재 입력에서 가져오며, 예시를 근거로 제품 판정이나 시험 범위를 추가하지 않습니다.
 """.strip()
 
 
@@ -168,7 +198,7 @@ class OpenAIAgent2:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent2-2-22",
+                prompt_cache_key="qa-v2-agent2-2-27",
                 input=[
                     {"role": "system", "content": AGENT2_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
@@ -308,6 +338,131 @@ def _existing_test_procedure_review_notes(
     ))
 
 
+def _tc_procedure_detail_errors(tc: ProductTestCaseCandidate) -> list[str]:
+    """Limited authoring checks over existing text fields, not a semantic parser.
+
+    They do not create product expectations or prove browser state. CP3 and the
+    trial still have to connect and observe the actual preparation/restoration.
+    """
+    errors: list[str] = []
+    target_object = r"(?:대상\s*)?(?:장비|기기|실내기)(?:\s*카드)?(?:을|를)\s*"
+    target_select = re.compile(
+        target_object + r"(?:선택|클릭)|\b(?:select|click)\s+(?:the\s+)?(?:target\s+)?device(?:\s+card)?\b", re.I
+    )
+    selected_state = re.compile(
+        r"(?:장비|기기|실내기)(?:\s*카드)?(?:가|는|를|을)?\s*(?:이미\s*)?"
+        r"(?:선택된|선택되어|선택돼|선택한\s*상태)"
+        r"|\b(?:target\s+)?device\s+(?:is\s+)?(?:already\s+)?selected\b", re.I
+    )
+    selection_negation = re.compile(
+        r"(?:선택|클릭)(?:하지|되지|할\s*필요|할\s*수\s*없)"
+        r"|선택(?:된|한)\s*상태(?:가|는)?\s*아니|미선택|\b(?:not|without)\b", re.I
+    )
+    operation = re.compile(
+        r"(?:선택|입력|설정|변경|적용|요청)(?:한다|합니다|하기|한\s*뒤|하고)"
+        r"|(?:입력|적용|선택)\s*버튼|\b(?:select|enter|fill|set|apply|submit|toggle|uncheck)\b"
+        r"|\bcheck\s+(?:the\s+)?checkbox\b", re.I
+    )
+    selections, operations = [], []
+    for index, step in enumerate(tc.steps):
+        match = target_select.search(step)
+        # Removing the target-selection phrase leaves any second operation
+        # visible, so selecting the device and its value on one line is not
+        # accepted as two distinct steps.
+        remainder = target_select.sub("", step)
+        if match and not selection_negation.search(step) and not operation.search(remainder):
+            selections.append(index)
+        elif operation.search(step):
+            operations.append(index)
+    prepared = any(selected_state.search(line) and not selection_negation.search(line) for line in tc.preconditions)
+    device_context = bool(re.search(
+        r"장비|기기|실내기|\bdevice\b",
+        " ".join([tc.title, *tc.preconditions, *tc.steps,
+                  *(result.observation_target or "" for result in tc.expected_results)]), re.I
+    )) or any(value is not None for value in (tc.test_data.requested_mode, tc.test_data.requested_temperature_c)) or bool(
+        tc.test_data.requested_modes or tc.test_data.requested_temperatures_c
+    )
+    if tc.control_path == ControlPath.CENTRAL and device_context and operations and not prepared:
+        if not any(index < operations[0] for index in selections):
+            errors.append(f"{tc.tc_id}: 값 조작 전에 대상 장비 선택을 별도 단계로 명시하거나 근거 있는 선택 완료 상태를 사전조건에 명시")
+
+    if tc.restore_required:
+        check_word = re.compile(r"확인|비교|검증|\b(?:verify|compare|confirm|check)\b", re.I)
+        check_negation = re.compile(r"확인하지|비교하지|검증하지|확인할\s*수\s*없|미확인|생략|\b(?:not|without|skip)\b", re.I)
+        original_basis = re.compile(r"초기(?:값|\s*상태)|원래|원상태|처음|(?:시험|실행)\s*전|\b(?:initial|original|baseline)\b", re.I)
+        observed_basis = re.compile(
+            r"(?:시험|실행)\s*(?:직전|전)[^.\n]*(?:관찰|기록|저장)"
+            r"|(?:관찰|기록|저장)[^.\n]*(?:원상태|초기값)"
+            r"|\b(?:observed|recorded|saved)\s+(?:initial\s+)?(?:state|value|baseline)\b", re.I
+        )
+        target = re.compile(r"장비|기기|실내기|대상|\b(?:device|target)\b", re.I)
+        observation = re.compile(r"내부|화면|카드|패널|표시|설정값|\b(?:state|value|panel|card|display)\b", re.I)
+        # Identifiers already in a TC's observation location also qualify; no
+        # feature/TC-ID/value whitelist is used (fanSpeed is not special).
+        identifiers = {
+            word for result in tc.expected_results
+            for word in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", result.observation_target or "")
+            if word.casefold() not in {"ui", "target", "device", "the"}
+        }
+        initial_values = _explicit_behavior_values(" ".join(tc.preconditions))
+        for value in (tc.test_data.initial_mode, tc.test_data.initial_temperature_c):
+            if value is not None:
+                initial_values.update(_explicit_behavior_values(str(value)))
+        restore_values = _explicit_behavior_values(" ".join(tc.restore_steps))
+        # This is a drafting completeness check. Actual value grounding and
+        # baseline equality must also be checked by CP3, never inferred here.
+        has_basis = bool(restore_values or original_basis.search(" ".join(tc.restore_steps)))
+        has_target = any(target.search(line) for line in tc.restore_steps) or any(
+            result.observation_target and _contains_fact(line, result.observation_target)
+            for line in tc.restore_steps for result in tc.expected_results
+        )
+        detailed_check = False
+        for line in tc.restore_steps:
+            if not check_word.search(line) or check_negation.search(line):
+                continue
+            values = _explicit_behavior_values(line)
+            location = observation.search(line) or any(re.search(rf"\b{re.escape(word)}\b", line, re.I) for word in identifiers) or any(
+                result.observation_target and _contains_fact(line, result.observation_target)
+                for result in tc.expected_results
+            )
+            basis = bool(values) or observed_basis.search(line) or (
+                original_basis.search(line) and bool(initial_values)
+            )
+            if location and basis and not (initial_values and values - initial_values):
+                detailed_check = True
+        if not (has_target and has_basis and detailed_check):
+            errors.append(f"{tc.tc_id}: restore_steps에 복원 대상·초기값/실행 전 상태와 구체적인 관찰 위치의 복귀 확인을 명시 (원문 복원 메모는 유지)")
+    return errors
+
+
+def _tc_restore_basis_errors(tc: ProductTestCaseCandidate) -> list[str]:
+    """Catch ambiguous per-target drafting before asking Agent 3 to repair a frozen TC."""
+    errors = []
+    baseline = re.compile(r"(?:시험|실행)\s*(?:직전|전)|초기\s*상태|원래\s*상태|원상태|\b(?:baseline|pre[- ]?test|initial state)\b", re.I)
+    for line in tc.restore_steps:
+        if not re.search(r"확인|비교|검사|검증|\b(?:check|verify|compare|confirm)\b", line, re.I):
+            continue
+        # Combined restore-operation notes are preserved; this guard handles the added confirmation.
+        if re.search(r"선택하|적용하|입력하|설정하|복원하|\b(?:apply|restore|fill|select|set)\b", line, re.I):
+            continue
+        distinct_targets = {r.observation_target: r for r in tc.expected_results if r.observation_target}
+        targets = sorted(((line.find(target), r) for target, r in distinct_targets.items()
+                          if target in line), key=lambda item: item[0])
+        for index, (start, result) in enumerate(targets):
+            end = targets[index + 1][0] if index + 1 < len(targets) else len(line)
+            clause = line[start:end].replace(result.observation_target, " ")
+            values = _explicit_behavior_values(clause)
+            if not values and not baseline.search(clause):
+                errors.append(f"{tc.tc_id}/{result.result_id}: 해당 확인 대상의 구절에 초기값 또는 시험 전 상태와의 비교를 명시하세요.")
+            if result.observation_layer == ObservationLayer.UI and values:
+                grounded = set().union(*(_explicit_behavior_values(p) for p in tc.preconditions
+                                        if result.observation_target in p))
+                if values - grounded:
+                    errors.append(f"{tc.tc_id}/{result.result_id}: 내부 코드를 화면 초기 표시로 가정하지 마세요. "
+                                  "화면 표시 근거가 없으면 이 대상의 실행 전 관찰 상태와 비교한다고 명시하세요.")
+    return errors
+
+
 def evaluate_checkpoint2(
     request: ChangeRequest,
     analysis: Agent1Analysis,
@@ -321,6 +476,9 @@ def evaluate_checkpoint2(
     require_double_assert_timing: bool = True,
     require_meaning_guard: bool = True,
     require_candidate_expectation_guard: bool = True,
+    require_tc_detail: bool = True,
+    require_procedure_detail: bool = True,
+    require_restore_target_basis: bool = False,
 ) -> Checkpoint2Result:
     checks: list[CheckResult] = []
 
@@ -352,6 +510,15 @@ def evaluate_checkpoint2(
     known_conditions = {item.condition_id: item for item in analysis.confirmed_conditions}
     requirement_relations = {
         item.requirement_id: item.relation for item in analysis.requirement_effects
+    }
+    trace_only_requirements = {
+        item.requirement_id for item in analysis.requirement_effects
+        if item.scope_evidence is not None
+        and item.scope_evidence.basis == ScopeBasis.REQUEST_TRACE_ONLY
+    }
+    trace_only_conditions = {
+        item.condition_id for item in analysis.confirmed_conditions
+        if trace_only_requirements.intersection(item.requirement_ids)
     }
     active_requirements = {
         item.requirement_id
@@ -450,7 +617,7 @@ def evaluate_checkpoint2(
         }
         layers = {result.observation_layer for result in tc.expected_results}
         requires_double_assert = (
-            "REQ-STATE-001" in source_requirements
+            "REQ-STATE-001" in (source_requirements - trace_only_requirements)
             or tc.test_type == TcType.STATE_CONSISTENCY
         )
         if requires_double_assert and not {
@@ -458,7 +625,7 @@ def evaluate_checkpoint2(
             ObservationLayer.INTERNAL_STATE,
         }.issubset(layers):
             state_errors.append(tc.tc_id)
-        if "REQ-NOTIFY-001" in source_requirements and ObservationLayer.NOTIFICATION not in layers:
+        if "REQ-NOTIFY-001" in (source_requirements - trace_only_requirements) and ObservationLayer.NOTIFICATION not in layers:
             notify_errors.append(tc.tc_id)
         for result in tc.expected_results:
             if result.observation_layer != ObservationLayer.UI:
@@ -1073,6 +1240,14 @@ def evaluate_checkpoint2(
     for tc in design.test_cases:
         for result in tc.expected_results:
             result_condition_ids = set(result.source_condition_ids)
+            if result_condition_ids & trace_only_conditions and (
+                len(result_condition_ids) != 1
+                or result.statement != known_conditions[next(iter(result_condition_ids))].source_text
+            ):
+                minimality_errors.append(
+                    f"{tc.tc_id}/{result.result_id}:근거 연결 조건은 요청 원문 한 문장을 그대로 검증해야 합니다. "
+                    "새 검사·기대값을 덧붙이지 마세요."
+                )
             excluded_sources = sorted(
                 result_condition_ids & scope_limit_condition_ids
             )
@@ -1232,6 +1407,46 @@ def evaluate_checkpoint2(
                 CheckStatus.PASS,
                 "MODIFIED·UPDATE_REQUIRED Requirement의 SRS 개정 전·후 문구와 근거가 구조화됐습니다.",
             )
+
+    if require_tc_detail:
+        detail_errors: list[str] = []
+        # Limited checks for visibly compressed procedures, not a general Korean
+        # parser. Restore may remain a concise select-and-apply instruction.
+        compressed_action = re.compile(
+            r"(?:선택|입력|설정)(?:하고|한\s*(?:뒤|후)|\s*(?:→|>|후|및))[^.\n]*적용"
+            r"|\b(?:select|enter|fill|set)\b[^.\n]*\b(?:and|then)\s+(?:click\s+)?(?:apply|submit)\b",
+            re.I,
+        )
+        vague_steps = {"테스트실행", "시험실행", "결과확인", "테스트를실행한다", "결과를확인한다"}
+        vague_targets = {"화면", "ui", "내부", "값", "상태", "결과", "요청결과", "내부값", "대상", "확인대상"}
+        for tc in design.test_cases:
+            for index, step in enumerate(tc.steps, 1):
+                if compressed_action.search(step):
+                    detail_errors.append(f"{tc.tc_id} 단계 {index}: 값 선택/입력과 적용을 별도 단계로 구분")
+                if _normalize(step).rstrip(".") in vague_steps:
+                    detail_errors.append(f"{tc.tc_id} 단계 {index}: 조작 위치·대상·행동을 구체화")
+            for result in tc.expected_results:
+                label = f"{tc.tc_id}/{result.result_id}"
+                if not result.verify_after_step or sum(
+                    _normalize(step) == _normalize(result.verify_after_step) for step in tc.steps
+                ) != 1:
+                    detail_errors.append(f"{label}: 실제 절차 한 곳에 판정 시점을 연결")
+                if (not result.observation_target
+                    or _normalize(result.observation_target) in vague_targets or not _contains_fact(
+                    result.statement, result.observation_target
+                )):
+                    detail_errors.append(f"{label}: 기대결과에 동일한 표현의 구체적인 확인 대상 명시")
+        add("CP2-020", CheckStatus.FAIL if detail_errors else CheckStatus.PASS,
+            "TC 상세화 필요: " + "; ".join(detail_errors) if detail_errors
+            else "조작 구분·기대결과 확인 대상·판정 단계의 상세화 항목을 확인했습니다.")
+
+        if require_procedure_detail:
+            procedure_errors = [error for tc in design.test_cases for error in _tc_procedure_detail_errors(tc)]
+            if require_restore_target_basis:
+                procedure_errors.extend(error for tc in design.test_cases for error in _tc_restore_basis_errors(tc))
+            add("CP2-021", CheckStatus.FAIL if procedure_errors else CheckStatus.PASS,
+                "TC 절차 보완 필요: " + "; ".join(procedure_errors) if procedure_errors
+                else "대상 선택 순서와 복원 확인 설명의 명시 항목을 확인했습니다.")
 
     statuses = {item.status for item in checks}
     if CheckStatus.ERROR in statuses:

@@ -3,6 +3,153 @@
 from pipeline_test_support import *
 
 
+def test_notion_detail_preserves_saved_steps_results_and_restore(tmp_path):
+    run_dir, run_id = _write_agent4_inputs(tmp_path)
+    design = detailed_boundary_design()
+    tc = design.test_cases[0].model_copy(update={"tc_id": "TC-CAND-003"})
+    tc.restore_required = True
+    tc.restore_steps = [
+        "시험 뒤 대상 장비의 설정 온도를 초기값 18°C로 복원하고 적용한다.",
+        "복원 후 내부 온도가 초기값 18°C로 돌아왔는지 확인한다.",
+    ]
+    _write_json(run_dir / "agent2_test_design.json", {"test_cases": [tc.model_dump(mode="json")]})
+    _write_json(run_dir / "agent2_manifest.json", {})  # Renderer unit test, not verified CLI input.
+    rows = pipeline_reporting.build_run_test_rows(run_dir)
+    row = next(item for item in rows if item["tc_id"] == tc.tc_id)
+    assert row["expected_result_details"][0]["result_id"] == tc.expected_results[0].result_id
+    bundle = pipeline.ValidationExecutionBundle.model_validate_json((run_dir / "validation_execution.json").read_text(encoding="utf-8"))
+    # Record rendering is separate from the CLI's upstream integrity gate.
+    report = SimpleNamespace(findings=[], run_id=run_id, recommendation=pipeline.FinalRecommendation.HUMAN_REVIEW,
+                             model_dump=lambda **kwargs: {})
+    records = pipeline_reporting._notion_report_records(bundle, report, run_dir)
+    record = next(item for item in records if item["tc_id"] == tc.tc_id)
+    assert record["tc_detail"]["steps"] == tc.steps
+    assert record["tc_detail"]["restore_steps"] == tc.restore_steps
+    assert record["tc_detail"]["expected_result_details"] == row["expected_result_details"]
+    assert len(records) == 3  # No independent publication of all Agent 2 drafts.
+    blocks = pipeline_reporting._notion_tc_blocks(record)
+    text = "\n".join(pipeline_reporting._notion_block_text(block) for block in blocks)
+    assert "3-1." in text and "3-2." in text
+    assert all(er.statement in text for er in tc.expected_results)
+    assert all(step in text for step in tc.steps + tc.restore_steps)
+    assert "공식 등록 승인" in text
+
+
+def test_notion_detail_does_not_guess_legacy_or_ambiguous_timing():
+    record = {"tc_detail": {"steps": ["적용", "적용"], "expected_result_details": [
+        {"statement": "상태 확인", "verify_after_step": "적용"},
+        {"statement": "과거 기대결과", "verify_after_step": None},
+    ]}}
+    text = "\n".join(pipeline_reporting._notion_block_text(block)
+                     for block in pipeline_reporting._notion_tc_blocks(record))
+    assert "단계 연결이 확인되지 않은 기대결과" in text
+    assert "상태 확인" in text and "과거 기대결과" in text
+    assert "1-1." not in text and "2-1." not in text
+    assert "복원 절차가 기록되어 있지 않습니다" in text
+
+
+def test_notion_detail_preserves_long_text_and_resumes_parts_without_duplicates(monkeypatch):
+    long_text = "긴 기대결과😀" * 13000
+    blocks = pipeline_reporting._notion_tc_blocks({"tc_detail": {"expected_results": [long_text]}})
+    assert long_text in "".join(pipeline_reporting._notion_block_text(block) for block in blocks)
+    assert all(len(pipeline_reporting._notion_block_text(block).encode("utf-16-le")) // 2 <= 1800 for block in blocks)
+    children = {"page": [{"id": "human", "type": "paragraph", "paragraph": {
+        "rich_text": [{"text": {"content": "사람 메모"}}]}}]}
+    writes, gets = [], []
+    fail_second = [True]
+
+    def fake_http(method, url, payload, **kwargs):
+        block_id = url.split("/blocks/")[1].split("/")[0]
+        if method == "GET":
+            assert payload is None
+            gets.append(url)
+            # Exercise pagination of page content, including unrelated human blocks.
+            if block_id == "page" and "start_cursor" not in url:
+                return 200, {"results": children[block_id][:1], "has_more": True, "next_cursor": "cursor 1"}
+            result = children[block_id][1:] if block_id == "page" else children[block_id]
+            return 200, {"results": result, "has_more": False}
+        assert method == "PATCH" and block_id == "page"
+        assert len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) < 400_000
+        block = payload["children"][0]
+        assert len(block["toggle"]["children"]) <= 40
+        block_id = f"toggle-{len(writes)}"
+        saved = {**block, "id": block_id, "has_children": True}
+        children["page"].append(saved)
+        children[block_id] = json.loads(json.dumps(block["toggle"]["children"]))
+        writes.append(payload)
+        if len(writes) == 2 and fail_second[0]:
+            fail_second[0] = False
+            raise TimeoutError("saved, but response unavailable")
+        return 200, {}
+
+    monkeypatch.setattr(pipeline_reporting, "_http_json_request", fake_http)
+    with pytest.raises(TimeoutError):
+        pipeline_reporting._sync_notion_tc_detail("page", blocks, {})
+    pipeline_reporting._sync_notion_tc_detail("page", blocks, {})
+    count = len(writes)
+    pipeline_reporting._sync_notion_tc_detail("page", blocks, {})
+    assert len(writes) == count > 1
+    assert any("start_cursor=cursor+1" in url for url in gets)
+    assert pipeline_reporting._notion_block_text(children["page"][0]) == "사람 메모"
+    # A human edit inside an owned snapshot is preserved, not overwritten.
+    children["toggle-0"][0]["paragraph"]["rich_text"][0]["text"]["content"] = "수동 수정"
+    with pytest.raises(ValueError, match="편집"):
+        pipeline_reporting._sync_notion_tc_detail("page", blocks, {})
+    assert len(writes) == count
+
+
+@pytest.mark.parametrize("body_status", [200, 403])
+def test_notion_detail_upsert_counts_only_completed_bodies(monkeypatch, body_status):
+    monkeypatch.setenv("NOTION_API_KEY", "test-only-not-a-secret")
+    monkeypatch.setenv("NOTION_DATA_SOURCE_ID", "test-data-source")
+    calls = []
+    def fake_http(method, url, payload, **kwargs):
+        calls.append((method, url, payload))
+        if url.endswith("/query"):
+            return 200, {"results": []}
+        if method == "GET":
+            return 200, {"results": [], "has_more": False}
+        if "/blocks/" in url:
+            return body_status, {}
+        return 200, {"id": "page-new"}
+    monkeypatch.setattr(pipeline_reporting, "_http_json_request", fake_http)
+    record = {"run_id": "RUN-A", "tc_id": "TC-CAND-001", "result": "PASSED",
+              "finding_category": "NONE", "recommendation": "HUMAN_REVIEW", "tc_detail": {}}
+    result = pipeline_reporting._upsert_notion_reports([record])
+    assert result.status == (pipeline.ExternalDeliveryStatus.SENT if body_status == 200 else pipeline.ExternalDeliveryStatus.FAILED)
+    assert result.item_count == (1 if body_status == 200 else 0)
+    assert any("/blocks/page-new/children" in url for _, url, _ in calls)
+
+
+def test_notion_get_does_not_send_json_body(monkeypatch):
+    requests = []
+    class Response:
+        status = 200
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def read(self):
+            return b'{}'
+    def fake_open(request, timeout):
+        requests.append(request)
+        return Response()
+    monkeypatch.setattr(pipeline_reporting.urllib.request, "urlopen", fake_open)
+    assert pipeline_reporting._http_json_request("GET", "https://api.notion.com/v1/blocks/test/children", None) == (200, {})
+    assert requests[0].data is None
+
+
+def test_report_omits_unverified_legacy_design_from_notion_detail(tmp_path):
+    run_dir, run_id = _write_agent4_inputs(tmp_path)
+    args = SimpleNamespace(run_id=run_id, runs_root=str(run_dir.parent), send=False)
+    assert pipeline.run_agent4(args) == 0
+    payload = json.loads((run_dir / "notion_payload.json").read_text(encoding="utf-8"))
+    assert all(record["tc_detail"] == {} for record in payload["records"])
+    # An unknown manifest cannot opt a report into trusted detailed publication.
+    _write_json(run_dir / "agent2_manifest.json", {})
+    assert pipeline.run_external_reporting(args) == 2
+
+
 def test_agent4_reports_precondition_failure_as_unexecuted_product_test(tmp_path):
     run_dir, run_id = _write_agent4_inputs(tmp_path,
         candidate_status=pipeline.NeutralExecutionStatus.EXECUTION_ERROR,

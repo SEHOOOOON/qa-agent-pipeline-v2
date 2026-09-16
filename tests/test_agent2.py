@@ -3,6 +3,383 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("variant", ["mixed", "ui_code", "ui_literal_proved", "missing_ui_basis", "connector"])
+def test_restore_drafting_separates_ui_labels_and_internal_codes(variant):
+    from qa_pipeline_agent2 import _tc_restore_basis_errors
+    case, _, _ = mixed_restore_comparison_fixture()
+    if variant in {"ui_code", "ui_literal_proved"}:
+        case.restore_steps[-1] = case.restore_steps[-1].replace("실행 전 상태와 같은지", "LOW인지")
+    if variant == "ui_literal_proved":
+        case.preconditions.append("풍량 표시의 초기값은 LOW이다.")
+    if variant == "missing_ui_basis":
+        case.restore_steps[-1] = case.restore_steps[-1].replace("실행 전 상태와 같은지", "정상인지")
+    if variant == "connector":
+        case.restore_steps[-1] = case.restore_steps[-1].replace("확인하고,", "확인하며,")
+    assert bool(_tc_restore_basis_errors(case)) == (variant in {"ui_code", "missing_ui_basis"})
+
+
+@pytest.mark.parametrize("mutation", [None, "extra_alert", "changed_value", "combined_sources", "unknown_source"])
+def test_trace_only_expected_results_cannot_expand_original_request(mutation):
+    from qa_pipeline_contracts import RequirementScopeEvidence, ScopeBasis
+    analysis, design = cp2_analysis(), cp2_valid_design()
+    condition = analysis.confirmed_conditions[2]
+    condition.statement = condition.source_text
+    effect = analysis.requirement_effects[2]
+    effect.scope_evidence = RequirementScopeEvidence(basis=ScopeBasis.REQUEST_TRACE_ONLY,
+        request_condition_ids=[condition.condition_id], srs_source_text="Toast 표시")
+    expected = design.test_cases[0].expected_results[2]
+    expected.statement = condition.source_text
+    if mutation == "extra_alert":
+        expected.statement += " 경고 아이콘도 표시한다."
+    elif mutation == "changed_value":
+        expected.statement = "성공 안내 Toast를 표시한다."
+    elif mutation == "combined_sources":
+        expected.source_condition_ids.append("COND-001")
+    elif mutation == "unknown_source":
+        expected.source_condition_ids.append("COND-999")
+    result = evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements())
+    assert cp2_check(result, "CP2-017").status == (CheckStatus.PASS if mutation is None else CheckStatus.FAIL)
+
+
+def test_trace_reference_does_not_force_unrequested_notification_layer():
+    from qa_pipeline_contracts import RequirementScopeEvidence, ScopeBasis
+    analysis, design = cp2_analysis(), cp2_valid_design()
+    condition = analysis.confirmed_conditions[2]
+    condition.statement = condition.source_text = "화면에 현재 설정 온도를 표시한다."
+    analysis.requirement_effects[2].scope_evidence = RequirementScopeEvidence(
+        basis=ScopeBasis.REQUEST_TRACE_ONLY, request_condition_ids=[condition.condition_id],
+        srs_source_text="Toast 표시")
+    expected = design.test_cases[0].expected_results[2]
+    expected.statement = condition.source_text
+    expected.observation_layer = ObservationLayer.UI
+    result = evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements())
+    assert not any(check.status == CheckStatus.FAIL and "알림" in check.message for check in result.checks)
+    assert cp2_check(result, "CP2-017").status == CheckStatus.PASS
+
+
+def test_new_tc_detail_keeps_steps_observation_locations_and_shared_timing():
+    design = detailed_boundary_design()
+    result = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements(), require_procedure_detail=False)
+    assert result.status == CheckStatus.PASS
+    assert cp2_check(result, "CP2-020").status == CheckStatus.PASS
+    assert design.test_cases[0].expected_results[0].verify_after_step == design.test_cases[0].expected_results[1].verify_after_step
+    assert Agent2TestDesign.model_validate_json(design.model_dump_json()) == design
+
+
+@pytest.mark.parametrize("mutation", [
+    "combined", "english_combined", "missing_timing", "unknown_timing", "ambiguous_timing",
+    "missing_target", "different_target", "generic_target", "vague_step",
+])
+def test_new_tc_detail_rejects_compressed_or_unlinked_drafts(mutation):
+    design = detailed_boundary_design()
+    tc = design.test_cases[0]
+    if mutation == "combined":
+        tc.steps[1] = "제어 패널에 온도를 입력하고 적용한다."
+    elif mutation == "english_combined":
+        tc.steps[1] = "Enter the temperature and apply the pending command."
+    elif mutation == "missing_timing":
+        tc.expected_results[0].verify_after_step = None
+    elif mutation == "unknown_timing":
+        tc.expected_results[0].verify_after_step = "존재하지 않는 조작"
+    elif mutation == "ambiguous_timing":
+        tc.steps.append(tc.steps[-1])
+    elif mutation == "missing_target":
+        tc.expected_results[0].observation_target = None
+    elif mutation == "different_target":
+        tc.expected_results[0].observation_target = "다른 장비의 이력"
+    elif mutation == "generic_target":
+        tc.expected_results[0].observation_target = "화면"
+    else:
+        tc.steps[0] = "테스트를 실행한다."
+    result = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements(), require_procedure_detail=False)
+    assert cp2_check(result, "CP2-020").status == CheckStatus.FAIL
+
+
+def test_tc_detail_preserves_legacy_read_only_and_existing_only_designs():
+    old = cp2_valid_design()
+    assert cp2_check(pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), old, cp2_requirements(), require_procedure_detail=False), "CP2-020").status == CheckStatus.FAIL
+    assert pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), old, cp2_requirements(), require_tc_detail=False).status == CheckStatus.PASS
+    design = detailed_boundary_design()
+    tc = design.test_cases[0]
+    tc.steps = ["대상 장비의 화면과 내부 값을 조회한다."]
+    for result in tc.expected_results:
+        result.verify_after_step = tc.steps[0]
+    tc.restore_required = True
+    tc.restore_steps = ["원래 값을 선택하고 적용한다."]
+    assert cp2_check(pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements(), require_procedure_detail=False), "CP2-020").status == CheckStatus.PASS
+    design.test_cases = []
+    assert cp2_check(pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements(), require_procedure_detail=False), "CP2-020").status == CheckStatus.PASS
+
+
+@pytest.mark.parametrize("feature", ["temperature", "fan"])
+def test_procedure_detail_accepts_explicit_selection_and_restore_without_new_product_results(feature):
+    request, analysis, requirements = cp1_request(), cp2_analysis(), cp2_requirements()
+    design = detailed_boundary_design()
+    tc = design.test_cases[0]
+    tc.restore_required = True
+    tc.restore_steps = [
+        "대상 장비의 설정 온도를 초기값인 18°C로 복원하고 적용한다.",
+        "대상 장비의 화면 온도와 내부 온도가 모두 초기값 18°C인지 확인한다.",
+    ]
+    if feature == "fan":
+        request = ChangeRequest(
+            request_id="CR-PROCEDURE-FAN-001", change_type="MODIFIED",
+            target_requirement_id="REQ-FAN-001",
+            before_value="MED의 표시 문구는 미정이다.",
+            after_value="MED 적용 후 대상 장비 카드에 중풍이 표시되고 내부 fanSpeed는 MED이다.",
+            description="MED 풍량의 표시 문구를 중풍으로 명시한다.",
+            acceptance_notes=["초기 LOW 풍량을 확인하고 시험 후 LOW 풍량으로 복원한다."],
+        )
+        conditions = [
+            ConfirmedCondition(
+                condition_id=f"COND-{index:03}", statement=statement,
+                source_type=ConditionSource.CHANGE_REQUEST,
+                source_text=request.after_value, requirement_ids=["REQ-FAN-001"],
+            )
+            for index, statement in enumerate([
+                "대상 장비 카드에 중풍이 표시된다.",
+                "대상 장비의 내부 fanSpeed는 MED이다.",
+            ], 1)
+        ]
+        analysis = analysis.model_copy(update={
+            "request_id": request.request_id, "target_requirement_id": "REQ-FAN-001",
+            "change_summary": request.description, "before_condition": request.before_value,
+            "after_condition": request.after_value, "confirmed_conditions": conditions,
+            "requirement_effects": [RequirementEffect(
+                requirement_id="REQ-FAN-001", relation=RequirementRelation.MODIFIED,
+                reason="MED 표시 문구 변경",
+            )],
+        })
+        requirements = {"REQ-FAN-001": SrsRequirement(
+            requirement_id="REQ-FAN-001", statement="풍량 선택과 적용",
+            acceptance_criteria="적용 후 내부 fanSpeed는 선택한 풍량 코드와 같다.",
+        )}
+        design.request_id = request.request_id
+        design.related_existing_tests = []
+        tc.title = "MED 적용 후 중풍 표시와 내부 코드 확인"
+        tc.test_type = TcType.NORMAL
+        tc.requirement_ids = tc.feature_requirement_ids = ["REQ-FAN-001"]
+        tc.source_condition_ids = ["COND-001", "COND-002"]
+        tc.test_data = StructuredTestData()
+        tc.preconditions = ["오류와 잠금이 없는 단일 대상 장비의 초기 풍량이 LOW이다."]
+        tc.steps = [
+            "중앙 관제 패널에서 대상 장비를 선택한다.",
+            "대상 장비의 풍량 값으로 MED를 선택한다.",
+            "선택한 MED 풍량을 중앙 관제 패널에서 적용한다.",
+        ]
+        tc.expected_results = [
+            ExpectedResult(
+                result_id="ER-001", statement=conditions[0].statement,
+                observation_layer=ObservationLayer.UI, source_condition_ids=["COND-001"],
+                verify_after_step=tc.steps[-1], observation_target="대상 장비 카드",
+            ),
+            ExpectedResult(
+                result_id="ER-002", statement=conditions[1].statement,
+                observation_layer=ObservationLayer.INTERNAL_STATE, source_condition_ids=["COND-002"],
+                verify_after_step=tc.steps[-1], observation_target="대상 장비의 내부 fanSpeed",
+            ),
+        ]
+        tc.restore_steps = [
+            "시험 뒤 대상 장비를 초기 LOW 풍량으로 복원하고 적용한다.",
+            "대상 장비의 내부 fanSpeed가 초기값 LOW로 돌아왔는지 확인한다.",
+        ]
+    product_results = [item.model_dump() for item in tc.expected_results]
+
+    result = pipeline.evaluate_checkpoint2(request, analysis, design, requirements)
+
+    assert cp2_check(result, "CP2-020").status == CheckStatus.PASS
+    assert cp2_check(result, "CP2-021").status == CheckStatus.PASS
+    assert [item.model_dump() for item in tc.expected_results] == product_results
+    assert Agent2TestDesign.model_validate_json(design.model_dump_json()) == design
+
+
+@pytest.mark.parametrize("mutation", [
+    "missing_selection", "value_selection_only", "negated_selection_step",
+    "negated_click_step", "negated_selected_precondition", "selected_state_denied",
+    "selection_after_value_operation",
+])
+def test_procedure_detail_rejects_missing_false_or_late_target_preparation(mutation):
+    design = detailed_boundary_design()
+    tc = design.test_cases[0]
+    if mutation == "missing_selection":
+        tc.steps.pop(0)
+    elif mutation == "value_selection_only":
+        tc.steps[0] = "대상 장비의 온도 값으로 17°C를 선택한다."
+    elif mutation == "negated_selection_step":
+        tc.steps[0] = "대상 장비 카드를 선택하지 않는다."
+    elif mutation == "negated_click_step":
+        tc.steps[0] = "대상 장비 카드를 클릭하지 않는다."
+    elif mutation == "negated_selected_precondition":
+        tc.steps.pop(0)
+        tc.preconditions.append("대상 장비가 아직 선택되지 않은 상태이다.")
+    elif mutation == "selected_state_denied":
+        tc.steps.pop(0)
+        tc.preconditions.append("대상 장비가 이미 선택된 상태가 아니다.")
+    else:
+        tc.steps[0], tc.steps[1] = tc.steps[1], tc.steps[0]
+
+    result = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
+
+    assert cp2_check(result, "CP2-021").status == CheckStatus.FAIL
+
+
+def test_procedure_detail_accepts_already_selected_target_without_extra_click():
+    design = detailed_boundary_design()
+    tc = design.test_cases[0]
+    tc.preconditions.append("중앙 관제 화면에서 대상 장비가 이미 선택된 상태이다.")
+    tc.steps.pop(0)
+
+    result = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
+
+    assert cp2_check(result, "CP2-021").status == CheckStatus.PASS
+    assert len(tc.steps) == 2
+
+
+@pytest.mark.parametrize("restore_steps", [
+    ["대상 장비의 설정 온도를 초기값 18°C로 복원하고 적용한다."],
+    ["원래 값을 선택하고 적용한다.", "결과를 확인한다."],
+    ["대상 장비의 설정 온도를 초기값 18°C로 복원하고 적용한다.", "복원 결과를 확인한다."],
+    ["대상 장비의 설정 온도를 초기값 18°C로 복원하고 적용한다.", "대상 장비의 내부 온도를 확인한다."],
+    ["대상 장비의 설정 온도를 초기값 18°C로 복원하고 적용한다.", "대상 장비의 내부 온도가 18°C인지 확인하지 않는다."],
+])
+def test_procedure_detail_rejects_vague_missing_or_negated_restore_verification(restore_steps):
+    design = detailed_boundary_design()
+    tc = design.test_cases[0]
+    tc.restore_required = True
+    tc.restore_steps = restore_steps
+
+    result = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
+
+    assert cp2_check(result, "CP2-021").status == CheckStatus.FAIL
+
+
+def test_procedure_detail_accepts_observed_baseline_without_invented_initial_value():
+    design = detailed_boundary_design()
+    tc = design.test_cases[0]
+    tc.restore_required = True
+    tc.restore_steps = [
+        "시험 직전에 관찰한 대상 장비의 모드와 설정 온도로 복원하고 적용한다.",
+        "대상 장비의 내부 모드와 설정 온도가 시험 직전에 관찰한 원상태와 일치하는지 확인한다.",
+    ]
+
+    result = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
+
+    assert cp2_check(result, "CP2-021").status == CheckStatus.PASS
+
+
+def test_procedure_detail_preserves_read_only_existing_only_and_legacy_contracts():
+    design = detailed_boundary_design()
+    tc = design.test_cases[0]
+    tc.steps = ["대상 장비의 화면 온도와 내부 온도를 조회한다."]
+    tc.restore_required = False
+    tc.restore_steps = []
+    for expected in tc.expected_results:
+        expected.verify_after_step = tc.steps[0]
+    read_only = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
+    assert cp2_check(read_only, "CP2-021").status == CheckStatus.PASS
+    tc.steps = ["Check the current device temperature."]
+    for expected in tc.expected_results:
+        expected.verify_after_step = tc.steps[0]
+    read_only = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
+    assert cp2_check(read_only, "CP2-021").status == CheckStatus.PASS
+
+    design.test_cases = []
+    existing_only = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
+    assert cp2_check(existing_only, "CP2-021").status == CheckStatus.PASS
+
+    legacy = detailed_boundary_design()
+    legacy.test_cases[0].steps.pop(0)
+    legacy.test_cases[0].restore_required = True
+    legacy.test_cases[0].restore_steps = ["원래 값을 선택하고 적용한다."]
+    for kwargs in ({"require_procedure_detail": False}, {"require_tc_detail": False}):
+        result = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), legacy, cp2_requirements(), **kwargs)
+        assert not any(check.rule_id == "CP2-021" for check in result.checks)
+
+
+@pytest.mark.parametrize("basis, accepted", [
+    ("초기값", False),
+    ("시험 전에 관찰한 값", True),
+    ("시험 직전에 기록한 원상태", True),
+])
+def test_procedure_detail_requires_a_named_or_observed_restoration_baseline(basis, accepted):
+    design = detailed_boundary_design()
+    tc = design.test_cases[0]
+    tc.test_data = StructuredTestData()
+    tc.preconditions = ["오류 없는 대상 장비를 준비한다."]
+    tc.restore_required = True
+    tc.restore_steps = [f"대상 장비를 {basis}으로 복원하고 적용한다.",
+                        f"대상 장비의 내부 온도를 {basis}과 비교해 확인한다."]
+    result = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
+    assert cp2_check(result, "CP2-021").status == (CheckStatus.PASS if accepted else CheckStatus.FAIL)
+
+
+def test_procedure_detail_does_not_invent_device_selection_for_standalone_control():
+    case = generic_new_control_test_case()
+    case.restore_steps.append("복원 후 새 제어 스위치 상태를 시험 전에 기록한 값과 비교해 확인한다.")
+    case.expected_results[0].observation_target = "새 제어 스위치"
+    assert not pipeline._tc_procedure_detail_errors(case)
+
+
+def test_approved_reuse_context_preserves_spec_without_registration_metadata():
+    approved, _ = pipeline.load_approved_regression_catalog(REPO_ROOT / "approved_assets")
+    spec = approved[0]
+    original = json.loads((REPO_ROOT / "approved_assets" / spec.test_case_file).read_text(encoding="utf-8"))["test_case"]
+    context = json.loads(spec.reuse_context_json)
+    for field in ("control_path", "target_role", "test_data", "preconditions", "steps",
+                  "condition_execution", "intermediate_reset_steps", "restore_required",
+                  "restore_steps", "independent_execution", "independence_reason"):
+        assert context[field] == original[field]
+    assert context["expected_results"] == [
+        {key: result.get(key) for key in ("statement", "observation_layer", "verify_after_step")}
+        for result in original["expected_results"]
+    ]
+    rendered = pipeline.render_existing_regression_context(approved)
+    assert "사전조건/절차/기대결과/판정 시점/복원" in rendered
+    for text in original["preconditions"] + original["steps"] + original["restore_steps"]:
+        assert text in rendered
+    for private_field in ("reviewer", "approval_note", "source_run_id", "source_condition_ids",
+                          "test_case_file", "automation_file", "target_sha256"):
+        assert private_field not in context and f'"{private_field}"' not in rendered
+    assert str(REPO_ROOT) not in rendered and spec.automation_file not in rendered
+
+
+def test_reuse_context_snapshot_roundtrip_and_legacy_compatibility():
+    from qa_pipeline_contracts import _catalog_from_snapshot
+    approved, snapshot = pipeline.load_approved_regression_catalog(REPO_ROOT / "approved_assets")
+    restored = next(s for s in _catalog_from_snapshot(snapshot) if s.tc_id == approved[0].tc_id)
+    assert restored == approved[0]
+    legacy = json.loads(json.dumps(snapshot))
+    for item in legacy["approved_assets"]:
+        item.pop("reuse_context_json")
+    historical = next(s for s in _catalog_from_snapshot(legacy) if s.tc_id == approved[0].tc_id)
+    assert historical.reuse_context_json is None
+    assert historical.covered_behaviors == restored.covered_behaviors
+    assert "승인 TC 명세" not in pipeline.render_existing_regression_context((historical,))
+
+
+def test_agent2_sends_approved_procedures_on_initial_and_rewrite_calls():
+    approved, _ = pipeline.load_approved_regression_catalog(REPO_ROOT / "approved_assets")
+    responses = Agent2FakeResponses()
+    agent = OpenAIAgent2(model="gpt-5.6-terra", client=SimpleNamespace(responses=responses))
+    for extra in ({}, {"previous_design": agent2_design(), "checkpoint_feedback": ["검사 항목 확인"]}):
+        agent.design(cp1_request(), cp2_analysis(), cp2_requirements(), existing_catalog=approved, **extra)
+        text = responses.kwargs["input"][1]["content"]
+        instructions = responses.kwargs["input"][0]["content"]
+        assert approved[0].reuse_context_json in text
+        assert "승인 TC 명세가 제공되면" in instructions
+        assert instructions == AGENT2_SYSTEM_INSTRUCTIONS
+        assert "작성 수준 예시 (아래는 기존 필드의 일부만 발췌한 형식 참고이며 이번 입력의 제품 기준이 아닙니다)" in instructions
+        assert "1. 중앙 관제 화면에서 시험할 대상 장비 카드를 선택한다." in instructions
+        assert "2. 선택한 장비의 제어 패널에서 풍량을 MED로 선택한다." in instructions
+        assert "3. 제어 패널의 적용 버튼을 눌러 선택한 풍량을 대상 장비에 적용한다." in instructions
+        assert "복원 후 대상 장비의 내부 fanSpeed가 초기값 LOW로 돌아왔는지 확인한다." in instructions
+        assert "대상 선택 성공·알림·선택 색상·LOW의 한글 표시를 새 expected_results로 만들지 않습니다." in instructions
+        assert "예시 B: 입력이 '초기 설정 온도 24°C, 30°C 적용 후 카드·내부 설정 온도 30°C'를 요구하면" in instructions
+        assert "예시 C: 입력이 현재 상태를 조회하는 읽기 전용 시험이면" in instructions
+        assert "값·화면명·필드명·조건 ID·초기 상태는 반드시 현재 입력에서 가져오며" in instructions
+        assert responses.kwargs["store"] is False
+
+
 @pytest.mark.parametrize("expected", ["HIGH", "99", "17"])
 def test_new_tc_expected_value_requires_its_own_condition(expected):
     design = cp2_valid_design()
@@ -165,7 +542,7 @@ def test_agent2_uses_structured_responses_api() -> None:
     assert response.usage["total_tokens"] == 300
     assert responses.kwargs["text_format"] is Agent2TestDesign
     assert responses.kwargs["store"] is False
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-22"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-27"
     agent2_input = responses.kwargs["input"][1]["content"]
     assert "[기존 사람 작성·자동화 TC 카탈로그]" in agent2_input
     assert "TC-TEMP-001" in agent2_input
@@ -184,6 +561,8 @@ def test_agent2_uses_structured_responses_api() -> None:
     assert "TC 분리 단위는 입력값 하나가 아니라 하나의 업무 규칙" in AGENT2_SYSTEM_INSTRUCTIONS
     assert "INDEPENDENT_VARIANTS" in AGENT2_SYSTEM_INSTRUCTIONS
     assert "verify_after_step" in AGENT2_SYSTEM_INSTRUCTIONS
+    assert "대상 선택 → 값 선택/입력 → 적용" in AGENT2_SYSTEM_INSTRUCTIONS
+    assert "observation_target" in responses.kwargs["input"][0]["content"]
     assert "제외된_정보_부족" in AGENT2_SYSTEM_INSTRUCTIONS
     assert "전체 test_cases와 관련_기존_TC를 완전한 결과로 반환" in Path(
         "src/qa_pipeline_agent2.py"
@@ -200,6 +579,7 @@ def test_agent2_uses_structured_responses_api() -> None:
         ],
     )
     rework_input = responses.kwargs["input"][1]["content"]
+    assert "observation_target" in responses.kwargs["input"][0]["content"]
     assert "Checkpoint 2 전체 판정" in rework_input
     assert "CP2-001 PASS" in rework_input
     assert "PASS인 규칙과 그 근거를 보존" in rework_input

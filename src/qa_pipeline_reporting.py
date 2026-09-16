@@ -13,6 +13,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
 import uuid
 import zipfile
 from dataclasses import dataclass
@@ -920,6 +921,12 @@ def build_run_test_rows(run_dir: Path, *, approved_assets_root: Path = DEFAULT_A
                        or (case.get("automation_reason") if manual else "") or result.get("raw_message") or ""),
             "preconditions": case.get("preconditions") or [], "steps": case.get("steps") or [],
             "expected_results": expected, "restore_steps": case.get("restore_steps") or [],
+            "expected_result_details": [
+                {key: item.get(key) for key in (
+                    "result_id", "statement", "observation_layer", "observation_target", "verify_after_step"
+                )}
+                for item in case.get("expected_results", [])
+            ],
             "requirement_ids": case.get("requirement_ids") or result.get("requirement_ids") or (list(spec.requirement_ids) if spec else []),
             "source": "환경 점검" if tc_id == "TC-ENV-000" else "신규·수정 후보" if tc_id.startswith("TC-CAND-") else "기존 TC",
             "executed_at": bundle.get("created_at") if result else None,
@@ -955,6 +962,11 @@ def _notion_report_records(
                 "title": rows.get(result.test_id, {}).get("title", result.test_id),
                 "test_category": rows.get(result.test_id, {}).get("category", "미분류"),
                 "priority": rows.get(result.test_id, {}).get("priority", "미지정"),
+                "tc_detail": {
+                    key: rows.get(result.test_id, {}).get(key, []) for key in (
+                        "preconditions", "steps", "expected_results", "expected_result_details", "restore_steps"
+                    )
+                } if run_dir and (run_dir / "agent2_manifest.json").is_file() else {},
             }
         )
     return records
@@ -963,7 +975,7 @@ def _notion_report_records(
 def _http_json_request(
     method: str,
     url: str,
-    payload: dict[str, Any],
+    payload: dict[str, Any] | None,
     *,
     headers: dict[str, str] | None = None,
     timeout: int = 30,
@@ -971,7 +983,7 @@ def _http_json_request(
     request_headers = {"Content-Type": "application/json", **(headers or {})}
     request = urllib.request.Request(
         url,
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None,
         headers=request_headers,
         method=method,
     )
@@ -1020,6 +1032,118 @@ def _notion_status_name(status: str) -> str:
     }.get(status, "Review Needed")
 
 
+def _notion_tc_blocks(record: dict[str, Any]) -> list[dict[str, Any]]:
+    """Render saved design, never infer a missing observation point or actual result."""
+    detail = record.get("tc_detail")
+    if not isinstance(detail, dict):
+        return []  # Historical summary-only caller.
+    blocks: list[dict[str, Any]] = []
+
+    def add(kind: str, text: str) -> None:
+        # One short rich-text object per block; preserve long content in continuation blocks.
+        # 900 code points also stay below 2,000 UTF-16 units for emoji-heavy text.
+        for offset in range(0, len(text), 900):
+            block_kind = kind if offset == 0 else "paragraph"
+            blocks.append({"object": "block", "type": block_kind, block_kind: {
+                "rich_text": [{"type": "text", "text": {"content": text[offset:offset + 900]}}]
+            }})
+
+    add("paragraph", "저장된 TC 설계입니다. 아래 기대결과는 실제 관찰값이 아닙니다. 실행 결과는 페이지 속성에서 확인하며, 통과가 공식 등록 승인을 뜻하지는 않습니다.")
+    add("heading_3", "사전조건")
+    for value in detail.get("preconditions") or ["상세 사전조건이 기록되어 있지 않습니다."]:
+        add("bulleted_list_item", value)
+    add("heading_3", "조작 순서 · 단계별 기대결과")
+    steps = detail.get("steps") or []
+    expected = detail.get("expected_result_details") or []
+    matched: set[int] = set()
+    normalize = lambda value: re.sub(r"\s+", "", value or "")
+    normalized_steps = [normalize(step) for step in steps]
+    for number, step in enumerate(steps, 1):
+        add("paragraph", f"{number}. {step}")
+        matches = [(index, item) for index, item in enumerate(expected)
+                   if normalize(item.get("verify_after_step")) == normalize(step)
+                   and normalized_steps.count(normalize(step)) == 1]
+        for subnumber, (index, item) in enumerate(matches, 1):
+            matched.add(index)
+            target = item.get("observation_target")
+            location = f"[{target}] " if target else ""
+            add("bulleted_list_item", f"{number}-{subnumber}. {location}{item['statement']}")
+    if not steps:
+        add("paragraph", "상세 조작 순서가 기록되어 있지 않습니다.")
+    unlinked = [item for index, item in enumerate(expected) if index not in matched]
+    if unlinked or (not expected and detail.get("expected_results")):
+        add("heading_3", "단계 연결이 확인되지 않은 기대결과")
+        add("paragraph", "저장된 단계 연결이 없거나 일치하지 않아 특정 조작 뒤의 결과로 추정하지 않았습니다.")
+        for item in unlinked:
+            add("bulleted_list_item", item["statement"])
+        if not expected:
+            for statement in detail["expected_results"]:
+                add("bulleted_list_item", statement)
+    if not expected and not detail.get("expected_results"):
+        add("paragraph", "기대결과 상세가 기록되어 있지 않습니다.")
+    add("heading_3", "시험 후 복원")
+    for number, step in enumerate(detail.get("restore_steps") or [], 1):
+        add("paragraph", f"{number}. {step}")
+    if not detail.get("restore_steps"):
+        add("paragraph", "복원 절차가 기록되어 있지 않습니다. 복원이 불필요하거나 완료됐다고 추정하지 않습니다.")
+    return blocks
+
+
+def _notion_block_text(block: dict[str, Any]) -> str:
+    return "".join(item.get("text", {}).get("content", item.get("plain_text", ""))
+                   for item in block.get(block.get("type"), {}).get("rich_text", []))
+
+
+def _notion_children(block_id: str, headers: dict[str, str]) -> list[dict[str, Any]]:
+    children: list[dict[str, Any]] = []
+    cursor = None
+    seen = set()
+    while True:
+        query = urllib.parse.urlencode({"page_size": 100, **({"start_cursor": cursor} if cursor else {})})
+        status, body = _http_json_request(
+            "GET", f"https://api.notion.com/v1/blocks/{block_id}/children?{query}", None, headers=headers
+        )
+        if not 200 <= status < 300 or not isinstance(body, dict) or not isinstance(body.get("results"), list):
+            raise RuntimeError("Notion 상세 조회 실패")
+        children.extend(body["results"])
+        if not body.get("has_more"):
+            return children
+        cursor = body.get("next_cursor")
+        if not cursor or cursor in seen:
+            raise RuntimeError("Notion 상세 조회 커서 오류")
+        seen.add(cursor)
+
+
+def _sync_notion_tc_detail(page_id: str, blocks: list[dict[str, Any]], headers: dict[str, str]) -> None:
+    """Append immutable, bounded snapshots; resume missing parts without erasing notes."""
+    if not blocks:
+        return
+    digest = hashlib.sha256(json.dumps(blocks, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+    parts = [blocks[index:index + 40] for index in range(0, len(blocks), 40)]
+    existing = _notion_children(page_id, headers)
+    for number, part in enumerate(parts, 1):
+        marker = f"상세 TC · 자동 기록 v1 · {number}/{len(parts)} · {digest}"
+        found = [block for block in existing if block.get("type") == "toggle" and _notion_block_text(block) == marker]
+        if found:
+            if len(found) != 1:
+                raise ValueError("Notion 상세 TC 중복 기록")
+            saved = _notion_children(found[0]["id"], headers)
+            signature = lambda items: [(item.get("type"), _notion_block_text(item), bool(item.get("has_children"))) for item in items]
+            if signature(saved) != signature(part):
+                raise ValueError("Notion 상세 TC가 편집되었습니다. 원문을 덮어쓰지 않습니다.")
+            continue
+        payload = {"children": [{"object": "block", "type": "toggle", "toggle": {
+            "rich_text": [{"type": "text", "text": {"content": marker}}], "children": part
+        }}]}
+        if len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) > 400_000:
+            raise ValueError("Notion 상세 TC 요청 크기 초과")
+        status, _ = _http_json_request(
+            "PATCH", f"https://api.notion.com/v1/blocks/{page_id}/children", payload, headers=headers
+        )
+        if not 200 <= status < 300:
+            raise RuntimeError(f"Notion 상세 TC 추가 HTTP {status}")
+
+
 def _upsert_notion_reports(
     records: list[dict[str, Any]],
 ) -> ExternalDestinationResult:
@@ -1038,6 +1162,7 @@ def _upsert_notion_reports(
     completed = 0
     try:
         for record in records:
+            detail_blocks = _notion_tc_blocks(record)
             tc_id = str(record["tc_id"])
             execution_key = f"{record['run_id']}:{tc_id}"
             query_status, query_body = _http_json_request(
@@ -1092,11 +1217,14 @@ def _upsert_notion_reports(
                     "parent": {"type": "data_source_id", "data_source_id": data_source_id},
                     "properties": properties,
                 }
-            mutation_status, _ = _http_json_request(
+            mutation_status, mutation_body = _http_json_request(
                 method, url, payload, headers=headers
             )
             if not 200 <= mutation_status < 300:
                 raise RuntimeError(f"Notion mutation HTTP {mutation_status}")
+            if detail_blocks:
+                page_id = results[0]["id"] if results else mutation_body["id"]
+                _sync_notion_tc_detail(page_id, detail_blocks, headers)
             completed += 1
         return ExternalDestinationResult(
             destination="NOTION",

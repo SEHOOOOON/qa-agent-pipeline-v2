@@ -3,6 +3,437 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("connector", ["확인하고,", "확인하며,", "확인한다."])
+@pytest.mark.parametrize("failure", [None, "ui", "internal"])
+def test_explicit_restore_basis_checks_display_and_internal_separately(tmp_path, monkeypatch, capsys, connector, failure):
+    case, plan, observation = mixed_restore_comparison_fixture(connector)
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, observation, require_restore_comparison_basis=True)
+    assert cp.status == CheckStatus.PASS, [c.message for c in cp.checks if c.status == CheckStatus.FAIL]
+    code = compile_automation_candidate("RUN-20260916-130000-ABCDEF", case, plan)
+    target = tmp_path / "mixed.html"
+    ui_guard = "if(this.value!=='LOW')" if failure == "ui" else ""
+    internal_guard = "if(this.value!=='LOW')" if failure == "internal" else ""
+    _write_text_atomic(target, f'''<!doctype html><span id="feature-label">약풍</span>
+      <input id="new-feature-toggle" value="LOW" oninput="{ui_guard}document.querySelector('#feature-label').textContent=this.value==='MED'?'중풍':'약풍';{internal_guard}window.__vccs.feature.fanSpeed=this.value">
+      <script>window.__vccs={{feature:{{fanSpeed:'LOW'}}}};</script>''')
+    monkeypatch.setenv("QA_TARGET_URL", target.as_uri())
+    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
+    namespace = {}
+    exec(compile(code, "mixed_restore", "exec"), namespace)
+    if failure:
+        with pytest.raises(AssertionError, match="RESTORE_MISMATCH"):
+            namespace["test_tc_cand_090"]()
+        assert "RESTORE_CONFIRMATIONS_VERIFIED" not in capsys.readouterr().out
+    else:
+        namespace["test_tc_cand_090"]()
+        assert "RESTORE_CONFIRMATIONS_VERIFIED: ER-090,ER-091" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("mutation", ["missing", "duplicate", "wrong_er", "wrong_basis", "ui_code", "uncovered",
+    "changed_excerpt", "other_target", "negation", "wrong_value", "fake_action", "missing_action", "cross_clause"])
+def test_explicit_restore_basis_rejects_ungrounded_or_missing_comparisons(mutation):
+    case, plan, observation = mixed_restore_comparison_fixture()
+    link = plan.restore_confirmations[0]
+    if mutation == "missing":
+        link.comparisons.clear()
+    elif mutation == "duplicate":
+        link.comparisons.append(link.comparisons[0].model_copy())
+    elif mutation == "wrong_er":
+        link.comparisons[0].result_id = "ER-999"
+    elif mutation == "wrong_basis":
+        link.comparisons[0].basis = pipeline.RestoreComparisonBasis.PROVED_INITIAL
+    elif mutation == "changed_excerpt":
+        link.comparisons[0].source_excerpt += " 변조"
+    elif mutation == "fake_action":
+        plan.actions.append(plan.actions[-1].model_copy(update={"action_id":"ACT-092", "source_text":link.source_text}))
+    elif mutation == "missing_action":
+        plan.actions.pop()
+    else:
+        old = link.comparisons[0].source_excerpt
+        new = {"ui_code": "복원 후 풍량 표시가 LOW인지 확인하고,",
+               "uncovered": old + " 새 알림도 확인한다.",
+               "other_target": old.replace("풍량 표시", "다른 장비 표시"),
+               "negation": old.replace("같은지", "다른지"),
+               "wrong_value": old.replace("실행 전 상태", "HIGH"),
+               "cross_clause": "복원 후 풍량 표시가 LOW인지 확인하고,"}[mutation]
+        case.restore_steps[-1] = link.source_text = link.source_text.replace(old, new)
+        if mutation != "uncovered":
+            link.comparisons[0].source_excerpt = new
+        if mutation == "cross_clause":
+            old_internal = link.comparisons[1].source_excerpt
+            new_internal = old_internal.replace("초기값 LOW", "실행 전 상태")
+            case.restore_steps[-1] = link.source_text = link.source_text.replace(old_internal, new_internal)
+            link.comparisons[1].source_excerpt = new_internal
+            link.comparisons[1].basis = pipeline.RestoreComparisonBasis.OBSERVED_BASELINE
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, observation, require_restore_comparison_basis=True)
+    assert cp.status == CheckStatus.FAIL
+    assert any(c.rule_id == "CP3-006B" and c.status == CheckStatus.FAIL for c in cp.checks)
+    if mutation != "missing_action":
+        assert not any("approved step is missing" in c.message for c in cp.checks)
+
+
+@pytest.mark.parametrize("mutation", [None, "missing", "wrong_id", "duplicate_id", "duplicate_line", "changed_source", "extra_line", "missing_target", "new_target", "wrong_value", "negated", "fake_action"])
+def test_restore_plan_links_preserve_sources_targets_and_fail_closed(mutation):
+    case, plan, observation = _restoration_detail_fixture()
+    line = "복원 후 새 제어 스위치와 내부 enabled 값을 실행 전 확인한 상태와 비교해 일치하는지 확인한다."
+    case.restore_steps.append(line)
+    link = pipeline.RestoreConfirmation(source_text=line, result_ids=[r.result_id for r in case.expected_results])
+    plan.restore_confirmations = [link]
+    if mutation == "missing":
+        plan.restore_confirmations = []
+    elif mutation == "wrong_id":
+        link.result_ids[0] = "ER-999"
+    elif mutation == "duplicate_id":
+        link.result_ids.append(link.result_ids[0])
+    elif mutation == "duplicate_line":
+        plan.restore_confirmations.append(link.model_copy(deep=True))
+    elif mutation == "changed_source":
+        link.source_text += " 새 문장"
+    elif mutation == "extra_line":
+        plan.restore_confirmations.append(link.model_copy(update={"source_text": "추가 검사"}))
+    elif mutation == "missing_target":
+        link.result_ids.pop()
+    elif mutation == "new_target":
+        case.restore_steps[-1] = link.source_text = line.replace("상태와", "상태 및 새 알림과")
+    elif mutation == "wrong_value":
+        case.restore_steps[-1] = link.source_text = line.replace("상태와", "상태 및 HIGH와")
+    elif mutation == "negated":
+        case.restore_steps[-1] = link.source_text = line.replace("일치하는지", "불일치하는지")
+    elif mutation == "fake_action":
+        plan.actions.append(plan.actions[-1].model_copy(update={"action_id": "ACT-092", "source_text": line}))
+    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, observation, require_restore_plan_links=True)
+    assert checkpoint.status == (CheckStatus.PASS if mutation is None else CheckStatus.FAIL)
+    if mutation is None:
+        code = compile_automation_candidate("RUN-20260916-130000-ABCDEF", case, plan)
+        assert "RESTORE_CONFIRMATIONS_VERIFIED" in code
+        assert "restore_actual != restore_baseline_" in code
+        assert pipeline.Agent3AutomationPlan.model_validate_json(plan.model_dump_json()) == plan
+    elif plan.restore_confirmations:
+        with pytest.raises(pipeline.Agent3Error, match="복원 확인 계획"):
+            compile_automation_candidate("RUN-20260916-130000-ABCDEF", case, plan)
+
+
+@pytest.mark.parametrize("wording", [
+    "복원 후 새 제어 스위치와 내부 enabled 값을 실행 전 확인한 상태와 비교해 일치하는지 확인한다.",
+    "복원 후 새 제어 스위치와 내부 enabled 값을 시험 전 관찰한 상태와 비교해 일치하는지 확인한다.",
+    "복원 후 새 제어 스위치와 내부 enabled 값을 실행 전 기록한 상태와 비교해 일치하는지 확인한다.",
+])
+def test_restore_links_accept_observed_initial_state_wording(wording):
+    case, plan, observation = _restoration_detail_fixture()
+    case.restore_steps.append(wording)
+    plan.restore_confirmations = [pipeline.RestoreConfirmation(source_text=wording,
+        result_ids=[r.result_id for r in case.expected_results])]
+    assert pipeline.evaluate_checkpoint3_plan(case, plan, observation, require_restore_plan_links=True).status == CheckStatus.PASS
+
+
+def _restoration_detail_fixture():
+    case, plan, observation = precondition_guard_fixture()
+    for result, target in zip(case.expected_results, ["새 제어 스위치", "내부 enabled 값"]):
+        result.observation_target = target
+        result.verify_after_step = case.steps[0]
+    for assertion in plan.assertions:
+        assertion.after_action_id = "ACT-090"
+    return case, plan, observation
+
+
+@pytest.mark.parametrize("feature,initial,changed", [
+    ("풍량", "LOW", "MED"), ("온도", "18", "24"), ("모드", "AUTO", "HEAT"),
+])
+@pytest.mark.parametrize("restore_broken", [False, True])
+@pytest.mark.parametrize("detailed", [False, True])
+@pytest.mark.parametrize("explicit_basis", [False, True])
+def test_restore_linked_browser_comparisons_across_control_values(tmp_path, monkeypatch, capsys, feature, initial, changed, restore_broken, detailed, explicit_basis):
+    case, plan, observation = _restoration_detail_fixture()
+    ui_target, internal_target = f"{feature} 입력란", f"내부 {feature} value 값"
+    case.preconditions = [f"{ui_target}의 초기값은 {initial}이고 {internal_target}은 {initial}이다."]
+    case.steps = [f"{ui_target}에 {changed}를 입력한다."]
+    operation = f"{ui_target}에 {initial}를 입력해 복원한다."
+    confirmation = f"복원 후 {ui_target}과 {internal_target}을 실행 전 확인한 상태와 비교해 일치하는지 확인한다."
+    if detailed:
+        confirmation = f"복원 후 {ui_target}에서 {feature} 표시가 실행 전 확인한 {initial} {feature} 상태와 같은지, {internal_target}이 {initial}인지 확인한다."
+    case.restore_steps = [operation, confirmation]
+    case.expected_results[0].statement = f"{ui_target}의 값은 {changed}이다."
+    case.expected_results[1].statement = f"{internal_target}은 {changed}이다."
+    for result, target in zip(case.expected_results, [ui_target, internal_target]):
+        result.observation_target, result.verify_after_step = target, case.steps[0]
+    plan.actions = [AutomationAction(action_id=f"ACT-{90+i:03}", phase=phase, action_type="FILL",
+        selector="#new-feature-toggle", value=value, source_text=source)
+        for i, (phase, value, source) in enumerate([("TEST", changed, case.steps[0]), ("RESTORE", initial, operation)])]
+    plan.assertions[0].strategy = pipeline.AssertionStrategy.UI_VALUE_EQUALS
+    plan.assertions[0].expected_value = changed
+    plan.assertions[1].expected_value = changed
+    plan.assertions[1].selector = "window.__vccs.feature.value"
+    plan.precondition_checks = [pipeline.PreconditionCheck(source_text=case.preconditions[0],
+        read_kind="UI_VALUE", selector="#new-feature-toggle", expected_value=initial),
+        pipeline.PreconditionCheck(source_text=case.preconditions[0], read_kind="INTERNAL_VALUE",
+            selector="window.__vccs.feature.value", expected_value=initial)]
+    plan.restore_confirmations = [pipeline.RestoreConfirmation(source_text=confirmation,
+        result_ids=[r.result_id for r in case.expected_results])]
+    if explicit_basis:
+        ui_clause = f"복원 후 {ui_target}이 실행 전 상태와 같은지 확인하고,"
+        internal_clause = f"{internal_target}이 초기값 {initial}와 같은지 확인한다."
+        if detailed:
+            ui_clause = f"복원 후 {ui_target}에서 {feature} 표시가 실행 전 확인한 상태와 같은지 확인하며,"
+        case.restore_steps[-1] = plan.restore_confirmations[0].source_text = ui_clause + " " + internal_clause
+        plan.restore_confirmations[0].comparisons = [
+            pipeline.RestoreComparison(result_id=case.expected_results[0].result_id, source_excerpt=ui_clause, basis="OBSERVED_BASELINE"),
+            pipeline.RestoreComparison(result_id=case.expected_results[1].result_id, source_excerpt=internal_clause, basis="PROVED_INITIAL")]
+    observation.harness_values = {"window.__vccs.feature.value": initial}
+    observation.elements[-1].text = ui_target
+    observation.elements[-1].action_hint = "FILL"
+    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, observation, require_restore_plan_links=True)
+    assert checkpoint.status == CheckStatus.PASS, [item.message for item in checkpoint.checks if item.status == CheckStatus.FAIL]
+    code = compile_automation_candidate("RUN-20260916-130000-ABCDEF", case, plan)
+    target = tmp_path / "control.html"
+    # A deliberately faulty product updates the TEST value but ignores the restore value.
+    handler = (f"if(this.value!=={json.dumps(initial)})" if restore_broken else "")
+    _write_text_atomic(target, f'''<!doctype html><input id="new-feature-toggle" value="{initial}"
+      oninput='{handler}window.__vccs.feature.value=this.value'><script>
+      window.__vccs={{feature:{{value:{json.dumps(initial)}}}}};</script>''')
+    monkeypatch.setenv("QA_TARGET_URL", target.as_uri())
+    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
+    namespace = {}
+    exec(compile(code, "linked_restore", "exec"), namespace)
+    if restore_broken:
+        with pytest.raises(AssertionError, match="RESTORE_MISMATCH"):
+            namespace["test_tc_cand_090"]()
+        assert "RESTORE_CONFIRMATIONS_VERIFIED" not in capsys.readouterr().out
+    else:
+        namespace["test_tc_cand_090"]()
+        assert "RESTORE_CONFIRMATIONS_VERIFIED: ER-090,ER-091" in capsys.readouterr().out
+
+
+def test_restore_confirmation_uses_existing_baselines_without_extra_actions(tmp_path, monkeypatch):
+    case, plan, observation = _restoration_detail_fixture()
+    previous = compile_automation_candidate("RUN-20260916-120000-ABCDEF", case, plan)
+    case.restore_steps.append("복원 후 새 제어 스위치와 내부 enabled 값을 시험 전 상태와 비교해 일치하는지 확인한다.")
+    assert pipeline.evaluate_checkpoint3_plan(case, plan, observation).status == CheckStatus.PASS
+    code = compile_automation_candidate("RUN-20260916-120000-ABCDEF", case, plan)
+    assert code == previous
+    assert len(plan.actions) == 2 and len(plan.assertions) == 2
+    target = tmp_path / "restore-detail.html"
+    _write_text_atomic(target, '''<!doctype html><input id="new-feature-toggle" type="checkbox"
+        onchange="window.__vccs.feature.enabled=this.checked"><script>
+        window.__vccs={feature:{enabled:false}};</script>''')
+    monkeypatch.setenv("QA_TARGET_URL", target.as_uri())
+    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
+    namespace = {}
+    exec(compile(code, "restore_detail_check", "exec"), namespace)
+    namespace["test_tc_cand_090"]()
+
+
+@pytest.mark.parametrize("restore_broken", [False, True])
+def test_restore_linked_switch_checks_real_boolean_restoration(tmp_path, monkeypatch, capsys, restore_broken):
+    case, plan, observation = _restoration_detail_fixture()
+    line = "복원 후 새 제어 스위치와 내부 enabled 값을 시험 전 관찰한 상태와 비교해 일치하는지 확인한다."
+    case.restore_steps.append(line)
+    plan.restore_confirmations = [pipeline.RestoreConfirmation(source_text=line,
+        result_ids=[r.result_id for r in case.expected_results])]
+    assert pipeline.evaluate_checkpoint3_plan(case, plan, observation, require_restore_plan_links=True).status == CheckStatus.PASS
+    code = compile_automation_candidate("RUN-20260916-130000-ABCDEF", case, plan)
+    target = tmp_path / "switch.html"
+    handler = "if(this.checked)" if restore_broken else ""
+    _write_text_atomic(target, f'''<!doctype html><input id="new-feature-toggle" type="checkbox"
+        onchange="{handler}window.__vccs.feature.enabled=this.checked"><script>
+        window.__vccs={{feature:{{enabled:false}}}};</script>''')
+    monkeypatch.setenv("QA_TARGET_URL", target.as_uri())
+    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
+    namespace = {}
+    exec(compile(code, "boolean_restore", "exec"), namespace)
+    if restore_broken:
+        with pytest.raises(AssertionError, match="RESTORE_MISMATCH"):
+            namespace["test_tc_cand_090"]()
+        assert "RESTORE_CONFIRMATIONS_VERIFIED" not in capsys.readouterr().out
+    else:
+        namespace["test_tc_cand_090"]()
+        assert "RESTORE_CONFIRMATIONS_VERIFIED" in capsys.readouterr().out
+
+
+def test_restore_comparison_supports_shared_target_without_borrowing_other_target_basis():
+    from qa_pipeline_agent3 import _restore_comparison_coverage
+    case, plan, _ = mixed_restore_comparison_fixture()
+    case.expected_results.append(case.expected_results[0].model_copy(update={"result_id":"ER-092"}))
+    plan.assertions.append(plan.assertions[0].model_copy(update={"result_id":"ER-092"}))
+    link = plan.restore_confirmations[0]
+    link.result_ids.append("ER-092")
+    link.comparisons.append(link.comparisons[0].model_copy(update={"result_id":"ER-092"}))
+    assert not _restore_comparison_coverage(case, plan)[1]
+    link.comparisons.pop()
+    assert _restore_comparison_coverage(case, plan)[1]
+
+
+@pytest.mark.parametrize("mutation", ["notification", "unsupported_strategy", "wrong_initial", "wrong_device"])
+def test_restore_links_do_not_claim_unsupported_or_unproved_comparisons(mutation):
+    case, plan, observation = _restoration_detail_fixture()
+    line = "복원 후 내부 enabled 값이 false로 돌아왔는지 확인한다."
+    case.preconditions.append("내부 enabled 값은 false다.")
+    proof = pipeline.PreconditionCheck(source_text=case.preconditions[-1], read_kind="INTERNAL_VALUE",
+        selector="window.__vccs.feature.enabled", expected_value=False)
+    plan.precondition_checks.append(proof)
+    case.restore_steps.append(line)
+    plan.restore_confirmations = [pipeline.RestoreConfirmation(source_text=line, result_ids=["ER-091"])]
+    if mutation == "notification":
+        plan.assertions[1].observation_layer = ObservationLayer.NOTIFICATION
+    elif mutation == "unsupported_strategy":
+        plan.assertions[1].strategy = pipeline.AssertionStrategy.TOAST_VISIBLE
+    elif mutation == "wrong_initial":
+        case.restore_steps[-1] = plan.restore_confirmations[0].source_text = line.replace("false", "true")
+    else:
+        proof.selector = "window.__vccs.devices[1].enabled"
+        observation.harness_values[proof.selector] = False
+    assert pipeline.evaluate_checkpoint3_plan(case, plan, observation, require_restore_plan_links=True).status == CheckStatus.FAIL
+
+
+@pytest.mark.parametrize("mutation", ["new_target", "new_value", "unproved_value", "missing_action", "early_check", "fake_action", "negated_comparison"])
+def test_restore_confirmation_rejects_unimplemented_or_ungrounded_checks(mutation):
+    case, plan, observation = _restoration_detail_fixture()
+    line = "복원 후 내부 enabled 값을 시험 전 상태와 비교해 일치하는지 확인한다."
+    if mutation == "new_target":
+        line = "복원 후 내부 enabled 값과 새 알림을 시험 전 상태와 비교해 일치하는지 확인한다."
+    elif mutation == "new_value":
+        line = "복원 후 내부 enabled 값이 true로 돌아왔는지 확인한다."
+    elif mutation == "unproved_value":
+        line = "복원 후 내부 enabled 값이 false로 돌아왔는지 확인한다."
+    elif mutation == "negated_comparison":
+        line = "복원 후 내부 enabled 값을 시험 전 상태와 비교해 불일치하는지 확인한다."
+    if mutation == "early_check":
+        case.restore_steps.insert(0, line)
+    else:
+        case.restore_steps.append(line)
+    if mutation == "missing_action":
+        plan.actions = plan.actions[:1]
+    elif mutation == "fake_action":
+        plan.actions.append(plan.actions[-1].model_copy(update={"action_id": "ACT-092", "source_text": line}))
+    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, observation)
+    assert checkpoint.status == CheckStatus.FAIL
+    assert any(item.rule_id == "CP3-006A" and item.status == CheckStatus.FAIL for item in checkpoint.checks)
+
+
+def test_restore_confirmation_explicit_value_needs_same_target_precondition_proof():
+    case, plan, observation = _restoration_detail_fixture()
+    initial = "내부 enabled 값은 false다."
+    case.preconditions.append(initial)
+    plan.precondition_checks.append(pipeline.PreconditionCheck(source_text=initial,
+        read_kind="INTERNAL_VALUE", selector="window.__vccs.feature.enabled", expected_value=False))
+    case.restore_steps.append("복원 후 내부 enabled 값이 false로 돌아왔는지 확인한다.")
+    assert pipeline.evaluate_checkpoint3_plan(case, plan, observation).status == CheckStatus.PASS
+    plan.precondition_checks[-1].selector = "window.__vccs.other.enabled"
+    observation.harness_values["window.__vccs.other.enabled"] = False
+    assert pipeline.evaluate_checkpoint3_plan(case, plan, observation).status == CheckStatus.FAIL
+
+
+def test_restore_confirmation_matches_string_initial_value_not_feature_names():
+    case, plan, _ = _restoration_detail_fixture()
+    case.expected_results[1].observation_target = "대상 장비의 내부 fanSpeed"
+    case.preconditions = ["대상 장비의 내부 fanSpeed는 LOW이다."]
+    plan.assertions[1] = AutomationAssertion(result_id="ER-091", observation_layer="INTERNAL_STATE",
+        strategy="INTERNAL_DEVICE_FIELDS_EQUALS", selector="window.__vccs.devices",
+        expected_fields=[pipeline.DeviceFieldExpectation(field_name="fanSpeed", expected_value="HIGH")])
+    plan.precondition_checks = [pipeline.PreconditionCheck(source_text=case.preconditions[0],
+        read_kind="INTERNAL_VALUE", selector="window.__vccs.devices[0].fanSpeed", expected_value="LOW")]
+    line = "복원 후 대상 장비의 내부 fanSpeed가 초기값 LOW로 돌아왔는지 확인한다."
+    case.restore_steps.append(line)
+    covered, errors = pipeline._restore_confirmation_coverage(case, plan)
+    assert not errors and pipeline._normalize(line) in covered
+    case.restore_steps[-1] = line.replace("LOW", "HIGH")
+    assert pipeline._restore_confirmation_coverage(case, plan)[1]
+    case.expected_results[1].observation_target = "LOW 상태 표시"
+    case.restore_steps[-1] = "복원 후 LOW 상태 표시를 확인한다."
+    assert pipeline._restore_confirmation_coverage(case, plan)[1]
+
+
+def test_restore_confirmation_does_not_accept_proof_for_another_device():
+    case, plan, observation = _restoration_detail_fixture()
+    initial = "내부 enabled 값은 false다."
+    case.preconditions.append(initial)
+    plan.precondition_checks.append(pipeline.PreconditionCheck(source_text=initial,
+        read_kind="INTERNAL_VALUE", selector="window.__vccs.devices[0].enabled", expected_value=False))
+    observation.harness_values.update({"window.__vccs.devices[0].id": 1, "window.__vccs.devices[0].enabled": False})
+    observation.device_state_fields.append("enabled")
+    plan.assertions[1] = AutomationAssertion(result_id="ER-091", observation_layer="INTERNAL_STATE",
+        strategy="INTERNAL_DEVICE_FIELDS_EQUALS", selector="window.__vccs.devices", after_action_id="ACT-090",
+        expected_fields=[pipeline.DeviceFieldExpectation(field_name="enabled", expected_value=True)])
+    case.restore_steps.append("복원 후 내부 enabled 값이 초기값 false로 돌아왔는지 확인한다.")
+    assert pipeline.evaluate_checkpoint3_plan(case, plan, observation).status == CheckStatus.PASS
+    observation.harness_values["window.__vccs.devices[0].id"] = 2
+    assert pipeline.evaluate_checkpoint3_plan(case, plan, observation).status == CheckStatus.FAIL
+
+
+def test_restore_check_action_is_not_mistaken_for_read_only_confirmation():
+    case, plan, observation = generic_control_guard_fixture()
+    case.restore_steps = ["Check the new feature toggle."]
+    plan.actions[-1].source_text = case.restore_steps[0]
+    plan.actions[-1].action_type = AutomationActionType.CHECK
+    assert pipeline._restore_confirmation_coverage(case, plan) == (set(), [])
+
+
+def test_restore_confirmation_legacy_temperature_uses_existing_fixed_checks():
+    case = agent3_test_case()
+    plan = agent3_plan()
+    operation = "Restore AUTO 18 and verify UI and internal state."
+    case.restore_required = True
+    case.restore_steps = [operation]
+    for result, target in zip(case.expected_results[:2], ["UI", "Internal setTemp"]):
+        result.observation_target = target
+        result.verify_after_step = case.steps[0]
+    for assertion in plan.assertions[:2]:
+        assertion.after_action_id = "ACT-006"
+    plan.actions.extend([
+        AutomationAction(action_id="ACT-007", phase="RESTORE", action_type="SET_TEMPERATURE",
+                         selector="#det-temp-display", value=18.0, source_text=operation),
+        AutomationAction(action_id="ACT-008", phase="RESTORE", action_type="APPLY_COMMANDS",
+                         selector=".btn-apply-cmd", source_text=operation),
+    ])
+    previous = compile_automation_candidate("RUN-20260916-120000-ABCDEF", case, plan)
+    case.restore_steps.extend(["복원 후 UI가 18로 돌아왔는지 확인한다.", "복원 후 Internal setTemp가 18로 돌아왔는지 확인한다."])
+    assert evaluate_checkpoint3_plan(case, plan, agent3_observation()).status == CheckStatus.PASS
+    assert compile_automation_candidate("RUN-20260916-120000-ABCDEF", case, plan) == previous
+    case.restore_steps[-1] = "복원 후 Internal setTemp가 17로 돌아왔는지 확인한다."
+    assert evaluate_checkpoint3_plan(case, plan, agent3_observation()).status == CheckStatus.FAIL
+
+
+def test_historical_restore_confirmation_uses_previous_checkpoint_rules():
+    case, plan = agent3_test_case(), agent3_plan()
+    operation = "Restore AUTO 18 and verify UI and internal state."
+    case.restore_required = True
+    case.restore_steps = [operation, "복원 후 UI가 초기값 18로 돌아왔는지 확인한다."]
+    plan.actions.extend([
+        AutomationAction(action_id="ACT-007", phase="RESTORE", action_type="SET_TEMPERATURE",
+                         selector="#det-temp-display", value=18.0, source_text=operation),
+        AutomationAction(action_id="ACT-008", phase="RESTORE", action_type="APPLY_COMMANDS",
+                         selector=".btn-apply-cmd", source_text=operation),
+    ])
+    previous = pipeline.evaluate_checkpoint3_plan(case, plan, agent3_observation(),
+        require_precondition_proof=False, require_restore_confirmation_detail=False)
+    current = pipeline.evaluate_checkpoint3_plan(case, plan, agent3_observation(), require_precondition_proof=False)
+    assert previous.status == CheckStatus.PASS
+    assert current.status == CheckStatus.FAIL
+    assert any(item.rule_id == "CP3-006A" and "observation_target" in item.message for item in current.checks)
+
+
+def test_detailed_single_flow_requires_and_executes_explicit_assertion_anchor(tmp_path, monkeypatch):
+    case, plan, observation = precondition_guard_fixture()
+    for result, target in zip(case.expected_results, ["새 제어 스위치", "내부 enabled 값"]):
+        result.observation_target = target
+        result.verify_after_step = case.steps[0]
+    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, observation)
+    assert next(item for item in checkpoint.checks if item.rule_id == "CP3-003A").status == CheckStatus.FAIL
+    for assertion in plan.assertions:
+        assertion.after_action_id = "ACT-090"
+    assert pipeline.evaluate_checkpoint3_plan(case, plan, observation).status == CheckStatus.PASS
+    code = compile_automation_candidate("RUN-20260915-120000-ABCDEF", case, plan)
+    assert code.index("# EXPECTED_RESULT: ER-090") < code.index("# ACT-091 RESTORE")
+    target = tmp_path / "detailed-switch.html"
+    _write_text_atomic(target, '''<!doctype html><input id="new-feature-toggle" type="checkbox"
+        onchange="window.__vccs.feature.enabled=this.checked"><script>
+        window.__vccs={feature:{enabled:false}};</script>''')
+    monkeypatch.setenv("QA_TARGET_URL", target.as_uri())
+    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
+    namespace = {}
+    exec(compile(code, "detailed_tc_check", "exec"), namespace)
+    namespace["test_tc_cand_090"]()
+
+
 @pytest.mark.parametrize("mutation", ["missing", "wrong_source", "unknown_selector", "wrong_value", "weak_text", "unproved_login", "enabled_instead_of_checked", "early_assertion"])
 def test_precondition_proof_rejects_unverified_plans(mutation):
     case, plan, observation = precondition_guard_fixture()
@@ -233,7 +664,7 @@ def test_agent3_uses_structured_plan_api() -> None:
     assert result.plan.tc_id == "TC-CAND-003"
     assert responses.kwargs["text_format"] is Agent3AutomationPlan
     assert responses.kwargs["store"] is False
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent3-3-22"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent3-3-26"
     instructions = responses.kwargs["input"][0]["content"]
     assert "Check only conditions stated in the approved TC preconditions" in instructions
     assert "not every available context field" in instructions

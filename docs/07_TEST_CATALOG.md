@@ -1,7 +1,7 @@
 # 자동 테스트 카탈로그
 
-최종 확인: 2026-09-12
-실행 기준: `python -m pytest --collect-only -q` → **283건**
+최종 확인: 2026-09-16
+실행 기준: `python -m pytest --collect-only -q` → **449건**
 실제 정의 파일: `tests/test_srs_agent1.py`, `tests/test_agent2.py`, `tests/test_integrity_cli.py`, `tests/test_agent3.py`, `tests/test_orchestration_execution.py`, `tests/test_agent4_reporting.py`, `tests/test_pipeline_ui.py`
 
 이 문서는 현재 수집되는 자동 테스트를 사람이 확인하기 쉽게 정리한 목록입니다. 실행의 기준은 항상 테스트 코드와 Pytest 수집 결과이며, 테스트를 추가·삭제할 때는 이 문서도 같은 변경에서 갱신합니다.
@@ -10,9 +10,113 @@
 
 | 구성 | 수량 | 설명 |
 |---|---:|---|
-| 일반 테스트 함수 | 220 | 함수 하나가 Pytest 실행 1건 |
-| 파라미터 테스트 함수 | 15 | 서로 다른 입력·실패 조합으로 실행 63건 |
-| 합계 | **283** | 현재 Pytest 수집 수 |
+| 일반 테스트 함수 | 248 | 함수 하나가 Pytest 실행 1건 |
+| 파라미터 테스트 함수 | 37 | 서로 다른 입력·실패 조합으로 실행 201건 |
+| 합계 | **449** | 현재 Pytest 수집 수 |
+
+### 대상별 복원 비교 기준: 추가 40개 실행 조합
+
+- `test_restore_drafting_separates_ui_labels_and_internal_codes`: Agent 2의 화면/내부 코드 구분·초기 표시 근거·비교 기준 누락·연결 어미 5조합.
+- `test_explicit_restore_basis_checks_display_and_internal_separately`: 한글 화면 표시와 내부 코드가 다른 로컬 제품에서 연결 표현 3종 × 정상/화면 복원 실패/내부 복원 실패 9조합.
+- `test_explicit_restore_basis_rejects_ungrounded_or_missing_comparisons`: 비교 누락·중복·다른 ER·방법 오류·원문 변조·근거 없는 값·다른 대상·부정·가짜 조작·조작 누락·다른 구절의 근거 차용 등 13조합.
+- 기존 `test_restore_linked_browser_comparisons_across_control_values`에 명시 비교 방식의 온도·풍량·모드 정상/복원 실패 12조합 추가(기존 방식 포함 총 24조합).
+- `test_restore_comparison_supports_shared_target_without_borrowing_other_target_basis`: 같은 관찰 위치의 복수 ER 연결과 누락 차단 1건.
+
+새 Agent 2 상세화 1.2 및 Agent 3 복원 1.2 계약·다운그레이드 차단은 기존 인계 테스트에 반영했습니다. 로컬 대역/저장 사본 검증과 새 모델 Live 결과는 구분합니다.
+
+### 복원 확인 원문과 실제 비교 연결: 추가 33개 실행 조합
+
+| 테스트 | 확인 내용 |
+|---|---|
+| `test_restore_plan_links_preserve_sources_targets_and_fail_closed` | 정상 연결·누락·없는 ID·중복·원문 변조·대상 누락·새 알림/값·부정·가짜 조작 차단 12조합 |
+| `test_restore_links_accept_observed_initial_state_wording` | 실행 전 확인/관찰/기록한 상태 표현 3조합 |
+| `test_restore_linked_browser_comparisons_across_control_values` | 풍량·온도·모드의 일반/상세 문장과 정상/복원 실패를 실제 로컬 브라우저에서 검사 12조합 |
+| `test_restore_linked_switch_checks_real_boolean_restoration` | 스위치 UI·내부 boolean 정상 복원·내부값 복원 실패 2조합 |
+| `test_restore_links_do_not_claim_unsupported_or_unproved_comparisons` | 알림·미지원 전략·다른 초기값·다른 장비 증명 차단 4조합 |
+
+기존 인계 시험에 새 4.2/복원 1.1 계약과 누락·다운그레이드 검사도 추가했습니다. 기능별 로컬 대역 시험이며 실제 제품의 모든 요구사항 또는 새 모델 전체 실행 검증을 뜻하지 않습니다.
+
+### 요청 근거 연결과 추가 검사 구분: 추가 16개 실행 조합
+
+| 테스트 | 확인 내용 |
+|---|---|
+| `test_request_trace_only_keeps_requested_words_without_full_srs_scope` | 관련 SRS 전체 검증이 아닌 요청 원문 연결 허용·과거 계약 분리 2조합 |
+| `test_request_trace_only_cannot_authorize_new_conditions` | 새 문장·SRS 조건·추가 조건·개정·끊긴 연결·허위 출처·제외 조건 차단 7조합 |
+| `test_trace_only_expected_results_cannot_expand_original_request` | 원문 기대결과 허용, 추가 알림·변경 값·복합/없는 출처 반려 5조합 |
+| `test_trace_reference_does_not_force_unrequested_notification_layer` | 관련 ID가 근거 연결일 때 요청하지 않은 알림 검사를 강제하지 않음 |
+| `test_request_trace_run_handoff_requires_new_scope_contract` | 신규 실행 진입점·저장·재검증, 계약 누락·다운그레이드·불일치 차단 |
+
+기존 직접 요청·간접 영향 보류 반례도 유지합니다. 실제 모델·Notion 결과와 남은 제한은 PROJECT_HANDOFF.md에 별도로 기록합니다.
+
+### 합의 예시 기반 절차·복원 확인: 추가 37개 실행 조합
+
+| 테스트 | 확인 내용 |
+|---|---|
+| `test_procedure_detail_accepts_explicit_selection_and_restore_without_new_product_results` | 온도·풍량의 명시 조작과 복원 확인, 제품 ER 불변 2조합 |
+| `test_procedure_detail_rejects_missing_false_or_late_target_preparation` | 대상 선택 누락·값 선택 오인·부정·늦은 선택 7조합 |
+| `test_procedure_detail_accepts_already_selected_target_without_extra_click` | 이미 선택됐다고 명시한 사전조건은 추가 클릭을 강제하지 않음 |
+| `test_procedure_detail_rejects_vague_missing_or_negated_restore_verification` | 복원 확인 누락·막연한 문장·부정 확인 5조합 |
+| `test_procedure_detail_accepts_observed_baseline_without_invented_initial_value` | 실행 전 관찰한 원상태 참조 허용 |
+| `test_procedure_detail_preserves_read_only_existing_only_and_legacy_contracts` | 한글/영어 읽기 전용, 기존 TC 전용, 과거 1.0 검사 보존 |
+| `test_procedure_detail_requires_a_named_or_observed_restoration_baseline` | 초기 기준 없는 문장 반려·관찰/기록 기준 허용 3조합 |
+| `test_procedure_detail_does_not_invent_device_selection_for_standalone_control` | 장비와 무관한 범용 단일 제어에 장비 선택을 강제하지 않음 |
+| `test_restore_confirmation_uses_existing_baselines_without_extra_actions` | 확인줄 추가 전후 코드 동일성·실제 로컬 UI/내부 상태 복원 |
+| `test_restore_confirmation_rejects_unimplemented_or_ungrounded_checks` | 새 대상·새 값·증명 부족·복원 누락·순서·가짜 Action·부정 비교 7조합 |
+| `test_restore_confirmation_explicit_value_needs_same_target_precondition_proof` | 동일 관찰 대상의 사전조건 증명과 명시 초기값 연결 |
+| `test_restore_confirmation_matches_string_initial_value_not_feature_names` | 문자열 초기값 LOW의 증명, 다른 값·관찰 이름 속 값의 오인 차단 |
+| `test_restore_confirmation_does_not_accept_proof_for_another_device` | 초기값이 같아도 다른 장비의 사전조건 증명은 반려 |
+| `test_restore_check_action_is_not_mistaken_for_read_only_confirmation` | 실제 체크박스 조작과 읽기 전용 확인 문장 구분 |
+| `test_restore_confirmation_legacy_temperature_uses_existing_fixed_checks` | 온도 복원 초기값과 실제 컴파일러 비교 연결 |
+| `test_historical_restore_confirmation_uses_previous_checkpoint_rules` | 과거 복원 문장은 이전 계약으로 재검증, 최신 작성 기준과 구분 |
+| `test_agent1_to_agent2_cli_handoff_with_frozen_inputs` | 기존 정상 외 재작성 해결·미해결 2조합 추가, 새 1.1 Manifest·누락/다운그레이드 차단·과거 1.0 호환 |
+
+추가 Agent 3의 과거 검사 분기·다른 장비 초기값 증명 반례도 포함합니다. 기존 모델 대역 테스트는 예시 A/B/C가 최초/재작성 모두 전달됨을 확인하고, 기존 Notion 테스트는 복원 확인줄까지 보존합니다. 위 수치는 규칙·대역·로컬 브라우저 검사이며 실제 모델의 새 초안 품질 또는 Notion 실제 게시 완료를 뜻하지 않습니다.
+
+### Notion 상세 TC 연결: 추가 7개 실행 조합
+
+| 테스트 | 확인 내용 |
+|---|---|
+| `test_notion_detail_preserves_saved_steps_results_and_restore` | 저장 명세·ER ID·단계 연결·복원을 보고 기록과 본문에 보존 |
+| `test_notion_detail_does_not_guess_legacy_or_ambiguous_timing` | 과거·중복 단계의 기대결과를 임의 연결하지 않음 |
+| `test_notion_detail_preserves_long_text_and_resumes_parts_without_duplicates` | 긴 한글·이모지 분할, 페이지네이션, 저장 후 응답 유실 재시도, 중복 방지·수동 편집 보존 |
+| `test_notion_detail_upsert_counts_only_completed_bodies` | 본문 성공·권한 실패 2조합, 상세 전송이 끝난 건만 완료 집계 |
+| `test_notion_get_does_not_send_json_body` | Notion 본문 조회 GET에 요청 본문을 넣지 않음 |
+| `test_report_omits_unverified_legacy_design_from_notion_detail` | 인계 명세 없는 과거 기록의 상세 제외·알 수 없는 Manifest 차단 |
+
+HTTP 대역으로 본문 생성·전송 계약을 검사합니다. 실제 Notion 계정에서의 권한·렌더링·게시 확인을 뜻하지 않습니다.
+
+### 생성 TC 상세화: 추가 12개 실행 조합
+
+| 테스트 | 확인 내용 |
+|---|---|
+| `test_new_tc_detail_keeps_steps_observation_locations_and_shared_timing` | 상세 단계·확인 대상·UI/내부 공동 판정 시점·구조화 왕복 보존 |
+| `test_new_tc_detail_rejects_compressed_or_unlinked_drafts` | 압축 절차 2종·판정 단계 누락/존재하지 않음/중복·대상 누락/불일치/일반어·빈 절차 9조합 |
+| `test_tc_detail_preserves_legacy_read_only_and_existing_only_designs` | 과거 규칙, 읽기 전용·기존 TC 전용, 간결한 복원 허용 |
+| `test_detailed_single_flow_requires_and_executes_explicit_assertion_anchor` | 새 단일 흐름의 판정 시점 강제·컴파일 위치·로컬 브라우저 실행·복원 |
+
+기존 API 대역 테스트는 최초/재작성 지침을, CLI 테스트는 새 상세화 Manifest와 재로딩을 함께 확인합니다. 과거 CP2 단위 fixture는 공유 어댑터에서 상세화 규칙을 끄고, 새 상세화 테스트와 운영 진입점은 기본 강제 규칙을 검사합니다. 실제 모델 출력 품질이나 노션 상세 게시 완료를 의미하지 않습니다.
+
+### 요청 밖 검사 범위 통제: 추가 18개 실행 조합
+
+| 테스트 | 확인 내용 |
+|---|---|
+| `test_scope_direct_request_passes_but_unrequested_dependency_pauses` | 두 종류 Requirement에서 직접 요청 통과·간접 영향 보류, PARTIAL_PROCEED로 우회하지 않음 |
+| `test_scope_rejects_unfounded_evidence` | 근거 누락·SRS 조건 오용·존재하지 않거나 중복된 조건·허위 원문·잘못된 Requirement·제외/변경 전/준비 문구 차단 9조합 |
+| `test_scope_does_not_accept_relabelled_dependency_or_shared_word_as_direct` | 간접 영향을 직접 요청으로 바꾸거나 공통 단어만 제시해도 자동 인계하지 않음 |
+| `test_scope_explicit_requirement_reference_and_update_are_supported` | 직접 명시한 Requirement의 UPDATE_REQUIRED 처리 |
+| `test_scope_guard_is_versioned_not_retroactive` | 과거 판정 계약 유지, 새 기본 검사의 누락 근거 차단 |
+| `test_scope_gate_rewrite_and_pause_before_agent2` | 재작성 해결·미해결·범위 보류 3조합, Manifest와 최초/재작성 입력, Agent 2 진입 차단 |
+| `test_scope_contract_loader_preserves_legacy_and_rejects_missing_new_contract` | 과거 Run 로딩, 새 계약 누락 거절 |
+
+기존 연관 UPDATE_REQUIRED 테스트도 근거 없는 확장을 차단하도록 바꿨습니다. 위 시험은 규칙·모델 대역 검증이며 새 실제 모델 실행 성공을 의미하지 않습니다. 현재 파일별 수집은 Agent 1 53·Agent 2 95·Agent 3 174·Agent 4 35·인계/CLI 13·실행 34·UI 45건입니다.
+
+### 승인 TC 재사용 입력: 추가 3건
+
+| 테스트 | 확인 내용 |
+|---|---|
+| `test_approved_reuse_context_preserves_spec_without_registration_metadata` | 승인 TC의 사전조건·조작·기대결과·판정 시점·복원 원문 전달, 등록 메타정보·경로 제외 |
+| `test_reuse_context_snapshot_roundtrip_and_legacy_compatibility` | 새 카탈로그 상세 정보 왕복 보존, 상세 정보 없는 과거 Snapshot 호환 |
+| `test_agent2_sends_approved_procedures_on_initial_and_rewrite_calls` | 최초 설계와 재작성의 실제 입력 구성에 승인 TC 명세 포함, 모델 대역 사용 |
 
 ### 긴 임시 경로 저장 오류: 추가 1건
 
@@ -96,7 +200,7 @@
 | `test_partial_proceed_continues_confirmed_scope_and_preserves_exclusions` | PARTIAL_PROCEED의 확정 범위 계속 실행 |
 | `test_partial_proceed_without_excluded_scope_is_rejected` | 제외 범위 없는 PARTIAL_PROCEED 차단 |
 | `test_blocked_decision_blocks_agent2_handoff` | BLOCKED의 후속 단계 차단 |
-| `test_related_requirement_can_be_marked_update_required` | 연관 Requirement UPDATE_REQUIRED 허용 |
+| `test_related_update_without_scope_evidence_is_rejected` | 연관 UPDATE_REQUIRED의 범위 근거 누락 차단 |
 | `test_proceed_with_open_question_is_recorded_for_final_review` | PROCEED 보완 REVIEW의 최종 보고 이관 |
 | `test_scope_limited_acceptance_note_is_only_excluded` | 범위 제한 인수 조건을 확정 조건이 아닌 제외 범위로 전달 |
 | `test_scope_limited_acceptance_note_cannot_be_confirmed_condition` | 범위 제한 문구의 확정 조건 혼입 차단 |

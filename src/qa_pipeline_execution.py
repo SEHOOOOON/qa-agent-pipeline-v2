@@ -152,9 +152,10 @@ def run_agent1(args: argparse.Namespace) -> int:
         _write_json(
             run_dir / "run_manifest.json",
             {
-                "contract_version": "2.4",
+                "contract_version": "2.6",
                 "meaning_guard_contract": "1.0",
-                "prompt_version": "agent1-2.9",
+                "scope_guard_contract": "1.1",
+                "prompt_version": "agent1-2.11",
                 "run_id": run_id,
                 "stage": "AGENT_1_CP1",
                 "status": checkpoint.status.value,
@@ -228,8 +229,23 @@ def _load_verified_agent1_run(run_dir: Path, run_id: str) -> tuple[
     requirements = load_srs_requirements(srs_snapshot_file)
     analysis = _read_json_model(analysis_file, Agent1Analysis)
     checkpoint = _read_json_model(checkpoint_file, Checkpoint1Result)
+    scope_contract = manifest.get("scope_guard_contract")
+    if scope_contract != "1.1" and any(
+        item.scope_evidence is not None
+        and item.scope_evidence.basis == ScopeBasis.REQUEST_TRACE_ONLY
+        for item in analysis.requirement_effects
+    ):
+        raise ValueError("요청 근거 연결에는 검사 범위 계약 1.1이 필요합니다.")
+    if scope_contract not in {None, "1.0", "1.1"} or (
+        manifest.get("contract_version") == "2.5" and scope_contract != "1.0"
+    ) or (
+        manifest.get("contract_version") == "2.6" and scope_contract != "1.1"
+    ):
+        raise ValueError("지원하지 않거나 누락된 검사 범위 계약입니다.")
     recomputed = evaluate_checkpoint1(request, analysis, requirements,
-        require_meaning_guard=manifest.get("meaning_guard_contract") == "1.0")
+        require_meaning_guard=manifest.get("meaning_guard_contract") == "1.0",
+        require_scope_guard=scope_contract in {"1.0", "1.1"},
+        allow_request_trace=scope_contract == "1.1")
     if recomputed.model_dump(mode="json") != checkpoint.model_dump(mode="json"):
         raise ValueError("현재 CP1 규칙으로 재검증한 결과가 저장된 Checkpoint 1과 다릅니다.")
     if checkpoint.status not in {CheckStatus.PASS, CheckStatus.REVIEW} or checkpoint.handoff_status != HandoffStatus.CONTINUE:
@@ -320,6 +336,7 @@ def run_agent2(args: argparse.Namespace) -> int:
             existing_catalog=existing_catalog,
             require_srs_revision_proposals=True,
             require_existing_behavior_values=True,
+            require_restore_target_basis=True,
         )
         attempts = [
             {
@@ -381,6 +398,7 @@ def run_agent2(args: argparse.Namespace) -> int:
                 existing_catalog=existing_catalog,
                 require_srs_revision_proposals=True,
                 require_existing_behavior_values=True,
+                require_restore_target_basis=True,
             )
             attempts.append(
                 {
@@ -413,8 +431,9 @@ def run_agent2(args: argparse.Namespace) -> int:
         _write_json(
             run_dir / "agent2_manifest.json",
             {
-                "contract_version": "3.0",
-                "prompt_version": "agent2-2.22",
+                "contract_version": "3.3",
+                "prompt_version": "agent2-2.27",
+                "tc_detail_contract": "1.2",
                 "run_id": args.run_id,
                 "source_stage": "AGENT_1_CP1",
                 "stage": "AGENT_2_CP2",
@@ -509,12 +528,24 @@ def _load_verified_agent2_run(
         existing_catalog = _catalog_from_snapshot(_read_json_payload(catalog_file))
     else:
         existing_catalog = EXISTING_REGRESSION_CATALOG
+    detail_contract = manifest.get("tc_detail_contract")
+    if detail_contract not in {None, "1.0", "1.1", "1.2"} or (
+        manifest.get("contract_version") == "3.1" and detail_contract != "1.0"
+    ) or (
+        manifest.get("contract_version") == "3.2" and detail_contract != "1.1"
+    ) or (
+        manifest.get("contract_version") == "3.3" and detail_contract != "1.2"
+    ):
+        raise ValueError("지원하지 않거나 누락된 TC 상세화 계약입니다.")
     recomputed = evaluate_checkpoint2(
         request,
         analysis,
         design,
         requirements,
         require_meaning_guard=manifest.get("meaning_guard_contract") == "1.0",
+        require_tc_detail=detail_contract in {"1.0", "1.1", "1.2"},
+        require_procedure_detail=detail_contract in {"1.1", "1.2"},
+        require_restore_target_basis=detail_contract == "1.2",
         require_candidate_expectation_guard=manifest.get("candidate_expectation_contract") == "1.0",
         existing_catalog=existing_catalog,
         require_srs_revision_proposals=(
@@ -866,7 +897,7 @@ def run_agent3(args: argparse.Namespace) -> int:
         agent = OpenAIAgent3(model=args.model)
         response = agent.plan(test_case, observation, requirements)
         _write_json(artifact_dir / "agent3_automation_plan_attempt_1.json", response.plan.model_dump(mode="json"))
-        checkpoint = evaluate_checkpoint3_plan(test_case, response.plan, observation, require_precondition_proof=True)
+        checkpoint = evaluate_checkpoint3_plan(test_case, response.plan, observation, require_precondition_proof=True, require_restore_plan_links=True, require_restore_comparison_basis=True)
         attempts = [
             {
                 "attempt": 1,
@@ -886,7 +917,7 @@ def run_agent3(args: argparse.Namespace) -> int:
                 checkpoint_feedback=[item.message for item in checkpoint.checks if item.status == CheckStatus.FAIL],
             )
             _write_json(artifact_dir / "agent3_automation_plan_attempt_2.json", response.plan.model_dump(mode="json"))
-            checkpoint = evaluate_checkpoint3_plan(test_case, response.plan, observation, require_precondition_proof=True)
+            checkpoint = evaluate_checkpoint3_plan(test_case, response.plan, observation, require_precondition_proof=True, require_restore_plan_links=True, require_restore_comparison_basis=True)
             attempts.append(
                 {
                     "attempt": 2,
@@ -934,9 +965,10 @@ def run_agent3(args: argparse.Namespace) -> int:
             _write_json(artifact_dir / "agent3_trial.json", trial.model_dump(mode="json"))
 
         manifest_payload = {
-            "contract_version": "4.0",
+            "contract_version": "4.3",
             "precondition_proof_contract": "1.0",
-            "prompt_version": "agent3-3.22",
+            "restore_confirmation_contract": "1.2",
+            "prompt_version": "agent3-3.26",
             "run_id": args.run_id,
             "source_stage": "AGENT_2_CP2",
             "stage": "AGENT_3_CP3_TRIAL",
@@ -1113,8 +1145,22 @@ def _candidate_execution_record(
     plan = _read_json_model(
         artifact_dir / "agent3_automation_plan.json", Agent3AutomationPlan
     )
+    restore_contract = agent3_manifest.get("restore_confirmation_contract")
+    if restore_contract not in {None, "1.0", "1.1", "1.2"} or (
+        agent3_manifest.get("contract_version") == "4.1" and restore_contract != "1.0"
+    ) or (
+        agent3_manifest.get("contract_version") == "4.2" and restore_contract != "1.1"
+    ) or (
+        agent3_manifest.get("contract_version") == "4.3" and restore_contract != "1.2"
+    ) or (plan.restore_confirmations and restore_contract not in {"1.1", "1.2"}
+    ) or (any(item.comparisons for item in plan.restore_confirmations) and restore_contract != "1.2"
+    ):
+        raise ValueError("지원하지 않거나 누락된 복원 확인 계약입니다.")
     current_checkpoint3 = evaluate_checkpoint3_plan(test_case, plan, observation,
-        require_precondition_proof=agent3_manifest.get("precondition_proof_contract") == "1.0")
+        require_precondition_proof=agent3_manifest.get("precondition_proof_contract") == "1.0",
+        require_restore_confirmation_detail=restore_contract in {"1.0", "1.1", "1.2"},
+        require_restore_plan_links=restore_contract in {"1.1", "1.2"},
+        require_restore_comparison_basis=restore_contract == "1.2")
     current_code = compile_automation_candidate(run_id, test_case, plan)
     current_static_checks = evaluate_compiled_candidate(test_case, current_code)
     current_checkpoint3.checks.extend(current_static_checks)

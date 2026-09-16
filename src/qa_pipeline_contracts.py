@@ -132,10 +132,24 @@ class ConfirmedCondition(StrictModel):
         return self
 
 
+class ScopeBasis(str, Enum):
+    DIRECT_REQUEST = "DIRECT_REQUEST"
+    CHANGE_DEPENDENCY = "CHANGE_DEPENDENCY"
+    REQUEST_TRACE_ONLY = "REQUEST_TRACE_ONLY"
+
+
+class RequirementScopeEvidence(StrictModel):
+    basis: ScopeBasis
+    request_condition_ids: list[NonEmptyStr] = Field(min_length=1)
+    srs_source_text: NonEmptyStr
+
+
 class RequirementEffect(StrictModel):
     requirement_id: RequirementId
     relation: RequirementRelation
     reason: NonEmptyStr
+    # Historical analyses have no scope proof. Only versioned new Runs require it.
+    scope_evidence: RequirementScopeEvidence | None = None
 
 
 class Agent1Analysis(StrictModel):
@@ -247,6 +261,9 @@ class ExpectedResult(StrictModel):
         Annotated[str, StringConstraints(pattern=r"^COND-\d{3}$")]
     ] = Field(min_length=1)
     verify_after_step: NonEmptyStr | None = None
+    # Human-readable observation location, not an executable selector. Legacy ERs
+    # omit it; new candidate detail checks require an explicit location.
+    observation_target: NonEmptyStr | None = None
 
 
 class ProductTestCaseCandidate(StrictModel):
@@ -533,6 +550,24 @@ class PreconditionCheck(StrictModel):
     expected_value: str | float | int | bool
 
 
+class RestoreComparisonBasis(str, Enum):
+    OBSERVED_BASELINE = "OBSERVED_BASELINE"
+    PROVED_INITIAL = "PROVED_INITIAL"
+
+
+class RestoreComparison(StrictModel):
+    result_id: Annotated[str, StringConstraints(pattern=r"^ER-\d{3}$")]
+    source_excerpt: NonEmptyStr
+    basis: RestoreComparisonBasis
+
+
+class RestoreConfirmation(StrictModel):
+    """Link an unchanged TC confirmation to existing compiler comparisons only."""
+    source_text: NonEmptyStr
+    result_ids: list[Annotated[str, StringConstraints(pattern=r"^ER-\d{3}$")]] = Field(min_length=1)
+    comparisons: list[RestoreComparison] = Field(default_factory=list)
+
+
 class Agent3AutomationPlan(StrictModel):
     tc_id: Annotated[str, StringConstraints(pattern=r"^TC-CAND-\d{3}$")]
     target_device_id: int = Field(ge=1, le=16)
@@ -541,6 +576,7 @@ class Agent3AutomationPlan(StrictModel):
     actions: list[AutomationAction] = Field(default_factory=list)
     assertions: list[AutomationAssertion] = Field(default_factory=list)
     precondition_checks: list[PreconditionCheck] = Field(default_factory=list)
+    restore_confirmations: list[RestoreConfirmation] = Field(default_factory=list)
     extension_reasons: list[NonEmptyStr] = Field(default_factory=list)
     technical_notes: list[NonEmptyStr] = Field(default_factory=list)
 
@@ -552,7 +588,7 @@ class Agent3AutomationPlan(StrictModel):
             if self.extension_reasons:
                 raise ValueError("READY 자동화 계획에는 지원 범위 확장 사유를 넣지 않습니다.")
         else:
-            if self.actions or self.assertions or self.precondition_checks:
+            if self.actions or self.assertions or self.precondition_checks or self.restore_confirmations:
                 raise ValueError("지원 범위 확장 요청에는 실행 동작이나 검증 조건을 넣지 않습니다.")
             if not self.extension_reasons:
                 raise ValueError("지원 범위 확장 요청에는 구체적인 사유가 필요합니다.")
@@ -803,6 +839,9 @@ class ExistingRegressionSpec:
     automation_file: str | None = None
     automation_sha256: str | None = None
 
+    # Whitelisted product-test specification, not code, paths or approval metadata.
+    reuse_context_json: str | None = None
+
 
 EXISTING_REGRESSION_CATALOG = (
     ExistingRegressionSpec(
@@ -886,6 +925,7 @@ def _catalog_snapshot_entry(spec: ExistingRegressionSpec) -> dict[str, Any]:
         "test_case_sha256": spec.test_case_sha256,
         "automation_file": spec.automation_file,
         "automation_sha256": spec.automation_sha256,
+        **({"reuse_context_json": spec.reuse_context_json} if spec.reuse_context_json else {}),
     }
 
 
@@ -908,6 +948,7 @@ def _catalog_from_snapshot(payload: dict[str, Any]) -> tuple[ExistingRegressionS
                 test_case_sha256=str(item.get("test_case_sha256") or ""),
                 automation_file=str(item.get("automation_file") or ""),
                 automation_sha256=str(item.get("automation_sha256") or ""),
+                reuse_context_json=item.get("reuse_context_json"),
             )
         )
     catalog = (*EXISTING_REGRESSION_CATALOG, *approved)
@@ -1002,6 +1043,32 @@ def load_approved_regression_catalog(
             test_case_sha256=str(asset["test_case_sha256"]),
             automation_file=str(asset["automation_file"]),
             automation_sha256=str(asset["automation_sha256"]),
+            reuse_context_json=json.dumps(
+                {
+                    "control_path": validated_test_case.control_path,
+                    "target_role": validated_test_case.target_role,
+                    "test_data": validated_test_case.test_data.model_dump(mode="json"),
+                    "preconditions": validated_test_case.preconditions,
+                    "steps": validated_test_case.steps,
+                    "condition_execution": validated_test_case.condition_execution,
+                    "intermediate_reset_steps": validated_test_case.intermediate_reset_steps,
+                    "expected_results": [
+                        {
+                            "statement": result.statement,
+                            "observation_layer": result.observation_layer,
+                            "verify_after_step": result.verify_after_step,
+                            **({"observation_target": result.observation_target}
+                               if result.observation_target is not None else {}),
+                        }
+                        for result in validated_test_case.expected_results
+                    ],
+                    "restore_required": validated_test_case.restore_required,
+                    "restore_steps": validated_test_case.restore_steps,
+                    "independent_execution": validated_test_case.independent_execution,
+                    "independence_reason": validated_test_case.independence_reason,
+                },
+                ensure_ascii=False,
+            ),
         )
         approved.append(spec)
         snapshot_entries.append({
@@ -1031,6 +1098,11 @@ def render_existing_regression_context(
         + item.test_function
         + " | 검증 동작: "
         + " / ".join(item.covered_behaviors)
+        + (
+            "\n  승인 TC 명세 · 사전조건/절차/기대결과/판정 시점/복원:\n  "
+            + item.reuse_context_json
+            if item.reuse_context_json else ""
+        )
         for item in catalog
     )
 

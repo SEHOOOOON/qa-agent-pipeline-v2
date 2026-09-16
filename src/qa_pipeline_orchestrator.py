@@ -242,9 +242,9 @@ def _agent3_run_entry(
         checkpoint_file = artifact_dir / "checkpoint3.json"
         if entry["reason"] is None and checkpoint_file.is_file():
             proof_failures = [check.get("message", "") for check in _read_json_payload(checkpoint_file).get("checks", [])
-                              if check.get("rule_id") == "CP3-006A" and check.get("status") == "FAIL"]
+                              if check.get("rule_id") in {"CP3-006A", "CP3-006B"} and check.get("status") == "FAIL"]
             if proof_failures:
-                entry["reason"] = "사전조건 증명 누락 또는 부적합: " + " / ".join(proof_failures)
+                entry["reason"] = "사전조건 증명·조작·복원 확인 계획 보완 필요: " + " / ".join(proof_failures)
     eligibility_file = artifact_dir / "agent3_eligibility.json"
     if entry["reason"] is None and eligibility_file.is_file():
         eligibility = _read_json_payload(eligibility_file)

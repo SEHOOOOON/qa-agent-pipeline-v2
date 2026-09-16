@@ -64,6 +64,9 @@ UNCHANGED request conditions must explicitly state maintenance (유지/변경 �
 19. 질문이 없고 변경 전 근거, 변경 후 정책과 전달할 확정 조건이 명확하면 PROCEED를 선택합니다. PARTIAL_PROCEED는 확정 조건을 Agent 2로 계속 전달하고 excluded_scope와 information_gaps만 최종 보고 대상으로 남깁니다. 핵심 기대 결과를 확정할 수 없어 분리 진행도 불가능할 때만 WAITING_FOR_USER를 선택합니다.
 20. 테스트케이스, 테스트 절차나 Playwright 코드는 작성하지 않습니다.
 21. Agent 1은 요구사항 영향도와 확정 조건을 Agent 2에 빠짐없이 전달하는 단계입니다. 현재 UI·하네스·자동화 구현 지원 여부를 이유로 영향 있는 Requirement를 NO_IMPACT로 낮추거나 확정된 제품 조건을 excluded_scope로 보내지 않습니다. TC 구성·기존 TC 선택·자동화 가능 여부는 Agent 2 이후 단계의 책임입니다.
+22. 대상 외 VERIFY·UPDATE_REQUIRED에는 scope_evidence를 작성합니다. request_condition_ids는 실제 변경 요청에서 인용한 CHANGE_REQUEST 조건만 연결하고, srs_source_text에는 해당 연관 Requirement 원문을 인용합니다. reason에는 어떤 요청 변경이 어떤 기존 동작에 영향을 주는지 적습니다. SRS에 존재하거나 같은 화면에서 실행된다는 이유만으로 검사 범위를 늘리지 않습니다. 근거가 없는 항목은 NO_IMPACT로 검토 기록만 남깁니다.
+23. 사용자가 직접 요구한 연관 동작이면 DIRECT_REQUEST, 요청에 없지만 변경의 영향으로 검사해야 한다고 판단하면 CHANGE_DEPENDENCY입니다. 간접 영향은 자동 확정하지 않고 범위 검토를 기다립니다. DIRECT_REQUEST도 인용된 요청에서 해당 Requirement ID 또는 SRS의 요구사항/인수 기준 전체 문장을 직접 대조할 수 없으면 CP1이 범위 확인을 위해 멈춥니다. 통과시키려고 원문에 없는 ID·문장을 만들거나 간접 영향을 직접 요청으로 바꾸지 않습니다. 사용자가 요청한 긍정 조건을 NO_IMPACT로 지우거나 주 대상에 잘못 연결해 이 검사를 피하지 않습니다.
+24. 새 검사 없이 사용자가 이미 요청한 결과에 관련 SRS 근거만 연결하는 경우에는 VERIFY + REQUEST_TRACE_ONLY를 사용합니다. 해당 Requirement에 연결하는 모든 조건은 request_condition_ids에 빠짐없이 기록하고 CHANGE_REQUEST의 긍정 제품 조건만 사용합니다. 이 조건의 statement는 source_text 원문과 정확히 같게 작성합니다. 관련 SRS는 scope_evidence.srs_source_text에만 인용하며, 별도 SRS 조건·새 기대값·새 검사·SRS 개정 근거로 확대하지 않습니다. 예: 사용자가 화면의 이름과 저장된 값을 확인하라고 이미 요청했다면, 공통 상태 규칙을 근거로 연결하되 두 요청 조건만 검사합니다. 사용자가 요청하지 않은 알림이나 다른 상태까지 검사하려면 REQUEST_TRACE_ONLY가 아니라 CHANGE_DEPENDENCY로 범위 확인을 기다립니다. 실제 연관 SRS 개정이 필요한 경우에는 UPDATE_REQUIRED와 기존 범위 근거를 사용합니다.
 """.strip()
 
 
@@ -152,7 +155,7 @@ class OpenAIAgent1:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent1-2-9",
+                prompt_cache_key="qa-v2-agent1-2-11",
                 input=[
                     {"role": "system", "content": AGENT1_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
@@ -344,6 +347,8 @@ def evaluate_checkpoint1(
     requirements: dict[str, SrsRequirement],
     *,
     require_meaning_guard: bool = True,
+    require_scope_guard: bool = True,
+    allow_request_trace: bool = True,
 ) -> Checkpoint1Result:
     checks: list[CheckResult] = []
 
@@ -668,6 +673,86 @@ def evaluate_checkpoint1(
     else:
         add("CP1-010", CheckStatus.PASS, "정보 부족·질문·진행 판정이 일관됩니다.")
 
+    scope_review_required = False
+    if require_scope_guard:
+        scope_errors: list[str] = []
+        scope_reviews: list[str] = []
+        conditions_by_id = {
+            item.condition_id: item for item in analysis.confirmed_conditions
+        }
+        # Do not use before_value, reason, preparation, or exclusions as authority
+        # for adding a product assertion. Keep each input field separate.
+        positive_request_parts = [
+            part for part in [request.after_value, request.description, *request.acceptance_notes]
+            if not _is_scope_exclusion_text(part) and not _is_test_procedure_note(part)
+        ]
+        for effect in analysis.requirement_effects:
+            if (effect.requirement_id == request.target_requirement_id
+                    or effect.relation == RequirementRelation.NO_IMPACT):
+                continue
+            label = effect.requirement_id
+            proof = effect.scope_evidence
+            related = requirements.get(label)
+            if proof is None:
+                scope_errors.append(f"{label}: 요청과 연결된 검사 범위 근거 누락")
+                continue
+            sources = [conditions_by_id.get(key) for key in proof.request_condition_ids]
+            if (len(set(proof.request_condition_ids)) != len(proof.request_condition_ids)
+                    or not all(
+                        item is not None
+                        and item.source_type == ConditionSource.CHANGE_REQUEST
+                        and not _is_scope_exclusion_text(item.source_text)
+                        and not _is_test_procedure_note(item.source_text)
+                        and any(_contains_fact(part, item.source_text) for part in positive_request_parts)
+                        for item in sources
+                    )):
+                scope_errors.append(f"{label}: 긍정 변경 요청 원문 조건에 연결되지 않은 범위 근거")
+                continue
+            if related is None or not any(
+                _contains_fact(part, proof.srs_source_text)
+                for part in [related.statement, related.acceptance_criteria]
+            ):
+                scope_errors.append(f"{label}: 연관 Requirement의 영향 근거 원문 불일치")
+                continue
+            if proof.basis == ScopeBasis.REQUEST_TRACE_ONLY:
+                linked = [item for item in analysis.confirmed_conditions
+                          if label in item.requirement_ids]
+                if (not allow_request_trace
+                        or effect.relation != RequirementRelation.VERIFY
+                        or {item.condition_id for item in linked} != set(proof.request_condition_ids)
+                        or not all(item.source_type == ConditionSource.CHANGE_REQUEST
+                                   and item.statement == item.source_text
+                                   and not re.search(r"(?:검사|검증|시험).*제외|검사하지|검증하지", item.source_text)
+                                   for item in linked)):
+                    scope_errors.append(
+                        f"{label}: 근거 연결은 VERIFY와 요청 원문 그대로의 조건만 허용합니다. "
+                        "연결 조건을 모두 기록하고 새 SRS 조건·기대값·개정을 추가하지 마세요."
+                    )
+                continue
+            if proof.basis == ScopeBasis.DIRECT_REQUEST:
+                if not all(label in item.requirement_ids for item in sources):
+                    scope_errors.append(f"{label}: 직접 요청 조건과 Requirement 연결 불일치")
+                    continue
+                # Exact explicit references are machine-checkable. A paraphrase,
+                # shared word, or model's causal explanation is not proof of scope.
+                if all(any(_contains_fact(item.source_text, reference) for reference in (
+                    label, related.statement, related.acceptance_criteria
+                )) for item in sources):
+                    continue
+                scope_reviews.append(f"{label}: 직접 요청의 연관 동작을 원문과 대조해 범위 확인 필요")
+            else:
+                scope_reviews.append(f"{label}: 요청 밖 간접 영향의 검사 필요성 확인 필요 — {effect.reason}")
+        scope_review_required = bool(scope_reviews)
+        if scope_errors:
+            add("CP1-011", CheckStatus.FAIL,
+                "검사 범위 근거를 보완하세요. 근거 없이 추가한 범위는 확정 조건에서 제외하고 NO_IMPACT로 기록하세요: "
+                + "; ".join(scope_errors + scope_reviews))
+        elif scope_reviews:
+            add("CP1-011", CheckStatus.REVIEW,
+                "검사 범위를 자동 확정하지 않고 입력 보완을 기다립니다: " + "; ".join(scope_reviews))
+        else:
+            add("CP1-011", CheckStatus.PASS, "요청 밖 검사 범위의 근거 없는 자동 확장이 없습니다.")
+
     statuses = {check.status for check in checks}
     if CheckStatus.ERROR in statuses:
         status = CheckStatus.ERROR
@@ -680,7 +765,7 @@ def evaluate_checkpoint1(
     blocking_decision = analysis.decision == AnalysisDecision.WAITING_FOR_USER
     if status in {CheckStatus.FAIL, CheckStatus.ERROR}:
         handoff_status = HandoffStatus.BLOCKED
-    elif blocking_decision:
+    elif blocking_decision or scope_review_required:
         handoff_status = HandoffStatus.PAUSE
     elif analysis.decision in {
         AnalysisDecision.PROCEED,

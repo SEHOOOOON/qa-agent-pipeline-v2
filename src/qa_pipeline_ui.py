@@ -253,7 +253,7 @@ def _verify_candidate_sources(run_dir: Path, tc_id: str) -> None:
         _verify_sha256(candidate_dir / filename, manifest.get(key), filename)
     plan = _read_json_model(candidate_dir / "agent3_automation_plan.json", Agent3AutomationPlan)
     observation = _read_json_model(candidate_dir / "agent3_ui_observation.json", UiObservation)
-    current_cp3 = evaluate_checkpoint3_plan(test_case, plan, observation, require_precondition_proof=True)
+    current_cp3 = evaluate_checkpoint3_plan(test_case, plan, observation, require_precondition_proof=True, require_restore_plan_links=True, require_restore_comparison_basis=True)
     if current_cp3.status != CheckStatus.PASS:
         proof_failed = any(check.rule_id == "CP3-006A" and check.status == CheckStatus.FAIL for check in current_cp3.checks)
         if proof_failed:
