@@ -3,6 +3,17 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("ending", [b"\n", b"\r\n"])
+def test_git_preserves_approved_asset_bytes(ending):
+    import subprocess
+    payload = ending.join([b"# approved evidence", b"assert True", b""])
+    raw = subprocess.run(["git", "hash-object", "--no-filters", "--stdin"],
+        input=payload, cwd=REPO_ROOT, check=True, capture_output=True).stdout
+    filtered = subprocess.run(["git", "hash-object", "--path=approved_assets/automation/test_integrity.py", "--stdin"],
+        input=payload, cwd=REPO_ROOT, check=True, capture_output=True).stdout
+    assert filtered == raw
+
+
 @pytest.mark.parametrize("operation", ["revalidate", "decision"])
 @pytest.mark.parametrize("failed", [False, True])
 def test_browser_ignores_previous_run_post_response(operation, failed):
@@ -1003,6 +1014,31 @@ def test_pipeline_ui_revalidation_rejects_files_changed_during_trial(tmp_path, m
     with pytest.raises(ValueError, match="재검증 중"):
         pipeline_ui.revalidate_candidate_asset(runs_root, target_html, run_id, tc_id)
     assert latest.read_bytes() == before
+
+
+@pytest.mark.parametrize("url,method,allowed", [
+    ("http://127.0.0.1:8765/", "GET", True),
+    ("http://127.0.0.1:8765/api/runs", "GET", True),
+    ("http://127.0.0.1:8765/api/approve", "POST", False),
+    ("http://127.0.0.1:8765/api/run", "POST", False),
+    ("http://127.0.0.1:8766/", "GET", False),
+    ("https://api.openai.com/v1/responses", "POST", False),
+    ("https://api.notion.com/v1/pages", "POST", False),
+    ("http://127.0.0.1:8765.example.com/", "GET", False),
+])
+def test_recording_preview_blocks_writes_and_external_requests(monkeypatch, url, method, allowed):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
+    import record_demo
+    assert record_demo.permitted_request(url, method, "http://127.0.0.1:8765") is allowed
+
+
+def test_recording_preview_timeline_does_not_claim_registration(monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
+    import record_demo
+    assert sum(scene.seconds for scene in record_demo.SCENES) == 90
+    assert "미등록" in record_demo.SCENES[5].title
+    assert "승인을 수행하지 않습니다" in record_demo.SCENES[5].caption
+    assert "변경하지 않았습니다" in record_demo.SCENES[-1].caption
 
 
 def test_pipeline_ui_rejects_unscoped_run_and_request_paths(tmp_path: Path) -> None:

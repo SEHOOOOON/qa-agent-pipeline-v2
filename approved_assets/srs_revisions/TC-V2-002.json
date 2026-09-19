@@ -1,0 +1,30 @@
+{
+  "contract_version": "1.0",
+  "official_tc_id": "TC-V2-002",
+  "source_run_id": "RUN-20260918-110541-4102E0",
+  "source_tc_id": "TC-CAND-001",
+  "reviewer": "사용자 승인 · Codex 대행",
+  "approval_note": "사용자가 대화에서 원본 MED의 SRS 및 공식 TC 등록을 명시적으로 승인했습니다. 현재 승인 검사와 실행 증거를 확인한 뒤 대행 등록합니다. 자동 원복하지 않습니다.",
+  "proposals": [
+    {
+      "proposal_id": "SRS-REV-001",
+      "requirement_id": "REQ-FAN-001",
+      "source_condition_ids": [
+        "COND-002",
+        "COND-003",
+        "COND-004",
+        "COND-005"
+      ],
+      "current_acceptance_criteria": "적용 후 내부 fanSpeed는 선택한 코드와 같고, HIGH는 장비 카드에 사용자용 한글 라벨 강풍으로 표시됩니다.",
+      "proposed_acceptance_criteria": "적용 후 내부 fanSpeed는 선택한 코드와 같고, MED는 장비 카드에 사용자용 한글 라벨 중풍으로, HIGH는 강풍으로 표시됩니다.",
+      "reason": "MED 풍량 적용 후 장비 카드의 사용자용 한글 라벨을 중풍으로 명시하고 내부 fanSpeed 코드 MED를 유지하며, 기존 HIGH의 강풍 표시와 내부 HIGH 상태 유지 의미를 보존하기 위한 개정 제안입니다."
+    }
+  ],
+  "before_sha256": "5d315f19668181895c0a6d2dc58883fd82f81058784665dc8e8a23819aafb506",
+  "after_sha256": "fe23fb44d165408df85ca866b656acf4bb289add3ce68ba140b8ea12e4b2145d",
+  "changed_requirement_ids": [
+    "REQ-FAN-001"
+  ],
+  "already_applied_requirement_ids": [],
+  "approved_at": "2026-09-19T04:27:55.955748+00:00"
+}

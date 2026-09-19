@@ -1,7 +1,7 @@
 # 자동 테스트 카탈로그
 
 최종 확인: 2026-09-19
-실행 기준: `python -m pytest --collect-only -q` → **476건**
+실행 기준: `python -m pytest --collect-only -q` → **487건**
 실제 정의 파일: `tests/test_srs_agent1.py`, `tests/test_agent2.py`, `tests/test_integrity_cli.py`, `tests/test_agent3.py`, `tests/test_orchestration_execution.py`, `tests/test_agent4_reporting.py`, `tests/test_pipeline_ui.py`
 
 이 문서는 현재 수집되는 자동 테스트를 사람이 확인하기 쉽게 정리한 목록입니다. 실행의 기준은 항상 테스트 코드와 Pytest 수집 결과이며, 테스트를 추가·삭제할 때는 이 문서도 같은 변경에서 갱신합니다.
@@ -10,9 +10,18 @@
 
 | 구성 | 수량 | 설명 |
 |---|---:|---|
-| 일반 테스트 함수 | 249 | 함수 하나가 Pytest 실행 1건 |
-| 파라미터 테스트 함수 | 43 | 서로 다른 입력·실패 조합으로 실행 227건 |
-| 합계 | **476** | 현재 Pytest 수집 수 |
+| 일반 테스트 함수 | 250 | 함수 하나가 Pytest 실행 1건 |
+| 파라미터 테스트 함수 | 45 | 서로 다른 입력·실패 조합으로 실행 237건 |
+| 합계 | **487** | 현재 Pytest 수집 수 |
+
+### 공식 등록 후 배포 무결성: 추가 2개 실행 조합
+
+- `test_git_preserves_approved_asset_bytes`: LF·CRLF 승인 자산 모두 Git 저장 필터가 바이트를 바꾸지 않는지 확인합니다. CLI 인계 검사는 고정된 공식 TC 한 건이 아니라 실행 직전 실제 등록 목록 전체가 스냅샷에 보존되는지 대조합니다.
+
+### 승인 전 영상 미리보기: 추가 9개 실행 조합
+
+- `test_recording_preview_blocks_writes_and_external_requests`: 지정 로컬 origin의 GET만 허용하고 다른 포트·유사 도메인·실행/승인 POST·OpenAI/Notion 전송을 차단하는 8조합.
+- `test_recording_preview_timeline_does_not_claim_registration`: 90초 구성과 미등록·승인 미수행 문구 확인.
 
 ### 최종 감사 반례: 추가 13개 실행 조합
 
@@ -127,7 +136,7 @@ HTTP 대역으로 본문 생성·전송 계약을 검사합니다. 실제 Notion
 | `test_scope_gate_rewrite_and_pause_before_agent2` | 재작성 해결·미해결·범위 보류 3조합, Manifest와 최초/재작성 입력, Agent 2 진입 차단 |
 | `test_scope_contract_loader_preserves_legacy_and_rejects_missing_new_contract` | 과거 Run 로딩, 새 계약 누락 거절 |
 
-기존 연관 UPDATE_REQUIRED 테스트도 근거 없는 확장을 차단하도록 바꿨습니다. 위 시험은 규칙·모델 대역 검증이며 새 실제 모델 실행 성공을 의미하지 않습니다. 현재 파일별 수집은 Agent 1 53·Agent 2 95·Agent 3 195·Agent 4 35·인계/CLI 13·실행 34·UI 51건입니다.
+기존 연관 UPDATE_REQUIRED 테스트도 근거 없는 확장을 차단하도록 바꿨습니다. 위 시험은 규칙·모델 대역 검증이며 새 실제 모델 실행 성공을 의미하지 않습니다. 현재 파일별 수집은 Agent 1 53·Agent 2 95·Agent 3 195·Agent 4 35·인계/CLI 13·실행 34·UI 60건입니다.
 
 ### 승인 TC 재사용 입력: 추가 3건
 

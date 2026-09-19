@@ -167,6 +167,8 @@ def test_paused_manifest_is_blocked_before_agent2(tmp_path: Path) -> None:
 def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
     tmp_path: Path, monkeypatch, detail_outcome
 ) -> None:
+    current_catalog, _ = pipeline.load_approved_regression_catalog(REPO_ROOT / "approved_assets")
+    expected_catalog_ids = [item.tc_id for item in current_catalog]
     request_file = tmp_path / "request.json"
     _write_json(request_file, cp1_request().model_dump(mode="json"))
 
@@ -317,9 +319,7 @@ def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
     catalog_snapshot = json.loads(
         (run_dir / "approved_regression_catalog.json").read_text(encoding="utf-8")
     )
-    assert [item["tc_id"] for item in catalog_snapshot["approved_assets"]] == [
-        "TC-V2-001"
-    ]
+    assert [item["tc_id"] for item in catalog_snapshot["approved_assets"]] == expected_catalog_ids
     assert manifest["approved_regression_catalog_sha256"] == _sha256_file(
         run_dir / "approved_regression_catalog.json"
     )
