@@ -1,7 +1,7 @@
 # 자동 테스트 카탈로그
 
-최종 확인: 2026-09-16
-실행 기준: `python -m pytest --collect-only -q` → **449건**
+최종 확인: 2026-09-19
+실행 기준: `python -m pytest --collect-only -q` → **476건**
 실제 정의 파일: `tests/test_srs_agent1.py`, `tests/test_agent2.py`, `tests/test_integrity_cli.py`, `tests/test_agent3.py`, `tests/test_orchestration_execution.py`, `tests/test_agent4_reporting.py`, `tests/test_pipeline_ui.py`
 
 이 문서는 현재 수집되는 자동 테스트를 사람이 확인하기 쉽게 정리한 목록입니다. 실행의 기준은 항상 테스트 코드와 Pytest 수집 결과이며, 테스트를 추가·삭제할 때는 이 문서도 같은 변경에서 갱신합니다.
@@ -10,9 +10,28 @@
 
 | 구성 | 수량 | 설명 |
 |---|---:|---|
-| 일반 테스트 함수 | 248 | 함수 하나가 Pytest 실행 1건 |
-| 파라미터 테스트 함수 | 37 | 서로 다른 입력·실패 조합으로 실행 201건 |
-| 합계 | **449** | 현재 Pytest 수집 수 |
+| 일반 테스트 함수 | 249 | 함수 하나가 Pytest 실행 1건 |
+| 파라미터 테스트 함수 | 43 | 서로 다른 입력·실패 조합으로 실행 227건 |
+| 합계 | **476** | 현재 Pytest 수집 수 |
+
+### 최종 감사 반례: 추가 13개 실행 조합
+
+- `test_agent3_complete_text_value_boundaries`: 한국어 조사·영문 코드·정상 한 글자 값·부분 단어 차단 8조합.
+- `test_agent3_temperature_plan_preserves_approved_step_order`: 정상 순서·역순·중간 초기화 누락 3조합.
+- `test_pipeline_ui_revalidation_rejects_files_changed_during_trial`: 제품 HTML·후보 코드의 시험 중 변경 2조합, 이전 유효 기록 보존.
+- 기존 동적 풍량 문구 테스트에 현재 CP3의 부분 단어 차단을 추가하고, 후보 인계 테스트에 4.4 계획 충실성 계약 누락·미지원 값 차단을 추가했습니다.
+
+### 검토 사유 화면 표시: 추가 4개 실행 조합
+
+- `test_ui_review_item_preserves_rationale_without_raw_json`: 구조화 Finding의 TC ID·판단 근거, 과거 문자열, 미분류 코드, 근거 없는 항목을 구분합니다. 내부 증거 경로를 요약에 나열하지 않되 판단 근거와 결함 미확정 표현을 보존합니다. 원본 보고서·분류·승인 조건은 변경하지 않습니다.
+
+### 사전조건별 모델 입력 안내: 추가 10개 실행 조합
+
+- `test_agent3_context_bindings_are_source_specific_and_do_not_mutate_tc`: 한국어/영어 장비 상태, 풍량·온도 초기값, 불리언, 로그인 조건 7조합에서 원문별 허용 항목과 입력 불변 확인.
+- `test_agent3_context_bindings_preserve_false_observations_without_inventing_evidence`: 관찰 false는 보존하고 미확보 상태 근거는 추가하지 않는 2조합.
+- `test_agent3_sends_context_bindings_and_action_only_repair_guidance_without_weakening_cp`: 최초·재작성 실제 요청에 안내 포함, 정상 항목 보존 지침, 기존 잘못된 계획의 CP3 차단 유지 1건.
+
+모델 안내 변경이며 실행 기준·컴파일러·기대값 검사를 완화하지 않습니다. 실제 모델 실행과 로컬 Fake Client 검증은 구분합니다.
 
 ### 대상별 복원 비교 기준: 추가 40개 실행 조합
 
@@ -108,7 +127,7 @@ HTTP 대역으로 본문 생성·전송 계약을 검사합니다. 실제 Notion
 | `test_scope_gate_rewrite_and_pause_before_agent2` | 재작성 해결·미해결·범위 보류 3조합, Manifest와 최초/재작성 입력, Agent 2 진입 차단 |
 | `test_scope_contract_loader_preserves_legacy_and_rejects_missing_new_contract` | 과거 Run 로딩, 새 계약 누락 거절 |
 
-기존 연관 UPDATE_REQUIRED 테스트도 근거 없는 확장을 차단하도록 바꿨습니다. 위 시험은 규칙·모델 대역 검증이며 새 실제 모델 실행 성공을 의미하지 않습니다. 현재 파일별 수집은 Agent 1 53·Agent 2 95·Agent 3 174·Agent 4 35·인계/CLI 13·실행 34·UI 45건입니다.
+기존 연관 UPDATE_REQUIRED 테스트도 근거 없는 확장을 차단하도록 바꿨습니다. 위 시험은 규칙·모델 대역 검증이며 새 실제 모델 실행 성공을 의미하지 않습니다. 현재 파일별 수집은 Agent 1 53·Agent 2 95·Agent 3 195·Agent 4 35·인계/CLI 13·실행 34·UI 51건입니다.
 
 ### 승인 TC 재사용 입력: 추가 3건
 

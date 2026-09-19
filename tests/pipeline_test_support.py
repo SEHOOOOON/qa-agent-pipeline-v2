@@ -635,6 +635,7 @@ def evaluate_checkpoint3_plan(test_case, plan, observation, *, require_precondit
     for historical unit fixtures that intentionally contain no proof contract.
     """
     return pipeline.evaluate_checkpoint3_plan(test_case, plan, observation,
+        require_plan_fidelity=False,
         require_precondition_proof=require_precondition_proof)
 
 

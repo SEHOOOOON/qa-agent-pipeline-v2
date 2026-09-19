@@ -965,10 +965,11 @@ def run_agent3(args: argparse.Namespace) -> int:
             _write_json(artifact_dir / "agent3_trial.json", trial.model_dump(mode="json"))
 
         manifest_payload = {
-            "contract_version": "4.3",
+            "contract_version": "4.4",
+            "plan_fidelity_contract": "1.0",
             "precondition_proof_contract": "1.0",
             "restore_confirmation_contract": "1.2",
-            "prompt_version": "agent3-3.26",
+            "prompt_version": "agent3-3.28",
             "run_id": args.run_id,
             "source_stage": "AGENT_2_CP2",
             "stage": "AGENT_3_CP3_TRIAL",
@@ -1151,12 +1152,18 @@ def _candidate_execution_record(
     ) or (
         agent3_manifest.get("contract_version") == "4.2" and restore_contract != "1.1"
     ) or (
-        agent3_manifest.get("contract_version") == "4.3" and restore_contract != "1.2"
+        agent3_manifest.get("contract_version") in {"4.3", "4.4"} and restore_contract != "1.2"
     ) or (plan.restore_confirmations and restore_contract not in {"1.1", "1.2"}
     ) or (any(item.comparisons for item in plan.restore_confirmations) and restore_contract != "1.2"
     ):
         raise ValueError("지원하지 않거나 누락된 복원 확인 계약입니다.")
+    fidelity_contract = agent3_manifest.get("plan_fidelity_contract")
+    if fidelity_contract not in {None, "1.0"} or (
+        agent3_manifest.get("contract_version") == "4.4" and fidelity_contract != "1.0"
+    ):
+        raise ValueError("지원하지 않거나 누락된 계획 충실성 계약입니다.")
     current_checkpoint3 = evaluate_checkpoint3_plan(test_case, plan, observation,
+        require_plan_fidelity=fidelity_contract == "1.0",
         require_precondition_proof=agent3_manifest.get("precondition_proof_contract") == "1.0",
         require_restore_confirmation_detail=restore_contract in {"1.0", "1.1", "1.2"},
         require_restore_plan_links=restore_contract in {"1.1", "1.2"},

@@ -408,12 +408,16 @@ def revalidate_candidate_asset(
     attempt_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
     revalidation_root = run_dir / "asset_revalidation" / tc_id
     evidence_dir = revalidation_root / attempt_id / "evidence"
+    target_sha256 = _sha256_file(target_html)
     trial = run_candidate_trial(
         candidate_file,
         target_html,
         evidence_dir,
         timeout_seconds=timeout_seconds,
     )
+    if (not target_html.is_file() or _sha256_file(target_html) != target_sha256
+            or not candidate_file.is_file() or _sha256_file(candidate_file) != candidate_sha256):
+        raise ValueError("재검증 중 제품 화면 또는 자동화 코드가 변경되었습니다. 다시 시험해야 합니다.")
     evidence_files = [
         (evidence_dir / name).relative_to(run_dir).as_posix()
         for name in trial.evidence_sha256
@@ -431,7 +435,7 @@ def revalidate_candidate_asset(
         "exit_code": trial.exit_code,
         "duration_ms": trial.duration_ms,
         "candidate_sha256": candidate_sha256,
-        "target_sha256": _sha256_file(target_html),
+        "target_sha256": target_sha256,
         "evidence_complete": trial.evidence_complete,
         "evidence_files": evidence_files,
         "evidence_sha256": evidence_sha256,
@@ -1012,6 +1016,15 @@ def _checkpoint_stage(
     }
 
 
+def _review_item_text(item: Any) -> str:
+    """Show the recorded finding, not its internal JSON/evidence-path dump."""
+    if not isinstance(item, dict):
+        return str(item)
+    identity = item.get("test_id") or item.get("finding_id")
+    rationale = item.get("rationale") or item.get("category") or "검토 근거가 기록되지 않았습니다."
+    return f"{identity} · {rationale}" if identity else str(rationale)
+
+
 def summarize_run(
     runs_root: Path,
     run_id: str,
@@ -1140,7 +1153,7 @@ def summarize_run(
             f"전체 결과: {report.get('total_results', analysis4.get('total_results', 0))}건",
             f"제품 결과: {report.get('product_result_count', analysis4.get('product_result_count', 0))}건",
             f"환경 점검: {report.get('environment_result_count', analysis4.get('environment_result_count', 0))}건",
-            *[f"사람 검토: {item}" for item in report.get("검토_항목") or []],
+            *[f"사람 검토: {_review_item_text(item)}" for item in report.get("검토_항목") or []],
             *[f"최종 확인: {item}" for item in report.get("최종_확인_사항") or []],
             (
                 f"기준 SRS 개정 제안: {len(report.get('SRS_개정_제안') or [])}건"

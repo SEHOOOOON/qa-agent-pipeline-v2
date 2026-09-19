@@ -51,7 +51,7 @@ def test_agent3_precondition_feedback_repairs_only_unstated_context(tmp_path, mo
         target_html=str(target), model="fixture", timeout=60)) == 0
     assert calls == ["model", "model", "trial"]
     assert (case.model_dump_json(), invalid.model_dump_json()) == preserved
-    assert pipeline._read_json_payload(run / "agent3_manifest.json")["prompt_version"] == "agent3-3.26"
+    assert pipeline._read_json_payload(run / "agent3_manifest.json")["prompt_version"] == "agent3-3.28"
     assert pipeline._read_json_payload(run / "agent3_automation_plan_attempt_1.json") == invalid.model_dump(mode="json")
     assert pipeline._read_json_payload(run / "agent3_automation_plan_attempt_2.json") == valid.model_dump(mode="json")
 
@@ -81,7 +81,8 @@ def test_agent3_requires_proof_on_new_runs_and_records_it(tmp_path, monkeypatch,
     assert pipeline.run_agent3(args) == (0 if include_proof else 2)
     manifest = pipeline._read_json_payload(run / "agent3_manifest.json")
     assert manifest["precondition_proof_contract"] == "1.0"
-    assert manifest["contract_version"] == "4.3"
+    assert manifest["contract_version"] == "4.4"
+    assert manifest["plan_fidelity_contract"] == "1.0"
     assert manifest["restore_confirmation_contract"] == "1.2"
     assert calls == (["model", "trial"] if include_proof else ["model", "model"])
     assert pipeline._read_json_payload(run / "agent3_automation_plan_attempt_1.json") == plan.model_dump(mode="json")
@@ -751,6 +752,11 @@ def test_candidate_trial_is_reused_only_after_hash_and_evidence_checks(
 
     manifest_file = run_dir / "agent3_manifest.json"
     original = pipeline._read_json_payload(manifest_file)
+    for unsupported in (None, "unknown"):
+        _write_json(manifest_file, {**original, "contract_version": "4.4",
+            "restore_confirmation_contract": "1.2", "plan_fidelity_contract": unsupported})
+        with pytest.raises(ValueError, match="계획 충실성 계약"):
+            pipeline._candidate_execution_record(run_dir, run_id, target)
     for unsupported in (None, "unknown"):
         _write_json(manifest_file, {**original, "contract_version": "4.1",
                                    "restore_confirmation_contract": unsupported})

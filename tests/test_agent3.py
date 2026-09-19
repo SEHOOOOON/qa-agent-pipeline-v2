@@ -3,6 +3,96 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("statement,value,valid", [
+    ("카드에 중풍이 표시된다.", "중풍", True),
+    ("카드에 중풍이 표시된다.", "풍", False),
+    ("카드에 중풍이 표시된다.", "중", False),
+    ("상태는 OFF이다.", "OFF", True),
+    ("상태는 OFF이다.", "OF", False),
+    ("등급은 A로 표시된다.", "A", True),
+    ("등급은 가로 표시된다.", "가", True),
+    ("메시지는 '처리 완료'로 표시된다.", "처리 완료", True),
+])
+def test_agent3_complete_text_value_boundaries(statement, value, valid):
+    assert pipeline._complete_text_value(statement, value) is valid
+
+
+@pytest.mark.parametrize("mutation", ["none", "reverse", "omit_reset"])
+def test_agent3_temperature_plan_preserves_approved_step_order(mutation):
+    case, plan = grouped_agent3_case_and_plan()
+    observation = agent3_observation()
+    if mutation == "reverse":
+        setup = [item for item in plan.actions if item.phase == AutomationPhase.PRECONDITION]
+        by_id = {item.action_id: item for item in plan.actions}
+        plan.actions = setup + [by_id[f"ACT-{n:03d}"] for n in (9, 10, 7, 8, 5, 6)]
+    elif mutation == "omit_reset":
+        plan.actions = [item for item in plan.actions if item.action_id not in {"ACT-007", "ACT-008"}]
+    result = pipeline.evaluate_checkpoint3_plan(case, plan, observation,
+        require_precondition_proof=False)
+    assert (result.status == CheckStatus.PASS) is (mutation == "none")
+
+
+@pytest.mark.parametrize("source,allowed", [
+    ("중앙 관제 패널에서 오류와 잠금이 없는 단일 장비를 대상으로 합니다.", ["error_free", "unlocked"]),
+    ("대상 장비가 온라인이고 오류가 없으며 잠금 해제 상태이다.", ["target_device_visible", "error_free", "unlocked", "online"]),
+    ("첫 실행 기본 상태인 LOW 풍량을 확인한다.", []),
+    ("설정 온도 18°C를 확인한다.", []),
+    ("새 제어 스위치의 enabled 값은 false이다.", []),
+    ("관리자 로그인 후 대상 장비가 온라인이다.", []),
+    ("device is online with no error and unlocked", ["target_device_visible", "error_free", "unlocked", "online"]),
+])
+def test_agent3_context_bindings_are_source_specific_and_do_not_mutate_tc(source, allowed):
+    case = agent3_test_case().model_copy(update={"preconditions": [source]})
+    observation = agent3_observation()
+    observation.verified_execution_context = observation.verified_execution_context.model_copy(update={
+        "device_state_available": True, "target_device_visible": True,
+        "error_free": True, "unlocked": True, "online": True,
+    })
+    before = case.model_dump_json(), observation.model_dump_json()
+    payload = build_agent3_model_input(case, observation, {})
+    assert payload["precondition_context_bindings"] == [{
+        "source_text": source, "allowed_baseline_context_selectors": allowed}]
+    assert (case.model_dump_json(), observation.model_dump_json()) == before
+
+
+@pytest.mark.parametrize("state_available", [True, False])
+def test_agent3_context_bindings_preserve_false_observations_without_inventing_evidence(state_available):
+    case = agent3_test_case().model_copy(update={"preconditions": ["오류와 잠금이 없는 단일 장비를 대상으로 한다."]})
+    observation = agent3_observation()
+    observation.verified_execution_context = observation.verified_execution_context.model_copy(update={
+        "device_state_available": state_available, "error_free": False, "unlocked": None})
+    payload = build_agent3_model_input(case, observation, {})
+    assert payload["precondition_context_bindings"][0]["allowed_baseline_context_selectors"] == (
+        ["error_free"] if state_available else [])
+    assert payload["ui_observation"]["verified_execution_context"]["error_free"] is False
+
+
+def test_agent3_sends_context_bindings_and_action_only_repair_guidance_without_weakening_cp():
+    source = "중앙 관제 패널에서 오류와 잠금이 없는 단일 장비를 대상으로 합니다."
+    case = agent3_test_case().model_copy(update={"preconditions": [source]})
+    observation = agent3_observation()
+    observation.verified_execution_context = observation.verified_execution_context.model_copy(update={
+        "device_state_available": True, "target_device_visible": True, "error_free": True, "unlocked": True})
+    expected = json.dumps(build_agent3_model_input(case, observation, {})["precondition_context_bindings"], ensure_ascii=False, indent=2)
+    responses = Agent3FakeResponses()
+    agent = OpenAIAgent3(model="test-model", client=SimpleNamespace(responses=responses))
+    agent.plan(case, observation, {})
+    assert expected in responses.kwargs["input"][1]["content"]
+    plan = agent3_plan()
+    plan.precondition_checks = [pipeline.PreconditionCheck(source_text=source, read_kind="BASELINE_CONTEXT", selector=name, expected_value=True)
+        for name in ["error_free", "unlocked", "target_device_visible"]]
+    errors_before = pipeline._precondition_proof_errors(case, plan, observation)
+    assert any("target_device_visible" in error for error in errors_before)
+    before = plan.model_dump_json()
+    agent.plan(case, observation, {}, previous_plan=plan, checkpoint_feedback=["ACT-001: observed element does not support CLICK"])
+    repair = responses.kwargs["input"][1]["content"]
+    assert expected in repair
+    assert "When feedback concerns only Action mapping" in repair
+    assert "precondition_checks, assertions and restore_confirmations unchanged" in repair
+    assert plan.model_dump_json() == before
+    assert pipeline._precondition_proof_errors(case, plan, observation) == errors_before
+
+
 @pytest.mark.parametrize("connector", ["확인하고,", "확인하며,", "확인한다."])
 @pytest.mark.parametrize("failure", [None, "ui", "internal"])
 def test_explicit_restore_basis_checks_display_and_internal_separately(tmp_path, monkeypatch, capsys, connector, failure):
@@ -404,7 +494,8 @@ def test_historical_restore_confirmation_uses_previous_checkpoint_rules():
                          selector=".btn-apply-cmd", source_text=operation),
     ])
     previous = pipeline.evaluate_checkpoint3_plan(case, plan, agent3_observation(),
-        require_precondition_proof=False, require_restore_confirmation_detail=False)
+        require_precondition_proof=False, require_restore_confirmation_detail=False,
+        require_plan_fidelity=False)
     current = pipeline.evaluate_checkpoint3_plan(case, plan, agent3_observation(), require_precondition_proof=False)
     assert previous.status == CheckStatus.PASS
     assert current.status == CheckStatus.FAIL
@@ -664,7 +755,7 @@ def test_agent3_uses_structured_plan_api() -> None:
     assert result.plan.tc_id == "TC-CAND-003"
     assert responses.kwargs["text_format"] is Agent3AutomationPlan
     assert responses.kwargs["store"] is False
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent3-3-26"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent3-3-28"
     instructions = responses.kwargs["input"][0]["content"]
     assert "Check only conditions stated in the approved TC preconditions" in instructions
     assert "not every available context field" in instructions
@@ -1277,6 +1368,16 @@ def test_agent3_allows_dynamic_text_on_the_approved_target_device_card() -> None
     assert next(
         item for item in checkpoint.checks if item.rule_id == "CP3-004"
     ).status == CheckStatus.PASS
+
+    strict = pipeline.evaluate_checkpoint3_plan(test_case, plan, observation,
+        require_precondition_proof=False)
+    assert strict.status == CheckStatus.PASS
+    shortened = plan.model_copy(deep=True)
+    shortened.assertions[0].expected_text = "풍"
+    rejected = pipeline.evaluate_checkpoint3_plan(test_case, shortened, observation,
+        require_precondition_proof=False)
+    assert rejected.status == CheckStatus.FAIL
+    assert any("only part" in item.message for item in rejected.checks)
 
     restore_step = "시험 뒤 대상 장비의 풍량을 LOW로 복원한다."
     restorable_case = test_case.model_copy(

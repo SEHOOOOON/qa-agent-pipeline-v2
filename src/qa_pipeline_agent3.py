@@ -37,11 +37,13 @@ from qa_pipeline_agent2 import *
 AGENT3_SYSTEM_INSTRUCTIONS = """
 Check only conditions stated in the approved TC preconditions; observed facts are available evidence, not additional requirements. Do not add online, visibility, login or selected-state checks merely because the inventory mentions them. A single-device target scope does not itself request a selectedUnitId assertion; an explicitly required selected state still needs its own observed proof.
 For BASELINE_CONTEXT, error_free applies to a stated no-error condition, unlocked to a stated unlocked condition, online only to explicit 온라인/online, and target_device_visible to a matching target-device/visibility phrase. Include all facts stated in a compound line, not every available context field. Unknown role/login conditions require their own observed read-only evidence, never the baseline context. Never rewrite the TC source to justify an extra check.
+The per-source precondition_context_bindings list exposes the current checker's allowed BASELINE_CONTEXT selectors for each exact TC line. Use only selectors listed for that source; do not borrow selectors from another source or from the overall inventory. These hints cover baseline context only, not all precondition values: explicit initial values still need their matching observed readers. An empty list does not mean the condition is optional or unsupported; inspect the other allowed readers before deciding support is missing.
 Every READY plan must include precondition_checks covering EVERY exact TC preconditions line, including already-satisfied conditions and setup actions. Use multiple checks for multiple explicit values in a line. They execute after all PRECONDITION actions and BEFORE the first TEST action; setup actions alone are not proof. Each check has source_text, read_kind, selector, expected_value.
 Read kinds: UI_TEXT (contains grounded state/value, not a generic label), UI_VALUE (exact string), UI_CHECKED/UI_ENABLED (boolean), INTERNAL_VALUE (exact observed, TC-grounded scalar path), BASELINE_CONTEXT (selector target_device_visible/error_free/unlocked/online, expected_value=true, only for the matching observed baseline fact).
 If a stated precondition cannot be observed with these readers, return AUTOMATION_SUPPORT_EXTENSION_REQUIRED with that precise reason. Never delete, invent, or silently weaken preconditions. Product assertions cannot run in PRECONDITION phase.
 For state expectations, UI_TEXT_CONTAINS must include the expected state, never only a static control label. CONTROLS_DISABLED requires an explicitly disabled Expected Result. Generic fixed RESTORE checks compare against the prepared TC state immediately before TEST, while RESTORE_OBSERVED_HVAC restores the original pre-setup HVAC state.
 Implement every approved TEST and RESTORE operation in order. Trailing read-only verification steps are implemented by their corresponding assertions, not invented clicks.
+For UI_TEXT_CONTAINS, copy a complete product value or meaningful message phrase from the Expected Result, never a substring inside a label. This also applies to temperature/mode plans: preserve every step and intermediate reset in the original order.
 Keep original restore-operation lines unchanged. A trailing restore confirmation may name an existing Expected Result's exact observation_target and compare it with the pre-test state, or with an initial value already proved for that same target. The compiler performs these existing baseline comparisons; do not invent RESTORE clicks or new product Expected Results for confirmation-only lines. A new observation target or unsupported restore comparison requires support extension, not silent omission.
 For each confirmation-only restore line, add one restore_confirmations entry: copy the complete original line as source_text and list every existing ER result_id whose observation_target is confirmed by that line. Do not change the TC wording. These references execute the compiler's existing same-target restoration comparisons, not the product test's expected value. No new selector, expected value, notification, or Action is permitted for these entries. Keep each restore operation as an Action; a confirmation is not a substitute for a restore operation.
 For each referenced ER, comparisons must identify its exact source_excerpt (a contiguous clause of that original line containing only that observation_target) and basis. OBSERVED_BASELINE compares that same reader with its runtime pre-test snapshot and requires that clause to say pre-test/original state. PROVED_INITIAL compares with the initial value already proved by a matching precondition reader (or the supported initial-temperature contract); quote that value in the clause. Do not transfer an internal code to a UI label or borrow another clause's baseline wording. Cover the whole confirmation with these clauses, leaving only punctuation/conjunctions. If the TC confuses UI labels with internal codes, report that precise drafting problem; do not invent a label, edit the TC, or add a precondition.
@@ -201,6 +203,20 @@ def build_agent3_model_input(
         "test_case": test_case.model_dump(mode="json"),
         "related_srs_requirements": related,
         "ui_observation": observation_payload,
+        "precondition_context_bindings": [
+            {
+                "source_text": source,
+                "allowed_baseline_context_selectors": [
+                    name
+                    for name, (pattern, _) in _BASELINE_PRECONDITION_READS.items()
+                    if not re.search(r"로그인|관리자|인증|login|admin|authenticat", source, re.I)
+                    and re.search(pattern, source, re.I)
+                    and isinstance(getattr(observation.verified_execution_context, name, None), bool)
+                    and (name == "target_device_visible" or observation.verified_execution_context.device_state_available)
+                ],
+            }
+            for source in test_case.preconditions
+        ],
         "excluded": [
             "API keys and authentication values",
             "local absolute paths and HTML source",
@@ -236,7 +252,9 @@ class OpenAIAgent3:
             "[Related SRS Requirements]\n"
             f"{json.dumps(payload['related_srs_requirements'], ensure_ascii=False, indent=2)}\n\n"
             "[Observed real UI inventory]\n"
-            f"{json.dumps(payload['ui_observation'], ensure_ascii=False, indent=2)}"
+            f"{json.dumps(payload['ui_observation'], ensure_ascii=False, indent=2)}\n\n"
+            "[Per-source BASELINE_CONTEXT bindings; other readers may still be required]\n"
+            f"{json.dumps(payload['precondition_context_bindings'], ensure_ascii=False, indent=2)}"
         )
         if previous_plan is not None:
             feedback = "\n".join(f"- {item}" for item in (checkpoint_feedback or []))
@@ -249,13 +267,17 @@ class OpenAIAgent3:
                 "For precondition feedback, repair the identified check and preserve valid checks. "
                 "Remove an extra check only when its condition is absent from the TC; never delete a stated condition. "
                 "A rejected extra check is not evidence that a different UI interface is missing."
+                " When feedback concerns only Action mapping, copy the previous precondition_checks, "
+                "assertions and restore_confirmations unchanged; do not add a new check while fixing an Action. "
+                "Use an observed compatibility Action when the inventory does not support the generic Action. "
+                "Re-check every BASELINE_CONTEXT selector against the per-source bindings before returning."
             )
         try:
             response = self.client.responses.parse(
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent3-3-26",
+                prompt_cache_key="qa-v2-agent3-3-28",
                 input=[
                     {"role": "system", "content": AGENT3_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
@@ -1182,6 +1204,16 @@ def _restore_confirmation_coverage(test_case, plan, *, require_plan_links=False,
     return covered, errors
 
 
+def _complete_text_value(statement: str, value: str) -> bool:
+    """Accept a whole literal (with Korean particles), not part of a label."""
+    literal = r"\s*".join(re.escape(part) for part in value.strip().split())
+    if not literal:
+        return False
+    particle = r"(?:으로|에서|처럼|으로는|로는|입니다|이다|이|가|은|는|을|를|로|도|만|와|과|에)?"
+    return re.search(r"(?<![\w])" + literal + particle + r"(?![\w])",
+                     statement, re.IGNORECASE) is not None
+
+
 def evaluate_checkpoint3_plan(
     test_case: ProductTestCaseCandidate,
     plan: Agent3AutomationPlan,
@@ -1190,6 +1222,7 @@ def evaluate_checkpoint3_plan(
     require_restore_confirmation_detail: bool = True,
     require_restore_plan_links: bool = False,
     require_restore_comparison_basis: bool = False,
+    require_plan_fidelity: bool = True,
 ) -> Checkpoint3Result:
     if test_case.control_path != ControlPath.CENTRAL:
         return Checkpoint3Result(
@@ -1484,6 +1517,8 @@ def evaluate_checkpoint3_plan(
                 )
             elif not re.sub(r"표시|화면|상태|텍스트|확인|display|visible|text|state|\W", "", assertion.expected_text, flags=re.I):
                 fidelity_errors.append(f"{assertion.result_id}: expected text contains no product value or message")
+            elif require_plan_fidelity and not _complete_text_value(result.statement, assertion.expected_text):
+                fidelity_errors.append(f"{assertion.result_id}: expected text is only part of a product value or message")
             elif (
                 result.observation_layer == ObservationLayer.NOTIFICATION
                 and len(_terms(assertion.expected_text)) >= len(_terms(result.statement))
@@ -1674,7 +1709,7 @@ def evaluate_checkpoint3_plan(
         and bool(tc_modes or allowed_numbers)
         and not (tc_modes - set(_MODE_SELECTOR))
     )
-    if not legacy_controller_flow:
+    if require_plan_fidelity or not legacy_controller_flow:
         for phase, lines in ((AutomationPhase.TEST, test_case.steps), (AutomationPhase.RESTORE, test_case.restore_steps)):
             implemented = [_normalize(item.source_text) for item in plan.actions if item.phase == phase]
             last_operation = max((i for i, line in enumerate(lines) if _normalize(line) in implemented), default=-1)
@@ -1704,7 +1739,7 @@ def evaluate_checkpoint3_plan(
             item.phase == AutomationPhase.RESTORE for item in plan.actions
         ):
             sequence_errors.append("generic plan is missing approved restore actions")
-    else:
+    if legacy_controller_flow:
         target_index = max(plan.target_device_id - 1, 0)
         observed_initial_mode = observation.harness_values.get(
             f"window.__vccs.devices[{target_index}].mode"

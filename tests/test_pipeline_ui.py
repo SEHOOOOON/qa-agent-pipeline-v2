@@ -469,6 +469,19 @@ def test_success_fan_speed_request_is_grounded_in_v2_baseline() -> None:
     assert "setPanelFan('HIGH')" in product_html
     assert "device.fanSpeed = pendingState.fanSpeed" in product_html
 
+@pytest.mark.parametrize("item,expected", [
+    ({"test_id": "TC-CAND-001", "category": "PRODUCT_MISMATCH_CANDIDATE",
+      "rationale": "기대 결과와 관찰 결과가 다릅니다. 결함 확정은 아닙니다.",
+      "evidence_files": ["evidence/trial-stdout.txt"]},
+     "TC-CAND-001 · 기대 결과와 관찰 결과가 다릅니다. 결함 확정은 아닙니다."),
+    ("기존 사람 확인 문장", "기존 사람 확인 문장"),
+    ({"finding_id": "FIND-002", "category": "UNCLASSIFIED"}, "FIND-002 · UNCLASSIFIED"),
+    ({}, "검토 근거가 기록되지 않았습니다."),
+])
+def test_ui_review_item_preserves_rationale_without_raw_json(item, expected):
+    assert pipeline_ui._review_item_text(item) == expected
+
+
 def test_pipeline_ui_summarizes_real_run_artifacts(tmp_path: Path) -> None:
     runs_root = tmp_path / "runs"
     run_id = "RUN-20260829-120000-ABCDEF"
@@ -970,6 +983,27 @@ def test_pipeline_ui_revalidates_stale_candidate_without_model_call(
         Path(path).name: digest
         for path, digest in record["evidence_sha256"].items()
     }
+
+@pytest.mark.parametrize("changed", ["target", "candidate"])
+def test_pipeline_ui_revalidation_rejects_files_changed_during_trial(tmp_path, monkeypatch, changed):
+    runs_root, _, target_html, run_id, tc_id, _ = build_approvable_ui_run(tmp_path, monkeypatch)
+    latest = runs_root / run_id / "asset_revalidation" / tc_id / "latest.json"
+    latest.parent.mkdir(parents=True, exist_ok=True)
+    latest.write_text('{"previous":"preserved"}', encoding="utf-8")
+    before = latest.read_bytes()
+
+    def changing_trial(code_file, current_target, evidence_dir, *, timeout_seconds):
+        changed_file = current_target if changed == "target" else code_file
+        changed_file.write_bytes(changed_file.read_bytes() + b"\n# changed during trial\n")
+        return pipeline.Agent3TrialResult(outcome=pipeline.TrialOutcome.PASS,
+            exit_code=0, duration_ms=1, stdout_file="stdout.txt", stderr_file="stderr.txt",
+            evidence_complete=True)
+
+    monkeypatch.setattr(pipeline, "run_candidate_trial", changing_trial)
+    with pytest.raises(ValueError, match="재검증 중"):
+        pipeline_ui.revalidate_candidate_asset(runs_root, target_html, run_id, tc_id)
+    assert latest.read_bytes() == before
+
 
 def test_pipeline_ui_rejects_unscoped_run_and_request_paths(tmp_path: Path) -> None:
     bridge = pipeline_ui.PipelineUiBridge(
