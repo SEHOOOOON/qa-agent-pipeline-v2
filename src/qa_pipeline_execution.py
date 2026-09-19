@@ -1641,6 +1641,13 @@ def run_existing_regression(
 def _final_review_notes_for_validation(run_dir: Path) -> list[str]:
     """검증된 이전 단계의 최종 확인 사항만 수집합니다."""
     notes: list[str] = []
+    analysis_file = run_dir / "agent1_change_analysis.json"
+    if analysis_file.is_file():
+        # Preserve the verified question, not a newly inferred answer or policy.
+        manifest = _read_json_payload(run_dir / "run_manifest.json")
+        _verify_sha256(analysis_file, manifest.get("agent1_analysis_sha256"), "사용자 확인 질문")
+        analysis = _read_json_model(analysis_file, Agent1Analysis)
+        notes.extend(f"사용자 확인 요청: {question}" for question in analysis.user_questions)
     checkpoint1_file = run_dir / "checkpoint1.json"
     if checkpoint1_file.is_file():
         checkpoint1 = _read_json_model(checkpoint1_file, Checkpoint1Result)

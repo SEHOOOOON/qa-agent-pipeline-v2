@@ -3,6 +3,22 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("variant", ["normal", "empty", "tampered"])
+def test_verified_user_questions_become_final_actions(tmp_path, variant):
+    questions = [] if variant == "empty" else ["허용할 온도 하한을 지정해 주세요."] * 2
+    analysis = agent1_analysis().model_copy(update={"user_questions": questions})
+    path = tmp_path / "agent1_change_analysis.json"
+    _write_json(path, analysis.model_dump(mode="json", by_alias=True))
+    _write_json(tmp_path / "run_manifest.json", {"agent1_analysis_sha256": _sha256_file(path)})
+    if variant == "tampered":
+        path.write_text(path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+        with pytest.raises(ValueError):
+            pipeline._final_review_notes_for_validation(tmp_path)
+    else:
+        notes = pipeline._final_review_notes_for_validation(tmp_path)
+        assert notes == ([] if not questions else ["사용자 확인 요청: " + questions[0]])
+
+
 def test_agent3_precondition_feedback_repairs_only_unstated_context(tmp_path, monkeypatch):
     case, valid, observation = precondition_guard_fixture()
     source = "중앙 관제 패널에서 오류와 잠금이 없는 단일 장비를 대상으로 한다."

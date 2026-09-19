@@ -1,7 +1,7 @@
 # 자동 테스트 카탈로그
 
 최종 확인: 2026-09-19
-실행 기준: `python -m pytest --collect-only -q` → **487건**
+실행 기준: `python -m pytest --collect-only -q` → **490건**
 실제 정의 파일: `tests/test_srs_agent1.py`, `tests/test_agent2.py`, `tests/test_integrity_cli.py`, `tests/test_agent3.py`, `tests/test_orchestration_execution.py`, `tests/test_agent4_reporting.py`, `tests/test_pipeline_ui.py`
 
 이 문서는 현재 수집되는 자동 테스트를 사람이 확인하기 쉽게 정리한 목록입니다. 실행의 기준은 항상 테스트 코드와 Pytest 수집 결과이며, 테스트를 추가·삭제할 때는 이 문서도 같은 변경에서 갱신합니다.
@@ -11,8 +11,13 @@
 | 구성 | 수량 | 설명 |
 |---|---:|---|
 | 일반 테스트 함수 | 250 | 함수 하나가 Pytest 실행 1건 |
-| 파라미터 테스트 함수 | 45 | 서로 다른 입력·실패 조합으로 실행 237건 |
-| 합계 | **487** | 현재 Pytest 수집 수 |
+| 파라미터 테스트 함수 | 46 | 서로 다른 입력·실패 조합으로 실행 240건 |
+| 합계 | **490** | 현재 Pytest 수집 수 |
+
+### 사용자 확인 요청의 최종 보고 연결
+
+- `test_verified_user_questions_become_final_actions`: 확인 질문의 원문 전달·중복 제거, 질문 없는 정상 사례, 분석 파일 변조 차단의 3조합.
+- `test_existing_only_procedure_notes_reach_final_human_review`: 기존 절차 확인과 함께 사용자 질문이 최종 JSON 및 사람 검토서까지 전달되는지 확인합니다. 신규 모델 호출이나 외부 게시 검사가 아닙니다.
 
 ### 공식 등록 후 배포 무결성: 추가 2개 실행 조합
 
