@@ -1,7 +1,7 @@
 # 자동 테스트 카탈로그
 
-최종 확인: 2026-09-19
-실행 기준: `python -m pytest --collect-only -q` → **490건**
+최종 확인: 2026-09-20
+실행 기준: `python -m pytest --collect-only -q` → **501건**
 실제 정의 파일: `tests/test_srs_agent1.py`, `tests/test_agent2.py`, `tests/test_integrity_cli.py`, `tests/test_agent3.py`, `tests/test_orchestration_execution.py`, `tests/test_agent4_reporting.py`, `tests/test_pipeline_ui.py`
 
 이 문서는 현재 수집되는 자동 테스트를 사람이 확인하기 쉽게 정리한 목록입니다. 실행의 기준은 항상 테스트 코드와 Pytest 수집 결과이며, 테스트를 추가·삭제할 때는 이 문서도 같은 변경에서 갱신합니다.
@@ -10,9 +10,16 @@
 
 | 구성 | 수량 | 설명 |
 |---|---:|---|
-| 일반 테스트 함수 | 250 | 함수 하나가 Pytest 실행 1건 |
-| 파라미터 테스트 함수 | 46 | 서로 다른 입력·실패 조합으로 실행 240건 |
-| 합계 | **490** | 현재 Pytest 수집 수 |
+| 일반 테스트 함수 | 251 | 함수 하나가 Pytest 실행 1건 |
+| 파라미터 테스트 함수 | 48 | 서로 다른 입력·실패 조합으로 실행 250건 |
+| 합계 | **501** | 현재 Pytest 수집 수 |
+
+### 이미 반영된 SRS의 불필요한 개정 차단
+
+- `test_srs_revision_exemption_requires_full_exact_current_criteria`: 전체 일치·앞뒤 공백·다른 값·부분 일치·대소문자·문장 내부 공백 6조합. 원본 설계 불변 및 과거 계약의 개정 필수 판정도 확인합니다.
+- `test_srs_revision_policy_keeps_invalid_proposals_and_related_changes_blocked`: 동일 제안·표현만 바꾼 불필요한 제안·다른 영향 Requirement의 개정 누락·대상 SRS 누락 4조합을 차단합니다.
+- `test_agent2_sends_reflected_srs_policy_on_initial_and_repair_without_mutation`: Fake Client로 최초·재작성 입력의 개정 범위 안내와 SRS 불변을 확인합니다.
+- 기존 `test_agent1_to_agent2_cli_handoff_with_frozen_inputs`에 새 개정 계약 1.1의 인계·누락/하향/다른 버전 조합 차단 및 과거 계약 1.0 로딩을 추가했습니다. 실제 모델 호출 테스트는 아닙니다.
 
 ### 사용자 확인 요청의 최종 보고 연결
 

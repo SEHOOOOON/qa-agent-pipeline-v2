@@ -102,7 +102,7 @@ SRS revision proposals must use grounded numbers and preserve the meaning of the
 19. 서로 충돌하는 권한 입력, 기대 결과 미정처럼 TC 의미를 확정할 수 없어 후속 자동 진행을 중단해야 하는 항목만 `중단_확인_사항`에 남깁니다.
 20. UPDATE_REQUIRED 자체는 변경관리의 정상 결과이므로 그것만으로 `중단_확인_사항` 또는 `최종_확인_사항`을 만들지 않습니다.
 21. existing_tc_comparison_completed=true로 기록합니다. 관련_기존_TC에는 제공된 기존 TC ID만 사용하고 각 선택이 어떤 유지·영향 조건을 회귀 확인하는지 source_condition_ids와 selection_reason으로 설명합니다. 변경 대상 Requirement를 포함하는 기존 TC도 `검증 동작`을 대조하되 변경 후에도 그대로 유효한 경우에만 선택합니다. 재사용할 수 없으면 억지로 선택하지 말고 TC ID와 미선택 이유를 coverage_notes에 기록합니다.
-22. requirement_effects가 MODIFIED 또는 UPDATE_REQUIRED인 모든 Requirement는 `SRS_개정_제안`에 정확히 한 건씩 기록합니다. current_acceptance_criteria는 제공된 SRS 원문과 완전히 같아야 하며, proposed_acceptance_criteria는 확정 Condition과 변경 요청에 근거한 새 판정 문구여야 합니다. Requirement 문장 자체는 바꾸지 않습니다. source_condition_ids로 근거를 연결하고, 사람이 승인하기 전 SRS가 변경된 것처럼 표현하지 않습니다.
+22. [코드로 확인한 SRS 개정 범위]의 required_requirement_ids에만 `SRS_개정_제안`을 정확히 한 건씩 기록합니다. MODIFIED·UPDATE_REQUIRED는 시험 영향 구분이지 SRS 개정 필요의 확정이 아닙니다. already_reflected_requirement_ids는 요청 after_value 전체 문장과 현재 인수 기준이 앞뒤 공백을 제외하고 일치한 대상입니다. 이 대상은 개정안 없이 기존 TC 대조·필요한 시험 설계를 계속하고, 이미 반영돼 SRS 개정이 불필요하다는 사실을 coverage_notes에 설명합니다. 같은 문장을 수정안으로 제출하거나 이를 사람이 새로 승인해야 한다고 쓰지 않습니다. 요청 밖 내용을 추가하거나 표현만 바꿔 개정안을 만들지 않습니다. 해당 목록 밖의 문장 유사성·TC 재사용 여부만으로 개정을 생략하지 않습니다. 실제 개정안의 current_acceptance_criteria는 SRS 원문과 완전히 같아야 하며, proposed_acceptance_criteria는 확정 Condition과 변경 요청에 근거한 새 판정 문구여야 합니다. Requirement 문장 자체는 바꾸지 않습니다. source_condition_ids로 근거를 연결하고, 사람이 승인하기 전 SRS가 변경된 것처럼 표현하지 않습니다.
 작성 수준 예시 (아래는 기존 필드의 일부만 발췌한 형식 참고이며 이번 입력의 제품 기준이 아닙니다):
 예시 A의 입력이 '오류·잠금 없는 단일 장비, 초기 LOW, MED 적용 직후 카드 중풍·내부 fanSpeed=MED, 종료 후 LOW 복원'을 명시한 경우:
 preconditions:
@@ -130,6 +130,37 @@ restore_steps:
 
 class Agent2Error(RuntimeError):
     """Raised when Agent 2 cannot produce a validated structured response."""
+
+
+def _srs_revision_policy(
+    request: ChangeRequest,
+    analysis: Agent1Analysis,
+    requirements: dict[str, SrsRequirement],
+) -> dict[str, Any]:
+    """Conservative document comparison, independent of model/proposal claims.
+
+    Only the target's complete requested after-value can prove it is already in
+    the frozen SRS. No fuzzy matching, case folding, or TC-reuse inference.
+    Other affected requirements still need proposals.
+    """
+    affected = {
+        effect.requirement_id
+        for effect in analysis.requirement_effects
+        if effect.relation in {RequirementRelation.MODIFIED, RequirementRelation.UPDATE_REQUIRED}
+    }
+    target = requirements.get(request.target_requirement_id)
+    reflected: set[str] = set()
+    if (
+        target is not None
+        and request.target_requirement_id in affected
+        and request.after_value.strip() == target.acceptance_criteria.strip()
+    ):
+        reflected.add(request.target_requirement_id)
+    return {
+        "required_requirement_ids": sorted(affected - reflected),
+        "already_reflected_requirement_ids": sorted(reflected),
+        "comparison": "TARGET_FULL_AFTER_VALUE_EQUALS_CURRENT_SRS_TRIM_ONLY",
+    }
 
 
 @dataclass(frozen=True)
@@ -177,6 +208,8 @@ class OpenAIAgent2:
             f"{analysis.model_dump_json(indent=2, by_alias=True)}\n\n"
             "[고정된 SRS Requirement]\n"
             f"{render_srs_context(requirements)}\n\n"
+            "[코드로 확인한 SRS 개정 범위]\n"
+            f"{json.dumps(_srs_revision_policy(request, analysis, requirements), ensure_ascii=False)}\n\n"
             "[기존 사람 작성·자동화 TC 카탈로그]\n"
             f"{render_existing_regression_context(existing_catalog)}"
         )
@@ -198,7 +231,7 @@ class OpenAIAgent2:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent2-2-27",
+                prompt_cache_key="qa-v2-agent2-2-28",
                 input=[
                     {"role": "system", "content": AGENT2_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
@@ -471,6 +504,7 @@ def evaluate_checkpoint2(
     *,
     existing_catalog: tuple[ExistingRegressionSpec, ...] = EXISTING_REGRESSION_CATALOG,
     require_srs_revision_proposals: bool = False,
+    allow_already_reflected_srs: bool = False,
     require_existing_behavior_values: bool = False,
     allow_existing_procedure_review: bool = True,
     require_double_assert_timing: bool = True,
@@ -1343,6 +1377,11 @@ def evaluate_checkpoint2(
             if effect.relation
             in {RequirementRelation.MODIFIED, RequirementRelation.UPDATE_REQUIRED}
         }
+        already_reflected_ids: set[str] = set()
+        if allow_already_reflected_srs:
+            policy = _srs_revision_policy(request, analysis, requirements)
+            required_revision_ids = set(policy["required_requirement_ids"])
+            already_reflected_ids = set(policy["already_reflected_requirement_ids"])
         proposal_ids = [item.proposal_id for item in design.srs_revision_proposals]
         proposal_requirement_ids = [
             item.requirement_id for item in design.srs_revision_proposals
@@ -1357,6 +1396,12 @@ def evaluate_checkpoint2(
             revision_errors.append("개정 제안 누락=" + ",".join(missing))
         if extra:
             revision_errors.append("개정 대상 밖 제안=" + ",".join(extra))
+        unnecessary = sorted(set(proposal_requirement_ids) & already_reflected_ids)
+        if unnecessary:
+            revision_errors.append(
+                "현재 SRS에 요청 after_value가 이미 반영됨=" + ",".join(unnecessary)
+                + "; 해당 개정안을 제외하고 TC 선택·검증 범위는 유지하세요. 새 승인이나 문구 변경은 필요하지 않습니다."
+            )
         for proposal in design.srs_revision_proposals:
             requirement = requirements.get(proposal.requirement_id)
             if requirement is None:
@@ -1405,7 +1450,10 @@ def evaluate_checkpoint2(
             add(
                 "CP2-018",
                 CheckStatus.PASS,
-                "MODIFIED·UPDATE_REQUIRED Requirement의 SRS 개정 전·후 문구와 근거가 구조화됐습니다.",
+                ("현재 SRS에 이미 반영되어 개정 불필요=" + ",".join(sorted(already_reflected_ids))
+                 + "; 나머지 개정안의 전·후 문구와 근거를 확인했습니다. 시험 완료·사람 승인을 뜻하지 않습니다."
+                 if already_reflected_ids else
+                 "MODIFIED·UPDATE_REQUIRED Requirement의 SRS 개정 전·후 문구와 근거가 구조화됐습니다."),
             )
 
     if require_tc_detail:

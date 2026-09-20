@@ -335,6 +335,7 @@ def run_agent2(args: argparse.Namespace) -> int:
             requirements,
             existing_catalog=existing_catalog,
             require_srs_revision_proposals=True,
+            allow_already_reflected_srs=True,
             require_existing_behavior_values=True,
             require_restore_target_basis=True,
         )
@@ -397,6 +398,7 @@ def run_agent2(args: argparse.Namespace) -> int:
                 requirements,
                 existing_catalog=existing_catalog,
                 require_srs_revision_proposals=True,
+                allow_already_reflected_srs=True,
                 require_existing_behavior_values=True,
                 require_restore_target_basis=True,
             )
@@ -431,8 +433,8 @@ def run_agent2(args: argparse.Namespace) -> int:
         _write_json(
             run_dir / "agent2_manifest.json",
             {
-                "contract_version": "3.3",
-                "prompt_version": "agent2-2.27",
+                "contract_version": "3.4",
+                "prompt_version": "agent2-2.28",
                 "tc_detail_contract": "1.2",
                 "run_id": args.run_id,
                 "source_stage": "AGENT_1_CP1",
@@ -455,7 +457,7 @@ def run_agent2(args: argparse.Namespace) -> int:
                 "approved_regression_catalog_sha256": _sha256_file(
                     approved_catalog_file
                 ),
-                "srs_revision_contract": "1.0",
+                "srs_revision_contract": "1.1",
                 "candidate_expectation_contract": "1.0",
                 "meaning_guard_contract": "1.0",
                 "existing_behavior_values_contract": "1.0",
@@ -534,9 +536,14 @@ def _load_verified_agent2_run(
     ) or (
         manifest.get("contract_version") == "3.2" and detail_contract != "1.1"
     ) or (
-        manifest.get("contract_version") == "3.3" and detail_contract != "1.2"
+        manifest.get("contract_version") in {"3.3", "3.4"} and detail_contract != "1.2"
     ):
         raise ValueError("지원하지 않거나 누락된 TC 상세화 계약입니다.")
+    revision_contract = manifest.get("srs_revision_contract")
+    if revision_contract not in {None, "1.0", "1.1"} or (
+        manifest.get("contract_version") == "3.4" and revision_contract != "1.1"
+    ) or (revision_contract == "1.1" and manifest.get("contract_version") != "3.4"):
+        raise ValueError("지원하지 않거나 누락된 SRS 개정 계약입니다.")
     recomputed = evaluate_checkpoint2(
         request,
         analysis,
@@ -549,8 +556,9 @@ def _load_verified_agent2_run(
         require_candidate_expectation_guard=manifest.get("candidate_expectation_contract") == "1.0",
         existing_catalog=existing_catalog,
         require_srs_revision_proposals=(
-            manifest.get("srs_revision_contract") == "1.0"
+            revision_contract in {"1.0", "1.1"}
         ),
+        allow_already_reflected_srs=revision_contract == "1.1",
         require_existing_behavior_values=(
             manifest.get("existing_behavior_values_contract") == "1.0"
         ),

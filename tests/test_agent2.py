@@ -542,9 +542,11 @@ def test_agent2_uses_structured_responses_api() -> None:
     assert response.usage["total_tokens"] == 300
     assert responses.kwargs["text_format"] is Agent2TestDesign
     assert responses.kwargs["store"] is False
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-27"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-28"
     agent2_input = responses.kwargs["input"][1]["content"]
     assert "[기존 사람 작성·자동화 TC 카탈로그]" in agent2_input
+    assert '[코드로 확인한 SRS 개정 범위]' in agent2_input
+    assert '"required_requirement_ids": ["REQ-TEMP-001"]' in agent2_input
     assert "TC-TEMP-001" in agent2_input
     assert "TC-MODE-002" in agent2_input
     assert "검증 동작" in agent2_input
@@ -734,6 +736,88 @@ def test_checkpoint2_requires_grounded_srs_revision_proposal_for_modified_requir
     assert cp2_check(passed, "CP2-018").status == CheckStatus.PASS
     assert cp2_check(missing, "CP2-018").status == CheckStatus.FAIL
     assert "개정 제안 누락=REQ-TEMP-001" in cp2_check(missing, "CP2-018").message
+
+@pytest.mark.parametrize("current, reflected", [
+    ("AUTO 모드는 18~30°C", True),
+    ("  AUTO 모드는 18~30°C\n", True),
+    ("AUTO 모드는 16~30°C", False),
+    ("AUTO 모드는 18~30°C이며 추가 조건이 있다", False),
+    ("auto 모드는 18~30°C", False),
+    ("AUTO  모드는 18~30°C", False),
+])
+def test_srs_revision_exemption_requires_full_exact_current_criteria(current, reflected):
+    requirements = cp2_requirements()
+    requirements["REQ-TEMP-001"] = requirements["REQ-TEMP-001"].model_copy(
+        update={"acceptance_criteria": current}
+    )
+    design = cp2_valid_design()
+    original = design.model_dump()
+    result = evaluate_checkpoint2(
+        cp1_request(), cp2_analysis(), design, requirements,
+        require_srs_revision_proposals=True, allow_already_reflected_srs=True,
+    )
+    assert cp2_check(result, "CP2-018").status == (CheckStatus.PASS if reflected else CheckStatus.FAIL)
+    assert design.model_dump() == original
+    # Old evidence is rechecked with its old policy, never silently upgraded.
+    legacy = evaluate_checkpoint2(
+        cp1_request(), cp2_analysis(), design, requirements,
+        require_srs_revision_proposals=True,
+    )
+    assert cp2_check(legacy, "CP2-018").status == CheckStatus.FAIL
+
+
+@pytest.mark.parametrize("variant", ["identical", "rephrased", "related_missing", "target_missing"])
+def test_srs_revision_policy_keeps_invalid_proposals_and_related_changes_blocked(variant):
+    request, analysis, requirements = cp1_request(), cp2_analysis(), cp2_requirements()
+    requirements[request.target_requirement_id] = requirements[request.target_requirement_id].model_copy(
+        update={"acceptance_criteria": request.after_value}
+    )
+    design = cp2_valid_design()
+    if variant in {"identical", "rephrased"}:
+        design = design.model_copy(update={"srs_revision_proposals": [pipeline.SrsRevisionProposal(
+            proposal_id="SRS-REV-001", requirement_id=request.target_requirement_id,
+            source_condition_ids=["COND-001"], current_acceptance_criteria=request.after_value,
+            proposed_acceptance_criteria=(request.after_value if variant == "identical" else request.after_value + "입니다."),
+            reason="개정안을 만들기 위한 불필요한 제안",
+        )]})
+    elif variant == "related_missing":
+        analysis = analysis.model_copy(update={"requirement_effects": [
+            effect.model_copy(update={"relation": RequirementRelation.UPDATE_REQUIRED})
+            if effect.requirement_id == "REQ-STATE-001" else effect
+            for effect in analysis.requirement_effects
+        ]})
+    else:
+        del requirements[request.target_requirement_id]
+    result = evaluate_checkpoint2(
+        request, analysis, design, requirements,
+        require_srs_revision_proposals=True, allow_already_reflected_srs=True,
+    )
+    check = cp2_check(result, "CP2-018")
+    assert check.status == CheckStatus.FAIL
+    if variant in {"identical", "rephrased"}:
+        assert "해당 개정안을 제외하고 TC 선택·검증 범위는 유지" in check.message
+    elif variant == "related_missing":
+        assert "개정 제안 누락=REQ-STATE-001" in check.message
+    else:
+        assert "개정 제안 누락=REQ-TEMP-001" in check.message
+
+
+def test_agent2_sends_reflected_srs_policy_on_initial_and_repair_without_mutation():
+    responses = Agent2FakeResponses()
+    agent = OpenAIAgent2(model="gpt-5.6-terra", client=SimpleNamespace(responses=responses))
+    request, requirements = cp1_request(), cp2_requirements()
+    requirements[request.target_requirement_id] = requirements[request.target_requirement_id].model_copy(
+        update={"acceptance_criteria": request.after_value}
+    )
+    before = {key: value.model_dump() for key, value in requirements.items()}
+    for kwargs in ({}, {"previous_design": cp2_valid_design(), "checkpoint_feedback": ["CP2-018 FAIL"]}):
+        agent.design(request, cp2_analysis(), requirements, **kwargs)
+        prompt = responses.kwargs["input"][1]["content"]
+        assert '"already_reflected_requirement_ids": ["REQ-TEMP-001"]' in prompt
+        assert '"required_requirement_ids": []' in prompt
+        assert request.after_value in prompt
+    assert {key: value.model_dump() for key, value in requirements.items()} == before
+
 
 def test_srs_revision_preview_apply_and_conflict_detection(tmp_path: Path) -> None:
     srs_file = tmp_path / "SRS.md"

@@ -299,7 +299,7 @@ def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
     assert pipeline.run_agent2(agent2_args) == (2 if detail_outcome == "unresolved" else 0)
     detail_manifest = pipeline._read_json_payload(run_dir / "agent2_manifest.json")
     assert detail_manifest["tc_detail_contract"] == "1.2"
-    assert detail_manifest["prompt_version"] == "agent2-2.27"
+    assert detail_manifest["prompt_version"] == "agent2-2.28"
     assert len(design_calls) == (1 if detail_outcome == "clean" else 2)
     if detail_outcome != "clean":
         assert any("CP2-021" in text for text in design_calls[1]["checkpoint_feedback"])
@@ -323,7 +323,16 @@ def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
     assert manifest["approved_regression_catalog_sha256"] == _sha256_file(
         run_dir / "approved_regression_catalog.json"
     )
-    assert manifest["srs_revision_contract"] == "1.0"
+    assert manifest["srs_revision_contract"] == "1.1"
+    assert manifest["contract_version"] == "3.4"
+
+    for unsupported in (None, "1.0", "unknown"):
+        _write_json(run_dir / "agent2_manifest.json", {**manifest, "srs_revision_contract": unsupported})
+        with pytest.raises(ValueError, match="SRS 개정 계약"):
+            pipeline._load_verified_agent2_run(run_dir, run_dir.name)
+    _write_json(run_dir / "agent2_manifest.json", {**manifest, "contract_version": "3.3"})
+    with pytest.raises(ValueError, match="SRS 개정 계약"):
+        pipeline._load_verified_agent2_run(run_dir, run_dir.name)
 
     # New runs may not drop/downgrade the additional procedure check. Old 1.0
     # records retain their original checks and are not rewritten by the loader.
@@ -334,7 +343,7 @@ def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
     checkpoint = pipeline._read_json_payload(run_dir / "checkpoint2.json")
     checkpoint["checks"] = [item for item in checkpoint["checks"] if item["rule_id"] != "CP2-021"]
     _write_json(run_dir / "checkpoint2.json", checkpoint)
-    legacy = {**manifest, "contract_version": "3.1", "tc_detail_contract": "1.0",
+    legacy = {**manifest, "contract_version": "3.1", "tc_detail_contract": "1.0", "srs_revision_contract": "1.0",
               "prompt_version": "agent2-2.24", "checkpoint2_sha256": _sha256_file(run_dir / "checkpoint2.json")}
     _write_json(run_dir / "agent2_manifest.json", legacy)
     pipeline._load_verified_agent2_run(run_dir, run_dir.name)
