@@ -299,7 +299,7 @@ def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
     assert pipeline.run_agent2(agent2_args) == (2 if detail_outcome == "unresolved" else 0)
     detail_manifest = pipeline._read_json_payload(run_dir / "agent2_manifest.json")
     assert detail_manifest["tc_detail_contract"] == "1.2"
-    assert detail_manifest["prompt_version"] == "agent2-2.28"
+    assert detail_manifest["prompt_version"] == "agent2-2.29"
     assert len(design_calls) == (1 if detail_outcome == "clean" else 2)
     if detail_outcome != "clean":
         assert any("CP2-021" in text for text in design_calls[1]["checkpoint_feedback"])

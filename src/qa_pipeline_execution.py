@@ -434,7 +434,7 @@ def run_agent2(args: argparse.Namespace) -> int:
             run_dir / "agent2_manifest.json",
             {
                 "contract_version": "3.4",
-                "prompt_version": "agent2-2.28",
+                "prompt_version": "agent2-2.29",
                 "tc_detail_contract": "1.2",
                 "run_id": args.run_id,
                 "source_stage": "AGENT_1_CP1",

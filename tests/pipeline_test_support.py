@@ -413,6 +413,43 @@ def cp2_analysis() -> Agent1Analysis:
         decision=AnalysisDecision.PROCEED,
     )
 
+def compound_reuse_fixture(values=("MED", "HIGH"), layout="split"):
+    statement = f"{values[0]} 및 {values[1]} 값을 적용한 결과를 각각 확인한다."
+    request = cp1_request().model_copy(update={"after_value": statement, "acceptance_notes": []})
+    analysis = cp2_analysis().model_copy(update={
+        "confirmed_conditions": [ConfirmedCondition(
+            condition_id="COND-010", statement=statement, source_type=ConditionSource.CHANGE_REQUEST,
+            source_text=statement, requirement_ids=["REQ-TEMP-001"],
+        )],
+        "requirement_effects": [RequirementEffect(requirement_id="REQ-TEMP-001",
+            relation=RequirementRelation.MODIFIED, reason="두 입력 조건 검증")],
+    })
+    specs = tuple(pipeline.ExistingRegressionSpec(
+        tc_id=f"TC-SPLIT-{i:03d}", test_function=f"test_split_{i}",
+        requirement_ids=("REQ-TEMP-001",), covered_behaviors=(f"{value} 값을 적용한 결과를 확인한다.",),
+        source="APPROVED",
+    ) for i, value in enumerate(values, 1))
+    if layout == "one_complete":
+        specs = (pipeline.ExistingRegressionSpec(tc_id="TC-SPLIT-001", test_function="test_split_1",
+            requirement_ids=("REQ-TEMP-001",), covered_behaviors=(statement,), source="APPROVED"),)
+    elif layout == "actual_gap":
+        specs = (specs[0], pipeline.ExistingRegressionSpec(tc_id="TC-SPLIT-002", test_function="test_split_2",
+            requirement_ids=("REQ-TEMP-001",), covered_behaviors=(f"{values[0]} 값을 적용한다.",), source="APPROVED"))
+    selections = [ExistingTestSelection(tc_id=s.tc_id, source_condition_ids=["COND-010"],
+        selection_reason="조건 중 실제 담당 부분을 확인한다.") for s in specs]
+    if layout == "missing_link":
+        # Selected for a different condition, not coverage of the compound one.
+        extra = analysis.confirmed_conditions[0].model_copy(update={
+            "condition_id": "COND-011", "statement": f"{values[1]} 값을 확인한다.",
+            "source_text": f"{values[1]} 값을 확인한다.",
+        })
+        analysis = analysis.model_copy(update={"confirmed_conditions": [*analysis.confirmed_conditions, extra]})
+        selections[1] = selections[1].model_copy(update={"source_condition_ids": ["COND-011"]})
+    design = Agent2TestDesign(request_id=request.request_id, existing_tc_comparison_completed=True,
+        related_existing_tests=selections, test_cases=[], coverage_summary="조건별 기존 검증 연결")
+    return request, analysis, design, specs
+
+
 def cp2_requirements():
     return {
         item.requirement_id: item

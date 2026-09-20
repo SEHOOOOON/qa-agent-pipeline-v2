@@ -542,7 +542,7 @@ def test_agent2_uses_structured_responses_api() -> None:
     assert response.usage["total_tokens"] == 300
     assert responses.kwargs["text_format"] is Agent2TestDesign
     assert responses.kwargs["store"] is False
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-28"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-29"
     agent2_input = responses.kwargs["input"][1]["content"]
     assert "[기존 사람 작성·자동화 TC 카탈로그]" in agent2_input
     assert '[코드로 확인한 SRS 개정 범위]' in agent2_input
@@ -600,6 +600,56 @@ def test_valid_design_passes_checkpoint2() -> None:
     assert result.status == CheckStatus.PASS
     assert len(result.checks) == 17
     assert all(item.status == CheckStatus.PASS for item in result.checks)
+
+@pytest.mark.parametrize("values", [("MED", "HIGH"), ("18°C", "30°C"), ("HEAT", "COOL")])
+@pytest.mark.parametrize("layout", ["split", "one_complete", "missing_link", "actual_gap"])
+def test_compound_existing_reuse_requires_actual_condition_links(values, layout):
+    request, analysis, design, catalog = compound_reuse_fixture(values, layout)
+    before = design.model_dump()
+    result = evaluate_checkpoint2(request, analysis, design, cp2_requirements(),
+        existing_catalog=catalog, require_existing_behavior_values=True)
+    check = cp2_check(result, "CP2-019")
+    assert check.status == (CheckStatus.PASS if layout in {"split", "one_complete"} else CheckStatus.FAIL)
+    context = pipeline._existing_reuse_link_context(analysis, catalog, design)
+    pair = next(row for row in context if row["condition_id"] == "COND-010")
+    assert bool(pair["values_not_covered_by_links"]) == (layout in {"missing_link", "actual_gap"})
+    if layout == "missing_link":
+        assert pair["linked_existing_tc_ids"] == ["TC-SPLIT-001"]
+        assert "TC-SPLIT-002" in [s.tc_id for s in design.related_existing_tests]
+    assert design.model_dump() == before
+
+
+def test_agent2_sends_compound_link_guidance_on_initial_and_repair():
+    request, analysis, design, catalog = compound_reuse_fixture(layout="missing_link")
+    responses = Agent2FakeResponses()
+    agent = OpenAIAgent2(model="gpt-5.6-terra", client=SimpleNamespace(responses=responses))
+    before = design.model_dump()
+    for kwargs in ({}, {"previous_design": design, "checkpoint_feedback": ["CP2-019 FAIL"]}):
+        agent.design(request, analysis, cp2_requirements(), existing_catalog=catalog, **kwargs)
+        prompt = responses.kwargs["input"][1]["content"]
+        assert "[조건별 기존 TC 연결 점검]" in prompt
+        assert '"detected_values": ["HIGH", "MED"]' in prompt
+        assert "TC-X와 TC-Y 모두 C에 연결" in prompt
+        assert "권장 TC 목록이나 합격 판정이 아닙니다" in prompt
+        if kwargs:
+            assert '"linked_existing_tc_ids": ["TC-SPLIT-001"]' in prompt
+            assert '"values_not_covered_by_links": ["HIGH"]' in prompt
+            assert "CP2-019 FAIL" in prompt
+    assert design.model_dump() == before
+
+
+def test_reuse_link_diagnostics_do_not_infer_coverage_from_unknown_tests_or_candidates():
+    request, analysis, design, catalog = compound_reuse_fixture()
+    unrelated = ExistingTestSelection(tc_id="TC-UNKNOWN-999", source_condition_ids=["COND-010"],
+        selection_reason="허용 목록 밖 테스트")
+    candidate = cp2_valid_design().test_cases[0].model_copy(update={"source_condition_ids": ["COND-010"]})
+    design = design.model_copy(update={"related_existing_tests": [unrelated], "test_cases": [candidate]})
+    row = pipeline._existing_reuse_link_context(analysis, catalog, design)[0]
+    assert row["values_not_covered_by_links"] == ["HIGH", "MED"]
+    assert row["candidate_tc_ids"] == [candidate.tc_id]
+    assert row["linked_existing_tc_ids"] == ["TC-UNKNOWN-999"]
+    assert "linked_existing_tc_ids" not in pipeline._existing_reuse_link_context(analysis, catalog)[0]
+
 
 def test_checkpoint2_allows_existing_tc_only_when_behavior_covers_change() -> None:
     analysis = cp2_analysis()

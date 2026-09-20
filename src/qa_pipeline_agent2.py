@@ -39,6 +39,7 @@ def _contains_any(value: str, terms: tuple[str, ...]) -> bool:
 AGENT2_SYSTEM_INSTRUCTIONS = """
 Every new Expected Result must preserve the codes, numbers and allow/block or enabled/disabled policy of its own source conditions. Test input values are not authority for expected outputs. Preserve initial values only when the source condition requires retention; do not replace a requested state with another supported product state.
 Existing TC reuse must preserve the requested allow/block and enabled/disabled behavior, not merely the same numbers.
+Existing TC selection and condition coverage are different: every condition must be linked to all selected tests that actually verify its parts. Reusing one condition ID across multiple existing tests is allowed and required for distributed coverage; never infer coverage from a test selected only for another condition.
 SRS revision proposals must use grounded numbers and preserve the meaning of their source conditions; do not introduce new limits.
 당신은 CP1을 통과한 변경 분석을 제품 기능 테스트케이스 후보로 바꾸는 Agent 2입니다.
 
@@ -132,6 +133,37 @@ class Agent2Error(RuntimeError):
     """Raised when Agent 2 cannot produce a validated structured response."""
 
 
+def _existing_reuse_link_context(
+    analysis: Agent1Analysis,
+    existing_catalog: tuple[ExistingRegressionSpec, ...],
+    design: Agent2TestDesign | None = None,
+) -> list[dict[str, Any]]:
+    """Read-only value/link diagnostics, not semantic approval or auto-linking."""
+    catalog = {item.tc_id: item for item in existing_catalog}
+    rows = []
+    for condition in analysis.confirmed_conditions:
+        values = _explicit_behavior_values(condition.statement)
+        row: dict[str, Any] = {
+            "condition_id": condition.condition_id,
+            "detected_values": sorted(values),
+        }
+        if design is not None:
+            linked = [item.tc_id for item in design.related_existing_tests
+                      if condition.condition_id in item.source_condition_ids]
+            behaviors = " ".join(
+                behavior for tc_id in linked if tc_id in catalog
+                for behavior in catalog[tc_id].covered_behaviors
+            )
+            row.update(
+                linked_existing_tc_ids=linked,
+                values_not_covered_by_links=sorted(values - _explicit_behavior_values(behaviors)),
+                candidate_tc_ids=[tc.tc_id for tc in design.test_cases
+                                  if condition.condition_id in tc.source_condition_ids],
+            )
+        rows.append(row)
+    return rows
+
+
 def _srs_revision_policy(
     request: ChangeRequest,
     analysis: Agent1Analysis,
@@ -211,7 +243,20 @@ class OpenAIAgent2:
             "[코드로 확인한 SRS 개정 범위]\n"
             f"{json.dumps(_srs_revision_policy(request, analysis, requirements), ensure_ascii=False)}\n\n"
             "[기존 사람 작성·자동화 TC 카탈로그]\n"
-            f"{render_existing_regression_context(existing_catalog)}"
+            f"{render_existing_regression_context(existing_catalog)}\n\n"
+            "[조건별 기존 TC 연결 점검]\n"
+            f"{json.dumps(_existing_reuse_link_context(analysis, existing_catalog, previous_design), ensure_ascii=False)}\n"
+            "복합 조건을 여러 기존 TC가 나누어 검증하면 실제 담당 TC 모두의 source_condition_ids에 "
+            "그 조건 ID를 넣으세요. TC 선택 목록에 있다는 이유만으로 그 조건을 검증한 것으로 계산하지 않습니다. "
+            "형식 예시: 조건 C가 동작 A와 B를 요구하고 TC-X가 A, TC-Y가 B를 검증하면 "
+            "TC-X와 TC-Y 모두 C에 연결합니다. 별도 B 전용 조건에 TC-Y를 연결한 것만으로 C가 충족되지는 않습니다. "
+            "C·A·B·TC-X·TC-Y는 형식 설명이며 출력에 복사하지 마세요. "
+            "위 목록은 코드·수치의 제한된 추출과 기존 연결 진단이며 권장 TC 목록이나 합격 판정이 아닙니다. "
+            "빈 detected_values도 검증 불필요를 뜻하지 않습니다. 값만 같고 대상·조작·판정·복원이 다르면 재사용하지 마세요. "
+            "신규 후보가 담당하는 조건은 후보의 실제 근거도 함께 대조하세요. "
+            "제출 전 복합 조건과 개별 조건을 각각 역으로 따라가 담당 TC 및 검증 범위가 빠짐없이 연결되는지 확인하세요. "
+            "연결을 맞추려고 원문 조건·값을 삭제하거나 무관한 TC를 추가하지 마세요. "
+            "기존 TC로 실제 검증하지 못하는 동작은 근거 있는 후보 설계 또는 확인 필요 사항으로 남깁니다."
         )
         if previous_design is not None:
             feedback = "\n".join(f"- {item}" for item in (checkpoint_feedback or []))
@@ -231,7 +276,7 @@ class OpenAIAgent2:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent2-2-28",
+                prompt_cache_key="qa-v2-agent2-2-29",
                 input=[
                     {"role": "system", "content": AGENT2_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},

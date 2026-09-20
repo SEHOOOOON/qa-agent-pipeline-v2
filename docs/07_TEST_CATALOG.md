@@ -1,7 +1,7 @@
 # 자동 테스트 카탈로그
 
 최종 확인: 2026-09-20
-실행 기준: `python -m pytest --collect-only -q` → **501건**
+실행 기준: `python -m pytest --collect-only -q` → **515건**
 실제 정의 파일: `tests/test_srs_agent1.py`, `tests/test_agent2.py`, `tests/test_integrity_cli.py`, `tests/test_agent3.py`, `tests/test_orchestration_execution.py`, `tests/test_agent4_reporting.py`, `tests/test_pipeline_ui.py`
 
 이 문서는 현재 수집되는 자동 테스트를 사람이 확인하기 쉽게 정리한 목록입니다. 실행의 기준은 항상 테스트 코드와 Pytest 수집 결과이며, 테스트를 추가·삭제할 때는 이 문서도 같은 변경에서 갱신합니다.
@@ -10,9 +10,16 @@
 
 | 구성 | 수량 | 설명 |
 |---|---:|---|
-| 일반 테스트 함수 | 251 | 함수 하나가 Pytest 실행 1건 |
-| 파라미터 테스트 함수 | 48 | 서로 다른 입력·실패 조합으로 실행 250건 |
-| 합계 | **501** | 현재 Pytest 수집 수 |
+| 일반 테스트 함수 | 253 | 함수 하나가 Pytest 실행 1건 |
+| 파라미터 테스트 함수 | 49 | 서로 다른 입력·실패 조합으로 실행 262건 |
+| 합계 | **515** | 현재 Pytest 수집 수 |
+
+### 복합 조건의 기존 TC 연결 안내
+
+- `test_compound_existing_reuse_requires_actual_condition_links`: 풍량·온도·모드 3종 × 분담 연결·한 TC 충족·다른 조건에만 연결·실제 값 미검증 4종, 총 12조합. 정상 분담은 허용하고 근거 누락은 계속 차단합니다.
+- `test_agent2_sends_compound_link_guidance_on_initial_and_repair`: Fake Client 최초/재작성 요청의 연결 안내·추출 값·미연결 값과 원본 불변을 검사합니다.
+- `test_reuse_link_diagnostics_do_not_infer_coverage_from_unknown_tests_or_candidates`: 카탈로그 밖 TC와 후보 담당 표시를 기존 검증 근거로 오인하지 않고 최초 입력의 미작성 상태를 구분합니다.
+- CP2 판정 코드는 변경하지 않았습니다. 이 검사는 작성 안내와 제한된 연결 진단의 테스트이며 실제 모델의 항상 올바른 연결을 보장하지 않습니다.
 
 ### 이미 반영된 SRS의 불필요한 개정 차단
 
