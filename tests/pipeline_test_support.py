@@ -828,6 +828,26 @@ def mixed_restore_comparison_fixture(connector="확인하고,"):
         text="풍량 표시 약풍", visible=True, enabled=True, action_hint="READ"))
     return case, plan, observation
 
+
+def structured_restoration_fixture(wording="실행 전 관찰값과 같은지 확인한다."):
+    case, plan, observation = precondition_guard_fixture()
+    case.state_effect = pipeline.TcStateEffect.STATE_CHANGE
+    confirmations = []
+    for result, assertion, target in zip(case.expected_results, plan.assertions,
+                                         ["새 제어 스위치", "내부 enabled 값"]):
+        result.observation_target = target
+        result.verify_after_step = case.steps[-1]
+        assertion.after_action_id = plan.actions[0].action_id
+        line = f"{target}: {wording}"
+        confirmations.append(pipeline.RestoreConfirmation(source_text=line,
+            result_ids=[result.result_id], comparisons=[pipeline.RestoreComparison(
+                result_id=result.result_id, source_excerpt=line, basis="OBSERVED_BASELINE")]))
+    case.restoration = pipeline.StructuredRestoration(operation_steps=list(case.restore_steps),
+        confirmations=confirmations, verify_when="AFTER_RESTORE")
+    case.restore_steps += [c.source_text for c in confirmations]
+    plan.restore_confirmations = [c.model_copy(deep=True) for c in confirmations]
+    return case, plan, observation
+
 def agent3_plan() -> Agent3AutomationPlan:
     return Agent3AutomationPlan(
         tc_id="TC-CAND-003",
@@ -847,6 +867,38 @@ def agent3_plan() -> Agent3AutomationPlan:
             AutomationAssertion(result_id="ER-007", observation_layer="NOTIFICATION", strategy="TOAST_BLOCKING", selector="#global-toast"),
         ],
     )
+
+
+def hvac_preparation_restoration_fixture():
+    """Required prepared AUTO18 differs from the original observed HVAC state."""
+    case, plan, observation = agent3_test_case(), agent3_plan(), agent3_observation()
+    case.state_effect = pipeline.TcStateEffect.BLOCKED_CHANGE
+    case.test_data.restore_observed_hvac_state = True
+    case.restore_required = True
+    case.preconditions = ["대상 장비의 mode는 AUTO이고 setTemp는 18이다."]
+    case.expected_results = case.expected_results[:2]
+    case.restore_steps = ["실행 직전 관찰한 모드와 설정 온도로 복원하고 적용한다."]
+    plan.assertions = plan.assertions[:2]
+    for action in plan.actions:
+        if action.phase == AutomationPhase.PRECONDITION:
+            action.source_text = case.preconditions[0]
+    plan.actions.append(AutomationAction(action_id="ACT-007", phase="RESTORE",
+        action_type="RESTORE_OBSERVED_HVAC", selector=".btn-apply-cmd", source_text=case.restore_steps[0]))
+    plan.precondition_checks = [pipeline.PreconditionCheck(source_text=case.preconditions[0],
+        read_kind="INTERNAL_VALUE", selector=f"window.__vccs.devices[0].{field}", expected_value=value)
+        for field, value in [("mode", "AUTO"), ("setTemp", 18)]]
+    for result, assertion, target in zip(case.expected_results, plan.assertions, ["온도 표시", "내부 setTemp"]):
+        result.observation_target = target
+        result.verify_after_step = case.steps[-1]
+        assertion.after_action_id = "ACT-006"
+        line = f"복원 후 {target}를 실행 전 상태와 비교해 일치하는지 확인한다."
+        case.restore_steps.append(line)
+        plan.restore_confirmations.append(pipeline.RestoreConfirmation(source_text=line,
+            result_ids=[result.result_id], comparisons=[pipeline.RestoreComparison(
+                result_id=result.result_id, source_excerpt=line, basis="OBSERVED_BASELINE")]))
+    observation.harness_values = {"window.__vccs.devices[0].id": 1,
+        "window.__vccs.devices[0].mode": "COOL", "window.__vccs.devices[0].setTemp": 24}
+    return case, plan, observation
 
 class Agent3FakeResponses:
     def __init__(self) -> None:

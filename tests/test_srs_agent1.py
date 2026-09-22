@@ -3,6 +3,307 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("note", [
+    "[준비] 복원 버튼이 있는 화면을 엽니다.",
+    "[복원] Return to the captured state after the scenario.",
+    "[시험 절차 메모] 마무리할 때 처음 기록한 상태와 대조합니다.",
+])
+def test_structural_cp1_preserves_marked_procedure_roles_with_free_body_wording(note):
+    from qa_pipeline_agent1 import _acceptance_delivery_contract
+
+    request, analysis = cp1_request(), cp1_valid_analysis()
+    request.acceptance_notes.append(note)
+    analysis.procedure_notes = [note]
+    request_before, analysis_before = request.model_dump_json(), analysis.model_dump_json()
+
+    delivery = _acceptance_delivery_contract(request, legacy_wording_checks=False)
+    assert delivery[-1]["source_text"] == note
+    assert delivery[-1]["destination"] == "procedure_notes"
+    result = evaluate_checkpoint1(request, analysis, cp1_requirements(), legacy_wording_checks=False)
+
+    assert result.status == CheckStatus.PASS, result.model_dump()
+    assert cp1_check(result, "CP1-012").status == CheckStatus.PASS
+    assert request.model_dump_json() == request_before
+    assert analysis.model_dump_json() == analysis_before
+
+
+@pytest.mark.parametrize("destination", ["missing", "condition", "scope", "gap"])
+def test_structural_cp1_rejects_marked_procedure_omission_or_role_change(destination):
+    note = "[복원] 원래 상태로 되돌립니다."
+    request, analysis = cp1_request(), cp1_valid_analysis()
+    request.acceptance_notes.append(note)
+    if destination == "condition":
+        analysis.confirmed_conditions.append(ConfirmedCondition(
+            condition_id="COND-090", statement=note, source_text=note,
+            source_type=ConditionSource.CHANGE_REQUEST,
+            requirement_ids=[request.target_requirement_id],
+        ))
+    elif destination == "scope":
+        analysis.excluded_scope.append(note)
+    elif destination == "gap":
+        analysis.decision = AnalysisDecision.PARTIAL_PROCEED
+        analysis.excluded_scope.append(note)
+        analysis.information_gaps = [note]
+        analysis.excluded_information_gaps = [note]
+        analysis.user_questions = ["복원 절차를 추가로 확인해 주세요."]
+
+    result = evaluate_checkpoint1(request, analysis, cp1_requirements(), legacy_wording_checks=False)
+
+    assert cp1_check(result, "CP1-012").status == CheckStatus.FAIL, result.model_dump()
+    assert result.handoff_status == HandoffStatus.BLOCKED
+
+
+@pytest.mark.parametrize("gap_field", ["information_gaps", "excluded_information_gaps"])
+def test_structural_cp1_rejects_procedure_and_gap_role_overlap(gap_field):
+    # Unmarked input isolates the list conflict from the mandatory marker rule.
+    note = "마무리할 때 처음 기록한 상태와 대조합니다."
+    request, analysis = cp1_request(), cp1_valid_analysis()
+    request.acceptance_notes.append(note)
+    analysis.procedure_notes = [note]
+    setattr(analysis, gap_field, [note])
+
+    result = evaluate_checkpoint1(request, analysis, cp1_requirements(), legacy_wording_checks=False)
+
+    assert cp1_check(result, "CP1-012").status == CheckStatus.FAIL, result.model_dump()
+    assert result.handoff_status == HandoffStatus.BLOCKED
+
+
+def test_structural_cp1_explicit_scope_exclusion_precedes_procedure_marker():
+    from qa_pipeline_agent1 import _acceptance_delivery_contract
+
+    note = "[복원] 외부 장비를 원래 상태로 되돌립니다."
+    request, analysis = cp1_request(), cp1_valid_analysis()
+    request.acceptance_notes.append(note)
+    request.out_of_scope.append(note)
+    analysis.excluded_scope.append(note)
+
+    delivery = _acceptance_delivery_contract(request, legacy_wording_checks=False)
+    assert delivery[-1]["destination"] == "excluded_scope"
+    result = evaluate_checkpoint1(request, analysis, cp1_requirements(), legacy_wording_checks=False)
+    assert result.status == CheckStatus.PASS, result.model_dump()
+    assert cp1_check(result, "CP1-012").status == CheckStatus.PASS
+
+    analysis.procedure_notes = [note]
+    duplicate = evaluate_checkpoint1(request, analysis, cp1_requirements(), legacy_wording_checks=False)
+    assert cp1_check(duplicate, "CP1-012").status == CheckStatus.FAIL
+    assert duplicate.handoff_status == HandoffStatus.BLOCKED
+
+
+def test_legacy_cp1_keeps_marker_routing_without_new_procedure_notes_field():
+    note = "[복원] 원래 상태로 되돌립니다."
+    request, analysis = cp1_request(), cp1_valid_analysis()
+    request.acceptance_notes.append(note)
+    assert analysis.procedure_notes == []
+
+    legacy = evaluate_checkpoint1(request, analysis, cp1_requirements(), legacy_wording_checks=True)
+    assert legacy.status == CheckStatus.PASS, legacy.model_dump()
+    assert not any(check.rule_id == "CP1-012" for check in legacy.checks)
+
+    current = evaluate_checkpoint1(request, analysis, cp1_requirements(), legacy_wording_checks=False)
+    assert cp1_check(current, "CP1-012").status == CheckStatus.FAIL
+    assert current.handoff_status == HandoffStatus.BLOCKED
+
+
+@pytest.mark.parametrize("wording", ["시험이 끝나면 원래 상태로 되돌립니다.",
+                                    "마무리할 때 처음 기록한 상태와 대조합니다.",
+                                    "Restore the captured state after the scenario."])
+def test_new_wording_policy_routes_declared_procedures_without_verb_guessing(wording):
+    request, analysis = cp1_request(), cp1_valid_analysis()
+    request.acceptance_notes.append(wording)
+    before = evaluate_checkpoint1(request, analysis, cp1_requirements(), legacy_wording_checks=False)
+    assert any(c.rule_id == "CP1-008" and c.status == CheckStatus.FAIL for c in before.checks)
+    analysis.procedure_notes = [wording]
+    after = evaluate_checkpoint1(request, analysis, cp1_requirements(), legacy_wording_checks=False)
+    assert after.status == CheckStatus.PASS, after.model_dump()
+    analysis.procedure_notes = ["입력에 없는 절차"]
+    invalid = evaluate_checkpoint1(request, analysis, cp1_requirements(), legacy_wording_checks=False)
+    assert any(c.rule_id == "CP1-012" and c.status == CheckStatus.FAIL for c in invalid.checks)
+
+
+@pytest.mark.parametrize("mutation", ["none", "id", "source", "number", "after", "missing_note"])
+def test_new_wording_policy_preserves_cp1_integrity(mutation):
+    request, analysis = cp1_request(), cp1_valid_analysis()
+    if mutation == "id":
+        analysis.request_id = "OTHER"
+    elif mutation == "source":
+        analysis.confirmed_conditions[0].source_text = "없는 출처"
+    elif mutation == "number":
+        analysis.confirmed_conditions[0].statement += " 999도"
+    elif mutation == "after":
+        analysis.after_condition = "다른 변경값"
+    elif mutation == "missing_note":
+        request.acceptance_notes.append("새로운 필수 인수 조건")
+    result = evaluate_checkpoint1(request, analysis, cp1_requirements(), legacy_wording_checks=False)
+    assert (result.status == CheckStatus.PASS) == (mutation == "none"), result.model_dump()
+
+
+def test_new_wording_policy_does_not_claim_boundary_sentence_semantics():
+    request, analysis = cp1_request(), cp1_valid_analysis()
+    source = "온도 30°C 이상 요청은 차단합니다."
+    request.acceptance_notes.append(source)
+    analysis.confirmed_conditions.append(ConfirmedCondition(condition_id="COND-099",
+        statement="온도 30°C 초과 요청은 차단합니다.", source_type="CHANGE_REQUEST",
+        source_text=source, requirement_ids=[request.target_requirement_id], change_role=ConditionChangeRole.CHANGED))
+    old = evaluate_checkpoint1(request, analysis, cp1_requirements())
+    new = evaluate_checkpoint1(request, analysis, cp1_requirements(), legacy_wording_checks=False)
+    assert any(c.rule_id == "CP1-007" and c.status == CheckStatus.FAIL for c in old.checks)
+    assert not any(c.rule_id == "CP1-007" and c.status == CheckStatus.FAIL for c in new.checks)
+    # Deliberate limitation: equal numbers do not prove equal boundary semantics.
+
+
+@pytest.mark.parametrize("subject", ["온도", "속도", "용량", "압력"])
+@pytest.mark.parametrize("wording", ["허용 범위 밖 입력은 차단합니다.", "허용 범위를 벗어나는 입력은 차단합니다.", "상한 초과 입력은 차단합니다."])
+def test_product_boundaries_are_not_test_exclusions(subject, wording):
+    from qa_pipeline_agent1 import _acceptance_delivery_contract, _is_scope_exclusion_text
+    note = subject + " " + wording
+    request, analysis = cp1_request(), cp1_valid_analysis()
+    request.acceptance_notes.append(note)
+    assert not _is_scope_exclusion_text(note)
+    assert _acceptance_delivery_contract(request)[-1]["destination"] == "confirmed_conditions.source_text"
+    # Still mandatory: removing the real boundary condition is not a workaround.
+    assert cp1_check(evaluate_checkpoint1(request, analysis, cp1_requirements()), "CP1-008").status == CheckStatus.FAIL
+    analysis.confirmed_conditions.append(ConfirmedCondition(condition_id="COND-090", statement=note,
+        source_text=note, source_type="CHANGE_REQUEST", requirement_ids=[request.target_requirement_id]))
+    assert evaluate_checkpoint1(request, analysis, cp1_requirements()).status == CheckStatus.PASS
+
+
+@pytest.mark.parametrize("note", ["알림 검사는 제외한다.", "통신 검증은 이번 시험 범위 밖입니다.",
+    "다중 장비 제어는 범위에 포함하지 않습니다.", "풍량 검증은 변경 범위에서 제외합니다.", "외부 통신"])
+def test_explicit_exclusions_remain_binding_without_product_keyword_guessing(note):
+    from qa_pipeline_agent1 import _acceptance_delivery_contract
+    request, analysis = cp1_request(), cp1_valid_analysis()
+    request.acceptance_notes.append(note)
+    request.out_of_scope.append(note)
+    analysis.excluded_scope.append(note)
+    assert _acceptance_delivery_contract(request)[-1]["destination"] == "excluded_scope"
+    assert evaluate_checkpoint1(request, analysis, cp1_requirements()).status == CheckStatus.PASS
+    analysis.confirmed_conditions.append(ConfirmedCondition(condition_id="COND-090", statement=note,
+        source_text=note, source_type="CHANGE_REQUEST", requirement_ids=[request.target_requirement_id]))
+    assert cp1_check(evaluate_checkpoint1(request, analysis, cp1_requirements()), "CP1-009").status == CheckStatus.FAIL
+
+
+@pytest.mark.parametrize("note", ["[시험 절차 메모] 시험이 끝나면 원래 상태로 복원하고 확인합니다.",
+    "[복원] 모든 검사가 끝났을 때 처음의 값으로 복원합니다.",
+    "[복원] 모든 검사가 끝났을 때 처음의 값으로 되돌립니다.",
+    "[준비] 시작할 장비를 지정합니다.", "[시험 절차 메모] 진행에 앞서 대상 장비를 지정합니다."])
+def test_explicit_procedure_markers_do_not_depend_on_time_wording(note):
+    from qa_pipeline_agent1 import _acceptance_delivery_contract
+    request, analysis = cp1_request(), cp1_valid_analysis()
+    request.acceptance_notes.append(note)
+    assert _acceptance_delivery_contract(request)[-1]["destination"].startswith("request.acceptance_notes")
+    assert evaluate_checkpoint1(request, analysis, cp1_requirements()).status == CheckStatus.PASS
+    analysis.confirmed_conditions.append(ConfirmedCondition(condition_id="COND-090", statement=note,
+        source_text=note, source_type="CHANGE_REQUEST", requirement_ids=[request.target_requirement_id]))
+    assert cp1_check(evaluate_checkpoint1(request, analysis, cp1_requirements()), "CP1-007").status == CheckStatus.FAIL
+
+
+def test_explicit_procedure_role_does_not_guess_from_body_words():
+    from qa_pipeline_agent1 import _is_test_setup_note, _is_test_restore_note
+    assert _is_test_restore_note("[복원] 최초 설정으로 되돌립니다.")
+    assert not _is_test_setup_note("[복원] 최초 설정으로 되돌립니다.")
+    assert _is_test_setup_note("[준비] 복원 버튼이 있는 화면을 엽니다.")
+    assert not _is_test_restore_note("[준비] 복원 버튼이 있는 화면을 엽니다.")
+
+
+@pytest.mark.parametrize("subject,unit,value", [("온도", "°C", 30), ("속도", "rpm", 1200), ("중량", "kg", 5)])
+@pytest.mark.parametrize("before,after", [("이상", "초과"), ("초과", "이상"), ("이하", "미만"), ("미만", "이하")])
+def test_same_frame_boundary_relation_changes_are_rejected(subject, unit, value, before, after):
+    request, analysis = cp1_request(), cp1_valid_analysis()
+    source = f"{subject} {value}{unit} {before} 요청은 차단합니다."
+    statement = source.replace(before, after)
+    request.acceptance_notes.append(source)
+    condition = ConfirmedCondition(condition_id="COND-090", statement=statement,
+        source_text=source, source_type="CHANGE_REQUEST", requirement_ids=[request.target_requirement_id])
+    analysis.confirmed_conditions.append(condition)
+    assert cp1_check(evaluate_checkpoint1(request, analysis, cp1_requirements()), "CP1-007").status == CheckStatus.FAIL
+    assert evaluate_checkpoint1(request, analysis, cp1_requirements(), require_input_contract=False).status == CheckStatus.PASS
+    condition.statement = source.replace(f"{value}{unit}", f"{value}.0 {unit}")
+    assert evaluate_checkpoint1(request, analysis, cp1_requirements()).status == CheckStatus.PASS
+
+
+@pytest.mark.parametrize("source,statement", [
+    ("온도 30°C 이상에서 차단합니다.", "속도 30rpm 초과에서 차단합니다."),
+    ("온도 30°C 이상이면 차단합니다.", "온도가 30°C를 넘으면 차단합니다."),
+])
+def test_relation_checker_does_not_claim_general_paraphrase_or_target_matching(source, statement):
+    from qa_pipeline_agent1 import _explicit_relation_conflict
+    # False is only 'no supported same-frame comparison', never proof of equivalence.
+    assert not _explicit_relation_conflict(source, statement)
+
+
+@pytest.mark.parametrize("source,changed", [
+    ("31°C 입력 후 30°C를 유지합니다.", "30°C 입력 후 31°C를 유지합니다."),
+    ("속도 1200rpm 입력 후 1000rpm을 유지합니다.", "속도 1000rpm 입력 후 1200rpm을 유지합니다."),
+    ("용량 8kg 입력 후 5kg을 유지합니다.", "용량 5kg 입력 후 8kg을 유지합니다."),
+])
+def test_ordered_input_output_values_are_not_a_bag_of_numbers(source, changed):
+    from qa_pipeline_agent1 import _meaning_conflicts
+    assert _meaning_conflicts(source, changed)
+    assert not _meaning_conflicts(source, source)
+    request, analysis = cp1_request(), cp1_valid_analysis()
+    request.acceptance_notes.append(source)
+    analysis.confirmed_conditions.append(ConfirmedCondition(condition_id="COND-090", statement=changed,
+        source_text=source, source_type="CHANGE_REQUEST", requirement_ids=[request.target_requirement_id]))
+    assert cp1_check(evaluate_checkpoint1(request, analysis, cp1_requirements()), "CP1-007").status == CheckStatus.FAIL
+
+
+@pytest.mark.parametrize("mutation", ["none", "missing", "wrong_requirement", "changed_role", "altered_quote", "after_policy"])
+def test_srs_maintenance_range_requires_same_target_verbatim_background_authority(mutation):
+    request, analysis, requirements = cp1_request(), cp1_valid_analysis(), cp1_requirements()
+    request.description = "기존 16~30°C 허용 범위는 유지하고 상한 차단 결과를 명확히 합니다."
+    request.after_value = "범위 밖 입력은 기존 설정값을 유지합니다."
+    analysis.after_condition = request.after_value
+    analysis.confirmed_conditions = analysis.confirmed_conditions[:3]
+    maintenance = analysis.confirmed_conditions[-1]
+    maintenance.statement = maintenance.source_text = requirements[request.target_requirement_id].statement
+    maintenance.change_role = ConditionChangeRole.UNCHANGED
+    if mutation == "missing":
+        analysis.confirmed_conditions.pop()
+    elif mutation == "wrong_requirement":
+        maintenance.requirement_ids = ["REQ-STATE-001"]
+    elif mutation == "changed_role":
+        maintenance.change_role = ConditionChangeRole.CHANGED
+    elif mutation == "altered_quote":
+        maintenance.statement += " 알림도 표시합니다."
+    elif mutation == "after_policy":
+        request.after_value = analysis.after_condition = "AUTO 모드는 16~30°C입니다."
+    result = evaluate_checkpoint1(request, analysis, requirements)
+    assert (cp1_check(result, "CP1-008").status == CheckStatus.PASS) == (mutation == "none")
+    if mutation == "none":
+        assert result.status == CheckStatus.PASS
+        assert cp1_check(evaluate_checkpoint1(request, analysis, requirements, require_input_contract=False), "CP1-008").status == CheckStatus.FAIL
+
+
+@pytest.mark.parametrize("note,destination", [
+    ("온라인 단일 장비를 대상으로 합니다.", "confirmed_conditions.source_text"),
+    ("중앙 관제 패널에서 오류와 잠금이 없는 단일 장비를 대상으로 합니다.", "confirmed_conditions.source_text"),
+    ("설정 온도는 18~30°C 범위여야 합니다.", "confirmed_conditions.source_text"),
+    ("운전 모드를 COOL로 표시합니다.", "confirmed_conditions.source_text"),
+    ("풍량 변경 시 내부 fanSpeed를 MED로 표시합니다.", "confirmed_conditions.source_text"),
+    ("조회 후 설정 상태를 유지합니다.", "confirmed_conditions.source_text"),
+    ("알림의 목표 색상은 미정입니다.", "information_gaps"),
+    ("다중 장비 제어는 범위에 포함하지 않습니다.", "excluded_scope"),
+    ("시험 전에 대상 장비를 선택한다.", "request.acceptance_notes"),
+    ("시험 후 원래 상태로 복원한다.", "request.acceptance_notes"),
+])
+def test_acceptance_routing_is_shared_by_initial_repair_and_checkpoint(note, destination):
+    from qa_pipeline_agent1 import _acceptance_delivery_contract
+    request, analysis = cp1_request(), cp1_valid_analysis()
+    request.acceptance_notes.append(note)
+    original = request.model_dump_json()
+    row = _acceptance_delivery_contract(request)[-1]
+    assert row["source_text"] == note and row["destination"].startswith(destination)
+    responses = Agent1FakeResponses()
+    agent = OpenAIAgent1(client=SimpleNamespace(responses=responses))
+    for extra in ({}, {"previous_analysis": analysis, "checkpoint_feedback": ["조건 누락"]}):
+        agent.analyze(request, cp1_requirements(), **extra)
+        assert json.dumps(_acceptance_delivery_contract(request, legacy_wording_checks=False), ensure_ascii=False) in responses.kwargs["input"][1]["content"]
+    cp = evaluate_checkpoint1(request, analysis, cp1_requirements())
+    needs_source = destination in {"confirmed_conditions.source_text", "information_gaps"}
+    assert (cp1_check(cp, "CP1-008").status == CheckStatus.FAIL) == needs_source
+    assert request.model_dump_json() == original
+
+
 @pytest.mark.parametrize("requirement_id", ["REQ-NOTIFY-001", "REQ-STATE-001"])
 def test_request_trace_only_keeps_requested_words_without_full_srs_scope(requirement_id):
     from qa_pipeline_contracts import ScopeBasis
@@ -225,12 +526,12 @@ def test_agent1_uses_structured_responses_api() -> None:
     assert result.response_id == "resp_test"
     assert result.usage["total_tokens"] == 150
     assert responses.kwargs["text_format"] is Agent1Analysis
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent1-2-11"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent1-2-14"
     assert responses.kwargs["store"] is False
     instructions = responses.kwargs["input"][0]["content"]
     assert "현재 SRS는 변경 전 제품 상태" in instructions
     assert "변경 후 정책의 권한 있는 입력" in instructions
-    assert "acceptance_notes 중 제품의 긍정적인 판정 기준" in instructions
+    assert "acceptance_notes는 제공된 인수 조건 전달 목록" in instructions
     assert "Agent 2가 TC의 판정 기준" in instructions
     assert "VERIFY, 이번 변경과 무관한 기준은 NO_IMPACT" in instructions
     assert "연관 항목을 조용히 생략하지 않습니다" in instructions

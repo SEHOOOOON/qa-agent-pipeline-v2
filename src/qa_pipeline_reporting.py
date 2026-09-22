@@ -58,7 +58,7 @@ def _agent4_finding_for_result(
 ) -> Agent4Finding | None:
     observations = failure_observations or {}
     precondition_failed = bool(observations.get("PRECONDITION_NOT_MET"))
-    restore_failed = bool(observations.get("RESTORE_MISMATCH"))
+    restore_failed = bool(observations.get("RESTORE_MISMATCH")) or "FAILED" in observations.get("RESTORE_STATUS", [])
     if result.status == NeutralExecutionStatus.PASSED and not restore_failed and not precondition_failed:
         return None
     if result.source == ExecutionSource.ENVIRONMENT_PRECHECK:
@@ -416,7 +416,7 @@ def _execution_failure_observations(
         text = candidate.read_text(encoding="utf-8", errors="replace")
         for marker, detail in re.findall(
             r"^[ \t]*(?:E[ \t]+)?(?:AssertionError:[ \t]*)?"
-            r"(PRODUCT_MISMATCH|RESTORE_MISMATCH|PRECONDITION_NOT_MET):[ \t]*([^\r\n]+)$",
+            r"(PRODUCT_MISMATCH|RESTORE_MISMATCH|PRECONDITION_NOT_MET|RESTORE_STATUS):[ \t]*([^\r\n]+)$",
             text,
             flags=re.MULTILINE,
         ):
@@ -437,6 +437,17 @@ def _human_review_observation(
         for marker, label in (("PRODUCT_MISMATCH", "제품 불일치 관찰"), ("RESTORE_MISMATCH", "복원 실패"), ("PRECONDITION_NOT_MET", "사전조건 불충족·본 시험 미실행"))
         if marker in observations
     ]
+    restore_labels = {"RESTORED": "시험 전 상태로 복원·비교 완료", "UNCHANGED": "상태 유지 확인·복원 조작 생략",
+                      "NOT_REQUIRED": "조회 TC·복원 불필요", "NOT_STARTED": "상태 변경 동작 전 중단",
+                      "FAILED": "복원 실패·해당 실행 환경 사용 종료"}
+    statuses = observations.get("RESTORE_STATUS", [])
+    if statuses:
+        # A later cleanup error wins over an earlier successful observation.
+        selected = "FAILED" if "FAILED" in statuses else statuses[-1]
+        if selected in restore_labels:
+            if not parts:
+                parts.append(_markdown_text(result.raw_message or result.source_outcome))
+            parts.append("복원 결과: " + restore_labels[selected])
     if parts:
         return " / ".join(parts)
     return _markdown_text(result.raw_message or result.source_outcome)

@@ -38,6 +38,14 @@ DEFAULT_APPROVED_ASSETS_ROOT = Path("approved_assets")
 _RUN_ID_PATTERN = re.compile(r"^RUN-\d{8}-\d{6}-[A-F0-9]{6}$")
 
 
+def _legacy_wording_policy(manifest: dict[str, Any], new_versions: set[str]) -> bool:
+    policy = manifest.get("wording_policy")
+    new_contract = manifest.get("contract_version") in new_versions
+    if policy not in {None, "STRUCTURAL_ONLY_V1"} or new_contract != (policy == "STRUCTURAL_ONLY_V1"):
+        raise ValueError("지원하지 않거나 누락된 문장 검사 정책입니다.")
+    return not new_contract
+
+
 def _read_request(path: Path) -> ChangeRequest:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -107,7 +115,7 @@ def run_agent1(args: argparse.Namespace) -> int:
     _write_text_atomic(srs_snapshot_file, srs_text)
     try:
         response = agent.analyze(request, requirements)
-        checkpoint = evaluate_checkpoint1(request, response.analysis, requirements)
+        checkpoint = evaluate_checkpoint1(request, response.analysis, requirements, legacy_wording_checks=False)
         attempts = [
             {
                 "attempt": 1,
@@ -136,7 +144,7 @@ def run_agent1(args: argparse.Namespace) -> int:
                     if item.status == CheckStatus.FAIL
                 ],
             )
-            checkpoint = evaluate_checkpoint1(request, response.analysis, requirements)
+            checkpoint = evaluate_checkpoint1(request, response.analysis, requirements, legacy_wording_checks=False)
             attempts.append(
                 {
                     "attempt": 2,
@@ -152,10 +160,12 @@ def run_agent1(args: argparse.Namespace) -> int:
         _write_json(
             run_dir / "run_manifest.json",
             {
-                "contract_version": "2.6",
+                "contract_version": "2.8",
+                "wording_policy": "STRUCTURAL_ONLY_V1",
+                "input_routing_contract": "1.0",
                 "meaning_guard_contract": "1.0",
                 "scope_guard_contract": "1.1",
-                "prompt_version": "agent1-2.11",
+                "prompt_version": "agent1-2.14",
                 "run_id": run_id,
                 "stage": "AGENT_1_CP1",
                 "status": checkpoint.status.value,
@@ -239,10 +249,16 @@ def _load_verified_agent1_run(run_dir: Path, run_id: str) -> tuple[
     if scope_contract not in {None, "1.0", "1.1"} or (
         manifest.get("contract_version") == "2.5" and scope_contract != "1.0"
     ) or (
-        manifest.get("contract_version") == "2.6" and scope_contract != "1.1"
+        manifest.get("contract_version") in {"2.6", "2.7", "2.8"} and scope_contract != "1.1"
     ):
         raise ValueError("지원하지 않거나 누락된 검사 범위 계약입니다.")
+    input_contract = manifest.get("input_routing_contract")
+    if input_contract not in {None, "1.0"} or (manifest.get("contract_version") in {"2.7", "2.8"}) != (input_contract == "1.0"):
+        raise ValueError("지원하지 않거나 누락된 입력 분류 계약입니다.")
+    legacy_wording = _legacy_wording_policy(manifest, {"2.8"})
     recomputed = evaluate_checkpoint1(request, analysis, requirements,
+        legacy_wording_checks=legacy_wording,
+        require_input_contract=input_contract == "1.0",
         require_meaning_guard=manifest.get("meaning_guard_contract") == "1.0",
         require_scope_guard=scope_contract in {"1.0", "1.1"},
         allow_request_trace=scope_contract == "1.1")
@@ -270,6 +286,15 @@ def run_agent2(args: argparse.Namespace) -> int:
     request, requirements, analysis, _, source_manifest = _load_verified_agent1_run(
         run_dir, args.run_id
     )
+    if _legacy_wording_policy(source_manifest, {"2.8"}):
+        # Historical CP1 records remain readable under their original rules,
+        # but have no verified procedure routing for a new Agent 2 execution.
+        # Stop before reserving outputs or constructing a paid model client.
+        raise ValueError(
+            "과거 Agent 1 분석에는 새 실행에 필요한 절차 분류가 없습니다. "
+            "같은 요청으로 새 Agent 1 Run을 만든 뒤 Agent 2를 실행하세요. "
+            "기존 실행 기록 조회·재검증은 계속 지원합니다."
+        )
     approved_assets_root = Path(
         getattr(args, "approved_assets_root", DEFAULT_APPROVED_ASSETS_ROOT)
     ).resolve()
@@ -338,6 +363,9 @@ def run_agent2(args: argparse.Namespace) -> int:
             allow_already_reflected_srs=True,
             require_existing_behavior_values=True,
             require_restore_target_basis=True,
+            require_state_restoration_policy=True,
+            require_structured_restoration=True,
+            legacy_wording_checks=False,
         )
         attempts = [
             {
@@ -401,6 +429,9 @@ def run_agent2(args: argparse.Namespace) -> int:
                 allow_already_reflected_srs=True,
                 require_existing_behavior_values=True,
                 require_restore_target_basis=True,
+                require_state_restoration_policy=True,
+                require_structured_restoration=True,
+                legacy_wording_checks=False,
             )
             attempts.append(
                 {
@@ -433,8 +464,12 @@ def run_agent2(args: argparse.Namespace) -> int:
         _write_json(
             run_dir / "agent2_manifest.json",
             {
-                "contract_version": "3.4",
-                "prompt_version": "agent2-2.29",
+                "contract_version": "3.8",
+                "wording_policy": "STRUCTURAL_ONLY_V1",
+                "input_routing_contract": "1.0",
+                "prompt_version": "agent2-2.35",
+                "structured_restoration_contract": "1.0",
+                "state_restoration_contract": "1.0",
                 "tc_detail_contract": "1.2",
                 "run_id": args.run_id,
                 "source_stage": "AGENT_1_CP1",
@@ -536,23 +571,41 @@ def _load_verified_agent2_run(
     ) or (
         manifest.get("contract_version") == "3.2" and detail_contract != "1.1"
     ) or (
-        manifest.get("contract_version") in {"3.3", "3.4"} and detail_contract != "1.2"
+        manifest.get("contract_version") in {"3.3", "3.4", "3.5", "3.6", "3.7", "3.8"} and detail_contract != "1.2"
     ):
         raise ValueError("지원하지 않거나 누락된 TC 상세화 계약입니다.")
     revision_contract = manifest.get("srs_revision_contract")
     if revision_contract not in {None, "1.0", "1.1"} or (
-        manifest.get("contract_version") == "3.4" and revision_contract != "1.1"
-    ) or (revision_contract == "1.1" and manifest.get("contract_version") != "3.4"):
+        manifest.get("contract_version") in {"3.4", "3.5", "3.6", "3.7", "3.8"} and revision_contract != "1.1"
+    ) or (revision_contract == "1.1" and manifest.get("contract_version") not in {"3.4", "3.5", "3.6", "3.7", "3.8"}):
         raise ValueError("지원하지 않거나 누락된 SRS 개정 계약입니다.")
+    state_contract = manifest.get("state_restoration_contract")
+    if (state_contract not in {None, "1.0"}
+        or (manifest.get("contract_version") in {"3.5", "3.6", "3.7", "3.8"}) != (state_contract == "1.0")
+        or (any(tc.state_effect is not None for tc in design.test_cases) and state_contract != "1.0")):
+        raise ValueError("지원하지 않거나 누락된 상태 복원 계약입니다.")
+    structured_contract = manifest.get("structured_restoration_contract")
+    if (structured_contract not in {None, "1.0"}
+            or (manifest.get("contract_version") in {"3.6", "3.7", "3.8"}) != (structured_contract == "1.0")
+            or (any(tc.restoration is not None for tc in design.test_cases) and structured_contract != "1.0")):
+        raise ValueError("지원하지 않거나 누락된 구조화 복원 계약입니다.")
+    input_contract = manifest.get("input_routing_contract")
+    if input_contract not in {None, "1.0"} or (manifest.get("contract_version") in {"3.7", "3.8"}) != (input_contract == "1.0"):
+        raise ValueError("지원하지 않거나 누락된 입력 분류 계약입니다.")
+    legacy_wording = _legacy_wording_policy(manifest, {"3.8"})
     recomputed = evaluate_checkpoint2(
         request,
         analysis,
         design,
         requirements,
+        require_input_contract=input_contract == "1.0",
+        legacy_wording_checks=legacy_wording,
         require_meaning_guard=manifest.get("meaning_guard_contract") == "1.0",
         require_tc_detail=detail_contract in {"1.0", "1.1", "1.2"},
         require_procedure_detail=detail_contract in {"1.1", "1.2"},
         require_restore_target_basis=detail_contract == "1.2",
+        require_state_restoration_policy=state_contract == "1.0",
+        require_structured_restoration=structured_contract == "1.0",
         require_candidate_expectation_guard=manifest.get("candidate_expectation_contract") == "1.0",
         existing_catalog=existing_catalog,
         require_srs_revision_proposals=(
@@ -905,7 +958,7 @@ def run_agent3(args: argparse.Namespace) -> int:
         agent = OpenAIAgent3(model=args.model)
         response = agent.plan(test_case, observation, requirements)
         _write_json(artifact_dir / "agent3_automation_plan_attempt_1.json", response.plan.model_dump(mode="json"))
-        checkpoint = evaluate_checkpoint3_plan(test_case, response.plan, observation, require_precondition_proof=True, require_restore_plan_links=True, require_restore_comparison_basis=True)
+        checkpoint = evaluate_checkpoint3_plan(test_case, response.plan, observation, require_precondition_proof=True, require_restore_plan_links=True, require_restore_comparison_basis=True, legacy_wording_checks=False)
         attempts = [
             {
                 "attempt": 1,
@@ -925,7 +978,7 @@ def run_agent3(args: argparse.Namespace) -> int:
                 checkpoint_feedback=[item.message for item in checkpoint.checks if item.status == CheckStatus.FAIL],
             )
             _write_json(artifact_dir / "agent3_automation_plan_attempt_2.json", response.plan.model_dump(mode="json"))
-            checkpoint = evaluate_checkpoint3_plan(test_case, response.plan, observation, require_precondition_proof=True, require_restore_plan_links=True, require_restore_comparison_basis=True)
+            checkpoint = evaluate_checkpoint3_plan(test_case, response.plan, observation, require_precondition_proof=True, require_restore_plan_links=True, require_restore_comparison_basis=True, legacy_wording_checks=False)
             attempts.append(
                 {
                     "attempt": 2,
@@ -973,11 +1026,13 @@ def run_agent3(args: argparse.Namespace) -> int:
             _write_json(artifact_dir / "agent3_trial.json", trial.model_dump(mode="json"))
 
         manifest_payload = {
-            "contract_version": "4.4",
+            "contract_version": "4.7" if test_case.restoration is not None else "4.6",
+            "wording_policy": "STRUCTURAL_ONLY_V1",
+            "structured_restoration_contract": "1.0" if test_case.restoration is not None else None,
             "plan_fidelity_contract": "1.0",
             "precondition_proof_contract": "1.0",
             "restore_confirmation_contract": "1.2",
-            "prompt_version": "agent3-3.28",
+            "prompt_version": "agent3-3.32",
             "run_id": args.run_id,
             "source_stage": "AGENT_2_CP2",
             "stage": "AGENT_3_CP3_TRIAL",
@@ -1160,17 +1215,23 @@ def _candidate_execution_record(
     ) or (
         agent3_manifest.get("contract_version") == "4.2" and restore_contract != "1.1"
     ) or (
-        agent3_manifest.get("contract_version") in {"4.3", "4.4"} and restore_contract != "1.2"
+        agent3_manifest.get("contract_version") in {"4.3", "4.4", "4.5", "4.6", "4.7"} and restore_contract != "1.2"
     ) or (plan.restore_confirmations and restore_contract not in {"1.1", "1.2"}
     ) or (any(item.comparisons for item in plan.restore_confirmations) and restore_contract != "1.2"
     ):
         raise ValueError("지원하지 않거나 누락된 복원 확인 계약입니다.")
     fidelity_contract = agent3_manifest.get("plan_fidelity_contract")
     if fidelity_contract not in {None, "1.0"} or (
-        agent3_manifest.get("contract_version") == "4.4" and fidelity_contract != "1.0"
+        agent3_manifest.get("contract_version") in {"4.4", "4.5", "4.6", "4.7"} and fidelity_contract != "1.0"
     ):
         raise ValueError("지원하지 않거나 누락된 계획 충실성 계약입니다.")
+    structured_contract = agent3_manifest.get("structured_restoration_contract")
+    if (structured_contract not in {None, "1.0"}
+            or (agent3_manifest.get("contract_version") in {"4.5", "4.7"}) != (structured_contract == "1.0")
+            or (test_case.restoration is not None) != (structured_contract == "1.0")):
+        raise ValueError("지원하지 않거나 누락된 구조화 복원 계획 계약입니다.")
     current_checkpoint3 = evaluate_checkpoint3_plan(test_case, plan, observation,
+        legacy_wording_checks=_legacy_wording_policy(agent3_manifest, {"4.6", "4.7"}),
         require_plan_fidelity=fidelity_contract == "1.0",
         require_precondition_proof=agent3_manifest.get("precondition_proof_contract") == "1.0",
         require_restore_confirmation_detail=restore_contract in {"1.0", "1.1", "1.2"},
@@ -1669,7 +1730,13 @@ def _final_review_notes_for_validation(run_dir: Path) -> list[str]:
         if manifest.get("existing_procedure_review_contract") == "1.0":
             request_file = run_dir / "request.json"
             _verify_sha256(request_file, manifest.get("request_sha256"), "시험 절차 요청")
-            notes.extend(_existing_test_procedure_review_notes(_read_request(request_file), design))
+            if manifest.get("wording_policy") == "STRUCTURAL_ONLY_V1":
+                if not design.test_cases and design.related_existing_tests and analysis_file.is_file():
+                    notes.extend(f"기존 TC 시험 절차 확인: {note} [실제 수행 증거를 확인해 주세요.]"
+                                 for note in analysis.procedure_notes)
+            else:
+                notes.extend(_existing_test_procedure_review_notes(_read_request(request_file), design,
+                    legacy=manifest.get("input_routing_contract") != "1.0"))
     return list(dict.fromkeys(notes))
 
 

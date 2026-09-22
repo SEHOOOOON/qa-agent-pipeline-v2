@@ -1,7 +1,7 @@
 # 자동 테스트 카탈로그
 
-최종 확인: 2026-09-20
-실행 기준: `python -m pytest --collect-only -q` → **515건**
+최종 확인: 2026-09-22
+실행 기준: `python -m pytest --collect-only -q` → **770건**
 실제 정의 파일: `tests/test_srs_agent1.py`, `tests/test_agent2.py`, `tests/test_integrity_cli.py`, `tests/test_agent3.py`, `tests/test_orchestration_execution.py`, `tests/test_agent4_reporting.py`, `tests/test_pipeline_ui.py`
 
 이 문서는 현재 수집되는 자동 테스트를 사람이 확인하기 쉽게 정리한 목록입니다. 실행의 기준은 항상 테스트 코드와 Pytest 수집 결과이며, 테스트를 추가·삭제할 때는 이 문서도 같은 변경에서 갱신합니다.
@@ -10,9 +10,85 @@
 
 | 구성 | 수량 | 설명 |
 |---|---:|---|
-| 일반 테스트 함수 | 253 | 함수 하나가 Pytest 실행 1건 |
-| 파라미터 테스트 함수 | 49 | 서로 다른 입력·실패 조합으로 실행 262건 |
-| 합계 | **515** | 현재 Pytest 수집 수 |
+| 일반 테스트 함수 | 262 | 함수 하나가 Pytest 실행 1건 |
+| 파라미터 테스트 함수 | 85 | 서로 다른 입력·실패 조합으로 실행 508건 |
+| 합계 | **770** | 현재 Pytest 수집 수 |
+
+### 절차 역할·중복 분류·과거 인계 후속 회귀
+
+- `test_structural_cp1_preserves_marked_procedure_roles_with_free_body_wording`: 준비·복원·시험 절차 표시 3종, 다른 본문 표현과 입력 불변 확인.
+- `test_structural_cp1_rejects_marked_procedure_omission_or_role_change`: 표시 원문의 누락·제품 조건/제외/정보 부족 이동 4종 차단.
+- `test_structural_cp1_rejects_procedure_and_gap_role_overlap`: 절차와 정보 부족·제외된 정보 부족의 중복 2종 차단.
+- `test_structural_cp1_explicit_scope_exclusion_precedes_procedure_marker`: 요청의 명시 제외 우선, 절차에 중복 기록하면 차단.
+- `test_legacy_cp1_keeps_marker_routing_without_new_procedure_notes_field`: 과거 CP1의 빈 절차 필드 호환과 새 정책의 필수 역할 보존 구분.
+- `test_new_agent2_rejects_historical_analysis_before_any_side_effect`: 과거 2.6/2.7 × 표시/무표시 준비·복원 4종, 8조합. 과거 조회·해시 불변, 새 모델 클라이언트/예약/카탈로그 작성 전 중단.
+- `test_agent1_to_agent2_cli_handoff_with_frozen_inputs`: 정상·재작성 해결·미해결 × 절차 없음/표시/무표시 3종, 9조합. 새 분류의 실제 원문 인계와 과거 계약 조회를 함께 확인.
+
+이 검사는 새 의미 판별 규칙을 추가하지 않으며 API를 호출하지 않습니다. 과거 원문에서 절차를 자동 추측해 채우는 대신, 새 실행의 인계 조건을 명확히 검사합니다.
+
+### 새 실행의 문장 표현 검사 제외와 보호 검사
+
+- `test_new_wording_policy_routes_declared_procedures_without_verb_guessing`: 한글·영문 절차 3종. 분류 단어 대신 명시 목록을 사용하고 입력에 없는 원문과 기록 누락을 차단.
+- `test_new_wording_policy_preserves_cp1_integrity`: 정상·ID·출처·수치·변경 후 값·누락 6종.
+- `test_new_wording_policy_does_not_claim_boundary_sentence_semantics`: 같은 수치의 이상/초과 차이를 새 문장 검사로 증명하지 않는 한계 명시. 과거 계약의 판정도 유지.
+- `test_new_wording_policy_accepts_target_labels_but_requires_bindings`: 확인 대상 표현 3종 허용, 없는 단계·대상 누락 차단.
+- `test_new_wording_policy_preserves_cp2_integrity`: 정상·ID·조건·기대값·대상·시점 6종.
+- `test_new_wording_policy_preserves_procedure_handoff_without_keywords`: 한글·영문 절차 2종. 인계 누락·시험 제외로 이동 차단.
+- `test_new_wording_policy_preserves_execution_contract`: 화면 이름의 다른 표현과 실제 실행 보호 7종. 미관찰 Selector·없는 원문·Assertion·값·복원·연결 변경 차단.
+- `test_wording_policy_is_bound_to_contract_version`: Agent별 4버전 × 정상/누락/알 수 없는 정책/하향 변경/과거 계약 5종, 20조합.
+- `test_declared_procedures_reach_final_review_for_existing_tests`: 기존 TC만 선택한 경우 명시한 절차를 수행 완료로 간주하지 않고 최종 검토로 전달.
+
+기존 문장 검사 테스트는 과거 계약 호환성을 검증합니다. 새 정책 테스트는 `legacy_wording_checks=False` 또는 실제 CLI/Fake Client 인계를 사용합니다. 기존 통합 재작성 테스트의 실패 입력은 문구 차이 대신 실제 observation_target 누락이며, 정상·재작성·미해결 차단을 계속 검증합니다. 자동 테스트는 실제 새 모델 실행을 뜻하지 않습니다.
+
+### 입력 분류와 원문 기반 차이 검사
+
+- `test_product_boundaries_are_not_test_exclusions`: 온도·속도·용량·압력 × 경계 표현 3종, 12조합. 제품 경계를 제외로 오인하지 않고 조건 누락은 계속 차단.
+- `test_explicit_exclusions_remain_binding_without_product_keyword_guessing`: 명시적 제외 5종. out_of_scope 필드의 표현이 짧아도 확정 조건으로 바꾸지 못함.
+- `test_explicit_procedure_markers_do_not_depend_on_time_wording`: 준비/복원 표시와 다른 시점 표현 5조합. 제품 판정 조건으로 이동하면 차단.
+- `test_explicit_procedure_role_does_not_guess_from_body_words`: `[준비]`·`[복원]`의 명시 역할을 본문 속 다른 동작 단어보다 우선.
+- `test_same_frame_boundary_relation_changes_are_rejected`: 온도·속도·중량 × 이상/초과·이하/미만 변경 4종, 12조합. 같은 문장 구조의 경계 변경 거절, 공백·소수 표기 허용, 과거 계약 보존.
+- `test_relation_checker_does_not_claim_general_paraphrase_or_target_matching`: 다른 대상/단위 및 문장 구조가 다른 바꿔 쓰기 2조합. 지원된 비교를 찾지 못한 것을 의미 동등성 증명으로 사용하지 않음.
+- `test_ordered_input_output_values_are_not_a_bag_of_numbers`: 온도·속도·용량 3조합. 같은 숫자 집합이라도 입력/기대값 대응을 뒤집으면 차단.
+- `test_srs_maintenance_range_requires_same_target_verbatim_background_authority`: 정상·누락·다른 Requirement·변경 역할·원문 변조·after_value 대체의 6조합.
+- `test_marked_restoration_is_preserved_as_procedure_not_exclusion`: 복원 표시 2조합, CP2에서 누락/제외는 실패하고 restore_steps 보존은 통과.
+- `test_cp2_boundary_relation_compares_linked_condition_not_shared_numbers`: 원문 유지/경계 포함 여부 변경 2조합, CP2-017에 공통 비교 적용.
+- 기존 인계 테스트에 입력 분류 계약 1.0 누락·하향 변경 차단을 추가. 새 API 호출이나 모든 자연어 의미 판별 성공을 뜻하지 않음.
+
+### 구조화 복원 인계와 실제 비교
+
+- `test_cp2_structured_restoration_checks_ids_coverage_and_policy`: 정상·계약 누락·대상 누락/변경/중복·기준/시점 변경·조작 누락·순서·원문 연결 10조합.
+- `test_structured_restoration_read_only_and_strict_api_schema`: 조회의 빈 복원 계약과 실제 SDK의 엄격한 필수 JSON 필드 확인.
+- `test_structured_restoration_id_normalization_keeps_local_references`: TC 간 기술 ID 변경 시 복원 참조 유지, 같은 TC의 모호한 중복 ID는 자동 수정하지 않음.
+- `test_structured_restoration_does_not_parse_description_vocabulary`: 자연어 설명 6종에서 같은 CP3·컴파일·정적 검사 결과. 설명의 의미 정확성 자체를 평가하는 테스트는 아님.
+- `test_structured_restore_plan_rejects_execution_contract_changes`: 확인 누락·기준/ID/원문 변조·복원 조작/reader 누락·가짜 조작 8조합.
+- `test_structured_restoration_executes_real_baseline_comparison`: 실제 브라우저 스위치 예제의 정상 복원/내부값 복원 실패 2조합. 성공 로그·실패 상태·환경 폐기 확인.
+- 기존 `test_agent1_to_agent2_cli_handoff_with_frozen_inputs` 인계 테스트에도 구조화 계약 누락·하향 변경·과거 계약 호환 검증을 연결.
+
+### 공통 작성·검사 기준의 표현 및 누락 반례
+
+- `test_acceptance_routing_is_shared_by_initial_repair_and_checkpoint`: 대상 제한·온도·모드·풍량·조회·미정·제외·준비·복원 10조합. 같은 인수 조건 목록이 최초/재작성 입력과 CP1에서 사용되며 누락은 계속 거부하는지 검사.
+- `test_common_observation_binding_has_no_feature_specific_exception`: 5종 대상 이름 × 정상·다른 대상·중복 수식어·없는 판정 단계 4종, 20조합. 특정 기능명 예외 없이 연결 검사.
+- `test_agent2_repair_receives_same_binding_diagnostics_without_mutation`: 작성 안내와 검사 함수의 진단 전달·원본 TC 불변 확인.
+- `test_cp2_cp3_share_baseline_vocabulary_across_observation_targets`: 5종 시점 표현 × 5종 확인 대상 이름, 25조합. 같은 구조화 읽기 경로의 표시 문구만 바꿔 CP2·CP3의 일관성을 확인하며 다섯 실제 제품 기능의 실행 증거가 아님.
+- `test_shared_baseline_does_not_approve_wrong_comparison`: 시험 후·종료 후·다음 시험·다른 상태 비교의 4조합을 CP3에서 차단.
+- 기존 잘못된 초기값·대상 간 기준 차용·부정·누락·조회/변경/차단·실제 브라우저 복원 테스트와 함께 실행. 모델 대역·로컬 검증이며 Live 반복 안정성 검증은 별도.
+
+### 준비 전 원상태와 시험 직전 상태 분리
+
+- `test_checkpoint2_distinguishes_hvac_preparation_from_original_restore`: 새 정책에서 준비 완료 초기값과 관찰 원복이 공존하는 경우 및 과거 계약의 제한 유지, 2조합.
+- `test_hvac_preparation_restores_original_not_prepared_state`: 제어된 모의 제품으로 정상 변경·정상 차단·잘못된 변경·준비 적용 실패·부분 준비 실패·복원 실패·원래 송풍·원래 제습의 8조합. 실제 생성 코드와 Chromium 실행, 준비 전 값과 준비 후 값 혼동 방지.
+- `test_hvac_preparation_on_controller_copy`: 실제 V2 HTML의 임시 사본에서 원래 COOL/FAN/DRY의 준비·시험·원복 3조합. 원본 해시 불변 확인.
+- `test_hvac_preparation_rejects_unproved_recovery`: 관찰 역동작 누락·지원 밖 준비 조작·준비 값을 최종 복원 기준으로 사용·대상 선택 전에 준비 변경의 4조합.
+- API 호출 없는 로컬 검증이며 실제 모델이 이 TC·계획을 작성했다는 뜻은 아님.
+
+### 새 TC의 유형별 상태 복원 정책
+
+- `test_tc_state_restoration_policy_required_for_new_contract`: 조회·변경·차단 분류 누락과 복원 필요 여부의 7조합.
+- `test_blocked_change_requires_state_observation_not_just_notification`: 알림만으로 상태 유지 근거를 대신하지 못하도록 검사.
+- `test_state_restoration_policy_in_real_browser`: 정상 복원·조회·조회 사전조건 실패·정상 차단·잘못된 차단 후 복원·복원 실패·제품/복원 동시 실패·변경 전 사전조건 실패의 8조합. 실제 로컬 Chromium과 생성 코드를 실행하며 API를 호출하지 않음.
+- `test_state_restoration_policy_rejects_unsafe_plans`: 조회에 변경 동작, 복원 누락, 지원되지 않은 범용 준비 변경, 관찰 누락, 비활성 표시만으로 차단을 주장하는 계획의 5조합.
+- `test_verified_restoration_status_reaches_human_review`: 5종 복원 상태의 사람 검토서 문구·변조 로그 제외·FAILED의 자동화 문제 분류.
+- 기존 인계 테스트에 상태 복원 계약 누락·하향 변경 차단과 과거 계약 호환성을 추가. 기존 풍량·온도·모드 복원 브라우저 테스트의 명시 비교 기준 조합은 새 STATE_CHANGE 정책으로 실행하고 나머지는 과거 계약을 유지.
 
 ### 복합 조건의 기존 TC 연결 안내
 
@@ -300,7 +376,7 @@ HTTP 대역으로 본문 생성·전송 계약을 검사합니다. 실제 Notion
 | `test_partial_scope_exclusions_must_be_preserved_by_agent2` | Agent 1 제외 범위·정보 부족의 Agent 2 인계 |
 | `test_agent2_preserves_setup_and_restore_notes_as_tc_procedures` | 시험 준비·종료 후 복원을 제외하지 않고 TC 절차로 보존 |
 | `test_playwright_code_is_rejected` | TC 내 Playwright 코드 혼입 차단 |
-| `test_verified_agent1_run_can_handoff_to_agent2` | 검증된 Agent 1 SHA 인계 |
+| `test_historical_agent1_run_remains_readable` | 과거 Agent 1 SHA·Checkpoint 조회 호환 |
 | `test_modified_agent1_artifact_is_blocked_before_agent2` | 변조된 Agent 1 산출물 차단 |
 | `test_paused_manifest_is_blocked_before_agent2` | PAUSE Manifest 차단 |
 | `test_agent1_to_agent2_cli_handoff_with_frozen_inputs` | CLI 동결 입력 인계 |

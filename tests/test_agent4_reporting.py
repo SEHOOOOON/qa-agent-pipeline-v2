@@ -3,6 +3,24 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("status,label", [
+    ("RESTORED", "시험 전 상태로 복원·비교 완료"), ("UNCHANGED", "상태 유지 확인"),
+    ("NOT_REQUIRED", "조회 TC"), ("NOT_STARTED", "상태 변경 동작 전 중단"),
+    ("FAILED", "해당 실행 환경 사용 종료"),
+])
+def test_verified_restoration_status_reaches_human_review(tmp_path, status, label):
+    run_dir, _ = _write_agent4_inputs(tmp_path, candidate_stdout="RESTORE_STATUS: " + status + "\n")
+    bundle = pipeline.ValidationExecutionBundle.model_validate_json((run_dir / "validation_execution.json").read_text(encoding="utf-8"))
+    result = bundle.candidate_results[0]
+    assert label in pipeline._human_review_observation(run_dir, result)
+    if status == "FAILED":
+        finding = pipeline._agent4_finding_for_result(result, 1,
+            failure_observations=pipeline._execution_failure_observations(run_dir, result))
+        assert finding.category == pipeline.Agent4FindingCategory.AUTOMATION_EXECUTION_ISSUE
+    (run_dir / result.stdout_file).write_text("RESTORE_STATUS: RESTORED\nforged", encoding="utf-8")
+    assert "복원 결과:" not in pipeline._human_review_observation(run_dir, result)
+
+
 def test_notion_detail_preserves_saved_steps_results_and_restore(tmp_path):
     run_dir, run_id = _write_agent4_inputs(tmp_path)
     design = detailed_boundary_design()

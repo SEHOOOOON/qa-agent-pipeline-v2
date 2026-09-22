@@ -230,7 +230,7 @@ def _candidate_validation(run_dir: Path, tc_id: str) -> dict[str, Any]:
 
 
 def _verify_candidate_sources(run_dir: Path, tc_id: str) -> None:
-    from qa_pipeline_execution import _load_verified_agent2_run, _read_json_model, _verify_sha256
+    from qa_pipeline_execution import _load_verified_agent2_run, _read_json_model, _verify_sha256, _legacy_wording_policy
     from qa_pipeline_reporting import _verify_final_report_sources
     from qa_pipeline_agent3 import evaluate_checkpoint3_plan
     from qa_pipeline_agent2 import evaluate_checkpoint2
@@ -238,7 +238,8 @@ def _verify_candidate_sources(run_dir: Path, tc_id: str) -> None:
 
     _verify_final_report_sources(run_dir, run_dir.name)
     request, requirements, analysis, design, _, source = _load_verified_agent2_run(run_dir, run_dir.name)
-    current_cp2 = evaluate_checkpoint2(request, analysis, design, requirements)
+    current_cp2 = evaluate_checkpoint2(request, analysis, design, requirements,
+                                     legacy_wording_checks=_legacy_wording_policy(source, {"3.8"}))
     if any(check.rule_id == "CP2-017" and check.status != CheckStatus.PASS for check in current_cp2.checks):
         raise ValueError("신규 TC 기대 결과가 현재 요구사항 대조 규칙을 통과하지 못했습니다.")
     test_case = next(item for item in design.test_cases if item.tc_id == tc_id)
@@ -253,7 +254,8 @@ def _verify_candidate_sources(run_dir: Path, tc_id: str) -> None:
         _verify_sha256(candidate_dir / filename, manifest.get(key), filename)
     plan = _read_json_model(candidate_dir / "agent3_automation_plan.json", Agent3AutomationPlan)
     observation = _read_json_model(candidate_dir / "agent3_ui_observation.json", UiObservation)
-    current_cp3 = evaluate_checkpoint3_plan(test_case, plan, observation, require_precondition_proof=True, require_restore_plan_links=True, require_restore_comparison_basis=True)
+    current_cp3 = evaluate_checkpoint3_plan(test_case, plan, observation, require_precondition_proof=True, require_restore_plan_links=True, require_restore_comparison_basis=True,
+                                          legacy_wording_checks=_legacy_wording_policy(manifest, {"4.6", "4.7"}))
     if current_cp3.status != CheckStatus.PASS:
         proof_failed = any(check.rule_id == "CP3-006A" and check.status == CheckStatus.FAIL for check in current_cp3.checks)
         if proof_failed:
