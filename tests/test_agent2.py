@@ -3,6 +3,93 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("wording", ["처음 기록한 설정으로 되돌립니다.", "Return to the saved settings."])
+@pytest.mark.parametrize("mutation", ["none", "missing_contract", "missing_comparison", "changed_basis", "wrong_order"])
+def test_structured_hvac_restore_does_not_require_magic_words(wording, mutation):
+    request, analysis, design = cp1_request(), cp2_analysis(), detailed_boundary_design()
+    tc = design.test_cases[0]
+    tc.state_effect = pipeline.TcStateEffect.BLOCKED_CHANGE
+    tc.restore_required = True
+    tc.test_data.restore_observed_hvac_state = True
+    confirmations = [pipeline.RestoreConfirmation(source_text=f"{r.observation_target}: 처음 기록한 값과 비교합니다.",
+        result_ids=[r.result_id], comparisons=[pipeline.RestoreComparison(result_id=r.result_id,
+            source_excerpt=f"{r.observation_target}: 처음 기록한 값과 비교합니다.", basis="OBSERVED_BASELINE")])
+        for r in tc.expected_results if r.observation_layer != ObservationLayer.NOTIFICATION]
+    tc.restoration = pipeline.StructuredRestoration(operation_steps=[wording],
+        confirmations=confirmations, verify_when="AFTER_RESTORE")
+    tc.restore_steps = [wording, *(c.source_text for c in confirmations)]
+    if mutation == "missing_contract": tc.restoration = None
+    elif mutation == "missing_comparison": tc.restoration.confirmations.pop()
+    elif mutation == "changed_basis": tc.restoration.confirmations[0].comparisons[0].basis = pipeline.RestoreComparisonBasis.PROVED_INITIAL
+    elif mutation == "wrong_order": tc.restore_steps.reverse()
+    before = design.model_dump_json()
+    result = pipeline.evaluate_checkpoint2(request, analysis, design, cp2_requirements(),
+        legacy_wording_checks=False, require_structured_restoration=True,
+        require_state_restoration_policy=True, use_structured_scope_restoration=True)
+    assert (result.status == CheckStatus.PASS) == (mutation == "none"), result.model_dump()
+    assert design.model_dump_json() == before
+    historical = pipeline.evaluate_checkpoint2(request, analysis, design, cp2_requirements(), legacy_wording_checks=False)
+    assert cp2_check(historical, "CP2-015").status == CheckStatus.FAIL
+
+
+@pytest.mark.parametrize("scope", ["trace_only", "direct", "state_type", "explicit_double"])
+def test_reference_only_srs_does_not_force_extra_state_assertion(scope):
+    analysis, design = cp2_analysis(), detailed_boundary_design()
+    tc = design.test_cases[0]
+    effect = next(e for e in analysis.requirement_effects if e.requirement_id == "REQ-STATE-001")
+    effect.scope_evidence = pipeline.RequirementScopeEvidence(basis="REQUEST_TRACE_ONLY",
+        request_condition_ids=["COND-002"], srs_source_text="UI와 내부 상태 일치")
+    tc.expected_results = [r for r in tc.expected_results if r.observation_layer != ObservationLayer.INTERNAL_STATE]
+    tc.double_assert_policy = DoubleAssertPolicy.UI_ONLY
+    tc.double_assert_reason = "요청된 UI 결과만 확인하며 관련 SRS는 참고 근거입니다."
+    if scope == "direct": effect.scope_evidence.basis = pipeline.ScopeBasis.DIRECT_REQUEST
+    elif scope == "state_type": tc.test_type = TcType.STATE_CONSISTENCY
+    elif scope == "explicit_double": tc.double_assert_policy = DoubleAssertPolicy.REQUIRED
+    result = pipeline.evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements(),
+        legacy_wording_checks=False, use_structured_scope_restoration=True)
+    assert (cp2_check(result, "CP2-006").status == CheckStatus.PASS) == (scope == "trace_only")
+    historical = pipeline.evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements(), legacy_wording_checks=False)
+    assert cp2_check(historical, "CP2-006").status == CheckStatus.FAIL
+
+
+@pytest.mark.parametrize("parts", [
+    ["[복원] 원래 값으로 되돌립니다.", "원래 상태인지 확인합니다."],
+    ["Return to the recorded value.", "Check the original state."],
+])
+@pytest.mark.parametrize("mutation", ["whole", "split", "missing", "reordered", "changed",
+                                     "interleaved", "across_fields", "across_cases", "disabled_restore"])
+def test_split_procedure_preservation_requires_contiguous_complete_source(parts, mutation):
+    request, analysis, design = cp1_request(), cp2_analysis(), detailed_boundary_design()
+    note = " ".join(parts)
+    request.acceptance_notes.append(note)
+    analysis.procedure_notes = [note]
+    tc = design.test_cases[0]
+    tc.restore_required = True
+    tc.restore_steps = [note] if mutation == "whole" else list(parts)
+    if mutation == "missing": tc.restore_steps.pop()
+    elif mutation == "reordered": tc.restore_steps.reverse()
+    elif mutation == "changed": tc.restore_steps[-1] += " 다른 값으로 판정합니다."
+    elif mutation == "interleaved": tc.restore_steps.insert(1, "다른 조작을 합니다.")
+    elif mutation == "across_fields": tc.preconditions.append(tc.restore_steps.pop(0))
+    elif mutation == "across_cases":
+        other = tc.model_copy(deep=True)
+        other.tc_id = "TC-CAND-002"
+        tc.restore_steps = parts[:1]
+        other.restore_steps = parts[1:]
+        design.test_cases.append(other)
+    elif mutation == "disabled_restore": tc.restore_required = False
+    original = design.model_dump_json()
+    result = pipeline.evaluate_checkpoint2(request, analysis, design, cp2_requirements(),
+        legacy_wording_checks=False, allow_split_procedure_notes=True)
+    assert (cp2_check(result, "CP2-014").status == CheckStatus.PASS) == (mutation in {"whole", "split"})
+    assert design.model_dump_json() == original
+    historical = pipeline.evaluate_checkpoint2(request, analysis, design, cp2_requirements(),
+        legacy_wording_checks=False)
+    assert (cp2_check(historical, "CP2-014").status == CheckStatus.PASS) == (mutation == "whole")
+    if mutation not in {"whole", "split"}:
+        assert "절차 원문 누락·순서 불일치" in cp2_check(result, "CP2-014").message
+
+
 @pytest.mark.parametrize("wording", ["실행이 끝나면 처음 기록한 모습으로 되돌립니다.",
                                     "After the exercise, return to the captured state."])
 def test_new_wording_policy_preserves_procedure_handoff_without_keywords(wording):
@@ -573,6 +660,10 @@ def test_agent2_sends_approved_procedures_on_initial_and_rewrite_calls():
         assert approved[0].reuse_context_json in text
         assert "승인 TC 명세가 제공되면" in instructions
         assert instructions == AGENT2_SYSTEM_INSTRUCTIONS
+        assert "같은 TC의 같은 절차 배열" in instructions
+        assert "조작 수단이 없는 입력에서 버튼·횟수를 추정하지 않습니다" in instructions
+        assert "UI 기대결과에 내부 enum을 곧바로 화면 표시 문자열처럼 쓰지 않습니다" in instructions
+        assert "설정 온도 30°C 입력 → 적용" not in instructions
         assert "작성 수준 예시 (아래는 기존 필드의 일부만 발췌한 형식 참고이며 이번 입력의 제품 기준이 아닙니다)" in instructions
         assert "1. 중앙 관제 화면에서 시험할 대상 장비 카드를 선택한다." in instructions
         assert "2. 선택한 장비의 제어 패널에서 풍량을 MED로 선택한다." in instructions
@@ -747,7 +838,7 @@ def test_agent2_uses_structured_responses_api() -> None:
     assert response.usage["total_tokens"] == 300
     assert responses.kwargs["text_format"] is Agent2TestDesign
     assert responses.kwargs["store"] is False
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-35"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-38"
     agent2_input = responses.kwargs["input"][1]["content"]
     assert "[기존 사람 작성·자동화 TC 카탈로그]" in agent2_input
     assert '[코드로 확인한 SRS 개정 범위]' in agent2_input

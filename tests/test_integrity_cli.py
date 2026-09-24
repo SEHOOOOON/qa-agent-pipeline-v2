@@ -3,6 +3,139 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("rewrite", [False, True])
+def test_srs_quote_policy_initial_rewrite_and_verified_loader(tmp_path, monkeypatch, rewrite):
+    request, analysis, _ = cp1_combined_srs_case()
+    calls = []
+    class FakeAgent:
+        def __init__(self, **kwargs):
+            pass
+        def analyze(self, *args, **kwargs):
+            calls.append(kwargs)
+            result = analysis.model_copy(deep=True)
+            if rewrite and len(calls) == 1:
+                result.confirmed_conditions[2].source_text += " | 없는 근거"
+            return pipeline.Agent1Response(analysis=result, response_id=None,
+                model="fake-srs-quotes", usage={"input_tokens": 0, "output_tokens": 0, "total_tokens": 0})
+    monkeypatch.setattr(pipeline_execution, "OpenAIAgent1", FakeAgent)
+    request_file = tmp_path / "request.json"
+    _write_json(request_file, request.model_dump(mode="json"))
+    assert pipeline.run_agent1(SimpleNamespace(request=str(request_file),
+        srs=str(REPO_ROOT / "docs/01_PRODUCT_SRS.md"), runs_root=str(tmp_path / "runs"), model=None)) == 0
+    run_dir = next((tmp_path / "runs").iterdir())
+    verified = _load_verified_agent1_run(run_dir, run_dir.name)
+    assert verified[2].model_dump() == analysis.model_dump()
+    assert len(calls) == (2 if rewrite else 1)
+    if rewrite:
+        assert any("출처" in message for message in calls[1]["checkpoint_feedback"])
+    manifest_file = run_dir / "run_manifest.json"
+    original = pipeline._read_json_payload(manifest_file)
+    assert original["contract_version"] == "2.11"
+    assert original["srs_quote_contract"] == "1.0"
+    for invalid in (None, "unknown", "0.9"):
+        _write_json(manifest_file, {**original, "srs_quote_contract": invalid})
+        with pytest.raises(ValueError, match="SRS 인용 계약"):
+            _load_verified_agent1_run(run_dir, run_dir.name)
+    _write_json(manifest_file, {**original, "contract_version": "2.9"})
+    with pytest.raises(ValueError, match="SRS 인용 계약"):
+        _load_verified_agent1_run(run_dir, run_dir.name)
+    _write_json(manifest_file, {**original, "contract_version": "2.9", "srs_quote_contract": None})
+    with pytest.raises(ValueError, match="근거 검토 계약"):
+        _load_verified_agent1_run(run_dir, run_dir.name)
+    _write_json(manifest_file, original)
+    assert _load_verified_agent1_run(run_dir, run_dir.name)[3].status == CheckStatus.PASS
+
+
+@pytest.mark.parametrize("stage", ["CP1", "CP2"])
+@pytest.mark.parametrize("legacy", [True, False])
+@pytest.mark.parametrize("mutation", [
+    "unchanged", "pass_message", "fail_message", "review_message", "overall_status",
+    "rule_status", "rule_id", "missing", "duplicate", "order", "checkpoint_name",
+])
+def test_checkpoint_revalidation_limits_legacy_pass_message_compatibility(stage, legacy, mutation):
+    stored = checkpoint_revalidation_fixture(stage)
+    recomputed = stored.model_copy(deep=True)
+    if mutation == "pass_message":
+        recomputed.checks[0].message = "새 성공 안내"
+    elif mutation in {"fail_message", "review_message"}:
+        status = CheckStatus.FAIL if mutation == "fail_message" else CheckStatus.REVIEW
+        stored.checks[0].status = recomputed.checks[0].status = status
+        recomputed.checks[0].message = "바뀐 실패 또는 검토 근거"
+    elif mutation == "overall_status":
+        recomputed.status = CheckStatus.FAIL
+    elif mutation == "rule_status":
+        recomputed.checks[0].status = CheckStatus.FAIL
+    elif mutation == "rule_id":
+        recomputed.checks[0].rule_id = f"{stage}-999"
+    elif mutation == "missing":
+        recomputed.checks.pop()
+    elif mutation == "duplicate":
+        recomputed.checks.append(recomputed.checks[0].model_copy(deep=True))
+    elif mutation == "order":
+        recomputed.checks.reverse()
+    elif mutation == "checkpoint_name":
+        recomputed.checkpoint = "OTHER"
+    original = stored.model_dump(mode="json"), recomputed.model_dump(mode="json")
+    expected = mutation == "unchanged" or (legacy and mutation == "pass_message")
+    assert pipeline_execution._checkpoint_revalidation_matches(
+        stored, recomputed, legacy=legacy) == expected
+    assert original == (stored.model_dump(mode="json"), recomputed.model_dump(mode="json"))
+
+
+@pytest.mark.parametrize("mutation", ["review_notes", "handoff", "different_model"])
+def test_checkpoint_revalidation_preserves_review_notes_and_handoff(mutation):
+    stored = checkpoint_revalidation_fixture("CP1")
+    recomputed = stored.model_copy(deep=True)
+    if mutation == "review_notes":
+        recomputed.final_review_notes.append("사람이 확인해야 할 추가 근거")
+    elif mutation == "handoff":
+        recomputed.handoff_status = HandoffStatus.PAUSE
+    else:
+        recomputed = checkpoint_revalidation_fixture("CP2")
+    assert not pipeline_execution._checkpoint_revalidation_matches(stored, recomputed, legacy=True)
+
+
+@pytest.mark.parametrize("stage", ["CP1", "CP2"])
+@pytest.mark.parametrize("mutation", ["pass_message", "unhashed_message", "rule_status", "missing_rule", "recomputed_failure"])
+def test_historical_checkpoint_loader_preserves_hash_and_decision_guards(tmp_path, monkeypatch, stage, mutation):
+    builder = build_verified_agent1_run if stage == "CP1" else build_historical_agent2_run
+    run_dir, run_id = builder(tmp_path)
+    loader = (pipeline_execution._load_verified_agent1_run if stage == "CP1"
+              else pipeline_execution._load_verified_agent2_run)
+    checkpoint_file = run_dir / f"checkpoint{stage[-1]}.json"
+    manifest_file = run_dir / ("run_manifest.json" if stage == "CP1" else "agent2_manifest.json")
+    checkpoint = pipeline._read_json_payload(checkpoint_file)
+    manifest = pipeline._read_json_payload(manifest_file)
+    if mutation in {"pass_message", "unhashed_message"}:
+        next(item for item in checkpoint["checks"] if item["status"] == "PASS")["message"] = "과거 버전의 성공 안내"
+    elif mutation == "rule_status":
+        checkpoint["checks"][0]["status"] = "FAIL"
+    elif mutation == "missing_rule":
+        checkpoint["checks"].pop()
+    elif mutation == "recomputed_failure":
+        name = f"evaluate_checkpoint{stage[-1]}"
+        original = getattr(pipeline_execution, name)
+        def failed(*args, **kwargs):
+            result = original(*args, **kwargs)
+            result.checks[0].status = CheckStatus.FAIL
+            return result
+        monkeypatch.setattr(pipeline_execution, name, failed)
+    _write_json(checkpoint_file, checkpoint)
+    if mutation != "unhashed_message":
+        manifest[f"checkpoint{stage[-1]}_sha256"] = _sha256_file(checkpoint_file)
+        _write_json(manifest_file, manifest)
+    before = {path.name: _sha256_file(path) for path in run_dir.iterdir() if path.is_file()}
+    def forbid_model(*args, **kwargs):
+        raise AssertionError("Read-only checkpoint verification must not construct an API client")
+    monkeypatch.setattr(pipeline_execution, "OpenAI", forbid_model)
+    if mutation == "pass_message":
+        loader(run_dir, run_id)
+    else:
+        with pytest.raises(ValueError):
+            loader(run_dir, run_id)
+    assert before == {path.name: _sha256_file(path) for path in run_dir.iterdir() if path.is_file()}
+
+
 def test_declared_procedures_reach_final_review_for_existing_tests(tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
@@ -120,7 +253,7 @@ def test_scope_gate_rewrite_and_pause_before_agent2(tmp_path, monkeypatch, outco
     run_dir = next((tmp_path / "runs").iterdir())
     manifest = pipeline._read_json_payload(run_dir / "run_manifest.json")
     assert manifest["scope_guard_contract"] == "1.1"
-    assert manifest["prompt_version"] == "agent1-2.14"
+    assert manifest["prompt_version"] == "agent1-2.17"
     if outcome == "scope_review":
         assert len(calls) == 1
         assert manifest["handoff_status"] == "PAUSE"
@@ -277,7 +410,7 @@ def test_paused_manifest_is_blocked_before_agent2(tmp_path: Path) -> None:
         _load_verified_agent1_run(run_dir, run_id)
 
 @pytest.mark.parametrize("detail_outcome", ["clean", "repair", "unresolved"])
-@pytest.mark.parametrize("procedure_style", ["none", "marked", "unmarked"])
+@pytest.mark.parametrize("procedure_style", ["none", "marked", "unmarked", "split"])
 def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
     tmp_path: Path, monkeypatch, detail_outcome, procedure_style
 ) -> None:
@@ -293,6 +426,8 @@ def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
         ]
         if procedure_style == "marked":
             procedure_notes = [f"[준비] {procedure_notes[0]}", f"[복원] {procedure_notes[1]}"]
+        if procedure_style == "split":
+            procedure_notes[1] += " 복원 조작을 적용합니다."
         request.acceptance_notes.extend(procedure_notes)
     _write_json(request_file, request.model_dump(mode="json"))
 
@@ -366,6 +501,9 @@ def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
                     automation_candidate=True,
                     automation_reason="화면에서 요청 결과를 확인할 수 있다.",
             )
+            if procedure_style == "split":
+                tc.restore_steps = ["시험 후 대상 장비를 시험 전 온도로 복원합니다.",
+                                    "복원 조작을 적용합니다.", *tc.restore_steps[1:]]
             line = tc.restore_steps[-1]
             tc.restoration = pipeline.StructuredRestoration(operation_steps=tc.restore_steps[:-1],
                 confirmations=[pipeline.RestoreConfirmation(source_text=line, result_ids=["ER-001"],
@@ -427,7 +565,7 @@ def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
     run_dir = next(path for path in runs_root.iterdir() if path.is_dir())
     verified_agent1 = _load_verified_agent1_run(run_dir, run_dir.name)
     assert verified_agent1[2].procedure_notes == procedure_notes
-    assert verified_agent1[4]["contract_version"] == "2.8"
+    assert verified_agent1[4]["contract_version"] == "2.11"
     assert verified_agent1[4]["wording_policy"] == "STRUCTURAL_ONLY_V1"
     agent2_args = SimpleNamespace(
         run_id=run_dir.name,
@@ -438,7 +576,7 @@ def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
     assert pipeline.run_agent2(agent2_args) == (2 if detail_outcome == "unresolved" else 0)
     detail_manifest = pipeline._read_json_payload(run_dir / "agent2_manifest.json")
     assert detail_manifest["tc_detail_contract"] == "1.2"
-    assert detail_manifest["prompt_version"] == "agent2-2.35"
+    assert detail_manifest["prompt_version"] == "agent2-2.38"
     assert len(design_calls) == (1 if detail_outcome == "clean" else 2)
     if detail_outcome != "clean":
         assert any("CP2-020" in text for text in design_calls[1]["checkpoint_feedback"])
@@ -463,7 +601,23 @@ def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
         run_dir / "approved_regression_catalog.json"
     )
     assert manifest["srs_revision_contract"] == "1.1"
-    assert manifest["contract_version"] == "3.8"
+    assert manifest["contract_version"] == "3.11"
+    assert manifest["scope_restoration_policy"] == "STRUCTURED_V1"
+    for invalid in (None, "unknown"):
+        _write_json(run_dir / "agent2_manifest.json", {**manifest, "scope_restoration_policy": invalid})
+        with pytest.raises(ValueError, match="범위·복원 검사 정책"):
+            pipeline._load_verified_agent2_run(run_dir, run_dir.name)
+    _write_json(run_dir / "agent2_manifest.json", {**manifest, "contract_version": "3.9"})
+    with pytest.raises(ValueError, match="범위·복원 검사 정책"):
+        pipeline._load_verified_agent2_run(run_dir, run_dir.name)
+    assert manifest["procedure_preservation_contract"] == "1.0"
+    for invalid in (None, "0.9", "unknown"):
+        _write_json(run_dir / "agent2_manifest.json", {**manifest, "procedure_preservation_contract": invalid})
+        with pytest.raises(ValueError, match="절차 보존 계약"):
+            pipeline._load_verified_agent2_run(run_dir, run_dir.name)
+    _write_json(run_dir / "agent2_manifest.json", {**manifest, "contract_version": "3.8"})
+    with pytest.raises(ValueError, match="절차 보존 계약"):
+        pipeline._load_verified_agent2_run(run_dir, run_dir.name)
     assert manifest["wording_policy"] == "STRUCTURAL_ONLY_V1"
     for invalid in (None, "unknown"):
         _write_json(run_dir / "agent2_manifest.json", {**manifest, "wording_policy": invalid})
@@ -512,6 +666,9 @@ def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
     for tc in legacy_design["test_cases"]:
         tc.pop("state_effect")
         tc.pop("restoration")
+        if procedure_style == "split":
+            # Historical contract only accepts the whole note as one item.
+            tc["restore_steps"] = [" ".join(tc["restore_steps"][:2]), *tc["restore_steps"][2:]]
     _write_json(run_dir / "agent2_test_design.json", legacy_design)
     # Build a historical fixture using historical rules/messages, not by
     # relabeling the new-policy checkpoint as an old checkpoint.
@@ -524,10 +681,13 @@ def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
     )
     _write_json(run_dir / "checkpoint2.json", historical_cp.model_dump(mode="json"))
     legacy = {**manifest, "contract_version": "3.1", "tc_detail_contract": "1.0", "srs_revision_contract": "1.0",
+              "grounding_contract": None, "grounding_review_sha256": None, "grounding_reviews": [],
               "state_restoration_contract": None, "structured_restoration_contract": None, "input_routing_contract": None,
-              "wording_policy": None,
+              "wording_policy": None, "procedure_preservation_contract": None, "scope_restoration_policy": None,
               "agent2_design_sha256": _sha256_file(run_dir / "agent2_test_design.json"),
               "prompt_version": "agent2-2.24", "checkpoint2_sha256": _sha256_file(run_dir / "checkpoint2.json")}
+    # This temporary historical fixture predates the independent review artifact.
+    (run_dir / "agent2_grounding_review.json").unlink()
     _write_json(run_dir / "agent2_manifest.json", legacy)
     pipeline._load_verified_agent2_run(run_dir, run_dir.name)
 

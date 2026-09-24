@@ -67,7 +67,7 @@ def test_agent3_precondition_feedback_repairs_only_unstated_context(tmp_path, mo
         target_html=str(target), model="fixture", timeout=60)) == 0
     assert calls == ["model", "model", "trial"]
     assert (case.model_dump_json(), invalid.model_dump_json()) == preserved
-    assert pipeline._read_json_payload(run / "agent3_manifest.json")["prompt_version"] == "agent3-3.32"
+    assert pipeline._read_json_payload(run / "agent3_manifest.json")["prompt_version"] == "agent3-3.33"
     assert pipeline._read_json_payload(run / "agent3_automation_plan_attempt_1.json") == invalid.model_dump(mode="json")
     assert pipeline._read_json_payload(run / "agent3_automation_plan_attempt_2.json") == valid.model_dump(mode="json")
 
@@ -97,9 +97,9 @@ def test_agent3_requires_proof_on_new_runs_and_records_it(tmp_path, monkeypatch,
     assert pipeline.run_agent3(args) == (0 if include_proof else 2)
     manifest = pipeline._read_json_payload(run / "agent3_manifest.json")
     assert manifest["precondition_proof_contract"] == "1.0"
-    assert manifest["contract_version"] == "4.6"
+    assert manifest["contract_version"] == "4.9"
     assert manifest["wording_policy"] == "STRUCTURAL_ONLY_V1"
-    assert manifest["plan_fidelity_contract"] == "1.0"
+    assert manifest["plan_fidelity_contract"] == "1.1"
     assert manifest["restore_confirmation_contract"] == "1.2"
     assert calls == (["model", "trial"] if include_proof else ["model", "model"])
     assert pipeline._read_json_payload(run / "agent3_automation_plan_attempt_1.json") == plan.model_dump(mode="json")

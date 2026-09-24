@@ -3,6 +3,164 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("variant,allowed", [
+    ("normal", True), ("reversed", True), ("three_parts", True),
+    ("same_field", True), ("two_requirements", True), ("three_requirements", True),
+    ("number_changed", False), ("unknown_part", False), ("empty_part", False),
+    ("leading_pipe", False), ("trailing_pipe", False), ("missing_id", False),
+    ("extra_id", False), ("unknown_id", False), ("split_token", False),
+])
+def test_srs_pipe_quotes_validate_each_part_and_each_linked_id(variant, allowed):
+    from qa_pipeline_agent1 import _srs_quote_is_grounded
+    request, analysis, requirements = cp1_combined_srs_case()
+    condition = analysis.confirmed_conditions[2]
+    target = requirements[request.target_requirement_id]
+    parts = [target.statement, target.acceptance_criteria]
+    if variant == "reversed":
+        parts.reverse()
+    elif variant == "three_parts":
+        parts = [target.statement, "범위 안 요청은 반영되고", "범위 밖 요청은 차단되며 화면·내부 설정 온도가 기존 값을 유지합니다."]
+    elif variant == "same_field":
+        parts = ["범위 안 요청은 반영되고", "범위 밖 요청은 차단되며 화면·내부 설정 온도가 기존 값을 유지합니다."]
+        condition.statement = target.acceptance_criteria
+    elif variant in {"two_requirements", "three_requirements"}:
+        for key in (["REQ-NOTIFY-001"] if variant == "two_requirements" else ["REQ-NOTIFY-001", "REQ-STATE-001"]):
+            parts.append(requirements[key].statement)
+            condition.requirement_ids.append(key)
+        parts.reverse()
+    elif variant == "number_changed":
+        parts[0] = parts[0].replace("16~30", "16~31")
+    elif variant == "unknown_part":
+        parts.append("입력에 없는 새로운 동작")
+    elif variant == "empty_part":
+        parts.insert(1, " ")
+    elif variant == "leading_pipe":
+        parts.insert(0, "")
+    elif variant == "trailing_pipe":
+        parts.append("")
+    elif variant == "missing_id":
+        parts.append(requirements["REQ-NOTIFY-001"].statement)
+    elif variant == "extra_id":
+        condition.requirement_ids.append("REQ-NOTIFY-001")
+    elif variant == "unknown_id":
+        condition.requirement_ids.append("REQ-UNKNOWN-001")
+    elif variant == "split_token":
+        # Cannot join numeric fragments into a value that the SRS never states.
+        parts = ["1", "6~30°C"]
+    condition.source_text = " | ".join(parts)
+    original = analysis.model_dump(mode="json")
+    assert _srs_quote_is_grounded(condition.source_text, condition.requirement_ids, requirements) == allowed
+    result = evaluate_checkpoint1(request, analysis, requirements,
+        legacy_wording_checks=False, allow_background_range_paraphrase=True, allow_srs_quote_parts=True)
+    assert (cp1_check(result, "CP1-007").status == CheckStatus.PASS) == allowed
+    assert analysis.model_dump(mode="json") == original
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("mutation", ["none", "invented_part", "wrong_id", "partial_range", "after_policy"])
+def test_combined_background_range_retains_target_and_complete_source_guards(reverse, mutation):
+    request, analysis, requirements = cp1_combined_srs_case()
+    request.description = "기존 16~30°C 범위를 유지합니다."
+    request.after_value = analysis.after_condition = "범위 밖 입력은 기존 설정값을 유지합니다."
+    analysis.confirmed_conditions = analysis.confirmed_conditions[:3]
+    condition = analysis.confirmed_conditions[2]
+    condition.change_role = ConditionChangeRole.UNCHANGED
+    parts = condition.source_text.split(" | ")
+    if mutation == "invented_part":
+        parts.append("없는 내용")
+    elif mutation == "wrong_id":
+        condition.requirement_ids = ["REQ-STATE-001"]
+    elif mutation == "partial_range":
+        parts = ["16~30°C", "범위 밖 요청은 차단되며"]
+    elif mutation == "after_policy":
+        request.after_value = analysis.after_condition = "변경 후 설정 범위는 16~30°C입니다."
+    condition.source_text = " | ".join(reversed(parts) if reverse else parts)
+    old = evaluate_checkpoint1(request, analysis, requirements,
+        legacy_wording_checks=False, allow_background_range_paraphrase=True)
+    new = evaluate_checkpoint1(request, analysis, requirements,
+        legacy_wording_checks=False, allow_background_range_paraphrase=True, allow_srs_quote_parts=True)
+    assert cp1_check(old, "CP1-008").status == CheckStatus.FAIL
+    assert (cp1_check(new, "CP1-008").status == CheckStatus.PASS) == (mutation == "none")
+
+
+@pytest.mark.parametrize("requirement_id", ["REQ-NOTIFY-001", "REQ-STATE-001"])
+@pytest.mark.parametrize("mutation", ["normal", "reversed", "foreign_part", "empty_part"])
+def test_scope_evidence_combined_quotes_stay_bound_to_effect_requirement(requirement_id, mutation):
+    from qa_pipeline_contracts import RequirementScopeEvidence, ScopeBasis
+    request, analysis, requirements = cp1_request(), cp1_valid_analysis(), cp1_requirements()
+    condition = analysis.confirmed_conditions[1]
+    condition.requirement_ids.append(requirement_id)
+    effect = next(e for e in analysis.requirement_effects if e.requirement_id == requirement_id)
+    effect.relation = RequirementRelation.VERIFY
+    related = requirements[requirement_id]
+    parts = [related.statement, related.acceptance_criteria]
+    if mutation == "reversed":
+        parts.reverse()
+    elif mutation == "foreign_part":
+        parts.append(requirements["REQ-TEMP-001"].statement)
+    elif mutation == "empty_part":
+        parts.append("")
+    effect.scope_evidence = RequirementScopeEvidence(basis=ScopeBasis.REQUEST_TRACE_ONLY,
+        request_condition_ids=[condition.condition_id], srs_source_text=" | ".join(parts))
+    result = evaluate_checkpoint1(request, analysis, requirements,
+        legacy_wording_checks=False, allow_srs_quote_parts=True)
+    assert (cp1_check(result, "CP1-011").status == CheckStatus.PASS) == (mutation in {"normal", "reversed"})
+
+
+def test_srs_pipe_policy_does_not_split_change_request_source():
+    request, analysis, requirements = cp1_request(), cp1_valid_analysis(), cp1_requirements()
+    analysis.confirmed_conditions[0].source_text += " | " + request.acceptance_notes[1]
+    result = evaluate_checkpoint1(request, analysis, requirements,
+        legacy_wording_checks=False, allow_srs_quote_parts=True)
+    assert cp1_check(result, "CP1-007").status == CheckStatus.FAIL
+
+
+@pytest.mark.parametrize("mutation", ["none", "missing", "wrong_requirement", "changed_role", "altered_source", "changed_number", "after_policy"])
+def test_background_range_uses_frozen_source_not_verbatim_explanation(mutation):
+    request, analysis, requirements = cp1_request(), cp1_valid_analysis(), cp1_requirements()
+    request.description = "기존 16~30°C 범위를 유지합니다."
+    request.after_value = analysis.after_condition = "범위 밖 입력은 기존 설정값을 유지합니다."
+    analysis.confirmed_conditions = analysis.confirmed_conditions[:3]
+    maintenance = analysis.confirmed_conditions[-1]
+    maintenance.source_text = requirements[request.target_requirement_id].statement
+    maintenance.statement = "섭씨 설정 범위 16~30°C는 기존 기준으로 유지합니다."
+    maintenance.change_role = ConditionChangeRole.UNCHANGED
+    if mutation == "missing":
+        analysis.confirmed_conditions.pop()
+    elif mutation == "wrong_requirement":
+        maintenance.requirement_ids = ["REQ-STATE-001"]
+    elif mutation == "changed_role":
+        maintenance.change_role = ConditionChangeRole.CHANGED
+    elif mutation == "altered_source":
+        maintenance.source_text += " 임의 근거"
+    elif mutation == "changed_number":
+        maintenance.statement = "설정 범위는 15~30°C를 유지합니다."
+    elif mutation == "after_policy":
+        request.after_value = analysis.after_condition = "변경 후 설정 범위는 16~30°C입니다."
+    original = analysis.model_dump(mode="json")
+    old = evaluate_checkpoint1(request, analysis, requirements, legacy_wording_checks=False)
+    assert cp1_check(old, "CP1-008").status == CheckStatus.FAIL
+    new = evaluate_checkpoint1(request, analysis, requirements, legacy_wording_checks=False,
+                              allow_background_range_paraphrase=True)
+    assert (new.status == CheckStatus.PASS) == (mutation == "none"), new.model_dump()
+    assert analysis.model_dump(mode="json") == original
+
+
+@pytest.mark.parametrize("rewrite", [False, True])
+def test_agent1_prompt_requires_exclusive_roles_without_dropping_gap_contract(rewrite):
+    responses = Agent1FakeResponses()
+    agent = OpenAIAgent1(client=SimpleNamespace(responses=responses))
+    request = cp1_request()
+    before = request.model_dump_json()
+    extra = {"previous_analysis": cp1_valid_analysis(), "checkpoint_feedback": ["중복 분류"]} if rewrite else {}
+    agent.analyze(request, cp1_requirements(), **extra)
+    system, user = [item["content"] for item in responses.kwargs["input"]]
+    assert "procedure_notes는 acceptance_notes 전체의 복사본이 아닙니다" in system
+    assert "하나를 선택" in user and "중복 복사하지" in user
+    assert "세 목록에 함께 보존" in system
+    assert request.model_dump_json() == before
+
+
 @pytest.mark.parametrize("note", [
     "[준비] 복원 버튼이 있는 화면을 엽니다.",
     "[복원] Return to the captured state after the scenario.",
@@ -526,7 +684,7 @@ def test_agent1_uses_structured_responses_api() -> None:
     assert result.response_id == "resp_test"
     assert result.usage["total_tokens"] == 150
     assert responses.kwargs["text_format"] is Agent1Analysis
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent1-2-14"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent1-2-17"
     assert responses.kwargs["store"] is False
     instructions = responses.kwargs["input"][0]["content"]
     assert "현재 SRS는 변경 전 제품 상태" in instructions

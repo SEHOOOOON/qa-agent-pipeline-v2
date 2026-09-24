@@ -228,6 +228,14 @@ def build_agent3_model_input(
     }
 
 
+AGENT3_SYSTEM_INSTRUCTIONS += """
+Implement the whole fact of each ExpectedResult, not just a matching result_id or numeric token.
+Do not silently omit an independent claim attached to an ExpectedResult. If the approved TC combines
+facts that cannot be faithfully asserted, return support-extension/review reasons; never shorten the TC.
+The semantic grounding review checks actual actions/assertions against the approved TC separately.
+"""
+
+
 class OpenAIAgent3:
     def __init__(self, *, model: str | None = None, client: Any | None = None) -> None:
         self.model = model or os.getenv("OPENAI_MODEL", "gpt-5.6-terra")
@@ -236,7 +244,7 @@ class OpenAIAgent3:
                 raise Agent3Error(
                     "OPENAI_API_KEY is missing. Never place secrets in code or Run artifacts."
                 )
-            client = OpenAI()
+            client = OpenAI(max_retries=0)
         self.client = client
 
     def plan(
@@ -280,7 +288,7 @@ class OpenAIAgent3:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent3-3-32",
+                prompt_cache_key="qa-v2-agent3-3-33",
                 input=[
                     {"role": "system", "content": AGENT3_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
@@ -1247,6 +1255,24 @@ def _complete_text_value(statement: str, value: str) -> bool:
                      statement, re.IGNORECASE) is not None
 
 
+def _trailing_observation_steps(
+    test_case: ProductTestCaseCandidate, plan: Agent3AutomationPlan,
+) -> set[str]:
+    """Share the existing terminal-read rule between coverage and timing checks."""
+    implemented = {_normalize(a.source_text) for a in plan.actions if a.phase == AutomationPhase.TEST}
+    last_operation = max((i for i, line in enumerate(test_case.steps)
+                          if _normalize(line) in implemented), default=-1)
+    mapped = {a.result_id for a in plan.assertions}
+    return {
+        _normalize(result.verify_after_step) for result in test_case.expected_results
+        if result.verify_after_step and result.result_id in mapped
+        and any(i > last_operation and _normalize(line) == _normalize(result.verify_after_step)
+                and re.search(r"확인|조회|관찰|검사|\b(?:verify|read|observe|check)\b", line, re.I)
+                and not re.search(r"선택하|적용하|입력하|변경하|설정하|누른|\b(?:click|apply|fill|select|set)\b", line, re.I)
+                for i, line in enumerate(test_case.steps))
+    }
+
+
 def evaluate_checkpoint3_plan(
     test_case: ProductTestCaseCandidate,
     plan: Agent3AutomationPlan,
@@ -1257,6 +1283,7 @@ def evaluate_checkpoint3_plan(
     require_restore_comparison_basis: bool = False,
     require_plan_fidelity: bool = True,
     legacy_wording_checks: bool = True,
+    allow_terminal_observation_anchor: bool = False,
 ) -> Checkpoint3Result:
     if test_case.control_path != ControlPath.CENTRAL:
         return Checkpoint3Result(
@@ -1446,6 +1473,8 @@ def evaluate_checkpoint3_plan(
 
     results_by_id = {item.result_id: item for item in test_case.expected_results}
     actions_by_id = {item.action_id: item for item in plan.actions}
+    terminal_observations = _trailing_observation_steps(test_case, plan)
+    test_actions = [item for item in plan.actions if item.phase == AutomationPhase.TEST]
     anchoring_errors: list[str] = []
     for assertion in plan.assertions:
         result = results_by_id.get(assertion.result_id)
@@ -1473,9 +1502,17 @@ def evaluate_checkpoint3_plan(
                 f"{assertion.result_id}: Expected Result has no verify_after_step"
             )
         elif _normalize(anchor.source_text) != _normalize(result.verify_after_step):
-            anchoring_errors.append(
-                f"{assertion.result_id}: anchor action does not implement verify_after_step"
+            terminal_read = (
+                allow_terminal_observation_anchor
+                and test_case.state_effect == TcStateEffect.READ_ONLY
+                and all(a.action_type == AutomationActionType.SELECT_DEVICE for a in plan.actions)
+                and _normalize(result.verify_after_step) in terminal_observations
+                and test_actions and anchor.action_id == test_actions[-1].action_id
             )
+            if not terminal_read:
+                anchoring_errors.append(
+                    f"{assertion.result_id}: anchor action does not implement verify_after_step"
+                )
         else:
             matching_actions = [
                 item
@@ -1748,18 +1785,9 @@ def evaluate_checkpoint3_plan(
     if require_plan_fidelity or not legacy_controller_flow:
         for phase, lines in ((AutomationPhase.TEST, test_case.steps), (AutomationPhase.RESTORE, test_case.restore_steps)):
             implemented = [_normalize(item.source_text) for item in plan.actions if item.phase == phase]
-            last_operation = max((i for i, line in enumerate(lines) if _normalize(line) in implemented), default=-1)
             # A trailing read-only step is implemented by its mapped assertion,
             # not by an invented click. Earlier observations still need ordering.
-            observation_steps = {
-                _normalize(result.verify_after_step) for result in test_case.expected_results
-                if result.verify_after_step and result.result_id in mapped_ids
-                and phase == AutomationPhase.TEST
-                and any(i > last_operation and _normalize(line) == _normalize(result.verify_after_step)
-                    and re.search(r"확인|조회|관찰|검사|\b(?:verify|read|observe|check)\b", line, re.I)
-                    and not re.search(r"선택하|적용하|입력하|변경하|설정하|누른|\b(?:click|apply|fill|select|set)\b", line, re.I)
-                    for i, line in enumerate(lines))
-            }
+            observation_steps = terminal_observations if phase == AutomationPhase.TEST else set()
             required = [_normalize(line) for line in lines
                         if _normalize(line) not in observation_steps
                         and not (phase == AutomationPhase.RESTORE and _normalize(line) in restore_confirmations)]

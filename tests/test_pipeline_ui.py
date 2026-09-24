@@ -3,6 +3,23 @@
 from pipeline_test_support import *
 
 
+def test_portfolio_catalog_matches_current_assets_and_historical_scope():
+    import re
+    html = (REPO_ROOT / "project.html").read_text(encoding="utf-8")
+    catalog = html.split('<table class="asset-table">', 1)[1].split('</table>', 1)[0]
+    shown = re.findall(r'<th scope="row">(TC-[^<]+)</th>', catalog)
+    registry = json.loads((REPO_ROOT / "approved_assets/registry.json").read_text(encoding="utf-8"))
+    expected = {spec.tc_id for spec in pipeline.EXISTING_REGRESSION_CATALOG}
+    expected.update(asset["official_tc_id"] for asset in registry["assets"])
+    expected.add("TC-ENV-000")
+    assert len(shown) == len(set(shown))
+    assert set(shown) == expected
+    assert f'V2 승인 {len(registry["assets"])}건' in html
+    assert "과거 후보를 소급 승인한 것은 아닙니다" in html
+    assert "같은 값으로 다른 의미를 쓴 오류까지 자동 판정하지는 못합니다" in html
+    assert "자동 승인은 아닙니다" in html
+
+
 @pytest.mark.parametrize("ending", [b"\n", b"\r\n"])
 def test_git_preserves_approved_asset_bytes(ending):
     import subprocess

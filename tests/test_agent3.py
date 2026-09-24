@@ -3,6 +3,51 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("mutation", ["none", "early_anchor", "restore_anchor", "omitted_operation", "earlier_observation", "changed_value", "missing_assertion", "write_tc"])
+def test_terminal_observation_uses_last_test_action_without_invented_click(mutation):
+    case, plan, observation = structured_restoration_fixture()
+    case.state_effect = pipeline.TcStateEffect.READ_ONLY
+    case.restore_required, case.restore_steps = False, []
+    case.restoration.operation_steps, case.restoration.confirmations = [], []
+    plan.actions, plan.restore_confirmations = plan.actions[:1], []
+    case.steps = ["대상 장비를 선택한다."]
+    action = plan.actions[0]
+    action.action_type, action.selector, action.value = AutomationActionType.SELECT_DEVICE, "#device-card-1 .card-body-split", 1
+    action.source_text = case.steps[0]
+    case.expected_results[0].statement = "새 제어 스위치의 checked 값은 false이다."
+    case.expected_results[1].statement = "내부 enabled 값은 false이다."
+    for assertion in plan.assertions:
+        assertion.expected_value = False
+    read_step = "새 제어 스위치와 내부 enabled 값을 확인한다."
+    case.steps.append(read_step)
+    for result in case.expected_results:
+        result.verify_after_step = read_step
+    if mutation == "early_anchor":
+        plan.actions.insert(0, plan.actions[0].model_copy(update={"action_id": "ACT-089"}))
+        plan.assertions[0].after_action_id = "ACT-089"
+    elif mutation == "restore_anchor":
+        plan.actions.append(plan.actions[0].model_copy(update={"action_id": "ACT-099", "phase": AutomationPhase.RESTORE}))
+        plan.assertions[0].after_action_id = plan.actions[-1].action_id
+    elif mutation == "omitted_operation":
+        case.steps.insert(-1, "새 제어 스위치를 해제한다.")
+    elif mutation == "earlier_observation":
+        case.steps.insert(0, case.steps.pop())
+    elif mutation == "changed_value":
+        plan.assertions[0].expected_value = True
+    elif mutation == "missing_assertion":
+        plan.assertions.pop()
+    elif mutation == "write_tc":
+        case.state_effect = pipeline.TcStateEffect.STATE_CHANGE
+    legacy = pipeline.evaluate_checkpoint3_plan(case, plan, observation, legacy_wording_checks=False)
+    assert legacy.status == CheckStatus.FAIL
+    current = pipeline.evaluate_checkpoint3_plan(case, plan, observation, legacy_wording_checks=False,
+                                       allow_terminal_observation_anchor=True)
+    assert (current.status == CheckStatus.PASS) == (mutation == "none"), current.model_dump()
+    if mutation == "none":
+        code = compile_automation_candidate("RUN-20260924-120000-ABCDEF", case, plan)
+        assert not any(c.status == CheckStatus.FAIL for c in evaluate_compiled_candidate(case, code))
+
+
 @pytest.mark.parametrize("mutation", ["none", "selector", "source", "assertion", "expected_value", "restore", "restore_link"])
 def test_new_wording_policy_preserves_execution_contract(mutation):
     case, plan, observation = structured_restoration_fixture()
@@ -1052,7 +1097,7 @@ def test_agent3_uses_structured_plan_api() -> None:
     assert result.plan.tc_id == "TC-CAND-003"
     assert responses.kwargs["text_format"] is Agent3AutomationPlan
     assert responses.kwargs["store"] is False
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent3-3-32"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent3-3-33"
     instructions = responses.kwargs["input"][0]["content"]
     assert "Check only conditions stated in the approved TC preconditions" in instructions
     assert "not every available context field" in instructions

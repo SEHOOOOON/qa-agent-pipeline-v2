@@ -1,18 +1,71 @@
 # 자동 테스트 카탈로그
 
-최종 확인: 2026-09-22
-실행 기준: `python -m pytest --collect-only -q` → **770건**
-실제 정의 파일: `tests/test_srs_agent1.py`, `tests/test_agent2.py`, `tests/test_integrity_cli.py`, `tests/test_agent3.py`, `tests/test_orchestration_execution.py`, `tests/test_agent4_reporting.py`, `tests/test_pipeline_ui.py`
+최종 확인: 2026-09-24
+실행 기준: `python -m pytest --collect-only -q` → **996건**
+실제 정의 파일: `tests/test_srs_agent1.py`, `tests/test_agent2.py`, `tests/test_integrity_cli.py`, `tests/test_agent3.py`, `tests/test_grounding.py`, `tests/test_orchestration_execution.py`, `tests/test_agent4_reporting.py`, `tests/test_pipeline_ui.py`
 
 이 문서는 현재 수집되는 자동 테스트를 사람이 확인하기 쉽게 정리한 목록입니다. 실행의 기준은 항상 테스트 코드와 Pytest 수집 결과이며, 테스트를 추가·삭제할 때는 이 문서도 같은 변경에서 갱신합니다.
+
+검사 규칙 자체의 목록은 [판단 지도](PROJECT_GUIDE.md#logic-map)에 있습니다. `scripts/audit_logic_inventory.py --self-test`는 별도 정적 색인 추출 도구의 Python/JavaScript 예제 확인이며 위 Pytest 수량에 포함하지 않습니다. `--check`는 소스·색인 및 Checkpoint 문서 목록의 일치 확인입니다. 이 도구의 성공을 해당 분기의 제품 시험이나 실제 모델 평가 성공으로 집계하지 않습니다.
 
 ## 수량 구조
 
 | 구성 | 수량 | 설명 |
 |---|---:|---|
-| 일반 테스트 함수 | 262 | 함수 하나가 Pytest 실행 1건 |
-| 파라미터 테스트 함수 | 85 | 서로 다른 입력·실패 조합으로 실행 508건 |
-| 합계 | **770** | 현재 Pytest 수집 수 |
+| 일반 테스트 함수 | 270 | 함수 하나가 Pytest 실행 1건 |
+| 파라미터 테스트 함수 | 106 | 서로 다른 입력·실패 조합으로 실행 726건 |
+| 합계 | **996** | 현재 Pytest 수집 수 |
+
+### 공통 모델 근거 검토 · 80건
+
+- 세 단계의 검토 대상 누락·중복·순서/ID 오류·없는 인용·인용 누락·근거 부족·불확실·수정 후 해시·단계/계약 오류, 36건.
+- 복합 기대결과 2건, 검색/이메일/다른 부수효과의 사전 지정 검토 판정 연결 3건. 키워드 금지 목록이 아니라 검토 결과가 실제 차단에 사용되는지 검사.
+- Agent 2에 최초 원문 전달, 새 기능/다른 표현 허용 지침, 카탈로그/화면 로컬 경로 제외, 각 1건.
+- 실제 SDK 어댑터를 Fake Client로 시험: 정상·거부/응답 없음·통신 오류, 3건.
+- Agent 1 CLI의 정상·수정·미해결·불확실·오류 경로와 사용량 합산, 5건.
+- A1/A2/A3 저장 검토의 계약 누락·파일 누락·해시 변경·과거 버전 위장·거부 판정, 15건.
+- Agent 2 인계 및 Agent 3 제품 시험 차단: 근거 부족·불확실·통신 오류, 6건. 후보 제외 사유 전달 포함.
+- 구조 실패 시 검토 호출 생략, 불확실한 단일 사실 여부의 REVIEW 보존, 각 1건.
+- 생성 3종·검토 클라이언트의 SDK 자동 재시도 0회 설정, 4건.
+- 줄바꿈·따옴표가 있는 원문을 JSON 이스케이프 표현이 아닌 실제 텍스트로 인용, 1건.
+
+판정은 테스트에서 지정한 대역 응답입니다. 실제 모델이 없는 기능을 정확히 찾아냈다거나 정상 표현을 항상 허용한다는 평가가 아닙니다. 새 검토의 Live 정확도·오탐·비용은 별도 확인 대상입니다.
+
+### SRS 복수 인용 · 위치와 무관한 출처 연결
+
+- `test_srs_pipe_quotes_validate_each_part_and_each_linked_id`: 정순·역순·세 조각·같은 필드의 복수 인용·2/3개 Requirement 연결과 숫자 변경·없는 조각·빈 조각·ID 누락/추가/미등록·숫자 토큰 분할, 15건. CP1-007과 입력 불변 확인.
+- `test_combined_background_range_retains_target_and_complete_source_guards`: 순서 2종 × 정상·임의 조각·잘못된 ID·부분 범위·변경 후 정책 대체 5종, 10건. CP1-008의 기존/새 판정 확인.
+- `test_scope_evidence_combined_quotes_stay_bound_to_effect_requirement`: 알림/상태 2종 × 정순·역순·다른 Requirement 조각·빈 조각, 8건. CP1-011의 effect별 출처 보호.
+- `test_srs_pipe_policy_does_not_split_change_request_source`: 변경 요청 인용에는 분할 예외를 적용하지 않음, 1건.
+- `test_srs_quote_policy_initial_rewrite_and_verified_loader`: 최초·재작성 2건. 실제 CLI/로더와 현재 2.11 계약 적용, 인용/근거 검토 계약 누락·하향 불일치 차단. 과거 결합 인용 판정은 별도 과거 기록 검증으로 유지.
+
+위 추가 36건은 로컬·모델 대역 검증이며 새 API 결과가 아닙니다. 원문 조각이 존재해도 조합한 설명의 의미 전체가 정확하다는 보장은 하지 않습니다.
+
+### 전체 로직 감사 · 과도한 차단과 누락 보호
+
+- `test_background_range_uses_frozen_source_not_verbatim_explanation`: 배경 범위 설명의 바꿔 쓰기는 허용하되 원문·Requirement·유지 역할·수치·변경 후 범위 대체 오류 6종은 차단. 과거 규칙과 원본 불변 포함, 7건.
+- `test_structured_hvac_restore_does_not_require_magic_words`: 한글/영문 복원 설명 2종 × 정상·계약 누락·확인 누락·기준 변경·순서 변경 5조합, 10건. 새 구조화 정책만 정상 표현을 허용.
+- `test_reference_only_srs_does_not_force_extra_state_assertion`: 참고 연결·직접 상태 요구·상태 정합성 TC·명시 REQUIRED 4조합. 참고 연결만으로 추가 이중 검증을 강제하지 않음.
+- `test_terminal_observation_uses_last_test_action_without_invented_click`: READ_ONLY TC의 마지막 확인은 Assertion으로 구현하며 이른 시점·복원 뒤 판정·조작 누락·중간 확인·기대값 변경·Assertion 누락·상태 변경 TC는 차단, 8건. 기존 계약 판정도 확인.
+- `test_portfolio_catalog_matches_current_assets_and_historical_scope`: 포폴 TC 목록·승인 수를 현재 Registry와 대조하고 과거 사례/현재 등록 구분·자동 검사 한계 표시 확인, 1건.
+- 기존 CLI·후속 로더 시험은 현재 A1 2.11, A2 3.11, A3 4.9 계약을 검증합니다. A2의 범위/복원 정책 누락·버전 불일치 거부를 포함합니다.
+
+함수별 위 30건은 모델 대역·로컬 검사입니다. 실제 API 응답·저장 응답 재검증·브라우저 실행 결과를 서로 합산하지 않습니다.
+
+### 역할 안내·분할 절차 보존 후속 회귀
+
+- `test_agent1_prompt_requires_exclusive_roles_without_dropping_gap_contract`: 최초·재작성 2건에서 역할 선택·중복 금지·정보 부족 계약 안내와 입력 불변 확인.
+- `test_split_procedure_preservation_requires_contiguous_complete_source`: 한글/영문 × 전체·분할·누락·역순·내용 변경·중간 삽입·필드 분산·TC 분산·복원 비활성 9종, 18건. 새 계약과 과거 단일 항목 대조를 구분하며 원본 불변 확인.
+- `test_agent2_sends_approved_procedures_on_initial_and_rewrite_calls`: 기존 시험에 분할 보존·UI 근거·내부 코드와 화면 표시 구분 안내를 추가 확인.
+- `test_agent1_to_agent2_cli_handoff_with_frozen_inputs`: 절차 분할 × 정상·재작성·미해결 3조합 추가. 최초·재작성·실제 로더의 새 계약 적용, 계약 누락/알 수 없는 값/버전 하향 불일치 거부, 과거 계약 조회 확인.
+
+### 과거 Checkpoint 성공 안내 호환과 판정 보호
+
+- `test_checkpoint_revalidation_limits_legacy_pass_message_compatibility`: CP1/CP2 × 과거/새 계약 × 11가지 변경, 44건. 과거 PASS 안내만 허용하고 실패·검토 메시지, ID·순서·누락·중복·판정 변경은 거부. 원본 불변 확인.
+- `test_checkpoint_revalidation_preserves_review_notes_and_handoff`: 최종 검토 사항·인계 상태·Checkpoint 모델 변경 3건 거부.
+- `test_historical_checkpoint_loader_preserves_hash_and_decision_guards`: CP1/CP2 × 성공 안내·해시 불일치·실패 판정·항목 누락·재계산 실패, 10건. 실제 파일 로더로 확인하며 API 클라이언트 생성 금지와 파일 불변도 검사.
+
+단위 로더 시험은 임시 합성 계약 자료를 사용합니다. 과거 Live 원본을 덮어쓰지 않으며 실제 저장 사례 재실행 결과는 인계 문서에 별도로 기록합니다.
 
 ### 절차 역할·중복 분류·과거 인계 후속 회귀
 
@@ -22,7 +75,7 @@
 - `test_structural_cp1_explicit_scope_exclusion_precedes_procedure_marker`: 요청의 명시 제외 우선, 절차에 중복 기록하면 차단.
 - `test_legacy_cp1_keeps_marker_routing_without_new_procedure_notes_field`: 과거 CP1의 빈 절차 필드 호환과 새 정책의 필수 역할 보존 구분.
 - `test_new_agent2_rejects_historical_analysis_before_any_side_effect`: 과거 2.6/2.7 × 표시/무표시 준비·복원 4종, 8조합. 과거 조회·해시 불변, 새 모델 클라이언트/예약/카탈로그 작성 전 중단.
-- `test_agent1_to_agent2_cli_handoff_with_frozen_inputs`: 정상·재작성 해결·미해결 × 절차 없음/표시/무표시 3종, 9조합. 새 분류의 실제 원문 인계와 과거 계약 조회를 함께 확인.
+- `test_agent1_to_agent2_cli_handoff_with_frozen_inputs`: 정상·재작성 해결·미해결 × 절차 없음/표시/무표시/분할 4종, 12조합. 새 분류의 실제 원문 인계와 과거 계약 조회를 함께 확인.
 
 이 검사는 새 의미 판별 규칙을 추가하지 않으며 API를 호출하지 않습니다. 과거 원문에서 절차를 자동 추측해 채우는 대신, 새 실행의 인계 조건을 명확히 검사합니다.
 

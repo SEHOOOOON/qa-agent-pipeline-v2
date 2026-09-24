@@ -191,6 +191,13 @@ def cp1_check(result, rule_id: str):
     return next(item for item in result.checks if item.rule_id == rule_id)
 
 
+def cp1_combined_srs_case():
+    request, analysis, requirements = cp1_request(), cp1_valid_analysis(), cp1_requirements()
+    target = requirements[request.target_requirement_id]
+    analysis.confirmed_conditions[2].source_text = f"{target.statement} | {target.acceptance_criteria}"
+    return request, analysis, requirements
+
+
 def cp1_scope_case(*, direct=False, requirement_id="REQ-NOTIFY-001"):
     """Grounded scope evidence, independent of a specific product control point."""
     from qa_pipeline_contracts import RequirementScopeEvidence, ScopeBasis
@@ -639,6 +646,55 @@ def build_verified_agent1_run(tmp_path: Path) -> tuple[Path, str]:
         },
     )
     return run_dir, run_id
+
+
+def build_historical_agent2_run(tmp_path: Path) -> tuple[Path, str]:
+    """Synthetic legacy-contract fixture; not a rewritten historical Live Run."""
+    run_dir, run_id = build_verified_agent1_run(tmp_path)
+    request, requirements, analysis, _, source = _load_verified_agent1_run(run_dir, run_id)
+    conditions = ["COND-001", "COND-002", "COND-003", "COND-005"]
+    tc = cp2_valid_design().test_cases[0].model_copy(update={
+        "requirement_ids": ["REQ-TEMP-001"], "source_condition_ids": conditions,
+        "feature_requirement_ids": ["REQ-TEMP-001"],
+        "domain_qa_criteria": [DomainQaCriterion.TARGET_DEVICE_ACCURACY],
+        "double_assert_policy": DoubleAssertPolicy.UI_ONLY,
+        "double_assert_reason": "이 단위 Fixture는 화면 경계 결과만 확인한다.",
+        "expected_results": [ExpectedResult(result_id="ER-001",
+            statement="화면 온도가 변경 조건과 일치한다.", observation_layer=ObservationLayer.UI,
+            source_condition_ids=conditions)],
+    })
+    design = cp2_valid_design().model_copy(update={
+        "test_cases": [tc], "excluded_scope": analysis.excluded_scope,
+        "excluded_information_gaps": analysis.information_gaps,
+    })
+    checkpoint = pipeline.evaluate_checkpoint2(request, analysis, design, requirements,
+        require_input_contract=False, require_meaning_guard=False, require_tc_detail=False,
+        require_procedure_detail=False, require_candidate_expectation_guard=False,
+        allow_existing_procedure_review=False, require_double_assert_timing=False)
+    assert checkpoint.status == CheckStatus.PASS, checkpoint.model_dump(mode="json")
+    _write_json(run_dir / "agent2_test_design.json", design.model_dump(mode="json"))
+    _write_json(run_dir / "checkpoint2.json", checkpoint.model_dump(mode="json"))
+    _write_json(run_dir / "agent2_manifest.json", {
+        "run_id": run_id, "stage": "AGENT_2_CP2", "status": "PASS", "contract_version": "2.8",
+        "source_run_manifest_sha256": _sha256_file(run_dir / "run_manifest.json"),
+        **{key: source[key] for key in (
+            "request_sha256", "srs_sha256", "agent1_analysis_sha256", "checkpoint1_sha256")},
+        "agent2_design_sha256": _sha256_file(run_dir / "agent2_test_design.json"),
+        "checkpoint2_sha256": _sha256_file(run_dir / "checkpoint2.json"),
+    })
+    return run_dir, run_id
+
+
+def checkpoint_revalidation_fixture(stage: str):
+    """Small CP1/CP2 records for presentation-vs-decision comparison tests."""
+    checks = [
+        pipeline.CheckResult(rule_id=f"{stage}-001", status=CheckStatus.PASS, message="기존 성공 안내"),
+        pipeline.CheckResult(rule_id=f"{stage}-002", status=CheckStatus.PASS, message="두 번째 성공 안내"),
+    ]
+    if stage == "CP1":
+        return pipeline.Checkpoint1Result(status=CheckStatus.PASS,
+            handoff_status=HandoffStatus.CONTINUE, checks=checks)
+    return pipeline.Checkpoint2Result(status=CheckStatus.PASS, checks=checks)
 
 import qa_pipeline_v2 as pipeline
 
@@ -1490,6 +1546,32 @@ def build_existing_srs_review_run(tmp_path, monkeypatch, *, target_content="<htm
     monkeypatch.setattr(pipeline, "_load_verified_agent2_run", lambda *_: (None, {}, None, design, None, {}))
     assert pipeline.run_agent4(SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))) == 0
     return run_dir, target, srs
+
+
+def fake_grounding_record(payload, *, verdict="SUPPORTED", single_fact=True):
+    """Scripted transport fixture, NOT a claim of actual semantic accuracy."""
+    from qa_pipeline_grounding import _review_digest
+    source = payload["source_documents"][0]
+    return {"contract": "grounding-1.0", "stage": payload["stage"],
+        "input_sha256": _review_digest(payload), "model": "scripted-review-not-live",
+        "response_id": "fake-review", "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+        "review": {"items": [{"item_id": item["item_id"], "verdict": verdict,
+            "single_fact": single_fact,
+            "citations": [{"source_id": source["source_id"], "quote": source["text"]}],
+            "reason": "Scripted fixture; semantic judgment supplied by the test, not inferred."}
+            for item in payload["items"]]}}
+
+
+@pytest.fixture(autouse=True)
+def offline_grounding_transport(monkeypatch):
+    """Existing CLI tests isolate generation/checkpoint behavior from reviewer API."""
+    calls = []
+    def review(payload):
+        calls.append(payload)
+        return fake_grounding_record(payload)
+    monkeypatch.setattr(pipeline_execution, "OpenAIGroundingReviewer",
+                        lambda **kwargs: SimpleNamespace(review=review))
+    return calls
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

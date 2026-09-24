@@ -240,6 +240,12 @@ def _agent3_run_entry(
             if isinstance(reasons, list) and reasons:
                 entry["reason"] = " / ".join(str(item) for item in reasons)
         checkpoint_file = artifact_dir / "checkpoint3.json"
+        if checkpoint_file.is_file():
+            grounding_findings = [check.get("message", "")
+                for check in _read_json_payload(checkpoint_file).get("checks", [])
+                if check.get("rule_id") == "AGENT3-GROUNDING" and check.get("status") in {"FAIL", "REVIEW"}]
+            if grounding_findings:
+                entry["reason"] = " / ".join(filter(None, [entry["reason"], "근거·검사 연결 검토: " + " / ".join(grounding_findings)]))
         if entry["reason"] is None and checkpoint_file.is_file():
             proof_failures = [check.get("message", "") for check in _read_json_payload(checkpoint_file).get("checks", [])
                               if check.get("rule_id") in {"CP3-006A", "CP3-006B"} and check.get("status") == "FAIL"]
@@ -588,7 +594,7 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument(
         "--tc-id",
         default="AUTO",
-        help="Current-Run TC ID, or AUTO to select one eligible CP2 candidate",
+        help="Current-Run TC ID, or AUTO to process every eligible CP2 candidate",
     )
     pipeline.add_argument(
         "--target-html",
