@@ -3,6 +3,20 @@ from pipeline_test_support import *
 import qa_pipeline_grounding as grounding
 
 
+@pytest.mark.parametrize("verdict,expected", [("SUPPORTED", "PASS"), ("UNSUPPORTED", "FAIL"), ("UNCERTAIN", "REVIEW")])
+def test_agent1_progress_decision_is_reviewed_without_claiming_human_approval(verdict, expected):
+    payload = review_payload("AGENT1")
+    decision = next(item for item in payload["items"] if item["item_id"] == "decision")
+    assert decision["content"] == "PROCEED"
+    record = fake_grounding_record(payload)
+    next(item for item in record["review"]["items"] if item["item_id"] == "decision")["verdict"] = verdict
+    assert grounding.check_review_record(payload, record).status.value == expected
+    assert "사람의 공식 SRS·TC 승인이 아닙니다" in grounding.REVIEW_INSTRUCTIONS
+    assert "실제 누락·충돌·근거 없는 확정은 계속 지적" in grounding.REVIEW_INSTRUCTIONS
+    record["review"]["items"] = [item for item in record["review"]["items"] if item["item_id"] != "decision"]
+    assert grounding.check_review_record(payload, record).status == CheckStatus.FAIL
+
+
 @pytest.mark.parametrize("mutation", ["normal", "missing_er", "missing_test", "wrong_reuse"])
 @pytest.mark.parametrize("verdict", ["SUPPORTED", "UNSUPPORTED", "UNCERTAIN"])
 def test_condition_coverage_is_enumerated_from_input_and_reviewed(tmp_path, monkeypatch, mutation, verdict):
@@ -200,7 +214,7 @@ def test_real_reviewer_adapter_with_fake_sdk(result_kind):
             reviewer.review(payload)
     assert len(calls) == 1 and calls[0]["store"] is False
     assert calls[0]["text_format"] is grounding.GroundingReview
-    assert calls[0]["prompt_cache_key"] == "qa-v2-grounding-1-3"
+    assert calls[0]["prompt_cache_key"] == "qa-v2-grounding-1-4"
     instructions = calls[0]["input"][0]["content"]
     assert instructions == grounding.REVIEW_INSTRUCTIONS
     assert "같은 관찰 위치에서 그 실제 기록값과 비교" in instructions

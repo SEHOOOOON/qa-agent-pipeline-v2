@@ -377,17 +377,18 @@ def test_existing_srs_approval_rejects_changed_inputs(tmp_path, monkeypatch, dam
     assert not (run_dir / "srs_only_decision.json").exists()
 
 
-def test_existing_srs_approval_rolls_back_on_record_failure(tmp_path, monkeypatch):
+@pytest.mark.parametrize("failure", [OSError, KeyboardInterrupt, SystemExit])
+def test_existing_srs_approval_rolls_back_on_record_failure(tmp_path, monkeypatch, failure):
     run_dir, target, srs = build_existing_srs_review_run(tmp_path, monkeypatch)
     before = srs.read_bytes()
     original = pipeline_ui._write_json_atomic
     def fail_record(path, payload):
         if path.name == "srs_only_decision.json":
-            raise OSError("record write failed")
+            raise failure("record write failed")
         original(path, payload)
     monkeypatch.setattr(pipeline_ui, "_write_json_atomic", fail_record)
     assets = tmp_path / "approved"
-    with pytest.raises(OSError):
+    with pytest.raises(failure):
         pipeline_ui.decide_existing_srs(run_dir.parent, assets, target, run_dir.name,
             srs_path=srs, decision="APPROVE", reviewer="검토자", note="확인", approve_srs_revisions=True)
     assert srs.read_bytes() == before
@@ -821,8 +822,9 @@ def test_pipeline_ui_requires_and_applies_srs_revision_with_asset_approval(
     assert (approved_root / asset["srs_revision_file"]).is_file()
     assert (runs_root / run_id / "srs_revision_decision.json").is_file()
 
+@pytest.mark.parametrize("failure", [OSError, KeyboardInterrupt, SystemExit])
 def test_pipeline_ui_rolls_back_all_asset_files_when_approval_copy_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure
 ) -> None:
     runs_root, approved_root, target_html, run_id, tc_id, _ = build_approvable_ui_run(
         tmp_path, monkeypatch
@@ -857,11 +859,11 @@ def test_pipeline_ui_rolls_back_all_asset_files_when_approval_copy_fails(
         destination = Path(destination)
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(b"partial")
-        raise OSError("simulated copy failure")
+        raise failure("simulated copy failure")
 
     monkeypatch.setattr(pipeline_ui.shutil, "copy2", fail_after_partial_copy)
 
-    with pytest.raises(OSError, match="simulated copy failure"):
+    with pytest.raises(failure, match="simulated copy failure"):
         pipeline_ui.decide_candidate_asset(
             runs_root,
             approved_root,
@@ -954,15 +956,20 @@ def test_pipeline_ui_blocks_asset_approval_for_failed_or_stale_evidence(
         )
     assert not (approved_root / "registry.json").exists()
 
+@pytest.mark.parametrize("target_changed", [False, True])
 def test_pipeline_ui_revalidates_stale_candidate_without_model_call(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target_changed
 ) -> None:
     runs_root, approved_root, target_html, run_id, tc_id, _ = build_approvable_ui_run(
         tmp_path, monkeypatch
     )
-    target_html.write_text("<!doctype html><title>UI updated</title>", encoding="utf-8")
+    if target_changed:
+        target_html.write_text("<!doctype html><title>UI updated</title>", encoding="utf-8")
 
     def fake_trial(code_file, current_target, evidence_dir, *, timeout_seconds):
+        _, _, _, reasons = pipeline_ui._candidate_approval_check(
+            runs_root / run_id, tc_id, target_html=target_html)
+        assert reasons, "Approval must be blocked while the retry is unfinished"
         evidence_dir.mkdir(parents=True)
         hashes = {}
         for name, content in (
@@ -1027,13 +1034,41 @@ def test_pipeline_ui_revalidates_stale_candidate_without_model_call(
         for path, digest in record["evidence_sha256"].items()
     }
 
+@pytest.mark.parametrize("target_changed", [False, True])
+@pytest.mark.parametrize("outcome,complete", [
+    ("PRODUCT_MISMATCH_CANDIDATE", True), ("AUTOMATION_ERROR", False),
+    ("TIMEOUT", False), ("PASS", False),
+])
+def test_latest_failed_revalidation_blocks_old_pass(tmp_path, monkeypatch, target_changed, outcome, complete):
+    runs, assets, target, run_id, tc_id, _ = build_approvable_ui_run(tmp_path, monkeypatch)
+    if target_changed:
+        target.write_text("<html>changed</html>", encoding="utf-8")
+    def trial(code, html, evidence_dir, *, timeout_seconds):
+        return pipeline.Agent3TrialResult(outcome=pipeline.TrialOutcome(outcome),
+            exit_code=None if outcome == "TIMEOUT" else 0 if outcome == "PASS" else 1,
+            duration_ms=1, stdout_file="stdout.txt", stderr_file="stderr.txt", evidence_complete=complete)
+    monkeypatch.setattr(pipeline, "run_candidate_trial", trial)
+    with pytest.raises(ValueError, match="공식 등록 조건"):
+        pipeline_ui.revalidate_candidate_asset(runs, target, run_id, tc_id)
+    latest = json.loads((runs / run_id / "asset_revalidation" / tc_id / "latest.json").read_text(encoding="utf-8"))
+    assert latest["outcome"] == outcome
+    _, _, _, reasons = pipeline_ui._candidate_approval_check(runs / run_id, tc_id, target_html=target)
+    assert reasons, "A failed current retry must supersede the original PASS"
+    with pytest.raises(ValueError):
+        pipeline_ui.decide_candidate_asset(runs, assets, target, run_id, tc_id,
+            decision="APPROVE", reviewer="검토자", note="실패 재시험 차단 확인")
+    assert not (assets / "registry.json").exists()
+
+
 @pytest.mark.parametrize("changed", ["target", "candidate"])
 def test_pipeline_ui_revalidation_rejects_files_changed_during_trial(tmp_path, monkeypatch, changed):
     runs_root, _, target_html, run_id, tc_id, _ = build_approvable_ui_run(tmp_path, monkeypatch)
     latest = runs_root / run_id / "asset_revalidation" / tc_id / "latest.json"
     latest.parent.mkdir(parents=True, exist_ok=True)
     latest.write_text('{"previous":"preserved"}', encoding="utf-8")
-    before = latest.read_bytes()
+    original_target = target_html.read_bytes()
+    candidate = runs_root / run_id / "agent3_candidates" / tc_id / "candidates"
+    original_code = {path: path.read_bytes() for path in candidate.iterdir() if path.is_file()}
 
     def changing_trial(code_file, current_target, evidence_dir, *, timeout_seconds):
         changed_file = current_target if changed == "target" else code_file
@@ -1045,7 +1080,82 @@ def test_pipeline_ui_revalidation_rejects_files_changed_during_trial(tmp_path, m
     monkeypatch.setattr(pipeline, "run_candidate_trial", changing_trial)
     with pytest.raises(ValueError, match="재검증 중"):
         pipeline_ui.revalidate_candidate_asset(runs_root, target_html, run_id, tc_id)
-    assert latest.read_bytes() == before
+    assert json.loads(latest.read_text(encoding="utf-8"))["outcome"] == "INCOMPLETE"
+    target_html.write_bytes(original_target)
+    for path, content in original_code.items():
+        path.write_bytes(content)
+    assert pipeline_ui._candidate_approval_check(
+        runs_root / run_id, tc_id, target_html=target_html)[3]
+
+
+@pytest.mark.parametrize("prior_retry", [False, True])
+@pytest.mark.parametrize("failure", [OSError, RuntimeError, KeyboardInterrupt])
+def test_interrupted_revalidation_cannot_reuse_old_pass(tmp_path, monkeypatch, prior_retry, failure):
+    runs, assets, target, run_id, tc_id, _ = build_approvable_ui_run(tmp_path, monkeypatch)
+    run_dir = runs / run_id
+    latest = run_dir / "asset_revalidation" / tc_id / "latest.json"
+    if prior_retry:
+        original = pipeline_ui._candidate_validation(run_dir, tc_id)
+        _write_json(latest, {
+            "outcome": "PASS", "candidate_sha256": original["test_sha256"],
+            "target_sha256": original["target_sha256"], "evidence_complete": True,
+            "evidence_files": original["evidence_files"],
+            "evidence_sha256": original["evidence_sha256"],
+        })
+    assert not pipeline_ui._candidate_approval_check(run_dir, tc_id, target_html=target)[3]
+    def interrupted(*args, **kwargs):
+        raise failure("trial interrupted")
+    monkeypatch.setattr(pipeline, "run_candidate_trial", interrupted)
+    with pytest.raises(failure):
+        pipeline_ui.revalidate_candidate_asset(runs, target, run_id, tc_id)
+    assert pipeline_ui._candidate_approval_check(run_dir, tc_id, target_html=target)[3], (
+        "An interrupted retry must not silently restore approval eligibility"
+    )
+    with pytest.raises(ValueError):
+        pipeline_ui.decide_candidate_asset(runs, assets, target, run_id, tc_id,
+            decision="APPROVE", reviewer="검토자", note="중단 시험 차단")
+    assert not (assets / "registry.json").exists()
+
+
+@pytest.mark.parametrize("fail_write", [1, 2])
+def test_revalidation_record_write_failure_is_safe(tmp_path, monkeypatch, fail_write):
+    runs, _, target, run_id, tc_id, _ = build_approvable_ui_run(tmp_path, monkeypatch)
+    original_write = pipeline_ui._write_json_atomic
+    calls = {"write": 0, "trial": 0}
+    def writing(path, payload):
+        calls["write"] += 1
+        if calls["write"] == fail_write:
+            raise OSError("simulated record failure")
+        original_write(path, payload)
+    def trial(*args, **kwargs):
+        calls["trial"] += 1
+        return pipeline.Agent3TrialResult(outcome=pipeline.TrialOutcome.PASS,
+            exit_code=0, duration_ms=1, stdout_file="stdout.txt", stderr_file="stderr.txt",
+            evidence_complete=True)
+    monkeypatch.setattr(pipeline_ui, "_write_json_atomic", writing)
+    monkeypatch.setattr(pipeline, "run_candidate_trial", trial)
+    with pytest.raises(OSError):
+        pipeline_ui.revalidate_candidate_asset(runs, target, run_id, tc_id)
+    assert calls["trial"] == fail_write - 1
+    reasons = pipeline_ui._candidate_approval_check(runs / run_id, tc_id, target_html=target)[3]
+    assert bool(reasons) == (fail_write == 2)
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_ui_atomic_writer_cleans_failed_temporary_file(tmp_path, monkeypatch, existing):
+    import qa_pipeline_io
+    target = tmp_path / "record.json"
+    if existing:
+        target.write_bytes(b'{"original":true}')
+    def fail_replace(*args, **kwargs):
+        raise OSError("simulated replacement failure")
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    monkeypatch.setattr(qa_pipeline_io.os, "replace", fail_replace)
+    with pytest.raises(OSError):
+        pipeline_ui._write_json_atomic(target, {"new": "record"})
+    assert sorted(p.name for p in tmp_path.iterdir()) == (["record.json"] if existing else [])
+    if existing:
+        assert target.read_bytes() == b'{"original":true}'
 
 
 @pytest.mark.parametrize("url,method,allowed", [

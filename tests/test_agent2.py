@@ -705,7 +705,12 @@ def test_agent2_sends_approved_procedures_on_initial_and_rewrite_calls():
         assert "근거 개수와 검증 사실 개수는 다릅니다" in instructions
         assert "유지 조건이라는 이유로 이번 요청에 필요한 검사를 생략" in instructions
         assert "후보와 기존 TC를 합친 실제 검사 범위" in instructions
-        assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-40"
+        assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-41"
+        assert "기존 TC는 전체 단위로 실행" in instructions
+        assert "명시적 제외와 충돌하는 검사가 포함돼 있으면 선택하지 않고" in instructions
+        assert "기존 assertion을 삭제하지 않습니다" in instructions
+        assert "요청된 변경분 후보가 실제로 확인하는 유지 기준도 함께 연결" in instructions
+        assert "유지` 조건은 관련_기존_TC로만" not in instructions
         assert "같은 TC의 같은 절차 배열" in instructions
         assert "조작 수단이 없는 입력에서 버튼·횟수를 추정하지 않습니다" in instructions
         assert "UI 기대결과에 내부 enum을 곧바로 화면 표시 문자열처럼 쓰지 않습니다" in instructions
@@ -884,7 +889,7 @@ def test_agent2_uses_structured_responses_api() -> None:
     assert response.usage["total_tokens"] == 300
     assert responses.kwargs["text_format"] is Agent2TestDesign
     assert responses.kwargs["store"] is False
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-40"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-41"
     agent2_input = responses.kwargs["input"][1]["content"]
     assert "[기존 사람 작성·자동화 TC 카탈로그]" in agent2_input
     assert '[코드로 확인한 SRS 개정 범위]' in agent2_input
@@ -896,7 +901,7 @@ def test_agent2_uses_structured_responses_api() -> None:
     assert "제품 기능 테스트케이스 후보" in AGENT2_SYSTEM_INSTRUCTIONS
     assert "Playwright 코드" in AGENT2_SYSTEM_INSTRUCTIONS
     assert "모든 confirmed_condition" in AGENT2_SYSTEM_INSTRUCTIONS
-    assert "Requirement ID만 같고 검증 동작이 다르면" in AGENT2_SYSTEM_INSTRUCTIONS
+    assert "Requirement ID만 같거나 일부 검사가 맞는다는 이유로 재사용하지 않습니다" in AGENT2_SYSTEM_INSTRUCTIONS
     assert "내부 필드 식별자" in AGENT2_SYSTEM_INSTRUCTIONS
     assert "target_role=PRIMARY_TEST_DEVICE" in AGENT2_SYSTEM_INSTRUCTIONS
     assert "V1의 3단계 QA 기준" in AGENT2_SYSTEM_INSTRUCTIONS

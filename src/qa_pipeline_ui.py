@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 from qa_pipeline_execution import _new_run_id
-from qa_pipeline_io import _sha256_file
+from qa_pipeline_io import _sha256_file, _write_json as _write_json_atomic
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -40,16 +40,6 @@ def _read_json(path: Path) -> dict[str, Any]:
         return {}
     payload = json.loads(path.read_text(encoding="utf-8"))
     return payload if isinstance(payload, dict) else {}
-
-
-def _write_json_atomic(path: Path, payload: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".tmp")
-    temporary.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    temporary.replace(path)
 
 
 def _safe_text(value: Any, *, field_name: str, required: bool, limit: int) -> str:
@@ -318,10 +308,15 @@ def _candidate_approval_check(
         reasons.append("변경 검증 결과가 PASSED가 아닙니다.")
     current_target_sha256 = _sha256_file(target_html) if target_html.is_file() else None
     approval_result = dict(result)
-    if current_target_sha256 and result.get("target_sha256") != current_target_sha256:
-        revalidation = _read_json(
-            run_dir / "asset_revalidation" / tc_id / "latest.json"
-        )
+    revalidation = _read_json(run_dir / "asset_revalidation" / tc_id / "latest.json")
+    latest_matches_current = bool(revalidation) and (
+        revalidation.get("target_sha256") == current_target_sha256
+        and revalidation.get("candidate_sha256") == manifest.get("candidate_sha256")
+    )
+    # A failed retry on unchanged files must not fall back to an older PASS.
+    if current_target_sha256 and (
+        result.get("target_sha256") != current_target_sha256 or latest_matches_current
+    ):
         if (
             revalidation.get("outcome") == "PASS"
             and revalidation.get("evidence_complete") is True
@@ -341,6 +336,8 @@ def _candidate_approval_check(
             )
         else:
             reasons.append(
+                "최근 재시험이 미완료·실패 상태이거나 증거가 부족하여 재검증이 필요합니다."
+                if latest_matches_current else
                 "시험 뒤 중앙제어 HTML이 변경되어 현재 제품 기준으로 재검증이 필요합니다."
             )
     if approval_result.get("evidence_complete") is not True:
@@ -423,6 +420,19 @@ def revalidate_candidate_asset(
     revalidation_root = run_dir / "asset_revalidation" / tc_id
     evidence_dir = revalidation_root / attempt_id / "evidence"
     target_sha256 = _sha256_file(target_html)
+    record = {
+        "contract_version": "1.0",
+        "run_id": run_id,
+        "tc_id": tc_id,
+        "attempt_id": attempt_id,
+        "candidate_sha256": candidate_sha256,
+        "target_sha256": target_sha256,
+        "outcome": "INCOMPLETE",
+        "evidence_complete": False,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    # Publish before execution: interruptions must not expose an older PASS.
+    _write_json_atomic(revalidation_root / "latest.json", record)
     trial = run_candidate_trial(
         candidate_file,
         target_html,
@@ -440,21 +450,15 @@ def revalidate_candidate_asset(
         relative: trial.evidence_sha256[Path(relative).name]
         for relative in evidence_files
     }
-    record = {
-        "contract_version": "1.0",
-        "run_id": run_id,
-        "tc_id": tc_id,
-        "attempt_id": attempt_id,
+    record.update({
         "outcome": trial.outcome.value,
         "exit_code": trial.exit_code,
         "duration_ms": trial.duration_ms,
-        "candidate_sha256": candidate_sha256,
-        "target_sha256": target_sha256,
         "evidence_complete": trial.evidence_complete,
         "evidence_files": evidence_files,
         "evidence_sha256": evidence_sha256,
         "created_at": datetime.now(timezone.utc).isoformat(),
-    }
+    })
     _write_json_atomic(revalidation_root / "latest.json", record)
     if trial.outcome != TrialOutcome.PASS or not trial.evidence_complete:
         raise ValueError(
@@ -585,7 +589,8 @@ def decide_existing_srs(
             _write_json_atomic(asset_file, record)
             record["record_sha256"] = _sha256_file(asset_file)
         _write_json_atomic(decision_file, record)
-    except Exception:
+    except BaseException:
+        # Compensate cancellation too, then propagate it without swallowing it.
         _restore_files_after_error(backups)
         raise
     return record
@@ -1004,7 +1009,8 @@ def decide_candidate_asset(
             note=note,
             approve_srs_revisions=approve_srs_revisions,
         )
-    except Exception as original_error:
+    except BaseException as original_error:
+        # The transaction must unwind on Ctrl+C/SystemExit as well as I/O errors.
         try:
             _restore_files_after_error(backups)
         except Exception as rollback_error:

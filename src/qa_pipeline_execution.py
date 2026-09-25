@@ -384,7 +384,7 @@ def _current_agent2_contract() -> dict[str, str]:
         "procedure_preservation_contract": "1.0",
         "wording_policy": "STRUCTURAL_ONLY_V1",
         "input_routing_contract": "1.0",
-        "prompt_version": "agent2-2.40",
+        "prompt_version": "agent2-2.41",
         "structured_restoration_contract": "1.0",
         "state_restoration_contract": "1.0",
         "tc_detail_contract": "1.2",

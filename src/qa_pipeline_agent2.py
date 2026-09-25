@@ -59,7 +59,7 @@ SRS revision proposals must use grounded numbers and preserve the meaning of the
 - 승인 TC 명세가 제공되면 검증 동작 요약뿐 아니라 사전조건·절차·기대결과·판정 시점·복원을 함께 대조합니다. 명세에 있는 절차를 요약에 없다는 이유로 누락된 것으로 판단하지 않습니다.
 - 기존 TC 명세는 재사용 판단 근거이지 이번 실행 성공의 증거가 아닙니다. 제공되지 않은 절차나 실제 수행 여부를 추정하지 않습니다.
 - test_cases에는 이번 변경으로 새로 필요하거나 기대 결과·절차가 달라져 수정이 필요한 변경 검증 후보만 작성합니다.
-- 유지되는 기존 동작은 새 TC로 다시 작성하지 않고 관련_기존_TC에 기존 TC ID와 연결 조건을 기록합니다.
+- 유지되는 기존 동작은 이번 범위에 맞는 기존 TC가 있으면 재사용합니다. 기존 TC를 재사용할 수 없다는 이유만으로 요청 밖 회귀 시험을 새로 만들지 않습니다.
 - 출력은 사람의 마지막 승인 전 변경 검증용 제품 TC 후보와 영향받는 기존 회귀 선택입니다.
 
 반드시 지킬 규칙:
@@ -68,7 +68,7 @@ SRS revision proposals must use grounded numbers and preserve the meaning of the
 2. requirement_effects가 NO_IMPACT인 Requirement는 테스트 범위에 포함하지 않습니다.
 2-1. scope_evidence.basis가 REQUEST_TRACE_ONLY인 연관 Requirement는 요청된 검사에 근거만 연결한 것입니다. 관련 SRS 전체를 새 검사로 추가하지 않습니다. 이 근거에 연결된 Condition을 기대결과로 사용할 때는 원문의 대상·값·판정 의미를 보존합니다. 문장 전체를 그대로 복사해야 하는 것은 아닙니다. 관찰 위치·판정 단계는 observation_target·verify_after_step에 구체화하고, 다른 확인 내용은 덧붙이지 않습니다. Requirement 이름만 보고 알림이나 UI/내부 상태 검사를 추가하지 않습니다.
 3. MODIFIED는 변경 동작 검증 후보, UPDATE_REQUIRED는 변경으로 기대 결과·절차 수정이 필요한 후보, VERIFY는 기존 동작 회귀 선택으로 해석합니다.
-3-1. 기존 TC 카탈로그의 `검증 동작`이 VERIFY·유지 조건 또는 변경 후 조건을 그대로 검증하면 관련_기존_TC로 선택하고 동일 내용을 TC-CAND로 다시 만들지 않습니다. Requirement ID만 같고 검증 동작이 다르면 재사용으로 판단하지 않습니다. 기존 TC가 변경 후 조건을 전부 검증하면 test_cases는 비워 두고 관련_기존_TC만 반환할 수 있습니다. 기존 TC가 변경된 기대 결과를 검증할 수 없을 때만 부족한 변경분 후보를 만듭니다. `변경_구분=유지` 조건은 관련_기존_TC로만 연결하고, `변경_구분=변경` 조건은 신규·수정 후보 또는 변경 후 동작을 이미 검증하는 기존 TC 중 한 경로로 연결합니다.
+3-1. 기존 TC 카탈로그의 `검증 동작`이 VERIFY·유지 조건 또는 변경 후 조건을 그대로 검증하고 TC 전체 실행이 이번 범위에 맞으면 관련_기존_TC로 선택합니다. Requirement ID만 같거나 일부 검사가 맞는다는 이유로 재사용하지 않습니다. 기존 TC는 전체 단위로 실행되므로 명시적 제외와 충돌하는 검사가 포함돼 있으면 선택하지 않고 미선택 이유를 기록합니다. 일부 검사만 실행했다고 가정하거나 기존 assertion을 삭제하지 않습니다. 기존 TC가 변경 후 조건을 전부 검증하면 test_cases를 비워 둘 수 있습니다. 재사용할 수 없으면 요청된 변경분 후보가 실제로 확인하는 유지 기준도 함께 연결하되, 관련 없는 유지 조건을 연결하거나 유지 SRS 전체를 검증했다고 주장하지 않습니다. 요청된 필수 검사를 후보·기존 TC 어느 쪽에서도 다룰 수 없으면 누락을 숨기지 말고 사람 확인 사항으로 남깁니다. 동일 검사의 중복 생성은 금지합니다.
 3-2. 변경 조건을 기존 TC만으로 검증할 때는 조건에 명시된 상태 코드·수치가 기존 카탈로그의 검증 동작에도 있는지 확인합니다. 값이 다르거나 확인할 수 없으면 기존 TC를 재사용 근거로 삼지 말고 부족한 변경분을 후보로 설계합니다. 같은 값이 있어도 매핑·순서·기대 동작이 다르면 동일 검증이 아닙니다.
 4. 모든 confirmed_condition을 test_cases 또는 관련_기존_TC의 source_condition_ids 중 최소 한 곳에 반영합니다. 실제로 바뀐 제품 판정 조건은 신규·수정 후보 또는 변경 후 동작을 이미 그대로 검증하는 기존 TC 중 한 경로에 반영합니다. 준비·선택·복원 절차를 제품 기대 결과로 바꾸지 않습니다. 변경 요청의 `[시험 절차 메모]`는 제외 범위가 아니며, 준비 메모는 preconditions 또는 steps에, 종료 후 복원 메모는 restore_steps에 원문 그대로 기록하고 restore_required=true로 설정합니다.
 5. 모든 기대 결과는 source_condition_ids로 제품 판정 근거를 연결합니다. 근거에 없는 수치·시간·문구·UI 동작을 추가하지 않습니다. 장비 선택 성공, 사전조건 준비 완료, 시험 종료 후 복원처럼 실행을 위한 절차는 steps·preconditions·restore_steps에만 두고, 변경 요청이 그 동작 자체의 제품 결과를 요구하지 않는 한 expected_results로 만들지 않습니다. Condition 원문에 없는 `선택하고 적용할 수 있다`, `클릭할 수 있다`, `입력할 수 있다` 같은 실행 행동 성공 문장을 새 기대 결과로 만들지 않습니다. Condition 자체가 설정 가능·선택 가능 같은 제품 기능을 요구하면 이를 삭제하지 말고 버튼 활성 상태, 선택값 반영 또는 적용 뒤 상태처럼 실제로 판정할 관찰값으로 구체화합니다.
@@ -307,7 +307,7 @@ class OpenAIAgent2:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent2-2-40",
+                prompt_cache_key="qa-v2-agent2-2-41",
                 input=[
                     {"role": "system", "content": AGENT2_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},

@@ -41,6 +41,11 @@ EXPECTED_RESULT 항목은 한 대상·한 판정 시점의 한 검증 사실인�
 여러 독립 결과를 한 항목에 합쳤으면 false로 표시합니다. 마침표·접속사 개수로 판정하지 마세요.
 복수 사실의 분리는 기존 사실을 모두 보존해야 하며 검사를 쉽게 만들려고 삭제하면 안 됩니다.
 AGENT1: 조건의 의미·변경/유지 역할과 영향 범위, 절차/제외/정보부족 분류를 원문과 대조하세요.
+AGENT1의 decision은 입력의 충분성에 따른 다음 설계 단계 진행 판단이며, 사람의 공식 SRS·TC 승인이 아닙니다.
+PROCEED는 필요한 시험 조건이 확정됐는지, PARTIAL_PROCEED는 미정 범위를 분리하고 확정 범위만 진행 가능한지,
+WAITING_FOR_USER/BLOCKED는 핵심 조건 부족·충돌로 진행할 수 없는지 원문과 분석 전체를 대조합니다.
+원문에 PROCEED라는 단어나 진행 승인 문장이 없다는 이유만으로 거부하지 말고 판단을 뒷받침하는 실제 시험 조건을 인용하세요.
+실제 누락·충돌·근거 없는 확정은 계속 지적하며, 판단할 수 없으면 UNCERTAIN입니다. decision을 검토에서 제외하지 않습니다.
 AGENT2: 각 조작과 기대결과, 기존 TC 선택, SRS 제안이 최초 요청·SRS에 근거하는지 확인하세요.
 CONDITION_COVERAGE 항목은 생성된 TC 목록에서 역으로 추정하지 않고 Agent 1의 모든 확정 조건에서 열거됩니다.
 연결 ID만 있다고 검증된 것은 아닙니다. 제품 확인 조건은 연결된 기대결과 또는 기존 TC의 실제 검증 동작이
@@ -248,7 +253,7 @@ class OpenAIGroundingReviewer:
 
     def review(self, payload):
         response = self.client.responses.parse(model=self.model, reasoning={"effort": "medium"},
-            store=False, prompt_cache_key="qa-v2-grounding-1-3",
+            store=False, prompt_cache_key="qa-v2-grounding-1-4",
             input=[{"role": "system", "content": REVIEW_INSTRUCTIONS},
                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
             text_format=GroundingReview)

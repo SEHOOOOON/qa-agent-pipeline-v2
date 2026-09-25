@@ -1,7 +1,7 @@
 # 자동 테스트 카탈로그
 
 최종 확인: 2026-09-25
-실행 기준: `python -m pytest --collect-only -q` → **1173건**
+실행 기준: `python -m pytest --collect-only -q` → **1199건**
 실제 정의 파일: `tests/test_srs_agent1.py`, `tests/test_agent2.py`, `tests/test_integrity_cli.py`, `tests/test_agent3.py`, `tests/test_grounding.py`, `tests/test_orchestration_execution.py`, `tests/test_agent4_reporting.py`, `tests/test_pipeline_ui.py`
 
 이 문서는 현재 수집되는 자동 테스트를 사람이 확인하기 쉽게 정리한 목록입니다. 실행의 기준은 항상 테스트 코드와 Pytest 수집 결과이며, 테스트를 추가·삭제할 때는 이 문서도 같은 변경에서 갱신합니다.
@@ -12,11 +12,34 @@
 
 | 구성 | 수량 | 설명 |
 |---|---:|---|
-| 일반 테스트 함수 | 275 | 함수 하나가 Pytest 실행 1건 |
-| 파라미터 테스트 함수 | 131 | 서로 다른 입력·실패 조합으로 실행 898건 |
-| 합계 | **1173** | 현재 Pytest 수집 수 |
+| 일반 테스트 함수 | 272 | 함수 하나가 Pytest 실행 1건 |
+| 파라미터 테스트 함수 | 139 | 서로 다른 입력·실패 조합으로 실행 927건 |
+| 합계 | **1199** | 현재 Pytest 수집 수 |
 
-코드 공개본은 수정 포폴을 공개하지 않으므로 시안 전용 자산 목록·안내 문구 검사 1건을 함께 제외합니다. 작업 브랜치의 1,174건과 수량 차이는 이 화면 검사뿐입니다. Agent 2 설계 변조 검사는 과거 자료의 체크아웃 줄바꿈에 의존하지 않도록 기존 합성 Run 생성기를 사용하고 변조 전 정상 로딩도 확인합니다. 파이프라인·승인·실행 검사 조건은 유지합니다.
+코드 공개본의 최초 수집은 1,173건이며 수정 포폴 전용 검사 1건은 작업 브랜치에 보존했습니다. 이번 승인 재시험 보완에서 9조합, 진행 판단 검토에서 3조합을 추가했습니다. Agent 2 설계 변조 검사는 기존 합성 Run 생성기로 변조 전 정상 로딩과 변조 후 차단을 확인합니다.
+
+아래 절의 ‘추가 N건’은 당시 보완 이력이며 서로 겹칠 수 있어 합산하지 않습니다. 최신 수량은 위 합계와 실제 Pytest 수집을 기준으로 합니다.
+
+기존 Agent 2 최초/재작성 어댑터와 상세 TC Manifest 검사는 작성 지침 2.41의 전체 TC 재사용·제외 범위·기존 assertion 보존 안내와 버전 전달을 확인합니다. 모델이 실제로 올바른 TC를 선택했다는 증거는 아닙니다.
+
+### 최신 재시험 결과 우선 · 추가 9건
+
+- 제품 파일 동일/변경 × 제품 불일치/자동화 오류/시간 초과/PASS지만 증거 부족 8조합: 최신 실패 기록 저장, 과거 PASS로 승인하지 않음, 공식 Registry 미생성.
+- 기존 정상 재시험 검사를 동일 파일에도 확대: 최신 증거 사용·승인 출처 연결 유지 1조합 추가.
+- 출처 무결성 검사는 별도 시험에서 다룹니다. 이 9건은 승인 트랜잭션 단위 자료와 대역 시험 결과를 사용하며 실제 공식 승인을 수행한 증거가 아닙니다.
+
+### 미완료 재시험·승인 중단 복구·공통 저장 · 추가 14건
+
+- 이전 재시험 유무 × OSError/RuntimeError/KeyboardInterrupt 6조합: 완료 결과를 못 남겨도 과거 PASS로 승인하지 않음.
+- 시작 기록/완료 기록 저장 실패 2조합: 시작 기록을 못 쓰면 시험 미시작, 완료 기록을 못 쓰면 미완료로 승인 차단.
+- 기존 SRS 전용 승인·TC 등록 원상복구 검사에 KeyboardInterrupt/SystemExit를 추가한 4조합: 부분 파일 변경 복구 후 원래 중단 예외 전달.
+- 기존 파일 유무에 따른 저장 교체 실패 2조합: 원본은 유지하고 임시 파일을 남기지 않음. UI는 별도 작성기를 없애고 기존 공통 원자적 저장 함수를 재사용합니다.
+- 기존 정상 재시험 2조합은 시험 중 승인 불가와 완료 뒤 승인 가능을 함께 확인합니다. 기존 시험 중 파일 변경 2조합도 파일을 원복한 뒤 미완료 시험이 승인 근거로 쓰이지 않는지 확인합니다.
+- 임시 폴더·대역 실행으로 실패 지점을 주입합니다. 실제 공식 자산 변경이나 전원 종료 복구 시험이 아닙니다.
+
+### Agent 1 진행 판단과 사람 승인 구분 · 추가 3건
+
+- `decision`을 계속 검토 대상으로 유지하며 지정한 SUPPORTED/UNSUPPORTED/UNCERTAIN은 PASS/FAIL/REVIEW로 전달됩니다. decision 항목을 빼면 거부합니다. 지침과 캐시 버전 1.4 전달을 기존 어댑터 검사에서도 확인합니다. 지정 응답 검사는 모델의 판단 정확도 검사가 아니며 실제 모델 비교는 인계 문서에서 구분합니다.
 
 ### 복수 근거·요청 시험 범위 · 추가 26건
 
@@ -58,7 +81,7 @@
 
 분기 감사 도구의 색인 생성은 실행 테스트가 아닙니다. 커버리지의 분기 수와 테스트 수는 다르며, 관련 테스트 이름을 찾았다는 사실만으로 특정 분기가 실행됐다고 집계하지 않습니다.
 
-### 공통 모델 근거 검토 · 최초 80건 (위 추가 포함 현재 87건)
+### 공통 모델 근거 검토 · 최초 80건 (해당 보완 당시 87건)
 
 - 세 단계의 검토 대상 누락·중복·순서/ID 오류·없는 인용·인용 누락·근거 부족·불확실·수정 후 해시·단계/계약 오류, 36건.
 - 복합 기대결과 2건, 검색/이메일/다른 부수효과의 사전 지정 검토 판정 연결 3건. 키워드 금지 목록이 아니라 검토 결과가 실제 차단에 사용되는지 검사.
@@ -326,7 +349,7 @@ HTTP 대역으로 본문 생성·전송 계약을 검사합니다. 실제 Notion
 | `test_scope_gate_rewrite_and_pause_before_agent2` | 재작성 해결·미해결·범위 보류 3조합, Manifest와 최초/재작성 입력, Agent 2 진입 차단 |
 | `test_scope_contract_loader_preserves_legacy_and_rejects_missing_new_contract` | 과거 Run 로딩, 새 계약 누락 거절 |
 
-기존 연관 UPDATE_REQUIRED 테스트도 근거 없는 확장을 차단하도록 바꿨습니다. 위 시험은 규칙·모델 대역 검증이며 새 실제 모델 실행 성공을 의미하지 않습니다. 현재 파일별 수집은 Agent 1 53·Agent 2 95·Agent 3 195·Agent 4 35·인계/CLI 13·실행 34·UI 60건입니다.
+기존 연관 UPDATE_REQUIRED 테스트도 근거 없는 확장을 차단하도록 바꿨습니다. 위 시험은 규칙·모델 대역 검증이며 새 실제 모델 실행 성공을 의미하지 않습니다. 당시 파일별 수집은 Agent 1 53·Agent 2 95·Agent 3 195·Agent 4 35·인계/CLI 13·실행 34·UI 60건이었으며 최신 수량은 아닙니다.
 
 ### 승인 TC 재사용 입력: 추가 3건
 
@@ -391,7 +414,7 @@ HTTP 대역으로 본문 생성·전송 계약을 검사합니다. 실제 Notion
 
 `test_agent4_reports_restore_failure_without_hiding_product_observation`는 복원 단독 실패와 제품 불일치·복원 동시 실패를 각각 검사합니다. 9월 7일 증가한 4건은 이 두 조합과 로그 오인·변조 방지, 기존 TC 절차 메모의 최종 보고 연결이며 제품 TC가 새로 생성된 수가 아닙니다.
 
-## 1. 기준 자산·SRS·Agent 1·Checkpoint 1 (27건)
+## 1. 기준 자산·SRS·Agent 1·Checkpoint 1
 
 | 테스트 | 확인 내용 |
 |---|---|
@@ -423,7 +446,7 @@ HTTP 대역으로 본문 생성·전송 계약을 검사합니다. 실제 Notion
 | `test_scope_limited_acceptance_note_is_only_excluded` | 범위 제한 인수 조건을 확정 조건이 아닌 제외 범위로 전달 |
 | `test_scope_limited_acceptance_note_cannot_be_confirmed_condition` | 범위 제한 문구의 확정 조건 혼입 차단 |
 
-## 2. Agent 2·Checkpoint 2·인계 (49건)
+## 2. Agent 2·Checkpoint 2·인계
 
 | 테스트 | 확인 내용 |
 |---|---|
@@ -477,7 +500,7 @@ HTTP 대역으로 본문 생성·전송 계약을 검사합니다. 실제 Notion
 | `test_agent1_to_agent2_cli_handoff_with_frozen_inputs` | CLI 동결 입력 인계 |
 | `test_agent2_rejects_an_active_run_reservation` | 동시 Agent 2 실행 예약 차단 |
 
-## 3. Agent 3 조사·계획 계약 (29건)
+## 3. Agent 3 조사·계획 계약
 
 | 테스트 | 확인 내용 |
 |---|---|
@@ -511,7 +534,7 @@ HTTP 대역으로 본문 생성·전송 계약을 검사합니다. 실제 Notion
 | `test_legacy_central_plan_cannot_bypass_required_actions_with_generic_assertion` | 전용·범용 혼합 계획의 필수 중앙제어 순서 우회 차단 |
 | `test_specialized_action_source_text_must_be_an_approved_tc_line` | 전용 Action도 승인 TC 원문만 근거로 허용 |
 
-## 4. Agent 3 CP3·후보 시험·증거 (41건)
+## 4. Agent 3 CP3·후보 시험·증거
 
 추가: `test_compiled_observation_wait_handles_delayed_browser_state_without_reclicking` — 실제 브라우저의 지연 반영 허용, 조작 한 번 유지, 지속 불일치 반환.
 
@@ -558,7 +581,7 @@ HTTP 대역으로 본문 생성·전송 계약을 검사합니다. 실제 Notion
 | `test_candidate_handoff_recomputes_current_cp3_rules` | 검증 실행 인계 전 현재 CP3 규칙 재계산 |
 | `test_candidate_handoff_rejects_evidence_changed_after_agent3` | Agent 3 기록 뒤 변경된 증거 파일 차단 |
 
-## 5. 변경 검증·기존 회귀 실행 (6건)
+## 5. 변경 검증·기존 회귀 실행
 
 | 테스트 | 확인 내용 |
 |---|---|
@@ -569,7 +592,7 @@ HTTP 대역으로 본문 생성·전송 계약을 검사합니다. 실제 Notion
 | `test_execute_parser_exposes_validation_execution_command` | `execute` CLI Parser |
 | `test_current_candidate_trial_returns_technical_failure_for_agent4` | 후보 기술 실패를 예외 대신 중립 결과로 Agent 4에 전달 |
 
-## 6. Agent 4·CP4·최종 보고·외부 전달 (25건)
+## 6. Agent 4·CP4·최종 보고·외부 전달
 
 | 테스트 | 확인 내용 |
 |---|---|
@@ -598,7 +621,7 @@ HTTP 대역으로 본문 생성·전송 계약을 검사합니다. 실제 Notion
 | `test_agent4_rejects_broken_manifest_or_candidate_chain` | Agent 3→검증 Manifest 또는 실제 후보 파일 체인 불일치 차단 |
 | `test_agent4_rejects_passed_result_without_complete_evidence` | 완전한 증거 없는 PASS 결과 차단 |
 
-## 7. 중앙제어 공개 데모·실제 Run 연동·후보 자산 승인 (32건)
+## 7. 중앙제어 공개 데모·실제 Run 연동·후보 자산 승인
 
 추가한 SRS 단독 승인 테스트:
 
@@ -635,7 +658,7 @@ HTTP 대역으로 본문 생성·전송 계약을 검사합니다. 실제 Notion
 | `test_pipeline_ui_blocks_asset_approval_for_failed_or_stale_evidence` | 최종 실패·현재 HTML 해시 불일치 후보의 공식 등록 차단 |
 | `test_pipeline_ui_revalidates_stale_candidate_without_model_call` | HTML 변경 뒤 모델 호출 없는 후보 재검증, 공개 요약·원본 해시 기록과 승인 가능 상태 복구 |
 
-## 8. 코드 감사 후 명백한 오류 방지 (36건)
+## 8. 코드 감사 후 명백한 오류 방지
 
 기존 1~7절의 209건에 추가된 검증입니다. 제품 후보 TC가 늘어난 것이 아니라 검사기의 오류 차단·정상 허용 조합을 추가했습니다.
 
