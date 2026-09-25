@@ -296,7 +296,7 @@ class OpenAIAgent3:
                 text_format=Agent3AutomationPlan,
             )
         except Exception as exc:
-            raise Agent3Error(f"Agent 3 model call failed: {exc}") from exc
+            raise Agent3Error(f"Agent 3 model call failed ({type(exc).__name__}). External error body omitted.") from None
         parsed = getattr(response, "output_parsed", None)
         if parsed is None:
             raise Agent3Error("The model did not return a structured Agent 3 automation plan.")
@@ -1284,6 +1284,7 @@ def evaluate_checkpoint3_plan(
     require_plan_fidelity: bool = True,
     legacy_wording_checks: bool = True,
     allow_terminal_observation_anchor: bool = False,
+    require_assertion_target_identity: bool = False,
 ) -> Checkpoint3Result:
     if test_case.control_path != ControlPath.CENTRAL:
         return Checkpoint3Result(
@@ -1337,7 +1338,9 @@ def evaluate_checkpoint3_plan(
 
     if require_precondition_proof or plan.precondition_checks:
         proof_errors = _precondition_proof_errors(test_case, plan, observation, legacy_wording_checks=legacy_wording_checks)
-        add("CP3-006A", CheckStatus.FAIL if proof_errors else CheckStatus.PASS,
+        # CP3-006A remains the historical action-sequence identifier. Saved
+        # checkpoints are not rewritten; fresh proof checks have their own ID.
+        add("CP3-006D", CheckStatus.FAIL if proof_errors else CheckStatus.PASS,
             " / ".join(proof_errors) if proof_errors else "Every precondition has a grounded read-only runtime check before TEST.")
 
     observed_selectors = {item.selector for item in observation.elements}
@@ -1659,6 +1662,10 @@ def evaluate_checkpoint3_plan(
                 fidelity_errors.append(
                     f"{assertion.result_id}: internal state path was not observed"
                 )
+            device_prefix = re.match(r"window\.__vccs\.devices\[\d+\]", assertion.selector)
+            if (require_assertion_target_identity and device_prefix
+                    and observation.harness_values.get(device_prefix.group() + ".id") != plan.target_device_id):
+                fidelity_errors.append(f"{assertion.result_id}: internal device index does not identify the observed target")
             path_meaning = re.sub(r"[^가-힣A-Za-z0-9]+", " ", assertion.selector)
             if legacy_wording_checks and not _has_textual_link(path_meaning, result.statement):
                 fidelity_errors.append(

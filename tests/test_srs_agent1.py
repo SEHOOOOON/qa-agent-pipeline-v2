@@ -3,6 +3,65 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("source,quote,valid", [
+    ("0.5°C", "5°C", False), ("-18°C", "18°C", False),
+    ("−18°C", "18°C", False), ("+18°C", "18°C", False),
+    ("18.5°C", "18", False), (".5°C", "5°C", False),
+    ("1e3", "1", False), ("1e-3", "-3", False),
+    ("130°C", "30°C", False), ("NONE", "ON", False),
+    ("0.5°C", "0.5°C", True), ("-18°C", "-18°C", True),
+    ("-18.5°C", "-18.5°C", True), ("+18°C", "+18°C", True),
+    ("18~30°C", "30°C", True), ("16-30°C", "30°C", True),
+    ("18°C / 0.5°C", "0.5°C", True), ("-18°C / 18°C", "18°C", True),
+    ("mode is ON.", "ON", True), ("set  18°C", "set 18°C", True),
+])
+def test_fact_quote_preserves_complete_numeric_tokens(source, quote, valid):
+    assert pipeline._contains_fact(source, quote) is valid
+
+
+@pytest.mark.parametrize("source,quote", [("0.5°C", "5°C"), ("-18°C", "18°C")])
+def test_srs_quote_parts_cannot_extract_a_different_number(source, quote):
+    requirements = {"REQ-TEMP-001": SrsRequirement(requirement_id="REQ-TEMP-001",
+        statement="Temperature", acceptance_criteria=source)}
+    assert not pipeline._srs_quote_is_grounded(f"Temperature | {quote}", ["REQ-TEMP-001"], requirements)
+    assert pipeline._srs_quote_is_grounded(f"Temperature | {source}", ["REQ-TEMP-001"], requirements)
+
+
+@pytest.mark.parametrize("mutation,rule", [
+    ('target', 'CP1-002'), ('duplicate_effect', 'CP1-006'), ('target_relation', 'CP1-006'),
+    ('other_modified', 'CP1-006'), ('duplicate_condition', 'CP1-007'),
+    ('duplicate_procedure', 'CP1-012'), ('overlap', 'CP1-009'), ('waiting', 'CP1-010'),
+])
+def test_uncommon_analysis_branches_remain_guarded(mutation, rule):
+    request, analysis, requirements = cp1_combined_srs_case()
+    if mutation == 'target': analysis.target_requirement_id = 'REQ-TEMP-999'
+    elif mutation == 'duplicate_effect': analysis.requirement_effects.append(analysis.requirement_effects[0].model_copy())
+    elif mutation == 'target_relation': analysis.requirement_effects[0].relation = RequirementRelation.NO_IMPACT
+    elif mutation == 'other_modified': analysis.requirement_effects[1].relation = RequirementRelation.MODIFIED
+    elif mutation == 'duplicate_condition': analysis.confirmed_conditions.append(analysis.confirmed_conditions[0].model_copy())
+    elif mutation == 'duplicate_procedure':
+        request.acceptance_notes.append('[준비] 대상 선택')
+        analysis.procedure_notes = ['[준비] 대상 선택', '[준비] 대상 선택']
+    elif mutation == 'overlap': analysis.excluded_scope.append(analysis.confirmed_conditions[0].statement)
+    elif mutation == 'waiting': analysis.decision = AnalysisDecision.WAITING_FOR_USER
+    result = pipeline.evaluate_checkpoint1(request, analysis, requirements, legacy_wording_checks=False)
+    assert cp1_check(result, rule).status == (CheckStatus.REVIEW if mutation == 'waiting' else CheckStatus.FAIL)
+    assert result.handoff_status != HandoffStatus.CONTINUE
+
+
+@pytest.mark.parametrize('text,message', [
+    ('no requirements', '찾지 못했습니다'),
+    ('| REQ-TEMP-001 | a | b |\n| REQ-TEMP-001 | a | b |', '중복 Requirement'),
+    ('### Relation with other Requirement\n- REQ-TEMP-999\n| REQ-TEMP-001 | a | b |', '정의되지 않은'),
+])
+def test_srs_loader_uncommon_invalid_input(tmp_path, text, message):
+    path = tmp_path / 'srs.md'
+    path.write_text(text, encoding='utf-8')
+    with pytest.raises(ValueError, match=message):
+        pipeline.load_srs_requirements(path)
+    with pytest.raises(FileNotFoundError):
+        pipeline.load_srs_requirements(tmp_path / 'missing.md')
+
 @pytest.mark.parametrize("variant,allowed", [
     ("normal", True), ("reversed", True), ("three_parts", True),
     ("same_field", True), ("two_requirements", True), ("three_requirements", True),

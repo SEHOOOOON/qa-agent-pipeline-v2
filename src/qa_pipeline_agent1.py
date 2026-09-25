@@ -186,7 +186,7 @@ class OpenAIAgent1:
                 text_format=Agent1Analysis,
             )
         except Exception as exc:  # SDK exceptions vary by transport and status.
-            raise Agent1Error(f"Agent 1 모델 호출에 실패했습니다: {exc}") from exc
+            raise Agent1Error(f"Agent 1 모델 호출에 실패했습니다 ({type(exc).__name__}). 외부 오류 본문은 저장하지 않습니다.") from None
 
         parsed = getattr(response, "output_parsed", None)
         if parsed is None:
@@ -211,7 +211,7 @@ def _contains(container: str, expected: str) -> bool:
 
 
 def _contains_fact(container: str, expected: str) -> bool:
-    """Quoted text may vary in spacing, but ON is not a token inside NONE."""
+    """Match a quote without cutting an identifier or a signed numeric token."""
     expected = expected.strip()
     if not expected:
         return False
@@ -220,7 +220,20 @@ def _contains_fact(container: str, expected: str) -> bool:
         pattern = r"(?<![A-Za-z0-9_])" + pattern
     if re.match(r"[A-Za-z0-9_]", expected[-1]):
         pattern += r"(?![A-Za-z0-9_])"
-    return bool(re.search(pattern, container, re.I))
+    numbers = list(re.finditer(r"[+\-−]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+\-]?\d+)?", container))
+    for match in re.finditer(pattern, container, re.I):
+        partial_number = False
+        for number in numbers:
+            start, end = number.span()
+            # In 16-30 the hyphen separates endpoints, unlike a unary -30.
+            if container[start] == "-" and start and container[start - 1].isdigit():
+                start += 1
+            if start < match.start() < end or start < match.end() < end:
+                partial_number = True
+                break
+        if not partial_number:
+            return True
+    return False
 
 
 def _srs_quote_parts(source_text: str) -> list[str]:
@@ -967,15 +980,7 @@ def evaluate_checkpoint1(
         else:
             add("CP1-011", CheckStatus.PASS, "요청 밖 검사 범위의 근거 없는 자동 확장이 없습니다.")
 
-    statuses = {check.status for check in checks}
-    if CheckStatus.ERROR in statuses:
-        status = CheckStatus.ERROR
-    elif CheckStatus.FAIL in statuses:
-        status = CheckStatus.FAIL
-    elif CheckStatus.REVIEW in statuses:
-        status = CheckStatus.REVIEW
-    else:
-        status = CheckStatus.PASS
+    status = _aggregate_check_status(check.status for check in checks)
     blocking_decision = analysis.decision == AnalysisDecision.WAITING_FOR_USER
     if status in {CheckStatus.FAIL, CheckStatus.ERROR}:
         handoff_status = HandoffStatus.BLOCKED

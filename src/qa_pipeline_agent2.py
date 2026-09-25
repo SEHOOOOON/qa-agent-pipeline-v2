@@ -312,7 +312,7 @@ class OpenAIAgent2:
                 text_format=Agent2TestDesign,
             )
         except Exception as exc:
-            raise Agent2Error(f"Agent 2 모델 호출에 실패했습니다: {exc}") from exc
+            raise Agent2Error(f"Agent 2 모델 호출에 실패했습니다 ({type(exc).__name__}). 외부 오류 본문은 저장하지 않습니다.") from None
 
         parsed = getattr(response, "output_parsed", None)
         if parsed is None:
@@ -1677,15 +1677,7 @@ def evaluate_checkpoint2(
         add("CP2-023", CheckStatus.FAIL if errors else CheckStatus.PASS,
             "; ".join(errors) if errors else "복원 조작·대상 ER·관찰 기준·확인 시점의 구조화 연결을 확인했습니다.")
 
-    statuses = {item.status for item in checks}
-    if CheckStatus.ERROR in statuses:
-        status = CheckStatus.ERROR
-    elif CheckStatus.FAIL in statuses:
-        status = CheckStatus.FAIL
-    elif CheckStatus.REVIEW in statuses:
-        status = CheckStatus.REVIEW
-    else:
-        status = CheckStatus.PASS
+    status = _aggregate_check_status(item.status for item in checks)
     return Checkpoint2Result(status=status, checks=checks)
 
 __all__ = [name for name in globals() if not name.startswith("__")]

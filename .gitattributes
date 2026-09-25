@@ -1,3 +1,5 @@
 # Approved artifacts are hashed as bytes. Do not normalize line endings on add/checkout.
 approved_assets/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+# Public evidence is also hashed as raw bytes; never rewrite historical snapshots.
+examples/results/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 product_baseline/** text eol=lf whitespace=-trailing-space

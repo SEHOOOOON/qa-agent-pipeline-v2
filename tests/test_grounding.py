@@ -3,6 +3,74 @@ from pipeline_test_support import *
 import qa_pipeline_grounding as grounding
 
 
+@pytest.mark.parametrize("mutation", ["normal", "missing_er", "missing_test", "wrong_reuse"])
+@pytest.mark.parametrize("verdict", ["SUPPORTED", "UNSUPPORTED", "UNCERTAIN"])
+def test_condition_coverage_is_enumerated_from_input_and_reviewed(tmp_path, monkeypatch, mutation, verdict):
+    request, analysis, design = cp1_request(), cp2_analysis(), detailed_boundary_design()
+    catalog = pipeline.EXISTING_REGRESSION_CATALOG
+    if mutation == "missing_er":
+        design.test_cases[0].expected_results.pop()
+    elif mutation == "missing_test":
+        design.test_cases = []
+    elif mutation == "wrong_reuse":
+        request, analysis, design, catalog = compound_reuse_fixture(values=("FAN", "DRY"), layout="actual_gap")
+    old_payload = grounding.build_grounding_input("AGENT2", request, cp2_requirements(), design,
+                                                   analysis=analysis, catalog=catalog)
+    payload = grounding.build_grounding_input("AGENT2", request, cp2_requirements(), design,
+        analysis=analysis, catalog=catalog, include_condition_coverage=True)
+    coverage = [i for i in payload["items"] if i["kind"] == "CONDITION_COVERAGE"]
+    assert [i["content"]["condition"]["condition_id"] for i in coverage] == [c.condition_id for c in analysis.confirmed_conditions]
+    if mutation == "missing_er":
+        condition = coverage[-1]["content"]
+        assert condition["condition"]["condition_id"] in condition["candidate_tests"][0]["source_condition_ids"]
+        assert not any(condition["condition"]["condition_id"] in er["source_condition_ids"]
+                       for er in condition["candidate_tests"][0]["expected_results"])
+    elif mutation == "missing_test":
+        assert all(not i["content"]["candidate_tests"] for i in coverage)
+    elif mutation == "wrong_reuse":
+        assert "DRY" in coverage[0]["content"]["condition"]["statement"]
+        assert all("DRY" not in " ".join(s["covered_behaviors"]) for s in coverage[0]["content"]["existing_behaviors"])
+    record = fake_grounding_record(payload)
+    target = coverage[-1]["item_id"]
+    next(i for i in record["review"]["items"] if i["item_id"] == target).update(verdict=verdict)
+    # Scripted verdicts prove routing, not a model's ability to detect these cases.
+    monkeypatch.setattr(pipeline_execution, "OpenAIGroundingReviewer", lambda **kw: SimpleNamespace(review=lambda _: record))
+    checkpoint = pipeline.Checkpoint2Result(status="PASS", checks=[pipeline.CheckResult(rule_id="fixture", status="PASS", message="base")])
+    result = pipeline_execution._run_grounding_review(tmp_path, "AGENT2", 1, payload, checkpoint, "fake", [])
+    assert result.status == {"SUPPORTED": CheckStatus.PASS, "UNSUPPORTED": CheckStatus.FAIL, "UNCERTAIN": CheckStatus.REVIEW}[verdict]
+    assert (result.status == CheckStatus.PASS) == (verdict == "SUPPORTED")
+    with pytest.raises(ValueError, match="해시"):
+        grounding.check_review_record(payload, fake_grounding_record(old_payload))
+    record["review"]["items"] = [i for i in record["review"]["items"] if i["item_id"] != target]
+    assert "누락" in grounding.check_review_record(payload, record).message
+
+
+@pytest.mark.parametrize("missing_field", [False, True])
+def test_partial_assertion_is_visible_to_the_existing_semantic_review(missing_field):
+    case, plan, observation = structured_restoration_fixture()
+    case.expected_results[1].statement = "Internal enabled must equal true and level must equal 5."
+    observation.device_state_fields = ["enabled", "level"]
+    fields = [{"field_name": "enabled", "expected_value": True}]
+    if not missing_field:
+        fields.append({"field_name": "level", "expected_value": 5})
+    plan.assertions[1] = pipeline.AutomationAssertion.model_validate(dict(result_id="ER-091",
+        observation_layer="INTERNAL_STATE", strategy="INTERNAL_DEVICE_FIELDS_EQUALS",
+        selector="window.__vccs.devices", expected_fields=fields, after_action_id="ACT-090"))
+    structural = pipeline.evaluate_checkpoint3_plan(case, plan, observation, legacy_wording_checks=False)
+    assert structural.status == CheckStatus.PASS
+    payload = grounding.build_grounding_input("AGENT3", None, {}, plan, test_case=case, observation=observation)
+    item = next(i for i in payload["items"] if i["item_id"] == "ER/1")
+    assert "level" in item["content"]["expected_result"]["statement"]
+    assert len(item["content"]["assertions"][0]["expected_fields"]) == (1 if missing_field else 2)
+    record = fake_grounding_record(payload)
+    decision = next(i for i in record["review"]["items"] if i["item_id"] == "ER/1")
+    # Both compound variants require separation, preserving the second fact.
+    decision.update(single_fact=False, verdict="UNSUPPORTED", reason="Preserve both facts; split and cover both.")
+    combined = grounding.attach_grounding_check(structural, grounding.check_review_record(payload, record))
+    assert combined.status == CheckStatus.FAIL
+
+
+
 def review_payload(stage="AGENT1"):
     request, analysis, requirements = cp1_combined_srs_case()
     if stage == "AGENT1":
@@ -162,6 +230,8 @@ def test_agent1_grounding_controls_rewrite_handoff_and_cost(tmp_path, monkeypatc
     expected_calls = 2 if outcome in {"repair", "unresolved"} else 1
     assert len(generation_calls) == len(reviews) == expected_calls
     if outcome == "error":
+        receipt = pipeline._read_json_payload(run / "agent1_generation_usage_attempt_1.json")
+        assert receipt["usage"]["total_tokens"] == 15
         assert (run / "agent1_grounding_error_attempt_1.json").is_file()
         assert (run / "agent1_change_analysis_attempt_1.json").is_file()
         assert not (run / "run_manifest.json").exists()
@@ -183,7 +253,7 @@ def test_agent1_grounding_controls_rewrite_handoff_and_cost(tmp_path, monkeypatc
             pipeline._load_verified_agent1_run(run, run.name)
 
 
-@pytest.mark.parametrize("stage,version", [("AGENT1", "2.11"), ("AGENT2", "3.11"), ("AGENT3", "4.9")])
+@pytest.mark.parametrize("stage,version", [("AGENT1", "2.11"), ("AGENT2", "3.11"), ("AGENT2", "3.12"), ("AGENT3", "4.9"), ("AGENT3", "4.10")])
 @pytest.mark.parametrize("mutation", ["missing_marker", "missing_file", "changed_hash", "downgrade", "unsupported"])
 def test_review_artifact_required_on_new_handoff(tmp_path, stage, version, mutation):
     payload = review_payload(stage)
@@ -255,6 +325,9 @@ def test_review_blocks_agent2_handoff_and_agent3_trial(tmp_path, monkeypatch, st
             target_html=str(target), model="fake", timeout=30))
         path = run / "checkpoint3.json"
     assert code == (1 if outcome == "error" else 2)
+    if outcome == "error":
+        receipt = pipeline._read_json_payload(run / f"{stage.lower()}_generation_usage_attempt_1.json")
+        assert receipt["usage"] is None  # Unknown is not zero.
     assert calls == (["generate", "review"] * (2 if outcome == "unsupported" else 1))
     if outcome != "error":
         assert pipeline._read_json_payload(path)["status"] == ("FAIL" if outcome == "unsupported" else "REVIEW")
@@ -303,3 +376,59 @@ def test_citations_preserve_multiline_and_quoted_original_text():
     record = fake_grounding_record(payload)
     record["review"]["items"][0]["citations"] = [{"source_id": source["source_id"], "quote": note}]
     assert grounding.check_review_record(payload, record).status == CheckStatus.PASS
+
+
+@pytest.mark.parametrize("verdict,expected", [("SUPPORTED", "REVIEW"), ("UNCERTAIN", "REVIEW"), ("UNSUPPORTED", "FAIL")])
+def test_extension_review_checks_reasons_not_prohibited_assertions(verdict, expected):
+    case, plan, observation = structured_restoration_fixture()
+    plan = pipeline.Agent3AutomationPlan(tc_id=case.tc_id, target_device_id=1,
+        summary="지원 확장 검토", planning_status="AUTOMATION_SUPPORT_EXTENSION_REQUIRED",
+        extension_reasons=["TC에 필요한 관찰을 현재 화면 정보로 연결할 수 없습니다."])
+    payload = grounding.build_grounding_input("AGENT3", None, {}, plan, test_case=case, observation=observation)
+    assert [item["kind"] for item in payload["items"]] == ["SUPPORT_EXTENSION"]
+    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, observation)
+    result = grounding.attach_grounding_check(checkpoint,
+        grounding.check_review_record(payload, fake_grounding_record(payload, verdict=verdict)))
+    assert result.status.value == expected
+    if expected == "REVIEW":
+        assert result.candidate_status.value == "AUTOMATION_SUPPORT_EXTENSION_REQUIRED"
+    else:
+        assert result.candidate_status.value == "REVISION_REQUIRED"
+    plan.tc_id = "TC-CAND-999"
+    assert pipeline.evaluate_checkpoint3_plan(case, plan, observation).status == CheckStatus.FAIL
+
+
+@pytest.mark.parametrize("stage", [1, 2, 3])
+def test_generator_exception_body_is_not_exposed(stage):
+    marker = "SYNTHETIC_PRIVATE_ERROR_BODY"
+    def fail(**kwargs):
+        raise RuntimeError(marker)
+    client = SimpleNamespace(responses=SimpleNamespace(parse=fail))
+    request, analysis, requirements = cp1_combined_srs_case()
+    case, plan, observation = structured_restoration_fixture()
+    agent = getattr(pipeline, f"OpenAIAgent{stage}")(model="fake", client=client)
+    with pytest.raises(Exception) as caught:
+        if stage == 1:
+            agent.analyze(request, requirements)
+        elif stage == 2:
+            agent.design(request, analysis, requirements)
+        else:
+            agent.plan(case, observation, requirements)
+    import traceback
+    formatted = "".join(traceback.format_exception(caught.type, caught.value, caught.tb))
+    assert marker not in formatted
+    assert "RuntimeError" in str(caught.value)
+
+
+def test_invalid_review_record_still_preserves_received_usage(tmp_path, monkeypatch):
+    payload = review_payload()
+    record = fake_grounding_record(payload)
+    record.update(input_sha256="wrong", usage={"total_tokens": 30})
+    monkeypatch.setattr(pipeline_execution, "OpenAIGroundingReviewer",
+                        lambda **kw: SimpleNamespace(review=lambda _: record))
+    checkpoint = pipeline.Checkpoint2Result(status="PASS", checks=[
+        pipeline.CheckResult(rule_id="base", status="PASS", message="fixture")])
+    with pytest.raises(ValueError):
+        pipeline_execution._run_grounding_review(tmp_path, "AGENT1", 1, payload, checkpoint, "fake", [])
+    receipt = pipeline._read_json_payload(tmp_path / "agent1_review_usage_attempt_1.json")
+    assert receipt["usage"]["total_tokens"] == 30

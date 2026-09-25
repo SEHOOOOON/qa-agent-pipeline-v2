@@ -3,6 +3,23 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize('blocked', [False, True])
+def test_single_tc_compatibility_wrapper_keeps_verified_loader(tmp_path, monkeypatch, blocked):
+    design = cp2_valid_design()
+    calls = []
+    def verified(run_dir, run_id):
+        calls.append((run_dir, run_id))
+        if blocked: raise ValueError('handoff integrity rejected')
+        return None, None, None, design, None, None
+    monkeypatch.setattr(pipeline_orchestrator, '_load_verified_agent2_run', verified)
+    if blocked:
+        with pytest.raises(ValueError, match='integrity rejected'):
+            pipeline._select_agent3_tc_from_run(tmp_path, 'fixture')
+    else:
+        selected, summaries = pipeline._select_agent3_tcs(design)
+        assert pipeline._select_agent3_tc_from_run(tmp_path, 'fixture') == (selected[0] if selected else None, summaries)
+    assert calls == [(tmp_path, 'fixture')]
+
 @pytest.mark.parametrize("variant", ["normal", "empty", "tampered"])
 def test_verified_user_questions_become_final_actions(tmp_path, variant):
     questions = [] if variant == "empty" else ["허용할 온도 하한을 지정해 주세요."] * 2
@@ -97,9 +114,9 @@ def test_agent3_requires_proof_on_new_runs_and_records_it(tmp_path, monkeypatch,
     assert pipeline.run_agent3(args) == (0 if include_proof else 2)
     manifest = pipeline._read_json_payload(run / "agent3_manifest.json")
     assert manifest["precondition_proof_contract"] == "1.0"
-    assert manifest["contract_version"] == "4.9"
+    assert manifest["contract_version"] == "4.10"
+    assert manifest["plan_fidelity_contract"] == "1.2"
     assert manifest["wording_policy"] == "STRUCTURAL_ONLY_V1"
-    assert manifest["plan_fidelity_contract"] == "1.1"
     assert manifest["restore_confirmation_contract"] == "1.2"
     assert calls == (["model", "trial"] if include_proof else ["model", "model"])
     assert pipeline._read_json_payload(run / "agent3_automation_plan_attempt_1.json") == plan.model_dump(mode="json")

@@ -3,6 +3,113 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("damaged", [False, True])
+def test_human_review_uses_same_approved_snapshot_details_as_ui(tmp_path, damaged):
+    run, run_id = _write_agent4_inputs(tmp_path, candidate_status=pipeline.NeutralExecutionStatus.ASSERTION_FAILED)
+    assert pipeline.run_agent4(SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))) == 0
+    _, snapshot = pipeline.load_approved_regression_catalog(REPO_ROOT / "approved_assets")
+    entry = snapshot["approved_assets"][0]
+    case = json.loads(entry["test_case_json"])["test_case"]
+    if damaged:
+        entry["test_case_json"] += " "
+    _write_json(run / "approved_regression_catalog.json", snapshot)
+    bundle = pipeline.ValidationExecutionBundle.model_validate_json((run / "validation_execution.json").read_text(encoding="utf-8"))
+    report = pipeline.FinalReport.model_validate_json((run / "final_report.json").read_text(encoding="utf-8"))
+    report.findings[0].test_id = entry["tc_id"]
+    bundle.regression_results.append(bundle.candidate_result.model_copy(update={"test_id": entry["tc_id"], "source": pipeline.ExecutionSource.EXISTING_REGRESSION}))
+    _write_json(run / "validation_execution.json", bundle.model_dump(mode="json", by_alias=True))
+    design = pipeline.Agent2TestDesign.model_validate_json((run / "agent2_test_design.json").read_text(encoding="utf-8"))
+    text = pipeline_reporting._human_review_markdown(run, bundle, report, design)
+    row = next(r for r in pipeline_reporting.build_run_test_rows(run) if r["tc_id"] == entry["tc_id"])
+    if damaged:
+        assert row["steps"] == []
+        assert case["steps"][0] not in text
+    else:
+        assert row["steps"] == case["steps"]
+        assert case["title"] in text
+        assert all(line in text for key in ("steps", "preconditions", "restore_steps") for line in case[key])
+        assert all(er["statement"] in text for er in case["expected_results"])
+
+
+def test_zero_findings_does_not_mean_no_human_approval(tmp_path):
+    run, run_id = _write_agent4_inputs(tmp_path)
+    assert pipeline.run_agent4(SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))) == 0
+    text = (run / "사람_최종_검토.md").read_text(encoding="utf-8")
+    assert "| 실행 결과 검토 항목 | 0건 |" in text
+    assert "SRS 개정·TC 등록 승인이나 정보 부족이 모두 해결됐다는 뜻은 아닙니다" in text
+    assert "현재 등록 상태는 승인 화면에서 확인" in text
+    assert "사람이 판단할 항목" not in text
+
+
+@pytest.mark.parametrize("mutation", ["single_only", "list_only", "equal", "status", "hash", "id", "multiple_conflict"])
+def test_candidate_result_alias_never_overwrites_conflicting_evidence(tmp_path, mutation):
+    run, _ = _write_agent4_inputs(tmp_path)
+    data = json.loads((run / "validation_execution.json").read_text(encoding="utf-8"))
+    if mutation == "single_only": data["candidate_results"] = []
+    elif mutation == "list_only": data["candidate_result"] = None
+    elif mutation == "status": data["candidate_results"][0]["status"] = "ASSERTION_FAILED"
+    elif mutation == "hash": data["candidate_results"][0]["test_sha256"] = "f" * 64
+    elif mutation == "id": data["candidate_results"][0]["test_id"] = "TC-CAND-999"
+    elif mutation == "multiple_conflict":
+        data["candidate_results"].append(dict(data["candidate_results"][0]))
+        data["candidate_results"][0]["status"] = "ASSERTION_FAILED"
+    if mutation in {"status", "hash", "id", "multiple_conflict"}:
+        with pytest.raises(ValueError, match="candidate_result"):
+            pipeline.ValidationExecutionBundle.model_validate(data)
+    else:
+        result = pipeline.ValidationExecutionBundle.model_validate(data)
+        assert result.candidate_result == result.candidate_results[0]
+
+
+@pytest.mark.parametrize('outcome,status,exit_code', [
+    ('PASS', 'PASSED', 0), ('PRODUCT_MISMATCH_CANDIDATE', 'ASSERTION_FAILED', 1),
+    ('AUTOMATION_ERROR', 'EXECUTION_ERROR', 1), ('ENVIRONMENT_ERROR', 'EXECUTION_ERROR', 1),
+    ('TIMEOUT', 'TIMEOUT', None), ('PYTEST_SKIPPED', 'SKIPPED', 0),
+])
+def test_report_status_contract_accepts_valid_and_rejects_wrong_exit(tmp_path, outcome, status, exit_code):
+    run, _ = _write_agent4_inputs(tmp_path)
+    bundle = pipeline.ValidationExecutionBundle.model_validate_json((run / 'validation_execution.json').read_text(encoding='utf-8'))
+    result = bundle.candidate_results[0].model_copy(update={
+        'source_outcome': outcome, 'status': pipeline.NeutralExecutionStatus(status), 'exit_code': exit_code})
+    assert not pipeline._agent4_status_contract_issues([result])
+    result.exit_code = 0 if exit_code != 0 else 1
+    assert pipeline._agent4_status_contract_issues([result])
+    result.source_outcome = 'UNKNOWN'
+    assert pipeline._agent4_status_contract_issues([result])
+
+
+@pytest.mark.parametrize('mutation,expected', [
+    ('empty', '설명할 증거'), ('missing_hash', 'SHA-256 목록'),
+    ('stdout', 'stdout 또는 stderr'), ('parent', '폴더 밖'),
+])
+def test_report_evidence_failure_branches_are_not_dead(tmp_path, mutation, expected):
+    run, _ = _write_agent4_inputs(tmp_path)
+    bundle = pipeline.ValidationExecutionBundle.model_validate_json((run / 'validation_execution.json').read_text(encoding='utf-8'))
+    result = bundle.candidate_results[0].model_copy(deep=True)
+    if mutation == 'empty':
+        result.status = pipeline.NeutralExecutionStatus.EXECUTION_ERROR
+        result.evidence_files = []
+        result.evidence_sha256 = {}
+    elif mutation == 'missing_hash': result.evidence_sha256 = {}
+    elif mutation == 'stdout': result.stdout_file = 'not-in-evidence.txt'
+    else: result.evidence_files.append('../outside.txt')
+    assert any(expected in issue for issue in pipeline._agent4_evidence_issues(run, [result]))
+
+
+@pytest.mark.parametrize('mutation', ['baseline', 'container', 'entry', 'duplicate', 'unselected', 'hash'])
+def test_regression_source_chain_rejects_corrupted_records(tmp_path, mutation):
+    run, _ = _write_agent4_inputs(tmp_path)
+    bundle = pipeline.ValidationExecutionBundle.model_validate_json((run / 'validation_execution.json').read_text(encoding='utf-8'))
+    manifest = pipeline._read_json_payload(run / 'validation_manifest.json')
+    assert pipeline._agent4_regression_source_chain_matches(run, bundle, manifest)
+    if mutation == 'baseline': manifest['baseline_test_sha256'] = None
+    elif mutation == 'container': manifest['approved_regression_assets'] = 'not-a-list'
+    elif mutation == 'entry': manifest['approved_regression_assets'] = [None]
+    elif mutation == 'duplicate': manifest['approved_regression_assets'] = [{'tc_id': 'TC-V2-001'}] * 2
+    elif mutation == 'unselected': manifest['approved_regression_assets'] = [{'tc_id': 'TC-V2-999'}]
+    else: bundle.regression_results[0].test_sha256 = '0' * 64
+    assert pipeline._agent4_regression_source_chain_matches(run, bundle, manifest) is False
+
 @pytest.mark.parametrize("status,label", [
     ("RESTORED", "시험 전 상태로 복원·비교 완료"), ("UNCHANGED", "상태 유지 확인"),
     ("NOT_REQUIRED", "조회 TC"), ("NOT_STARTED", "상태 변경 동작 전 중단"),
@@ -942,7 +1049,8 @@ def test_agent4_rejects_passed_result_without_complete_evidence(
             "evidence_complete": False,
         }
     )
-    bundle = bundle.model_copy(update={"candidate_result": candidate})
+    # This test targets missing evidence, not contradictory alias fields.
+    bundle = bundle.model_copy(update={"candidate_result": candidate, "candidate_results": [candidate]})
     _write_json(execution_file, bundle.model_dump(mode="json"))
     manifest_file = run_dir / "validation_manifest.json"
     manifest = json.loads(manifest_file.read_text(encoding="utf-8"))

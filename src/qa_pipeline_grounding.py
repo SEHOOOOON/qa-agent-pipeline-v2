@@ -13,7 +13,7 @@ from typing import Any, Literal
 from openai import OpenAI
 from qa_pipeline_contracts import (
     StrictModel, NonEmptyStr, CheckResult, CheckStatus, HandoffStatus,
-    AutomationCandidateStatus,
+    AutomationCandidateStatus, Agent3PlanningStatus,
 )
 from qa_pipeline_agent1 import _response_usage_summary
 
@@ -37,11 +37,20 @@ EXPECTED_RESULT 항목은 한 대상·한 판정 시점의 한 검증 사실인�
 복수 사실의 분리는 기존 사실을 모두 보존해야 하며 검사를 쉽게 만들려고 삭제하면 안 됩니다.
 AGENT1: 조건의 의미·변경/유지 역할과 영향 범위, 절차/제외/정보부족 분류를 원문과 대조하세요.
 AGENT2: 각 조작과 기대결과, 기존 TC 선택, SRS 제안이 최초 요청·SRS에 근거하는지 확인하세요.
+CONDITION_COVERAGE 항목은 생성된 TC 목록에서 역으로 추정하지 않고 Agent 1의 모든 확정 조건에서 열거됩니다.
+연결 ID만 있다고 검증된 것은 아닙니다. 제품 확인 조건은 연결된 기대결과 또는 기존 TC의 실제 검증 동작이
+그 조건 전체를 다루는지 확인하세요. 여러 TC가 나누어 다룰 수 있습니다. 같은 Requirement ID만으로
+서로 다른 모드·대상·값의 검증을 대체하지 마세요. 준비·조작·복원 조건은 절차 연결로 검토하며
+별도의 제품 기대결과를 억지로 요구하지 마세요. 누락은 UNSUPPORTED, 판단 불가는 UNCERTAIN입니다.
 AGENT3: 각 EXPECTED_RESULT의 모든 의미·대상·값·시점이 연결된 실제 assertion에 구현되었는지 확인하세요.
 result_id만 같거나 일부 값만 검사하는 것은 충분하지 않습니다. source_documents의 TC와 UI 관찰은
 실제 시험 성공의 증거가 아닙니다. 실제 실행 결과는 여기서 판단하지 마세요.
 행동/사전조건/복원 항목도 해당 TC 원문과 계획의 실제 수행 내용이 일치해야 합니다.
 모호하거나 지원 여부를 확인할 수 없는 연결은 UNCERTAIN으로 남깁니다.
+AGENT3의 SUPPORT_EXTENSION 항목은 실행 계획이 아니라 지원 확장 요청입니다.
+TC·UI 관찰에 비추어 확장이 필요하다는 사유를 검토하세요. 이 상태는 계약상 실행 동작과
+assertion을 비워야 합니다. 빈 assertion 자체를 누락으로 판정하지 마세요.
+사유의 타당성을 확인할 수 없으면 UNCERTAIN으로 남기며, SUPPORTED도 실행 승인이 아닙니다.
 """
 
 
@@ -68,7 +77,7 @@ def _review_digest(payload: dict) -> str:
 
 
 def build_grounding_input(stage, request, requirements, artifact, *, analysis=None,
-                          catalog=(), test_case=None, observation=None):
+                          catalog=(), test_case=None, observation=None, include_condition_coverage=False):
     """Host enumerates review targets; the reviewer cannot choose a smaller scope."""
     documents, items = [], []
     def doc(source_id, value):
@@ -132,6 +141,19 @@ def build_grounding_input(stage, request, requirements, artifact, *, analysis=No
         # Catalog proves existing test behavior, but does not authorize new scope.
         for index, entry in enumerate(context["catalog"]):
             doc(f"CATALOG/{index}", entry)
+        if include_condition_coverage:
+            # Enumerate from the input, so deleting an output cannot delete its review.
+            for condition in analysis.confirmed_conditions:
+                cid = condition.condition_id
+                selections = [s for s in artifact.related_existing_tests if cid in s.source_condition_ids]
+                selected_ids = {s.tc_id for s in selections}
+                item(f"CONDITION/{cid}", {
+                    "condition": condition.model_dump(mode="json"),
+                    "candidate_tests": [tc.model_dump(mode="json") for tc in artifact.test_cases
+                                        if cid in tc.source_condition_ids],
+                    "existing_selections": [s.model_dump(mode="json") for s in selections],
+                    "existing_behaviors": [entry for entry in context["catalog"] if entry["tc_id"] in selected_ids],
+                }, "CONDITION_COVERAGE")
     elif stage == "AGENT3":
         doc("APPROVED_TC", test_case.model_dump(mode="json"))
         context["approved_tc"] = test_case.model_dump(mode="json")
@@ -141,7 +163,12 @@ def build_grounding_input(stage, request, requirements, artifact, *, analysis=No
         doc("UI_INVENTORY", {k: v for k, v in observed.items()
                              if k not in {"target_file", "target_sha256", "target_path"}})
         context["plan"] = artifact.model_dump(mode="json")
-        for index, result in enumerate(test_case.expected_results):
+        results = test_case.expected_results
+        if artifact.planning_status == Agent3PlanningStatus.AUTOMATION_SUPPORT_EXTENSION_REQUIRED:
+            results = []
+            for index, reason in enumerate(artifact.extension_reasons):
+                item(f"extension_reasons/{index}", reason, "SUPPORT_EXTENSION")
+        for index, result in enumerate(results):
             item(f"ER/{index}", {"expected_result": result.model_dump(mode="json"),
                 "assertions": [a.model_dump(mode="json") for a in artifact.assertions
                                if a.result_id == result.result_id]}, "EXPECTED_RESULT")
@@ -193,7 +220,9 @@ def attach_grounding_check(checkpoint, check):
             checkpoint.status = check.status
         if hasattr(checkpoint, "handoff_status"):
             checkpoint.handoff_status = HandoffStatus.PAUSE
-        if hasattr(checkpoint, "candidate_status"):
+        if (hasattr(checkpoint, "candidate_status") and not (
+                check.status == CheckStatus.REVIEW and checkpoint.candidate_status ==
+                AutomationCandidateStatus.AUTOMATION_SUPPORT_EXTENSION_REQUIRED)):
             checkpoint.candidate_status = AutomationCandidateStatus.REVISION_REQUIRED
     return checkpoint
 
@@ -209,7 +238,7 @@ class OpenAIGroundingReviewer:
 
     def review(self, payload):
         response = self.client.responses.parse(model=self.model, reasoning={"effort": "medium"},
-            store=False, prompt_cache_key="qa-v2-grounding-1-0",
+            store=False, prompt_cache_key="qa-v2-grounding-1-1",
             input=[{"role": "system", "content": REVIEW_INSTRUCTIONS},
                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
             text_format=GroundingReview)

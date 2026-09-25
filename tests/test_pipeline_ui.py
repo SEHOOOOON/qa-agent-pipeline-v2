@@ -3,6 +3,38 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize('mutation,expected', [('none', None), ('precondition', '사전조건'), ('sequence', '조작·복원 순서')])
+def test_approval_recheck_distinguishes_sequence_from_precondition(tmp_path, monkeypatch, mutation, expected):
+    # Isolate diagnostic routing; source/hash checks are tested independently.
+    import qa_pipeline_agent2 as a2
+    case, plan, observation = precondition_guard_fixture()
+    request, analysis, requirements = cp1_combined_srs_case()
+    design = cp2_valid_design().model_copy(update={'test_cases': [case]})
+    if mutation == 'precondition': plan.precondition_checks = []
+    elif mutation == 'sequence':
+        next(a for a in plan.actions if a.phase == pipeline.AutomationPhase.TEST).source_text = 'not in TC'
+    run = tmp_path / 'RUN-20260924-000000-ABCDEF'
+    folder = run / 'agent3_candidates' / case.tc_id
+    _write_json(folder / 'agent3_manifest.json', {})
+    _write_json(folder / 'agent3_automation_plan.json', plan.model_dump(mode='json'))
+    _write_json(folder / 'agent3_ui_observation.json', observation.model_dump(mode='json'))
+    monkeypatch.setattr(pipeline_reporting, '_verify_final_report_sources', lambda *_: None)
+    monkeypatch.setattr(pipeline_execution, '_load_verified_agent2_run', lambda *_: (request, requirements, analysis, design, None, {}))
+    monkeypatch.setattr(pipeline_execution, '_verify_sha256', lambda *_: None)
+    monkeypatch.setattr(a2, 'evaluate_checkpoint2', lambda *a, **k: pipeline.Checkpoint2Result(
+        status=CheckStatus.PASS, checks=[pipeline.CheckResult(rule_id='CP2-017', status=CheckStatus.PASS, message='isolated diagnostic test')]))
+    if expected:
+        with pytest.raises(ValueError, match=expected):
+            pipeline_ui._verify_candidate_sources(run, case.tc_id)
+    else:
+        pipeline_ui._verify_candidate_sources(run, case.tc_id)
+
+
+@pytest.mark.parametrize('value,required,limit', [(None, False, 10), (' ', True, 10), ('long', False, 2)])
+def test_ui_text_guards_reject_invalid_input(value, required, limit):
+    with pytest.raises(ValueError):
+        pipeline_ui._safe_text(value, field_name='field', required=required, limit=limit)
+
 def test_portfolio_catalog_matches_current_assets_and_historical_scope():
     import re
     html = (REPO_ROOT / "project.html").read_text(encoding="utf-8")

@@ -3,6 +3,130 @@
 from pipeline_test_support import *
 
 
+def test_editable_execution_instructions_match_workspace_runtime():
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    guide = (REPO_ROOT / "docs/PROJECT_GUIDE.md").read_text(encoding="utf-8")
+    assert 'pip install -e ".[agent3,test]"' in readme
+    assert 'pip install -e ".[agent3,video]"' in guide
+    assert pipeline_ui.REPO_ROOT == REPO_ROOT
+    assert pipeline_ui.DEFAULT_TARGET_HTML.is_file() and pipeline_ui.DEFAULT_SRS.is_file()
+
+
+def test_public_and_approved_evidence_preserves_bytes_with_windows_checkout(tmp_path):
+    """Exercise add/checkout in a disposable index; never normalize original files."""
+    root = tmp_path / "git-work"
+    root.mkdir()
+    def git(*args):
+        return subprocess.check_output(["git", "-C", str(root), *args], stderr=subprocess.STDOUT)
+    git("init", "-q")
+    git("config", "core.autocrlf", "true")
+    git("config", "core.safecrlf", "false")
+    (root / ".gitattributes").write_bytes((REPO_ROOT / ".gitattributes").read_bytes())
+    paths = subprocess.check_output(["git", "ls-files", "-z", "--", "examples/results", "approved_assets"], cwd=REPO_ROOT).decode().split("\0")
+    originals = {}
+    for name in filter(None, paths):
+        originals[name] = (REPO_ROOT / name).read_bytes()
+        destination = root / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(originals[name])
+    git("add", ".")
+    output = tmp_path / "checkout-copy"
+    output.mkdir()
+    git("checkout-index", "--all", "--prefix=" + output.as_posix() + "/")
+    assert originals
+    for name, raw in originals.items():
+        assert git("show", ":" + name) == raw, name
+        assert (output / name).read_bytes() == raw, name
+
+
+
+@pytest.mark.parametrize("statuses", [[], *[[a, b] for a in CheckStatus for b in CheckStatus]])
+def test_shared_status_aggregation_preserves_priority_and_exports(statuses):
+    import qa_pipeline_agent1 as a1
+    import qa_pipeline_agent2 as a2
+    import qa_pipeline_contracts as contracts
+    expected = next((s for s in (CheckStatus.ERROR, CheckStatus.FAIL, CheckStatus.REVIEW)
+                     if s in statuses), CheckStatus.PASS)
+    assert contracts._aggregate_check_status(iter(statuses)) == expected
+    assert a1._aggregate_check_status is a2._aggregate_check_status is pipeline._aggregate_check_status
+
+
+@pytest.mark.parametrize("mutation,message", [
+    ("registry_type", "assets 목록"), ("entry_type", "JSON 객체"),
+    ("tc_id", "TC ID 형식"), ("missing_file", "찾을 수 없습니다"),
+    ("hash", "SHA-256"), ("revision", "SRS 개정 기록 SHA-256"),
+    ("payload_id", "TC 파일 ID"), ("payload_type", "구조화 TC"),
+    ("requirements", "Requirement 목록"), ("functions", "정확히 한 개"),
+])
+def test_approved_catalog_failure_branches_preserve_original_assets(tmp_path, mutation, message):
+    import shutil
+    original = REPO_ROOT / "approved_assets"
+    before = {p.relative_to(original): _sha256_file(p) for p in original.rglob('*') if p.is_file()}
+    root = tmp_path / "assets"
+    shutil.copytree(original, root)
+    registry_file = root / "registry.json"
+    registry = pipeline._read_json_payload(registry_file)
+    asset = registry['assets'][0]
+    if mutation == "registry_type": registry['assets'] = {}
+    elif mutation == "entry_type": registry['assets'] = [None]
+    elif mutation == "tc_id": asset['official_tc_id'] = 'INVALID'
+    elif mutation == "missing_file": asset['automation_file'] = 'missing.py'
+    elif mutation == "hash": asset['automation_sha256'] = '0' * 64
+    elif mutation == "revision": asset['srs_revision_sha256'] = '0' * 64
+    elif mutation == "requirements": asset['requirement_ids'] = []
+    elif mutation == "functions":
+        source = root / asset['automation_file']
+        source.write_text('def helper():\n    pass\n', encoding='utf-8')
+        asset['automation_sha256'] = _sha256_file(source)
+    else:
+        source = root / asset['test_case_file']
+        payload = pipeline._read_json_payload(source)
+        if mutation == "payload_id": payload['official_tc_id'] = 'TC-V2-999'
+        else: payload['test_case'] = None
+        _write_json(source, payload)
+        asset['test_case_sha256'] = _sha256_file(source)
+    _write_json(registry_file, registry)
+    with pytest.raises(ValueError, match=message):
+        pipeline.load_approved_regression_catalog(root)
+    assert before == {p.relative_to(original): _sha256_file(p) for p in original.rglob('*') if p.is_file()}
+
+
+@pytest.mark.parametrize("payload", [{'approved_assets': 'bad'}, {'approved_assets': [None]},
+                                      {'approved_assets': [{'source': 'UNKNOWN'}]}])
+def test_catalog_snapshot_rejects_non_catalog_data(payload):
+    with pytest.raises(ValueError, match='Snapshot'):
+        pipeline._catalog_from_snapshot(payload)
+
+
+def test_catalog_duplicate_ids_and_invalid_hash_are_rejected(tmp_path):
+    spec = pipeline.EXISTING_REGRESSION_CATALOG[0]
+    with pytest.raises(ValueError, match='중복 ID'):
+        pipeline._existing_regression_by_id((spec, spec))
+    with pytest.raises(ValueError, match='SHA-256 값'):
+        pipeline._verify_sha256(tmp_path / 'not-read', None, 'test')
+
+
+@pytest.mark.parametrize("mutation,message", [
+    ('run_id', 'Run ID'), ('stage', '단계'), ('status', 'PASS'),
+    ('design_hash', '설계 해시'), ('tc_id', '선택 TC'), ('target_name', '파일명'),
+    ('product_modified', '제품 불변'), ('candidate_name', '파일명'),
+])
+def test_candidate_handoff_rejects_invalid_manifest_branches(tmp_path, monkeypatch, mutation, message):
+    run, target, run_id = _build_candidate_execution_handoff(tmp_path, monkeypatch)
+    file = run / 'agent3_manifest.json'
+    manifest = pipeline._read_json_payload(file)
+    key, value = {
+        'run_id': ('run_id', 'RUN-20200101-000000-ABCDEF'), 'stage': ('stage', 'AGENT_1_CP1'),
+        'status': ('status', 'FAIL'), 'design_hash': ('source_agent2_design_sha256', '0'*64),
+        'tc_id': ('tc_id', 'TC-CAND-999'), 'target_name': ('target_file', 'other.html'),
+        'product_modified': ('project1_modified', True), 'candidate_name': ('candidate_file', None),
+    }[mutation]
+    manifest[key] = value
+    _write_json(file, manifest)
+    with pytest.raises(ValueError, match=message):
+        pipeline._candidate_execution_record(run, run_id, target)
+
+
 @pytest.mark.parametrize("rewrite", [False, True])
 def test_srs_quote_policy_initial_rewrite_and_verified_loader(tmp_path, monkeypatch, rewrite):
     request, analysis, _ = cp1_combined_srs_case()
@@ -601,7 +725,17 @@ def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
         run_dir / "approved_regression_catalog.json"
     )
     assert manifest["srs_revision_contract"] == "1.1"
-    assert manifest["contract_version"] == "3.11"
+    assert manifest["contract_version"] == "3.12"
+    reviewed_attempt = manifest["grounding_reviews"][-1]["attempt"]
+    review_input = pipeline._read_json_payload(
+        run_dir / f"agent2_grounding_input_attempt_{reviewed_attempt}.json"
+    )
+    assert any(item["kind"] == "CONDITION_COVERAGE" for item in review_input["items"])
+    # Downgrading a new manifest cannot reuse a review over different inputs.
+    _write_json(run_dir / "agent2_manifest.json", {**manifest, "contract_version": "3.11"})
+    with pytest.raises(ValueError, match="해시"):
+        pipeline._load_verified_agent2_run(run_dir, run_dir.name)
+    _write_json(run_dir / "agent2_manifest.json", manifest)
     assert manifest["scope_restoration_policy"] == "STRUCTURED_V1"
     for invalid in (None, "unknown"):
         _write_json(run_dir / "agent2_manifest.json", {**manifest, "scope_restoration_policy": invalid})

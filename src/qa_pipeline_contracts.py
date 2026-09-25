@@ -81,6 +81,17 @@ class CheckStatus(str, Enum):
     ERROR = "ERROR"
 
 
+def _aggregate_check_status(statuses) -> CheckStatus:
+    """Shared CP1/CP2 severity order; preserve ERROR even if producers omit it.
+
+    Empty checks retain the historical PASS result. This helper only aggregates
+    status: stage-specific handoff/approval decisions remain at their boundaries.
+    """
+    observed = set(statuses)
+    return next((status for status in (CheckStatus.ERROR, CheckStatus.FAIL, CheckStatus.REVIEW)
+                 if status in observed), CheckStatus.PASS)
+
+
 class HandoffStatus(str, Enum):
     CONTINUE = "CONTINUE"
     PAUSE = "PAUSE"
@@ -796,10 +807,7 @@ class ValidationExecutionBundle(StrictModel):
             and self.candidate_results
             and self.candidate_results[0] != self.candidate_result
         ):
-            if len(self.candidate_results) == 1:
-                self.candidate_results = [self.candidate_result]
-            else:
-                raise ValueError("candidate_result와 candidate_results[0]이 다릅니다.")
+            raise ValueError("candidate_result와 candidate_results[0]이 다릅니다.")
         return self
 
 

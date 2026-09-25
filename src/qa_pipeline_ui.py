@@ -241,7 +241,7 @@ def _verify_candidate_sources(run_dir: Path, tc_id: str) -> None:
     _verify_final_report_sources(run_dir, run_dir.name)
     request, requirements, analysis, design, _, source = _load_verified_agent2_run(run_dir, run_dir.name)
     current_cp2 = evaluate_checkpoint2(request, analysis, design, requirements,
-                                     legacy_wording_checks=_legacy_wording_policy(source, {"3.8", "3.9", "3.10", "3.11"}),
+                                     legacy_wording_checks=_legacy_wording_policy(source, {"3.8", "3.9", "3.10", "3.11", "3.12"}),
                                      allow_split_procedure_notes=source.get("procedure_preservation_contract") == "1.0",
                                      use_structured_scope_restoration=source.get("scope_restoration_policy") == "STRUCTURED_V1")
     if any(check.rule_id == "CP2-017" and check.status != CheckStatus.PASS for check in current_cp2.checks):
@@ -259,14 +259,18 @@ def _verify_candidate_sources(run_dir: Path, tc_id: str) -> None:
     plan = _read_json_model(candidate_dir / "agent3_automation_plan.json", Agent3AutomationPlan)
     observation = _read_json_model(candidate_dir / "agent3_ui_observation.json", UiObservation)
     current_cp3 = evaluate_checkpoint3_plan(test_case, plan, observation, require_precondition_proof=True, require_restore_plan_links=True, require_restore_comparison_basis=True,
-                                          legacy_wording_checks=_legacy_wording_policy(manifest, {"4.6", "4.7", "4.8", "4.9"}),
-                                          allow_terminal_observation_anchor=manifest.get("plan_fidelity_contract") == "1.1")
-    current_cp3 = _load_grounding_review(candidate_dir, manifest, "AGENT3", "4.9",
+                                          legacy_wording_checks=_legacy_wording_policy(manifest, {"4.6", "4.7", "4.8", "4.9", "4.10"}),
+                                          allow_terminal_observation_anchor=manifest.get("plan_fidelity_contract") in {"1.1", "1.2"},
+                                          require_assertion_target_identity=manifest.get("plan_fidelity_contract") == "1.2")
+    current_cp3 = _load_grounding_review(candidate_dir, manifest, "AGENT3", ("4.9", "4.10"),
         build_grounding_input("AGENT3", None, {}, plan, test_case=test_case, observation=observation), current_cp3)
     if current_cp3.status != CheckStatus.PASS:
-        proof_failed = any(check.rule_id == "CP3-006A" and check.status == CheckStatus.FAIL for check in current_cp3.checks)
+        # This is a freshly recomputed checkpoint, not a historical saved one.
+        proof_failed = any(check.rule_id == "CP3-006D" and check.status == CheckStatus.FAIL for check in current_cp3.checks)
         if proof_failed:
             raise ValueError("사전조건 증명이 없거나 부적합합니다. 현재 계약으로 계획·시험을 다시 확보해야 승인할 수 있습니다.")
+        if any(check.rule_id == "CP3-006A" and check.status == CheckStatus.FAIL for check in current_cp3.checks):
+            raise ValueError("TC의 조작·복원 순서와 자동화 계획이 일치하지 않습니다. 계획을 보완한 뒤 다시 시험해야 승인할 수 있습니다.")
         raise ValueError("현재 검사 규칙에서 후보 자동화 계획을 승인할 수 없습니다.")
 
 

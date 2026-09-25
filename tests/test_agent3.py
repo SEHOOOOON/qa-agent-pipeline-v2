@@ -3,6 +3,51 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("identity", [1, 2, None])
+@pytest.mark.parametrize("index", [0, 4])
+def test_assertion_device_path_must_identify_plan_target(identity, index):
+    case, plan, observation = structured_restoration_fixture()
+    path = f"window.__vccs.devices[{index}]"
+    plan.assertions[1].selector = path + ".enabled"
+    observation.harness_values[path + ".enabled"] = False
+    if identity is not None:
+        observation.harness_values[path + ".id"] = identity
+    old = pipeline.evaluate_checkpoint3_plan(case, plan, observation, legacy_wording_checks=False)
+    assert old.status == CheckStatus.PASS  # Stored historical contract is unchanged.
+    current = pipeline.evaluate_checkpoint3_plan(case, plan, observation, legacy_wording_checks=False,
+                                                  require_assertion_target_identity=True)
+    assert (current.status == CheckStatus.PASS) == (identity == plan.target_device_id)
+    if identity != plan.target_device_id:
+        assert "device index" in next(c.message for c in current.checks if c.rule_id == "CP3-004")
+
+
+@pytest.mark.parametrize('selectors,harness,message', [
+    ({'#unknown'}, set(), 'selector='), (set(), {'unknown'}, 'window.__vccs='),
+    ({'#unknown'}, {'unknown'}, 'selector=.*window.__vccs='),
+])
+def test_inventory_unknown_interfaces_are_rejected_before_browser(selectors, harness, message):
+    with pytest.raises(pipeline.Agent3Error, match=message):
+        inspect_target_ui(REPO_ROOT / 'product_baseline/virtual-controller.html',
+                          required_selectors=selectors, required_harness_keys=harness)
+
+
+def test_inventory_missing_html_is_rejected_before_browser(tmp_path):
+    with pytest.raises(pipeline.Agent3Error, match='existing local HTML'):
+        inspect_target_ui(tmp_path / 'missing.html')
+
+
+@pytest.mark.parametrize('mutation', ['none', 'precondition', 'sequence'])
+def test_checkpoint3_proof_and_sequence_have_distinct_identifiers(mutation):
+    case, plan, observation = precondition_guard_fixture()
+    if mutation == 'precondition': plan.precondition_checks = []
+    elif mutation == 'sequence':
+        next(a for a in plan.actions if a.phase == pipeline.AutomationPhase.TEST).source_text = 'not in TC'
+    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, observation)
+    by_id = {c.rule_id: c for c in checkpoint.checks}
+    assert len(by_id) == len(checkpoint.checks)
+    assert by_id['CP3-006D'].status == (CheckStatus.FAIL if mutation == 'precondition' else CheckStatus.PASS)
+    assert by_id['CP3-006A'].status == (CheckStatus.FAIL if mutation == 'sequence' else CheckStatus.PASS)
+
 @pytest.mark.parametrize("mutation", ["none", "early_anchor", "restore_anchor", "omitted_operation", "earlier_observation", "changed_value", "missing_assertion", "write_tc"])
 def test_terminal_observation_uses_last_test_action_without_invented_click(mutation):
     case, plan, observation = structured_restoration_fixture()
@@ -893,7 +938,7 @@ def test_precondition_proof_rejects_unverified_plans(mutation):
     else:
         case.preconditions.append("관리자 권한으로 로그인되어 있어야 한다.")
     checkpoint = evaluate_checkpoint3_plan(case, plan, observation, require_precondition_proof=True)
-    assert next(item for item in checkpoint.checks if item.rule_id == "CP3-006A").status == CheckStatus.FAIL
+    assert next(item for item in checkpoint.checks if item.rule_id == "CP3-006D").status == CheckStatus.FAIL
 
 
 def test_baseline_context_cannot_prove_administrator_login():

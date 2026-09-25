@@ -462,12 +462,9 @@ def _human_review_markdown(
     results_by_id = {
         result.test_id: result for result in _validation_results(bundle)
     }
-    candidates_by_id = (
-        {test_case.tc_id: test_case for test_case in design.test_cases}
-        if design is not None
-        else {}
+    cases, existing_by_id = _run_test_case_catalog(
+        run_dir, design.model_dump(mode="json") if design is not None else {}
     )
-    existing_by_id = {item.tc_id: item for item in EXISTING_REGRESSION_CATALOG}
     category_labels = {
         Agent4FindingCategory.PRODUCT_MISMATCH_CANDIDATE: "제품 동작 불일치 후보",
         Agent4FindingCategory.AUTOMATION_EXECUTION_ISSUE: "자동화 실행 문제",
@@ -505,16 +502,20 @@ def _human_review_markdown(
         f"| 전체 실행 결과 | {report.total_results}건 |",
         f"| 제품 결과 | {report.product_result_count}건 |",
         f"| 환경 점검 | {report.environment_result_count}건 |",
-        f"| 사람이 판단할 항목 | {len(report.findings)}건 |",
+        f"| 실행 결과 검토 항목 | {len(report.findings)}건 |",
+        f"| SRS 개정 제안 | {len(report.srs_revision_proposals)}건 · 등록 여부와 별도로 원문 검토 |",
+        f"| 추가 확인 사항 | {len(report.final_review_notes)}건 |",
+        f"| 정보 부족으로 제외 | {len(report.excluded_information_gaps)}건 |",
+        "| 공식 SRS·TC 승인 | 자동 실행 판정과 별개 · 현재 등록 상태는 승인 화면에서 확인 |",
         "",
         "## 3. 항목별 사람 판정",
         "",
     ]
     if not report.findings:
-        lines.extend(["사람이 별도로 판정할 자동 검토 항목이 없습니다.", ""])
+        lines.extend(["실행 결과에서 별도로 분류된 검토 항목은 없습니다. SRS 개정·TC 등록 승인이나 정보 부족이 모두 해결됐다는 뜻은 아닙니다.", ""])
     for index, finding in enumerate(report.findings, start=1):
         result = results_by_id.get(finding.test_id or "")
-        test_case = candidates_by_id.get(finding.test_id or "")
+        test_case = cases.get(finding.test_id or "")
         existing = existing_by_id.get(finding.test_id or "")
         requirements = finding.requirement_ids or (
             result.requirement_ids if result is not None else []
@@ -526,24 +527,30 @@ def _human_review_markdown(
                 "| 구분 | 내용 |",
                 "|---|---|",
                 f"| 관련 TC | `{_markdown_text(finding.test_id or '연결 없음')}` |",
-                f"| TC 제목 | {_markdown_text(test_case.title if test_case is not None else '기존 회귀 또는 제목 정보 없음')} |",
+                f"| TC 제목 | {_markdown_text(test_case.get('title', '제목 정보 없음') if test_case else existing.covered_behaviors[0] if existing and existing.covered_behaviors else '기존 회귀 또는 제목 정보 없음')} |",
                 f"| 관련 Requirement | {', '.join(f'`{item}`' for item in requirements) or '없음'} |",
                 f"| 실행 상태 | `{result.status.value if result is not None else finding.status.value if finding.status else '없음'}` |",
                 f"| 자동 분류 근거 | {_markdown_text(finding.rationale)} |",
                 "",
-                "#### 기대 결과",
-                "",
             ]
         )
+        if test_case:
+            for key, title in (("preconditions", "사전조건"), ("steps", "시험 절차"), ("restore_steps", "시험 후 복원")):
+                lines.extend([f"#### {title}", ""])
+                lines.extend(f"- {_markdown_text(line)}" for line in test_case.get(key, []))
+                if not test_case.get(key):
+                    lines.append("- 저장된 TC에 별도 항목이 없습니다.")
+                lines.append("")
+        lines.extend(["#### 기대 결과", ""])
         if test_case is not None:
-            for expected in test_case.expected_results:
+            for expected in test_case.get("expected_results", []):
                 timing = (
-                    f" — 확인 시점: {_markdown_text(expected.verify_after_step)}"
-                    if expected.verify_after_step
+                    f" — 확인 시점: {_markdown_text(expected['verify_after_step'])}"
+                    if expected.get("verify_after_step")
                     else ""
                 )
                 lines.append(
-                    f"- `{expected.result_id}` {_markdown_text(expected.statement)}{timing}"
+                    f"- `{expected['result_id']}` {_markdown_text(expected['statement'])}{timing}"
                 )
         elif existing is not None:
             lines.extend(
@@ -571,9 +578,9 @@ def _human_review_markdown(
         ):
             mismatch_result_ids = set(re.findall(r"ER-\d{3}", observation_detail))
             lines.extend(
-                f"- `{expected.result_id}`: 이 요약에서 개별 판정이 확인되지 않습니다. 원본 실행 증거를 확인해 주세요."
-                for expected in test_case.expected_results
-                if expected.result_id not in mismatch_result_ids
+                f"- `{expected['result_id']}`: 이 요약에서 개별 판정이 확인되지 않습니다. 원본 실행 증거를 확인해 주세요."
+                for expected in test_case.get("expected_results", [])
+                if expected["result_id"] not in mismatch_result_ids
             )
         lines.extend(["", "#### 실행 증거", ""])
         evidence_files = finding.evidence_files or (
@@ -854,18 +861,11 @@ def _slack_report_payload(report: FinalReport) -> dict[str, Any]:
     }
 
 
-def build_run_test_rows(run_dir: Path, *, approved_assets_root: Path = DEFAULT_APPROVED_ASSETS_ROOT) -> list[dict[str, Any]]:
-    """저장된 Run의 설계·실행·분류를 합칩니다. 미실행을 통과로 추정하지 않습니다."""
-    def read(name: str) -> dict[str, Any]:
-        path = run_dir / name
-        return _read_json_payload(path) if path.is_file() else {}
-
-    design = read("agent2_test_design.json")
-    bundle = read("validation_execution.json")
-    report = read("final_report.json")
-    summary = read("agent3_run_summary.json")
+def _run_test_case_catalog(run_dir: Path, design: dict, *, approved_assets_root: Path = DEFAULT_APPROVED_ASSETS_ROOT):
+    """Shared TC detail source for UI, Notion and the human review document."""
     cases = {item["tc_id"]: item for item in design.get("test_cases", [])}
-    snapshot = read("approved_regression_catalog.json")
+    snapshot_path = run_dir / "approved_regression_catalog.json"
+    snapshot = _read_json_payload(snapshot_path) if snapshot_path.is_file() else {}
     catalog = _catalog_from_snapshot(snapshot)
     saved_cases = {item["tc_id"]: item.get("test_case_json") for item in snapshot.get("approved_assets", [])}
     specs = {item.tc_id: item for item in (*catalog, ENVIRONMENT_PRECHECK)}
@@ -882,6 +882,20 @@ def build_run_test_rows(run_dir: Path, *, approved_assets_root: Path = DEFAULT_A
         if (path.is_relative_to(approved_root.resolve()) and path.is_file()
                 and _sha256_file(path) == spec.test_case_sha256):
             cases[spec.tc_id] = _read_json_payload(path).get("test_case", {})
+    return cases, specs
+
+
+def build_run_test_rows(run_dir: Path, *, approved_assets_root: Path = DEFAULT_APPROVED_ASSETS_ROOT) -> list[dict[str, Any]]:
+    """저장된 Run의 설계·실행·분류를 합칩니다. 미실행을 통과로 추정하지 않습니다."""
+    def read(name: str) -> dict[str, Any]:
+        path = run_dir / name
+        return _read_json_payload(path) if path.is_file() else {}
+
+    design = read("agent2_test_design.json")
+    bundle = read("validation_execution.json")
+    report = read("final_report.json")
+    summary = read("agent3_run_summary.json")
+    cases, specs = _run_test_case_catalog(run_dir, design, approved_assets_root=approved_assets_root)
     results = {
         item["test_id"]: item for item in [
             *bundle.get("candidate_results", []),

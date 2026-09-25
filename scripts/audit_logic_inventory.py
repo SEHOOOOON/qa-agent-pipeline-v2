@@ -210,7 +210,7 @@ def build_inventory():
         files[path.relative_to(ROOT).as_posix()] = {"sha256": hashlib.sha256(raw).hexdigest(),
                                                   **index_python(raw.decode("utf-8-sig"))}
     surfaces = {}
-    for relative in ("product_baseline/virtual-controller.html", "project.html"):
+    for relative in ("product_baseline/virtual-controller.html", "project.html", "project-story.html"):
         raw = (ROOT / relative).read_bytes()
         parser = HtmlSurfaceIndex()
         parser.feed(raw.decode("utf-8-sig"))
