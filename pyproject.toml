@@ -33,6 +33,7 @@ py-modules = [
   "qa_pipeline_agent2",
   "qa_pipeline_agent3",
   "qa_pipeline_execution",
+  "qa_pipeline_grounding",
   "qa_pipeline_reporting",
   "qa_pipeline_orchestrator",
 ]

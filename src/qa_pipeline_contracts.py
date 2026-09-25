@@ -34,6 +34,29 @@ __version__ = "0.3.0"
 NonEmptyStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 RequirementId = Annotated[str, StringConstraints(pattern=r"^REQ-[A-Z]+-\d{3}$")]
 
+# Shared drafting vocabulary, not a semantic equivalence classifier. Keep the
+# same source-relative time reference in CP2 and CP3; never normalize values,
+# observation targets, negation, or the signed source text.
+RESTORE_BASELINE_PATTERN = (
+    r"(?:시험|실행)\s*(?:시작\s*)?(?:직전|전)|초기\s*상태|원래\s*상태|원상태"
+    r"|\b(?:pre[- ]?test|baseline|initial\s+state|before\s+(?:the\s+)?test)\b"
+)
+
+
+def _has_restore_baseline(text: str) -> bool:
+    return bool(re.search(RESTORE_BASELINE_PATTERN, text, re.I))
+
+
+TC_OBSERVATION_BINDING_RULES = {
+    "target": "observation_target에 실제 확인할 대상을 명시한다. 설명과 철자가 같아야 하는 것은 아니며, "
+              "대상이 실제로 같은지 확인한다. 단어 일치는 대상 동일성의 증거가 아니다.",
+    "source": "source_condition_ids와 출처 원문을 유지한다. 대상 연결을 맞추려고 기대값을 고치지 않는다.",
+    "timing": "verify_after_step은 실제 판정할 steps 항목을 그대로 연결한다.",
+    "restore": "복원 확인은 같은 observation_target마다 시험 전 관찰값 또는 해당 대상에서 증명한 초기값을 연결한다. "
+               "다른 대상의 값·비교 기준을 빌리지 않는다.",
+    "limits": "이름 유사도는 대상 동일성의 근거가 아니다. 대상·값·시점 연결이 불명확하면 보완 대상으로 남긴다.",
+}
+
 
 class StrictModel(BaseModel):
     # 저장 산출물은 한글 표시명을 쓰되, 이전 Run의 영문 키도 계속 읽습니다.
@@ -56,6 +79,17 @@ class CheckStatus(str, Enum):
     REVIEW = "REVIEW"
     FAIL = "FAIL"
     ERROR = "ERROR"
+
+
+def _aggregate_check_status(statuses) -> CheckStatus:
+    """Shared CP1/CP2 severity order; preserve ERROR even if producers omit it.
+
+    Empty checks retain the historical PASS result. This helper only aggregates
+    status: stage-specific handoff/approval decisions remain at their boundaries.
+    """
+    observed = set(statuses)
+    return next((status for status in (CheckStatus.ERROR, CheckStatus.FAIL, CheckStatus.REVIEW)
+                 if status in observed), CheckStatus.PASS)
 
 
 class HandoffStatus(str, Enum):
@@ -167,6 +201,9 @@ class Agent1Analysis(StrictModel):
         default_factory=list, alias="제외된_정보_부족"
     )
     user_questions: list[NonEmptyStr] = Field(default_factory=list)
+    # Explicit source routing replaces guessing preparation/restoration from verbs.
+    # Missing in historical analyses; never inferred when loading old evidence.
+    procedure_notes: list[NonEmptyStr] = Field(default_factory=list)
     decision: AnalysisDecision
 
 
@@ -266,6 +303,45 @@ class ExpectedResult(StrictModel):
     observation_target: NonEmptyStr | None = None
 
 
+class TcStateEffect(str, Enum):
+    READ_ONLY = "READ_ONLY"
+    STATE_CHANGE = "STATE_CHANGE"
+    BLOCKED_CHANGE = "BLOCKED_CHANGE"
+
+
+class RestoreComparisonBasis(str, Enum):
+    OBSERVED_BASELINE = "OBSERVED_BASELINE"
+    PROVED_INITIAL = "PROVED_INITIAL"
+
+
+class RestoreComparison(StrictModel):
+    result_id: Annotated[str, StringConstraints(pattern=r"^ER-\d{3}$")]
+    source_excerpt: NonEmptyStr
+    basis: RestoreComparisonBasis
+
+
+class RestoreConfirmation(StrictModel):
+    """Reference existing ER readers; never introduce a new selector or value."""
+    source_text: NonEmptyStr
+    result_ids: list[Annotated[str, StringConstraints(pattern=r"^ER-\d{3}$")]] = Field(min_length=1)
+    comparisons: list[RestoreComparison] = Field(default_factory=list)
+
+
+class RestoreVerificationTiming(str, Enum):
+    AFTER_RESTORE = "AFTER_RESTORE"
+
+
+class StructuredRestoration(StrictModel):
+    """Executable restoration intent, separate from human-readable prose.
+
+    operation_steps and confirmation source_text partition restore_steps.
+    Readers come only from existing ER IDs; baseline is captured before preparation.
+    """
+    operation_steps: list[NonEmptyStr]
+    confirmations: list[RestoreConfirmation]
+    verify_when: RestoreVerificationTiming
+
+
 class ProductTestCaseCandidate(StrictModel):
     tc_id: Annotated[str, StringConstraints(pattern=r"^TC-CAND-\d{3}$")]
     title: NonEmptyStr
@@ -292,7 +368,11 @@ class ProductTestCaseCandidate(StrictModel):
     double_assert_policy: DoubleAssertPolicy = DoubleAssertPolicy.NOT_APPLICABLE
     double_assert_reason: NonEmptyStr | None = None
     restore_required: bool
+    # None preserves historical approved artifacts. New runs require a policy.
+    state_effect: TcStateEffect | None = None
     restore_steps: list[NonEmptyStr] = Field(default_factory=list)
+    # None is legacy only. New handoffs require this even for READ_ONLY (empty lists).
+    restoration: StructuredRestoration | None = None
     automation_candidate: bool
     automation_reason: NonEmptyStr
 
@@ -303,6 +383,46 @@ class ProductTestCaseCandidate(StrictModel):
         if not self.restore_required and self.restore_steps:
             raise ValueError("restore_required가 false이면 restore_steps는 비워야 합니다.")
         return self
+
+
+def _structured_restoration_errors(tc: ProductTestCaseCandidate) -> list[str]:
+    """Shared CP2/CP3 contract check; no free-text vocabulary recognition."""
+    contract = tc.restoration
+    if contract is None:
+        return ["구조화 복원 계약 누락"]
+    if contract.verify_when != RestoreVerificationTiming.AFTER_RESTORE:
+        return ["복원 확인 시점은 복원 조작 이후여야 합니다"]
+    if tc.state_effect is None or tc.restore_required != (tc.state_effect != TcStateEffect.READ_ONLY):
+        return ["상태 변경 유형과 복원 필요 여부 불일치"]
+    if not tc.restore_required:
+        return (["조회 TC에는 복원 조작·확인을 넣을 수 없습니다"]
+                if contract.operation_steps or contract.confirmations or tc.restore_steps else [])
+    errors = []
+    sources = [item.source_text for item in contract.confirmations]
+    if (not contract.operation_steps or not sources
+            or len(set(tc.restore_steps)) != len(tc.restore_steps)
+            or contract.operation_steps + sources != tc.restore_steps):
+        errors.append("복원 절차는 조작 목록 다음 확인 목록으로 빠짐없이 한 번씩 연결해야 합니다")
+    results = {r.result_id: r for r in tc.expected_results}
+    required = {r.result_id for r in tc.expected_results if r.observation_layer != ObservationLayer.NOTIFICATION}
+    linked = []
+    for confirmation in contract.confirmations:
+        ids = confirmation.result_ids
+        comparisons = confirmation.comparisons
+        if len(ids) != len(set(ids)) or [c.result_id for c in comparisons] != ids:
+            errors.append("복원 확인 대상의 ID 누락·중복 또는 비교 연결 불일치")
+        linked.extend(ids)
+        for comparison in comparisons:
+            result = results.get(comparison.result_id)
+            if result is None or result.observation_layer == ObservationLayer.NOTIFICATION or not result.observation_target:
+                errors.append("복원 확인은 관찰 위치가 있는 기존 상태 ER만 참조할 수 있습니다")
+            if comparison.basis != RestoreComparisonBasis.OBSERVED_BASELINE:
+                errors.append("새 복원 비교는 준비 전 실제 관찰 상태를 기준으로 해야 합니다")
+            if comparison.source_excerpt != confirmation.source_text:
+                errors.append("설명 원문은 자르거나 재해석하지 않고 전체 문장을 연결해야 합니다")
+    if not required or set(linked) != required or len(linked) != len(set(linked)):
+        errors.append("상태 ER마다 복원 비교를 정확히 하나씩 연결해야 합니다")
+    return errors
 
 
 class ExistingTestSelection(StrictModel):
@@ -550,24 +670,6 @@ class PreconditionCheck(StrictModel):
     expected_value: str | float | int | bool
 
 
-class RestoreComparisonBasis(str, Enum):
-    OBSERVED_BASELINE = "OBSERVED_BASELINE"
-    PROVED_INITIAL = "PROVED_INITIAL"
-
-
-class RestoreComparison(StrictModel):
-    result_id: Annotated[str, StringConstraints(pattern=r"^ER-\d{3}$")]
-    source_excerpt: NonEmptyStr
-    basis: RestoreComparisonBasis
-
-
-class RestoreConfirmation(StrictModel):
-    """Link an unchanged TC confirmation to existing compiler comparisons only."""
-    source_text: NonEmptyStr
-    result_ids: list[Annotated[str, StringConstraints(pattern=r"^ER-\d{3}$")]] = Field(min_length=1)
-    comparisons: list[RestoreComparison] = Field(default_factory=list)
-
-
 class Agent3AutomationPlan(StrictModel):
     tc_id: Annotated[str, StringConstraints(pattern=r"^TC-CAND-\d{3}$")]
     target_device_id: int = Field(ge=1, le=16)
@@ -705,10 +807,7 @@ class ValidationExecutionBundle(StrictModel):
             and self.candidate_results
             and self.candidate_results[0] != self.candidate_result
         ):
-            if len(self.candidate_results) == 1:
-                self.candidate_results = [self.candidate_result]
-            else:
-                raise ValueError("candidate_result와 candidate_results[0]이 다릅니다.")
+            raise ValueError("candidate_result와 candidate_results[0]이 다릅니다.")
         return self
 
 

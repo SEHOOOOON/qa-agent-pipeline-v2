@@ -35,13 +35,15 @@ from qa_pipeline_agent2 import *
 # Agent 3: Evidence-grounded automation planning
 # ---------------------------------------------------------------------------
 AGENT3_SYSTEM_INSTRUCTIONS = """
+For a TC with restoration, use its STRUCTURED contract instead of interpreting confirmation prose: copy restoration.confirmations verbatim into restore_confirmations, including full source_excerpt, result_ids and OBSERVED_BASELINE basis. Implement restoration.operation_steps as RESTORE Actions in order. verify_when=AFTER_RESTORE is implemented by the compiler after restoration, comparing the same ER reader to its original value captured before preparation. Do NOT split descriptions into clauses or infer values, timing or extra targets from them. The legacy prose/excerpt guidance below applies ONLY to TCs without restoration. All action allowlists, source grounding, assertion coverage, original expectations and precondition checks still apply.
+For TCs with state_effect: READ_ONLY permits observation and SELECT_DEVICE navigation only, no mutation or restore actions. STATE_CHANGE and BLOCKED_CHANGE require approved restore operations and same-target comparisons. Preserve the original state BEFORE preparation separately from the prepared state BEFORE TEST. A blocked operation is compared with the prepared state; final restoration is compared with the original state. PRECONDITION writes are supported only for the existing central HVAC SET_MODE/SET_TEMPERATURE/APPLY_COMMANDS path, with test_data.restore_observed_hvac_state=true and exactly one RESTORE_OBSERVED_HVAC restore action. All non-restore operations in that plan must be SELECT_DEVICE or those HVAC operations. Initial mode/temperature describe the required prepared state, not a fixed restoration value. Use OBSERVED_BASELINE restoration comparisons. The compiler restores even after partial preparation or failed precondition checks. BLOCKED_CHANGE skips restore writes only when no preparation write happened and observed state stayed unchanged. Unsupported recovery/read targets require AUTOMATION_SUPPORT_EXTENSION_REQUIRED, never invented inverse actions or defaults. A restore failure retires that browser context; later independent tests run only in fresh contexts.
 Check only conditions stated in the approved TC preconditions; observed facts are available evidence, not additional requirements. Do not add online, visibility, login or selected-state checks merely because the inventory mentions them. A single-device target scope does not itself request a selectedUnitId assertion; an explicitly required selected state still needs its own observed proof.
 For BASELINE_CONTEXT, error_free applies to a stated no-error condition, unlocked to a stated unlocked condition, online only to explicit 온라인/online, and target_device_visible to a matching target-device/visibility phrase. Include all facts stated in a compound line, not every available context field. Unknown role/login conditions require their own observed read-only evidence, never the baseline context. Never rewrite the TC source to justify an extra check.
 The per-source precondition_context_bindings list exposes the current checker's allowed BASELINE_CONTEXT selectors for each exact TC line. Use only selectors listed for that source; do not borrow selectors from another source or from the overall inventory. These hints cover baseline context only, not all precondition values: explicit initial values still need their matching observed readers. An empty list does not mean the condition is optional or unsupported; inspect the other allowed readers before deciding support is missing.
 Every READY plan must include precondition_checks covering EVERY exact TC preconditions line, including already-satisfied conditions and setup actions. Use multiple checks for multiple explicit values in a line. They execute after all PRECONDITION actions and BEFORE the first TEST action; setup actions alone are not proof. Each check has source_text, read_kind, selector, expected_value.
 Read kinds: UI_TEXT (contains grounded state/value, not a generic label), UI_VALUE (exact string), UI_CHECKED/UI_ENABLED (boolean), INTERNAL_VALUE (exact observed, TC-grounded scalar path), BASELINE_CONTEXT (selector target_device_visible/error_free/unlocked/online, expected_value=true, only for the matching observed baseline fact).
 If a stated precondition cannot be observed with these readers, return AUTOMATION_SUPPORT_EXTENSION_REQUIRED with that precise reason. Never delete, invent, or silently weaken preconditions. Product assertions cannot run in PRECONDITION phase.
-For state expectations, UI_TEXT_CONTAINS must include the expected state, never only a static control label. CONTROLS_DISABLED requires an explicitly disabled Expected Result. Generic fixed RESTORE checks compare against the prepared TC state immediately before TEST, while RESTORE_OBSERVED_HVAC restores the original pre-setup HVAC state.
+For state expectations, UI_TEXT_CONTAINS must include the expected state, never only a static control label. CONTROLS_DISABLED requires an explicitly disabled Expected Result. Historical plans without state_effect retain their original prepared-state comparison. New state_effect plans preserve the original pre-setup state for final restoration; RESTORE_OBSERVED_HVAC is the supported inverse for HVAC preparation.
 Implement every approved TEST and RESTORE operation in order. Trailing read-only verification steps are implemented by their corresponding assertions, not invented clicks.
 For UI_TEXT_CONTAINS, copy a complete product value or meaningful message phrase from the Expected Result, never a substring inside a label. This also applies to temperature/mode plans: preserve every step and intermediate reset in the original order.
 Keep original restore-operation lines unchanged. A trailing restore confirmation may name an existing Expected Result's exact observation_target and compare it with the pre-test state, or with an initial value already proved for that same target. The compiler performs these existing baseline comparisons; do not invent RESTORE clicks or new product Expected Results for confirmation-only lines. A new observation target or unsupported restore comparison requires support extension, not silent omission.
@@ -201,6 +203,7 @@ def build_agent3_model_input(
         "store": False,
         "system_instructions": AGENT3_SYSTEM_INSTRUCTIONS,
         "test_case": test_case.model_dump(mode="json"),
+        "observation_binding_rules": TC_OBSERVATION_BINDING_RULES,
         "related_srs_requirements": related,
         "ui_observation": observation_payload,
         "precondition_context_bindings": [
@@ -225,6 +228,14 @@ def build_agent3_model_input(
     }
 
 
+AGENT3_SYSTEM_INSTRUCTIONS += """
+Implement the whole fact of each ExpectedResult, not just a matching result_id or numeric token.
+Do not silently omit an independent claim attached to an ExpectedResult. If the approved TC combines
+facts that cannot be faithfully asserted, return support-extension/review reasons; never shorten the TC.
+The semantic grounding review checks actual actions/assertions against the approved TC separately.
+"""
+
+
 class OpenAIAgent3:
     def __init__(self, *, model: str | None = None, client: Any | None = None) -> None:
         self.model = model or os.getenv("OPENAI_MODEL", "gpt-5.6-terra")
@@ -233,7 +244,7 @@ class OpenAIAgent3:
                 raise Agent3Error(
                     "OPENAI_API_KEY is missing. Never place secrets in code or Run artifacts."
                 )
-            client = OpenAI()
+            client = OpenAI(max_retries=0)
         self.client = client
 
     def plan(
@@ -277,7 +288,7 @@ class OpenAIAgent3:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent3-3-28",
+                prompt_cache_key="qa-v2-agent3-3-33",
                 input=[
                     {"role": "system", "content": AGENT3_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
@@ -285,7 +296,7 @@ class OpenAIAgent3:
                 text_format=Agent3AutomationPlan,
             )
         except Exception as exc:
-            raise Agent3Error(f"Agent 3 model call failed: {exc}") from exc
+            raise Agent3Error(f"Agent 3 model call failed ({type(exc).__name__}). External error body omitted.") from None
         parsed = getattr(response, "output_parsed", None)
         if parsed is None:
             raise Agent3Error("The model did not return a structured Agent 3 automation plan.")
@@ -890,7 +901,7 @@ _BASELINE_PRECONDITION_READS = {
 }
 
 
-def _precondition_proof_errors(test_case, plan, observation) -> list[str]:
+def _precondition_proof_errors(test_case, plan, observation, *, legacy_wording_checks: bool = True) -> list[str]:
     """Check explicit proof mappings, not general natural-language equivalence."""
     errors = []
     approved = set(test_case.preconditions)
@@ -942,7 +953,7 @@ def _precondition_proof_errors(test_case, plan, observation) -> list[str]:
                 errors.append("precondition selector must have exactly one observed match")
                 continue
             meaning = " ".join([element.text, element.accessible_name or "", element.selector, element.action_hint])
-            if not _has_textual_link(meaning, check.source_text):
+            if legacy_wording_checks and not _has_textual_link(meaning, check.source_text):
                 errors.append("precondition UI target has no textual link to its source")
             if check.read_kind in {PreconditionReadKind.UI_CHECKED, PreconditionReadKind.UI_ENABLED} and not isinstance(check.expected_value, bool):
                 errors.append("precondition boolean observation requires a boolean value")
@@ -1050,6 +1061,8 @@ def _restore_confirmation_coverage(test_case, plan, *, require_plan_links=False,
     interpreter. Extra targets/values and mutation verbs remain fail-closed.
     Historical combined operation/verification lines keep their action mapping.
     """
+    if test_case.restoration is not None:
+        return _structured_restore_plan_coverage(test_case, plan)
     if require_comparison_basis or any(item.comparisons for item in plan.restore_confirmations):
         return _restore_comparison_coverage(test_case, plan)
     read_only = {
@@ -1100,10 +1113,7 @@ def _restore_confirmation_coverage(test_case, plan, *, require_plan_links=False,
         for result in sorted(targets, key=lambda item: len(item.observation_target), reverse=True):
             remainder = re.sub(re.escape(result.observation_target), " ", remainder, flags=re.I)
         comparison_text = remainder
-        baseline_comparison = bool(re.search(
-            r"시험\s*전|실행\s*전|실행\s*직전|초기\s*상태|원래\s*상태|원상태"
-            r"|pre[- ]?test|baseline|initial\s+state", comparison_text, re.I
-        ))
+        baseline_comparison = _has_restore_baseline(comparison_text)
         if _comparison_basis == RestoreComparisonBasis.OBSERVED_BASELINE and not baseline_comparison:
             errors.append(f"{label}: 시험 전 관찰값 비교가 원문에 없습니다. 내부 코드를 화면 표시로 가정하지 마세요.")
         if _comparison_basis == RestoreComparisonBasis.PROVED_INITIAL:
@@ -1176,11 +1186,12 @@ def _restore_confirmation_coverage(test_case, plan, *, require_plan_links=False,
         if _comparison_basis is not None:
             remainder = re.sub(r"확인(?:하고|하며|하여|해서)|검사(?:하고|하며)|검증(?:한다|합니다|하고|하며)"
                                r"|비교(?:하고|하며)|\bconfirm\b", "확인한다", remainder, flags=re.I)
+        remainder = re.sub(RESTORE_BASELINE_PATTERN, " ", remainder, flags=re.I)
         remainder = re.sub(
-            r"복원\s*(?:후|뒤)|시험\s*전|실행\s*(?:직전|전)|초기\s*(?:상태|값)|원래\s*상태|원상태"
+            r"복원\s*(?:후|뒤)|초기\s*값"
             r"|동일한지|일치하는지|같은지|돌아왔는지|복구되었는지|복원되었는지|인지"
             r"|비교(?:하여|해서|해)?|확인(?:합니다|한다)?|검사(?:합니다|한다)?"
-            r"|pre[- ]?test|baseline|initial\s+state|after\s+restoring|verify|check|compare|matches|equals|same|with|and"
+            r"|after\s+restoring|verify|check|compare|matches|equals|same|with|and"
             r"|\b(?:state|value)\b|상태|값|으로|을|를|와|과|및|은|는|이|가|로|에|°c|℃",
             " ", remainder, flags=re.I,
         )
@@ -1204,6 +1215,36 @@ def _restore_confirmation_coverage(test_case, plan, *, require_plan_links=False,
     return covered, errors
 
 
+def _structured_restore_plan_coverage(test_case, plan) -> tuple[set[str], list[str]]:
+    """Validate the frozen CP2 intent against executable readers, not its prose."""
+    errors = _structured_restoration_errors(test_case)
+    contract = test_case.restoration
+    if contract is None:
+        return set(), errors
+    approved = [item.model_dump(mode="json") for item in contract.confirmations]
+    actual = [item.model_dump(mode="json") for item in plan.restore_confirmations]
+    if approved != actual:
+        errors.append("Agent 2의 복원 확인 연결·비교 기준을 누락·변경할 수 없습니다")
+    sources = {item.source_text for item in contract.confirmations}
+    if any(action.source_text in sources for action in plan.actions):
+        errors.append("복원 확인 설명을 조작으로 구현할 수 없습니다")
+    actions = [a for a in plan.actions if a.phase == AutomationPhase.RESTORE]
+    implemented = list(dict.fromkeys(a.source_text for a in actions))
+    if implemented != contract.operation_steps:
+        errors.append("구조화 복원 조작의 누락·추가 또는 순서 변경")
+    results = {r.result_id: r for r in test_case.expected_results}
+    assertions = {a.result_id: a for a in plan.assertions}
+    for confirmation in contract.confirmations:
+        for result_id in confirmation.result_ids:
+            result, assertion = results.get(result_id), assertions.get(result_id)
+            if (result is None or assertion is None
+                    or assertion.observation_layer != result.observation_layer
+                    or not _restoration_read_expression(assertion, plan.target_device_id)):
+                errors.append(f"{result_id}: 동일 대상의 실제 복원 비교 reader 누락")
+    errors.extend(_state_restoration_plan_errors(test_case, plan))
+    return {_normalize(line) for line in sources}, errors
+
+
 def _complete_text_value(statement: str, value: str) -> bool:
     """Accept a whole literal (with Korean particles), not part of a label."""
     literal = r"\s*".join(re.escape(part) for part in value.strip().split())
@@ -1212,6 +1253,24 @@ def _complete_text_value(statement: str, value: str) -> bool:
     particle = r"(?:으로|에서|처럼|으로는|로는|입니다|이다|이|가|은|는|을|를|로|도|만|와|과|에)?"
     return re.search(r"(?<![\w])" + literal + particle + r"(?![\w])",
                      statement, re.IGNORECASE) is not None
+
+
+def _trailing_observation_steps(
+    test_case: ProductTestCaseCandidate, plan: Agent3AutomationPlan,
+) -> set[str]:
+    """Share the existing terminal-read rule between coverage and timing checks."""
+    implemented = {_normalize(a.source_text) for a in plan.actions if a.phase == AutomationPhase.TEST}
+    last_operation = max((i for i, line in enumerate(test_case.steps)
+                          if _normalize(line) in implemented), default=-1)
+    mapped = {a.result_id for a in plan.assertions}
+    return {
+        _normalize(result.verify_after_step) for result in test_case.expected_results
+        if result.verify_after_step and result.result_id in mapped
+        and any(i > last_operation and _normalize(line) == _normalize(result.verify_after_step)
+                and re.search(r"확인|조회|관찰|검사|\b(?:verify|read|observe|check)\b", line, re.I)
+                and not re.search(r"선택하|적용하|입력하|변경하|설정하|누른|\b(?:click|apply|fill|select|set)\b", line, re.I)
+                for i, line in enumerate(test_case.steps))
+    }
 
 
 def evaluate_checkpoint3_plan(
@@ -1223,6 +1282,9 @@ def evaluate_checkpoint3_plan(
     require_restore_plan_links: bool = False,
     require_restore_comparison_basis: bool = False,
     require_plan_fidelity: bool = True,
+    legacy_wording_checks: bool = True,
+    allow_terminal_observation_anchor: bool = False,
+    require_assertion_target_identity: bool = False,
 ) -> Checkpoint3Result:
     if test_case.control_path != ControlPath.CENTRAL:
         return Checkpoint3Result(
@@ -1275,8 +1337,10 @@ def evaluate_checkpoint3_plan(
         checks.append(CheckResult(rule_id=rule_id, status=status, message=message))
 
     if require_precondition_proof or plan.precondition_checks:
-        proof_errors = _precondition_proof_errors(test_case, plan, observation)
-        add("CP3-006A", CheckStatus.FAIL if proof_errors else CheckStatus.PASS,
+        proof_errors = _precondition_proof_errors(test_case, plan, observation, legacy_wording_checks=legacy_wording_checks)
+        # CP3-006A remains the historical action-sequence identifier. Saved
+        # checkpoints are not rewritten; fresh proof checks have their own ID.
+        add("CP3-006D", CheckStatus.FAIL if proof_errors else CheckStatus.PASS,
             " / ".join(proof_errors) if proof_errors else "Every precondition has a grounded read-only runtime check before TEST.")
 
     observed_selectors = {item.selector for item in observation.elements}
@@ -1375,7 +1439,7 @@ def evaluate_checkpoint3_plan(
                 )
                 if part
             )
-            if not _has_textual_link(observed_meaning, item.source_text):
+            if legacy_wording_checks and not _has_textual_link(observed_meaning, item.source_text):
                 action_errors.append(
                     f"{item.action_id}: observed element has no textual link to the approved TC step"
                 )
@@ -1412,6 +1476,8 @@ def evaluate_checkpoint3_plan(
 
     results_by_id = {item.result_id: item for item in test_case.expected_results}
     actions_by_id = {item.action_id: item for item in plan.actions}
+    terminal_observations = _trailing_observation_steps(test_case, plan)
+    test_actions = [item for item in plan.actions if item.phase == AutomationPhase.TEST]
     anchoring_errors: list[str] = []
     for assertion in plan.assertions:
         result = results_by_id.get(assertion.result_id)
@@ -1439,9 +1505,17 @@ def evaluate_checkpoint3_plan(
                 f"{assertion.result_id}: Expected Result has no verify_after_step"
             )
         elif _normalize(anchor.source_text) != _normalize(result.verify_after_step):
-            anchoring_errors.append(
-                f"{assertion.result_id}: anchor action does not implement verify_after_step"
+            terminal_read = (
+                allow_terminal_observation_anchor
+                and test_case.state_effect == TcStateEffect.READ_ONLY
+                and all(a.action_type == AutomationActionType.SELECT_DEVICE for a in plan.actions)
+                and _normalize(result.verify_after_step) in terminal_observations
+                and test_actions and anchor.action_id == test_actions[-1].action_id
             )
+            if not terminal_read:
+                anchoring_errors.append(
+                    f"{assertion.result_id}: anchor action does not implement verify_after_step"
+                )
         else:
             matching_actions = [
                 item
@@ -1568,7 +1642,7 @@ def evaluate_checkpoint3_plan(
                     fidelity_errors.append(
                         f"{assertion.result_id}: target-device field was not observed: {field_name}"
                     )
-                if field_name not in result.statement:
+                if legacy_wording_checks and field_name not in result.statement:
                     fidelity_errors.append(
                         f"{assertion.result_id}: target-device field is not named in the Expected Result: {field_name}"
                     )
@@ -1588,8 +1662,12 @@ def evaluate_checkpoint3_plan(
                 fidelity_errors.append(
                     f"{assertion.result_id}: internal state path was not observed"
                 )
+            device_prefix = re.match(r"window\.__vccs\.devices\[\d+\]", assertion.selector)
+            if (require_assertion_target_identity and device_prefix
+                    and observation.harness_values.get(device_prefix.group() + ".id") != plan.target_device_id):
+                fidelity_errors.append(f"{assertion.result_id}: internal device index does not identify the observed target")
             path_meaning = re.sub(r"[^가-힣A-Za-z0-9]+", " ", assertion.selector)
-            if not _has_textual_link(path_meaning, result.statement):
+            if legacy_wording_checks and not _has_textual_link(path_meaning, result.statement):
                 fidelity_errors.append(
                     f"{assertion.result_id}: internal state path has no textual link to the Expected Result"
                 )
@@ -1621,7 +1699,7 @@ def evaluate_checkpoint3_plan(
                         )
                     )
                 )
-                if not approved_target_card and not _has_textual_link(
+                if legacy_wording_checks and not approved_target_card and not _has_textual_link(
                     observed_meaning, result.statement
                 ):
                     fidelity_errors.append(
@@ -1630,7 +1708,9 @@ def evaluate_checkpoint3_plan(
     if fidelity_errors:
         add("CP3-004", CheckStatus.FAIL, " / ".join(fidelity_errors))
     else:
-        add("CP3-004", CheckStatus.PASS, "Observation layers and targets preserve the approved expectations.")
+        add("CP3-004", CheckStatus.PASS,
+            "Observation layers and targets preserve the approved expectations." if legacy_wording_checks
+            else "Observation layers, available readers and grounded values checked; target semantics are not proved by wording.")
 
     data = test_case.test_data
     plan_values = [item.value for item in plan.actions]
@@ -1712,18 +1792,9 @@ def evaluate_checkpoint3_plan(
     if require_plan_fidelity or not legacy_controller_flow:
         for phase, lines in ((AutomationPhase.TEST, test_case.steps), (AutomationPhase.RESTORE, test_case.restore_steps)):
             implemented = [_normalize(item.source_text) for item in plan.actions if item.phase == phase]
-            last_operation = max((i for i, line in enumerate(lines) if _normalize(line) in implemented), default=-1)
             # A trailing read-only step is implemented by its mapped assertion,
             # not by an invented click. Earlier observations still need ordering.
-            observation_steps = {
-                _normalize(result.verify_after_step) for result in test_case.expected_results
-                if result.verify_after_step and result.result_id in mapped_ids
-                and phase == AutomationPhase.TEST
-                and any(i > last_operation and _normalize(line) == _normalize(result.verify_after_step)
-                    and re.search(r"확인|조회|관찰|검사|\b(?:verify|read|observe|check)\b", line, re.I)
-                    and not re.search(r"선택하|적용하|입력하|변경하|설정하|누른|\b(?:click|apply|fill|select|set)\b", line, re.I)
-                    for i, line in enumerate(lines))
-            }
+            observation_steps = terminal_observations if phase == AutomationPhase.TEST else set()
             required = [_normalize(line) for line in lines
                         if _normalize(line) not in observation_steps
                         and not (phase == AutomationPhase.RESTORE and _normalize(line) in restore_confirmations)]
@@ -1907,6 +1978,10 @@ def evaluate_checkpoint3_plan(
         else "Restore actions preserve the TC initial state contract.",
     )
 
+    if test_case.state_effect is not None:
+        policy_errors = _state_restoration_plan_errors(test_case, plan)
+        add("CP3-006C", CheckStatus.FAIL if policy_errors else CheckStatus.PASS,
+            " / ".join(policy_errors) if policy_errors else "유형별 상태 복원·관찰 계획 확인")
     statuses = {item.status for item in checks}
     status = CheckStatus.FAIL if CheckStatus.FAIL in statuses else CheckStatus.PASS
     candidate_status = (
@@ -1915,6 +1990,75 @@ def evaluate_checkpoint3_plan(
         else AutomationCandidateStatus.READY_FOR_EXECUTION
     )
     return Checkpoint3Result(status=status, candidate_status=candidate_status, checks=checks)
+
+
+def _restoration_read_expression(assertion: AutomationAssertion, device_id: int) -> str | None:
+    """Read only the approved assertion target; never discover/write arbitrary state."""
+    strategy, selector = assertion.strategy, repr(assertion.selector)
+    methods = {
+        AssertionStrategy.UI_TEXT_CONTAINS: "inner_text",
+        AssertionStrategy.UI_VALUE_EQUALS: "input_value",
+        AssertionStrategy.UI_CHECKED_EQUALS: "is_checked",
+        AssertionStrategy.UI_ENABLED_EQUALS: "is_enabled",
+        AssertionStrategy.CONTROLS_DISABLED: "is_enabled",
+        AssertionStrategy.DISABLED_TEMPERATURE_TEXT: "inner_text",
+    }
+    if strategy in methods:
+        return f"page.locator({selector}).{methods[strategy]}()"
+    if strategy == AssertionStrategy.UI_TEMPERATURE:
+        return "_displayed_temperature(page, '#det-temp-display')"
+    if strategy == AssertionStrategy.INTERNAL_SET_TEMP:
+        return f"page.evaluate('id => window.__vccs.devices.find(d => d.id === id).setTemp', {device_id})"
+    if strategy == AssertionStrategy.INTERNAL_VALUE_EQUALS:
+        return f"page.evaluate({repr('() => ' + assertion.selector)})"
+    if strategy == AssertionStrategy.INTERNAL_DEVICE_FIELDS_EQUALS:
+        args = {'id': device_id, 'fields': sorted(item.field_name for item in assertion.expected_fields)}
+        return ("page.evaluate('({id, fields}) => { const d = window.__vccs.devices.find(d => d.id === id); "
+                "return Object.fromEntries(fields.map(f => [f, d ? d[f] : null])); }', " + repr(args) + ")")
+    return None
+
+
+def _state_restoration_plan_errors(test_case: ProductTestCaseCandidate, plan: Agent3AutomationPlan) -> list[str]:
+    if test_case.state_effect is None:
+        return []  # Historical artifacts keep their original contract.
+    errors = []
+    read_only = test_case.state_effect == TcStateEffect.READ_ONLY
+    if test_case.restore_required == read_only:
+        errors.append("조회는 복원 불필요, 변경·차단은 복원 필요")
+    preparation = [a for a in plan.actions if a.phase == AutomationPhase.PRECONDITION
+                   and a.action_type != AutomationActionType.SELECT_DEVICE]
+    if preparation:
+        # Reuse the bounded HVAC inverse, not arbitrary DOM/state rollback.
+        reversible = {AutomationActionType.SELECT_DEVICE, AutomationActionType.SET_MODE,
+                      AutomationActionType.SET_TEMPERATURE, AutomationActionType.APPLY_COMMANDS}
+        restores = [a for a in plan.actions if a.phase == AutomationPhase.RESTORE]
+        if (not test_case.test_data.restore_observed_hvac_state
+                or len(restores) != 1
+                or restores[0].action_type != AutomationActionType.RESTORE_OBSERVED_HVAC
+                or any(a.action_type not in reversible for a in plan.actions if a.phase != AutomationPhase.RESTORE)):
+            errors.append("준비 상태 변경은 원래 모드·온도의 관찰 복원이 연결된 HVAC 동작만 지원합니다")
+        first_write = next(i for i, a in enumerate(plan.actions) if a in preparation)
+        if not any(a.action_type == AutomationActionType.SELECT_DEVICE for a in plan.actions[:first_write]):
+            errors.append("준비 값을 변경하기 전에 대상 장비를 선택해야 합니다")
+        if any(comparison.basis == RestoreComparisonBasis.PROVED_INITIAL
+               for item in plan.restore_confirmations for comparison in item.comparisons):
+            errors.append("준비 후 초기값과 준비 전 원래 상태는 다릅니다. 복원 확인은 OBSERVED_BASELINE을 사용하세요")
+    if read_only:
+        if any(a.action_type != AutomationActionType.SELECT_DEVICE or a.phase == AutomationPhase.RESTORE for a in plan.actions):
+            errors.append("조회 TC에 상태 변경 가능 동작 또는 복원 동작이 있습니다")
+    elif not any(a.phase == AutomationPhase.RESTORE for a in plan.actions):
+        errors.append("변경·차단 TC의 비상 복원 동작 누락")
+    elif not any(a.observation_layer != ObservationLayer.NOTIFICATION and
+                 _restoration_read_expression(a, plan.target_device_id) for a in plan.assertions):
+        errors.append("복원 비교가 가능한 변경 대상 관찰값이 없습니다")
+    if test_case.state_effect == TcStateEffect.BLOCKED_CHANGE and not any(
+        a.observation_layer != ObservationLayer.NOTIFICATION and _restoration_read_expression(a, plan.target_device_id)
+        and a.strategy not in {AssertionStrategy.CONTROLS_DISABLED, AssertionStrategy.UI_ENABLED_EQUALS,
+                               AssertionStrategy.DISABLED_TEMPERATURE_TEXT}
+        for a in plan.assertions
+    ):
+        errors.append("버튼 비활성·안내 표시만으로 변경 대상 상태의 유지를 증명할 수 없습니다")
+    return errors
 
 
 def _py_literal(value: Any) -> str:
@@ -1931,7 +2075,11 @@ def compile_automation_candidate(
     plan: Agent3AutomationPlan,
 ) -> str:
     """Compile a constrained plan into deterministic pytest + Playwright code."""
-    if plan.restore_confirmations:
+    policy_errors = _state_restoration_plan_errors(test_case, plan)
+    if policy_errors:
+        raise Agent3Error("상태 복원 정책: " + " / ".join(policy_errors))
+    state_policy = test_case.state_effect is not None
+    if plan.restore_confirmations or test_case.restoration is not None:
         _, link_errors = _restore_confirmation_coverage(test_case, plan, require_plan_links=True)
         if link_errors:
             raise Agent3Error("복원 확인 계획 연결 오류: " + " / ".join(link_errors))
@@ -2025,6 +2173,9 @@ def compile_automation_candidate(
         if restore_actions
         else []
     )
+    if state_policy and restore_actions:
+        restore_assertions = [a for a in plan.assertions if a.observation_layer != ObservationLayer.NOTIFICATION
+                              and _restoration_read_expression(a, plan.target_device_id)]
     lines = [
         "from __future__ import annotations",
         "",
@@ -2107,6 +2258,12 @@ def compile_automation_candidate(
         ]
     )
     indent = "            "
+    if state_policy:
+        # This declaration must precede page loading so cleanup is safe even if
+        # navigation/precondition checks fail before any product action.
+        marker = lines.index("        try:")
+        lines[marker:marker] = ["        state_change_started = False", "        preparation_started = False",
+                               "        test_state_started = False", "        unexpected_state_change = False"]
     if uses_dynamic_hvac_restore:
         lines.extend(
             [
@@ -2122,7 +2279,9 @@ def compile_automation_candidate(
     for index, assertion in enumerate(restore_assertions):
         variable = f"restore_baseline_{index}"
         restore_baselines.append((variable, assertion))
-        if assertion.strategy == AssertionStrategy.UI_TEXT_CONTAINS:
+        if state_policy:
+            lines.append(f"{indent}{variable} = {_restoration_read_expression(assertion, plan.target_device_id)}")
+        elif assertion.strategy == AssertionStrategy.UI_TEXT_CONTAINS:
             lines.append(
                 f"{indent}{variable} = page.locator({_py_literal(assertion.selector)}).inner_text()"
             )
@@ -2154,6 +2313,25 @@ def compile_automation_candidate(
                 + ")"
             )
     baseline_block = lines[baseline_start:]
+    if state_policy:
+        # UI observations belong to the selected target, not the panel shown
+        # before SELECT_DEVICE. Capture once, before the first write.
+        del lines[baseline_start:]
+    if state_policy and restore_actions:
+        lines.extend([f"{indent}def observe_restoration():", f"{indent}    changes = []"])
+        for variable, assertion in restore_baselines:
+            lines.extend([
+                f"{indent}    actual = {_restoration_read_expression(assertion, plan.target_device_id)}",
+                f"{indent}    if actual != prepared_{variable}:",
+                f"{indent}        changes.append({_py_literal(assertion.result_id)} + ' state differs from pre-test observation')",
+            ])
+        if uses_dynamic_hvac_restore:
+            lines.extend([
+                f"{indent}    actual_hvac = page.evaluate(\"id => {{ const d = window.__vccs.devices.find(d => d.id === id); return d ? {{mode: d.mode, setTemp: d.setTemp}} : null; }}\", {plan.target_device_id})",
+                f"{indent}    if actual_hvac != prepared_hvac_baseline:",
+                f"{indent}        changes.append('HVAC state differs from prepared observation')",
+            ])
+        lines.append(f"{indent}    return changes")
     action_blocks: list[tuple[str, list[str]]] = []
     for action in [item for item in plan.actions if item.phase != AutomationPhase.RESTORE]:
         block_start = len(lines)
@@ -2318,47 +2496,70 @@ def compile_automation_candidate(
         lines.append(f"{prefix}{errors}.extend(_wait_for_observations(page, observe))")
 
     prepared_baseline_captured = False
+    original_baseline_captured = False
+    def append_precondition_checks():
+        lines.extend([f"{indent}precondition_values = {{}}",
+                      f"{indent}def observe_preconditions():",
+                      f"{indent}    precondition_errors = []"])
+        for index, check in enumerate(plan.precondition_checks, start=1):
+            expression = _precondition_read_expression(check, plan.target_device_id)
+            comparison = (f"{_py_literal(check.expected_value)} in str(precondition_actual)"
+                          if check.read_kind == PreconditionReadKind.UI_TEXT else
+                          f"type(precondition_actual) is type({_py_literal(check.expected_value)}) and precondition_actual == {_py_literal(check.expected_value)}")
+            if type(check.expected_value) in {float, int}:
+                comparison = f"type(precondition_actual) in (int, float) and precondition_actual == {_py_literal(check.expected_value)}"
+            lines.extend([
+                f"{indent}    # PRECONDITION: {index} {_safe_comment(check.source_text)}",
+                f"{indent}    precondition_actual = {expression}",
+                f"{indent}    precondition_values[{index}] = precondition_actual",
+                f"{indent}    if not ({comparison}):",
+                f"{indent}        precondition_errors.append('check {index} expected=' + repr({_py_literal(check.expected_value)}) + ' actual=' + repr(precondition_actual))",
+            ])
+        lines.extend([
+            f"{indent}    return precondition_errors",
+            f"{indent}precondition_errors = _wait_for_observations(page, observe_preconditions)",
+            f"{indent}for check_index, observed_value in precondition_values.items():",
+            f"{indent}    print('PRECONDITION_OBSERVED: ' + str(check_index) + ' ' + repr(observed_value))",
+            f"{indent}if precondition_errors:",
+            f"{indent}    page.screenshot(path=str(EVIDENCE_DIR / 'trial-final.png'), full_page=True)",
+            f"{indent}    raise AssertionError('PRECONDITION_NOT_MET: ' + ' | '.join(precondition_errors))",
+            f"{indent}print('PRECONDITIONS_VERIFIED: {len(plan.precondition_checks)}')",
+        ])
+
     phases_by_id = {action.action_id: action.phase for action in plan.actions}
     has_preparation = any(action.phase == AutomationPhase.PRECONDITION for action in plan.actions)
     preconditions_checked = False
     for action_id, block in action_blocks:
+        action = next(a for a in plan.actions if a.action_id == action_id)
+        if state_policy and not original_baseline_captured and action.action_type != AutomationActionType.SELECT_DEVICE:
+            lines.extend(baseline_block)
+            lines.extend(f"{indent}prepared_{variable} = {variable}" for variable, _ in restore_baselines)
+            if uses_dynamic_hvac_restore:
+                lines.append(f"{indent}prepared_hvac_baseline = observed_hvac_baseline")
+            original_baseline_captured = True
         if has_preparation and not prepared_baseline_captured and phases_by_id[action_id] == AutomationPhase.TEST:
             # Capture the prepared state even when its verification fails.
-            lines.extend(baseline_block)
+            if state_policy:
+                lines.extend(f"{indent}prepared_{variable} = {_restoration_read_expression(assertion, plan.target_device_id)}"
+                             for variable, assertion in restore_baselines)
+                if uses_dynamic_hvac_restore:
+                    lines.append(f"{indent}prepared_hvac_baseline = page.evaluate(\"id => {{ const d = window.__vccs.devices.find(d => d.id === id); return d ? {{mode: d.mode, setTemp: d.setTemp}} : null; }}\", {plan.target_device_id})")
+            else:
+                lines.extend(baseline_block)
             prepared_baseline_captured = True
         if not preconditions_checked and phases_by_id[action_id] == AutomationPhase.TEST and plan.precondition_checks:
-            lines.extend([f"{indent}precondition_values = {{}}",
-                          f"{indent}def observe_preconditions():",
-                          f"{indent}    precondition_errors = []"])
-            for index, check in enumerate(plan.precondition_checks, start=1):
-                expression = _precondition_read_expression(check, plan.target_device_id)
-                comparison = (f"{_py_literal(check.expected_value)} in str(precondition_actual)"
-                              if check.read_kind == PreconditionReadKind.UI_TEXT else
-                              f"type(precondition_actual) is type({_py_literal(check.expected_value)}) and precondition_actual == {_py_literal(check.expected_value)}")
-                if type(check.expected_value) in {float, int}:
-                    comparison = f"type(precondition_actual) in (int, float) and precondition_actual == {_py_literal(check.expected_value)}"
-                lines.extend([
-                    f"{indent}    # PRECONDITION: {index} {_safe_comment(check.source_text)}",
-                    f"{indent}    precondition_actual = {expression}",
-                    f"{indent}    precondition_values[{index}] = precondition_actual",
-                    f"{indent}    if not ({comparison}):",
-                    f"{indent}        precondition_errors.append('check {index} expected=' + repr({_py_literal(check.expected_value)}) + ' actual=' + repr(precondition_actual))",
-                ])
-            lines.extend([
-                f"{indent}    return precondition_errors",
-                f"{indent}precondition_errors = _wait_for_observations(page, observe_preconditions)",
-                f"{indent}for check_index, observed_value in precondition_values.items():",
-                f"{indent}    print('PRECONDITION_OBSERVED: ' + str(check_index) + ' ' + repr(observed_value))",
-                f"{indent}if precondition_errors:",
-                f"{indent}    page.screenshot(path=str(EVIDENCE_DIR / 'trial-final.png'), full_page=True)",
-                f"{indent}    raise AssertionError('PRECONDITION_NOT_MET: ' + ' | '.join(precondition_errors))",
-                f"{indent}print('PRECONDITIONS_VERIFIED: {len(plan.precondition_checks)}')",
-            ])
+            append_precondition_checks()
             preconditions_checked = True
+        if state_policy and action.action_type != AutomationActionType.SELECT_DEVICE:
+            lines.append(f"{indent}state_change_started = True")
+            flag = "preparation_started" if action.phase == AutomationPhase.PRECONDITION else "test_state_started"
+            lines.append(f"{indent}{flag} = True")
         lines.extend(block)
         append_observation_group(
             [block for after, block in assertion_blocks if after == action_id], indent, "mismatches"
         )
+    if state_policy and not preconditions_checked and plan.precondition_checks:
+        append_precondition_checks()
     append_observation_group(
         [block for after, block in assertion_blocks if after is None], indent, "mismatches"
     )
@@ -2378,6 +2579,7 @@ def compile_automation_candidate(
                 "            try:",
             ]
         )
+    restore_action_start = len(lines)
     for action in restore_actions:
         lines.append(
             f"                # {action.action_id} RESTORE: {_safe_comment(action.source_text)}"
@@ -2416,6 +2618,19 @@ def compile_automation_candidate(
                     f"                page.locator({_py_literal(action.selector)}).click()",
                 ]
             )
+            if state_policy:
+                # FAN/DRY hide the temperature control. Restore temperature in
+                # a writable mode, then the original mode, before applying.
+                lines[-4:] = [
+                    f"                observed_mode_selector = {_py_literal(_MODE_SELECTOR)}[observed_hvac_baseline['mode']]",
+                    f"                writable_mode_selector = {_py_literal(_MODE_SELECTOR['COOL'])} if observed_hvac_baseline['mode'] in ('FAN', 'DRY') else observed_mode_selector",
+                    "                page.locator(writable_mode_selector).click()",
+                    "                _set_temperature(page, float(observed_hvac_baseline['setTemp']))",
+                    "                if observed_hvac_baseline['mode'] in ('FAN', 'DRY'):",
+                    f"                    page.locator({_py_literal(action.selector)}).click()",
+                    "                page.locator(observed_mode_selector).click()",
+                    f"                page.locator({_py_literal(action.selector)}).click()",
+                ]
         else:
             lines.append(
                 f"                _set_temperature(page, {float(action.value)})"
@@ -2446,7 +2661,9 @@ def compile_automation_candidate(
                 ]
             )
     for variable, assertion in restore_baselines:
-        if assertion.strategy == AssertionStrategy.UI_TEXT_CONTAINS:
+        if state_policy:
+            actual = _restoration_read_expression(assertion, plan.target_device_id)
+        elif assertion.strategy == AssertionStrategy.UI_TEXT_CONTAINS:
             actual = f"page.locator({_py_literal(assertion.selector)}).inner_text()"
         elif assertion.strategy == AssertionStrategy.UI_VALUE_EQUALS:
             actual = f"page.locator({_py_literal(assertion.selector)}).input_value()"
@@ -2478,6 +2695,7 @@ def compile_automation_candidate(
         restore_actions
         and uses_legacy_temperature_action
         and test_case.test_data.initial_temperature_c is not None
+        and not (state_policy and uses_dynamic_hvac_restore)
     ):
         initial_temperature = float(test_case.test_data.initial_temperature_c)
         lines.extend(
@@ -2502,6 +2720,34 @@ def compile_automation_candidate(
         restore_block = lines[restore_observation_start:]
         del lines[restore_observation_start:]
         append_observation_group([restore_block], "                ", "restore_mismatches")
+        if state_policy:
+            # Compare before touching the product: a correctly blocked change
+            # needs no restore clicks. Any unexpected change is still reported.
+            body = lines[restore_action_start:]
+            action_count = restore_observation_start - restore_action_start
+            action_body, verification_body = body[:action_count], body[action_count:]
+            del lines[restore_action_start:]
+            lines.extend([
+                "                if state_change_started:",
+                "                    changes = observe_restoration() if test_state_started else []",
+            ])
+            if test_case.state_effect == TcStateEffect.BLOCKED_CHANGE:
+                lines.extend([
+                    "                    if test_state_started and changes:",
+                    "                        unexpected_state_change = True",
+                    "                        print('PRODUCT_MISMATCH: blocked operation changed observed state: ' + ' | '.join(changes))",
+                    "                    if preparation_started or changes:",
+                ])
+            action_indent = "        " if test_case.state_effect == TcStateEffect.BLOCKED_CHANGE else "    "
+            lines.extend(action_indent + line for line in action_body)
+            lines.extend("    " + line for line in verification_body)
+            lines.extend([
+                "                    print('RESTORE_STATUS: ' + ('FAILED' if restore_mismatches else ('RESTORED' if preparation_started or changes else 'UNCHANGED')))"
+                if test_case.state_effect == TcStateEffect.BLOCKED_CHANGE else
+                "                    print('RESTORE_STATUS: ' + ('FAILED' if restore_mismatches else 'RESTORED'))",
+                "                else:",
+                "                    print('RESTORE_STATUS: NOT_STARTED')",
+            ])
         lines.extend(
             [
                 "            except Exception as restore_error:",
@@ -2518,6 +2764,16 @@ def compile_automation_candidate(
                 "",
             ]
         )
+        if state_policy:
+            failure_marker = lines.index("                print(restore_message)") + 1
+            lines[failure_marker:failure_marker] = [
+                "                print('RESTORE_STATUS: FAILED')",
+                "                print('ENVIRONMENT_RETIRED: restoration failed; browser context closed')",
+            ]
+            lines.extend([
+                "            if unexpected_state_change and test_completed:",
+                "                raise AssertionError('PRODUCT_MISMATCH: blocked operation changed observed state')",
+            ])
     else:
         lines.extend(
             [
@@ -2527,6 +2783,8 @@ def compile_automation_candidate(
                 "",
             ]
         )
+        if state_policy:
+            lines.append("            print('RESTORE_STATUS: NOT_REQUIRED')")
     if restore_actions and plan.restore_confirmations:
         lines.extend([
             "            if not restore_mismatches and test_completed:",
@@ -2534,6 +2792,15 @@ def compile_automation_candidate(
             + _py_literal(",".join(sorted({result_id for item in plan.restore_confirmations for result_id in item.result_ids}))) + ")",
             "",
         ])
+    if state_policy:
+        close_index = next(i for i, line in enumerate(lines) if "context.tracing.stop(" in line)
+        close_lines = lines[close_index:close_index + 3]
+        prefix = close_lines[0][:len(close_lines[0]) - len(close_lines[0].lstrip())]
+        lines[close_index:close_index + 3] = [
+            prefix + "try:", "    " + close_lines[0], prefix + "finally:",
+            prefix + "    try:", "        " + close_lines[1],
+            prefix + "    finally:", "        " + close_lines[2],
+        ]
     return "\n".join(lines)
 
 

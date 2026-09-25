@@ -31,9 +31,13 @@ from qa_pipeline_contracts import *
 # Agent 1: 변경 요구사항 분석
 # ---------------------------------------------------------------------------
 AGENT1_SYSTEM_INSTRUCTIONS = """
+각 acceptance_notes 원문은 제품 조건, 시험 절차, 명시 제외, 정보 부족 중 하나의 역할로 분류합니다. 전달 목록의 '/'는 선택지이며 모든 위치에 복사하라는 뜻이 아닙니다. procedure_notes는 acceptance_notes 전체의 복사본이 아닙니다. 확정 조건으로 전달한 원문을 절차에도 중복 기록하지 않습니다. 단, 분리 가능한 정보 부족은 기존 계약에 따라 information_gaps·제외된_정보_부족·excluded_scope 세 목록에 함께 보존합니다.
+분류 형식 예시(제품 기준이 아님): '적용 후 값은 X이다.'는 제품 조건에만, '[준비] 시험 전 상태를 기록한다.'는 절차에만 보존합니다. 표시 없는 문장도 역할 하나를 판단하되 제품 기대값을 절차로 옮겨 검사를 생략하지 않습니다. 예시의 X나 문장을 실제 산출물에 추가하지 않습니다.
+Input routing is not a keyword meaning verdict: an out-of-range product input is a test condition, not an out-of-scope test. Preserve explicit out_of_scope items separately. Explicit [시험 절차 메모], [준비], [복원] markers identify procedure notes; pass them unchanged to Agent 2, not as product expectations. Ambiguous or conflicting authority must be explained as a gap, not silently dropped.
+Preserve comparison relations as well as values: >= differs from >; an attempted input differs from the expected retained value. Do not infer correctness from shared numbers. Automatic checks cover explicit contradictions and grounding, not all paraphrase semantics.
 Preserve the quoted source's numbers and allow/block or enabled/disabled meaning in statement.
-Each SRS condition must have its quoted source in every listed Requirement; split separate sources into separate conditions.
-UNCHANGED request conditions must explicitly state maintenance (유지/변경 없음/unchanged/remain); do not label a new acceptance criterion UNCHANGED.
+Each SRS condition must cite only its listed Requirements. A pipe (|) separates quoted excerpts, not fixed field positions. Each excerpt must occur verbatim in a statement or acceptance criterion of a listed Requirement, and every listed Requirement must support at least one excerpt. Order and excerpt count do not determine their roles. Do not add row IDs, relation metadata, empty excerpts, or unquoted connective claims to source_text. Separate conditions when their product meaning or scope differs; combined citations alone do not prove a combined interpretation.
+Use UNCHANGED only for maintained behavior; do not label a new acceptance criterion UNCHANGED. The enum records this role; no particular maintenance keyword is required. For background ranges, quote the complete criterion of the same target SRS in source_text; statement may explain it without copying that sentence verbatim. Never change its range values or meaning.
 당신은 운영 중인 가상 중앙제어 시스템의 변경 요구사항을 분석하는 Agent 1입니다.
 
 입력의 권한 관계:
@@ -48,8 +52,8 @@ UNCHANGED request conditions must explicitly state maintenance (유지/변경 �
 4. before_condition과 after_condition은 요청 값을 바꾸거나 보완하지 않습니다.
 5. change_summary는 Agent 2가 변경 목적을 바로 이해할 수 있게 한두 문장으로 작성합니다.
 6. confirmed_conditions에는 Agent 2가 TC의 판정 기준으로 사용할 수 있는 확정 조건만 한 항목씩 분리합니다. 테스트 절차나 새로운 기대값은 만들지 않습니다. 각 조건의 `변경_구분`은 변경 후 새로 검증할 내용이면 `변경`, 변경 전·후에 같은 동작을 회귀 확인하는 내용이면 `유지`, SRS 공통 규칙이나 실행 문맥을 뒷받침하는 내용이면 `보조_근거`로 명시합니다. 단어가 같다는 이유만으로 값의 대응 관계나 실행 순서가 바뀐 조건을 `유지`로 두지 않습니다.
-7. acceptance_notes 중 제품의 긍정적인 판정 기준은 각각 별도 confirmed_condition으로 만들고 source_text에 해당 인수 조건 원문 전체를 한 글자도 합치거나 바꾸지 않고 기록합니다. `범위에 포함하지 않는다`, `제외한다`, `검증 대상이 아니다`처럼 범위를 제한하는 항목은 confirmed_condition으로 만들지 말고 excluded_scope에 원문 그대로 기록합니다. 시험 준비·선택·종료 후 복원 절차도 제품 기대 결과인 confirmed_condition으로 바꾸지 않지만 excluded_scope에도 넣지 않습니다. 해당 원문은 변경 요청에 보존되어 Agent 2가 TC 절차로 사용합니다. 그 밖에 after_value와 description에만 있는 변경 후 범위·경계·모드별 정책도 별도 조건으로 포함합니다. 특히 하한~상한 범위는 두 경계를 모두 전달하고, 추가 조건의 source_type은 CHANGE_REQUEST, source_text는 해당 요청의 연속된 원문으로 기록합니다.
-8. 기존 SRS 조건을 사용할 때는 source_type을 SRS로 지정하고 source_text는 연결 Requirement의 요구사항 또는 인수 기준에서 연속된 원문 일부를 그대로 사용합니다.
+7. acceptance_notes는 제공된 인수 조건 전달 목록에 따라 원문 전체를 해당 위치에 보존합니다. 제품 판정 기준은 confirmed_condition, 명시적 시험 제외는 excluded_scope, 준비·복원 메모는 원문 요청을 통해 Agent 2의 절차로 전달합니다. 제품 허용 범위를 벗어나는 입력을 시험 제외로 분류하지 않습니다. after_value의 변경 후 범위·경계·모드별 정책은 CHANGE_REQUEST 조건에 양쪽 경계와 원문을 보존합니다. description에만 있는 기존 유지 범위는 같은 대상 SRS의 요구사항 또는 인수 기준 전체를 그대로 인용한 SRS·유지 조건으로도 전달할 수 있습니다. 다른 요구사항의 같은 숫자로 대체하지 않습니다.
+8. 기존 SRS 조건은 source_type을 SRS로 지정합니다. source_text에는 연결 Requirement의 요구사항 또는 인수 기준에서 연속된 원문을 인용합니다. 여러 원문은 |로 구분할 수 있고 위치로 항목 종류를 정하지 않습니다. 각 조각의 출처와 모든 연결 Requirement의 근거가 있어야 합니다. scope_evidence.srs_source_text도 같은 방식이지만 해당 effect의 Requirement만 출처로 사용합니다. 구분자는 의미를 바꾸거나 임의 내용을 추가할 권한이 아닙니다.
 9. 각 confirmed_condition의 requirement_ids와 requirement_effects에는 제공된 SRS에 존재하는 ID만 사용합니다.
 10. target_requirement_id는 requirement_effects에서 MODIFIED로 분류합니다.
 11. 대상 Requirement의 related_requirement_ids와 변경 요청이 직접 언급하는 기존 Requirement를 모두 검토합니다. 변경 후 정책 때문에 기존 문장이나 인수 기준의 수정이 필요한 연관 Requirement는 UPDATE_REQUIRED, 변경으로 실제 영향을 받을 수 있어 기존 동작 회귀가 필요한 기준은 VERIFY, 이번 변경과 무관한 기준은 NO_IMPACT로 분류하고 이유를 작성합니다. 모든 변경에 일반적으로 적용된다는 이유만으로 알림·상태·제어 Requirement를 일괄 VERIFY로 확장하지 않습니다. 연관 항목을 조용히 생략하지 않습니다.
@@ -66,7 +70,7 @@ UNCHANGED request conditions must explicitly state maintenance (유지/변경 �
 21. Agent 1은 요구사항 영향도와 확정 조건을 Agent 2에 빠짐없이 전달하는 단계입니다. 현재 UI·하네스·자동화 구현 지원 여부를 이유로 영향 있는 Requirement를 NO_IMPACT로 낮추거나 확정된 제품 조건을 excluded_scope로 보내지 않습니다. TC 구성·기존 TC 선택·자동화 가능 여부는 Agent 2 이후 단계의 책임입니다.
 22. 대상 외 VERIFY·UPDATE_REQUIRED에는 scope_evidence를 작성합니다. request_condition_ids는 실제 변경 요청에서 인용한 CHANGE_REQUEST 조건만 연결하고, srs_source_text에는 해당 연관 Requirement 원문을 인용합니다. reason에는 어떤 요청 변경이 어떤 기존 동작에 영향을 주는지 적습니다. SRS에 존재하거나 같은 화면에서 실행된다는 이유만으로 검사 범위를 늘리지 않습니다. 근거가 없는 항목은 NO_IMPACT로 검토 기록만 남깁니다.
 23. 사용자가 직접 요구한 연관 동작이면 DIRECT_REQUEST, 요청에 없지만 변경의 영향으로 검사해야 한다고 판단하면 CHANGE_DEPENDENCY입니다. 간접 영향은 자동 확정하지 않고 범위 검토를 기다립니다. DIRECT_REQUEST도 인용된 요청에서 해당 Requirement ID 또는 SRS의 요구사항/인수 기준 전체 문장을 직접 대조할 수 없으면 CP1이 범위 확인을 위해 멈춥니다. 통과시키려고 원문에 없는 ID·문장을 만들거나 간접 영향을 직접 요청으로 바꾸지 않습니다. 사용자가 요청한 긍정 조건을 NO_IMPACT로 지우거나 주 대상에 잘못 연결해 이 검사를 피하지 않습니다.
-24. 새 검사 없이 사용자가 이미 요청한 결과에 관련 SRS 근거만 연결하는 경우에는 VERIFY + REQUEST_TRACE_ONLY를 사용합니다. 해당 Requirement에 연결하는 모든 조건은 request_condition_ids에 빠짐없이 기록하고 CHANGE_REQUEST의 긍정 제품 조건만 사용합니다. 이 조건의 statement는 source_text 원문과 정확히 같게 작성합니다. 관련 SRS는 scope_evidence.srs_source_text에만 인용하며, 별도 SRS 조건·새 기대값·새 검사·SRS 개정 근거로 확대하지 않습니다. 예: 사용자가 화면의 이름과 저장된 값을 확인하라고 이미 요청했다면, 공통 상태 규칙을 근거로 연결하되 두 요청 조건만 검사합니다. 사용자가 요청하지 않은 알림이나 다른 상태까지 검사하려면 REQUEST_TRACE_ONLY가 아니라 CHANGE_DEPENDENCY로 범위 확인을 기다립니다. 실제 연관 SRS 개정이 필요한 경우에는 UPDATE_REQUIRED와 기존 범위 근거를 사용합니다.
+24. 새 검사 없이 사용자가 이미 요청한 결과에 관련 SRS 근거만 연결하는 경우에는 VERIFY + REQUEST_TRACE_ONLY를 사용합니다. 해당 Requirement에 연결하는 모든 조건은 request_condition_ids에 빠짐없이 기록하고 CHANGE_REQUEST의 긍정 제품 조건만 사용합니다. source_text에는 요청 원문을 보존하고 statement는 같은 의미로 설명할 수 있습니다. 설명의 문장 일치로 통과 여부를 맞추지 않습니다. 관련 SRS는 scope_evidence.srs_source_text에만 인용하며, 별도 SRS 조건·새 기대값·새 검사·SRS 개정 근거로 확대하지 않습니다. 예: 사용자가 화면의 이름과 저장된 값을 확인하라고 이미 요청했다면, 공통 상태 규칙을 근거로 연결하되 두 요청 조건만 검사합니다. 사용자가 요청하지 않은 알림이나 다른 상태까지 검사하려면 REQUEST_TRACE_ONLY가 아니라 CHANGE_DEPENDENCY로 범위 확인을 기다립니다. 실제 연관 SRS 개정이 필요한 경우에는 UPDATE_REQUIRED와 기존 범위 근거를 사용합니다.
 """.strip()
 
 
@@ -122,7 +126,7 @@ class OpenAIAgent1:
                     "OPENAI_API_KEY 환경변수가 없습니다. 키를 코드에 넣지 말고 "
                     "PowerShell 환경변수로 설정하세요."
                 )
-            client = OpenAI()
+            client = OpenAI(max_retries=0)
         self.client = client
 
     def analyze(
@@ -138,6 +142,25 @@ class OpenAIAgent1:
             f"{request.model_dump_json(indent=2)}\n\n"
             "[현재 SRS Requirement]\n"
             f"{render_srs_context(requirements)}"
+        )
+        user_input += (
+            "\n\n[검사기와 공유하는 인수 조건 전달 목록]\n"
+            f"{json.dumps(_acceptance_delivery_contract(request, legacy_wording_checks=False), ensure_ascii=False)}\n"
+            "각 source_text를 지정된 destination으로 빠짐없이 전달하세요. "
+            "destination의 '/'는 서로 배타적인 역할 선택지입니다. 하나를 선택하고 "
+            "confirmed_conditions.source_text와 procedure_notes에 같은 원문을 중복 복사하지 마세요. "
+            "이는 출력 자동 보정이나 의미 합격 판정이 아닙니다. 범위·대상 제한도 확정 조건에서 누락하지 마세요. "
+            "절차 메모는 원문 요청에 보존되므로 제품 기대값이나 제외 범위로 바꾸지 마세요. "
+            "미정 항목은 분리 가능할 때만 PARTIAL_PROCEED와 세 정보 부족 목록에 원문을 보존하고, "
+            "핵심 범위가 불명확하면 WAITING_FOR_USER로 남기세요."
+            "description에만 있는 기존 유지 범위는 같은 target Requirement의 SRS 요구사항 또는 인수 기준 전체 원문을 "
+            "statement와 source_text에 그대로 보존하고 SRS·유지로 연결해도 됩니다. "
+            "after_value에 명시된 범위는 이 예외로 대체하지 말고 CHANGE_REQUEST 조건으로 전달하세요. "
+            "다른 Requirement·다른 대상의 같은 숫자는 근거가 아닙니다."
+            "새 검사 정책에서는 단어로 제외·절차 역할을 결정하지 않습니다. "
+            "준비·복원에 해당하는 acceptance_notes는 procedure_notes에 원문 전체를 보존하세요. "
+            "제품 조건을 절차로 바꿔 검사를 생략하지 마세요. 분류의 의미 정확성을 자동 검사 통과로 보장하지 않습니다. "
+            "출처 인용은 그대로 유지하되 분석 설명의 동의어·문체를 검사기에 맞추어 바꾸지 마세요."
         )
         if previous_analysis is not None:
             feedback = "\n".join(f"- {item}" for item in (checkpoint_feedback or []))
@@ -155,7 +178,7 @@ class OpenAIAgent1:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent1-2-11",
+                prompt_cache_key="qa-v2-agent1-2-17",
                 input=[
                     {"role": "system", "content": AGENT1_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
@@ -163,7 +186,7 @@ class OpenAIAgent1:
                 text_format=Agent1Analysis,
             )
         except Exception as exc:  # SDK exceptions vary by transport and status.
-            raise Agent1Error(f"Agent 1 모델 호출에 실패했습니다: {exc}") from exc
+            raise Agent1Error(f"Agent 1 모델 호출에 실패했습니다 ({type(exc).__name__}). 외부 오류 본문은 저장하지 않습니다.") from None
 
         parsed = getattr(response, "output_parsed", None)
         if parsed is None:
@@ -188,7 +211,7 @@ def _contains(container: str, expected: str) -> bool:
 
 
 def _contains_fact(container: str, expected: str) -> bool:
-    """Quoted text may vary in spacing, but ON is not a token inside NONE."""
+    """Match a quote without cutting an identifier or a signed numeric token."""
     expected = expected.strip()
     if not expected:
         return False
@@ -197,7 +220,48 @@ def _contains_fact(container: str, expected: str) -> bool:
         pattern = r"(?<![A-Za-z0-9_])" + pattern
     if re.match(r"[A-Za-z0-9_]", expected[-1]):
         pattern += r"(?![A-Za-z0-9_])"
-    return bool(re.search(pattern, container, re.I))
+    numbers = list(re.finditer(r"[+\-−]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+\-]?\d+)?", container))
+    for match in re.finditer(pattern, container, re.I):
+        partial_number = False
+        for number in numbers:
+            start, end = number.span()
+            # In 16-30 the hyphen separates endpoints, unlike a unary -30.
+            if container[start] == "-" and start and container[start - 1].isdigit():
+                start += 1
+            if start < match.start() < end or start < match.end() < end:
+                partial_number = True
+                break
+        if not partial_number:
+            return True
+    return False
+
+
+def _srs_quote_parts(source_text: str) -> list[str]:
+    """Preserve every excerpt; empty segments must not disappear silently."""
+    parts = [part.strip() for part in source_text.split("|")]
+    return parts if all(parts) else []
+
+
+def _srs_quote_is_grounded(
+    source_text: str, requirement_ids: list[str], requirements: dict[str, SrsRequirement]
+) -> bool:
+    """Match excerpts to linked fields, independent of order or field position.
+
+    Both sides need coverage: no unsupported excerpt and no unrelated linked ID.
+    This establishes provenance, not the semantics of combining the excerpts.
+    """
+    parts = _srs_quote_parts(source_text)
+    if not parts or not requirement_ids or any(key not in requirements for key in requirement_ids):
+        return False
+    matches = [
+        [any(_contains_fact(field, part) for field in (
+            requirements[key].statement, requirements[key].acceptance_criteria
+        )) for key in requirement_ids]
+        for part in parts
+    ]
+    return all(any(row) for row in matches) and all(
+        any(row[index] for row in matches) for index in range(len(requirement_ids))
+    )
 
 
 def _numeric_facts(text: str) -> set[str]:
@@ -226,12 +290,43 @@ _STATE_WORD_PAIRS = (
 )
 
 
-def _meaning_conflicts(source: str, derived: str) -> bool:
+def _explicit_relation_conflict(source: str, derived: str) -> bool:
+    """Compare boundaries only when the surrounding clause is identical.
+
+    This is a syntactic counterexample check, not a general semantic parser.
+    Retaining the entire frame prevents borrowing a number from another target
+    or mixing up an attempted input with the expected output.
+    """
+    boundary = re.compile(r"(?<![\w.])(-?\d+(?:\.\d+)?)\s*(°?\s*[CF]|%|rpm|kg|초|분|개|도)?\s*(이상|이하|초과|미만)", re.I)
+
+    def signature(text: str):
+        matches = list(boundary.finditer(text))
+        if not matches:
+            return None
+        # No value/target reordering or clause-level inference is performed.
+        frame = _normalize(boundary.sub("<BOUNDARY>", text))
+        values = [(float(m[1]), _normalize(m[2] or ""), m[3]) for m in matches]
+        return frame, values
+
+    left, right = signature(source), signature(derived)
+    if left and right and left[0] == right[0] and left[1] != right[1]:
+        return True
+    # Also preserve ordered input/output values when ALL other text is the same.
+    # Unlike a set of numbers, this detects '31 input -> 30 retained' reversed.
+    number = re.compile(r"(?<![\w.])-?\d+(?:\.\d+)?")
+    if _normalize(number.sub("<VALUE>", source)) == _normalize(number.sub("<VALUE>", derived)):
+        return [float(m[0]) for m in number.finditer(source)] != [float(m[0]) for m in number.finditer(derived)]
+    return False
+
+
+def _meaning_conflicts(source: str, derived: str, *, compare_relations: bool = True) -> bool:
     """Reject explicit one-state reversals, not claim general semantic equivalence.
 
     Mixed conditions and grammatical negation need human/model interpretation;
     they must not be reduced to a bag-of-words verdict.
     """
+    if compare_relations and _explicit_relation_conflict(source, derived):
+        return True
     if re.search(r"하지\s*않|되지\s*않|아니|\bnot\b", source + " " + derived, re.I):
         return False
     return any(
@@ -288,7 +383,7 @@ def _request_authority_text(request: ChangeRequest) -> str:
     )
 
 
-_SCOPE_EXCLUSION_TEXT = re.compile(
+_LEGACY_SCOPE_EXCLUSION_TEXT = re.compile(
     r"(?:범위(?:에|에는|에서)?\s*(?:포함하지|포함되지|벗어)|범위\s*밖|"
     r"검증\s*대상(?:이|은|에는)?\s*아니|요구하지\s*않|"
     r"(?:이번\s*)?(?:변경|시험|검증)?\s*범위에서\s*제외|out[\s-]*of[\s-]*scope)",
@@ -296,8 +391,19 @@ _SCOPE_EXCLUSION_TEXT = re.compile(
 )
 
 
-def _is_scope_exclusion_text(value: str) -> bool:
-    return bool(_SCOPE_EXCLUSION_TEXT.search(value))
+_SCOPE_EXCLUSION_TEXT = re.compile(
+    r"(?:범위(?:에|에는|에서)?\s*포함하지|"
+    r"(?:시험|검사|검증|변경)\s*범위(?:에|에는|에서)?\s*(?:포함되지|벗어|밖)|"
+    r"검증\s*대상(?:이|은|에는)?\s*아니|"
+    r"(?:이번\s*)?(?:변경|시험|검사|검증)\s*(?:범위에서\s*)?제외|"
+    r"(?:검사|검증|시험)(?:은|는|를|을)?\s*제외|"
+    r"out[\s-]*of[\s-]*scope)", re.I,
+)
+
+
+def _is_scope_exclusion_text(value: str, *, legacy: bool = False) -> bool:
+    # A product's out-of-range input is not an instruction to omit its test.
+    return bool((_LEGACY_SCOPE_EXCLUSION_TEXT if legacy else _SCOPE_EXCLUSION_TEXT).search(value))
 
 
 _TEST_SETUP_NOTE = re.compile(
@@ -313,18 +419,49 @@ _TEST_RESTORE_NOTE = re.compile(
 )
 
 
-def _is_test_setup_note(value: str) -> bool:
-    return bool(_TEST_SETUP_NOTE.search(value))
+def _is_test_setup_note(value: str, *, legacy: bool = False) -> bool:
+    if not legacy and re.match(r"\s*\[준비\]", value):
+        return True
+    if not legacy and re.match(r"\s*\[복원\]", value):
+        return False
+    marked = not legacy and bool(re.match(r"\s*\[(?:시험\s*절차\s*메모|준비)\]", value))
+    return bool(_TEST_SETUP_NOTE.search(value)) or (marked and not re.search(r"복원|원복", value))
 
 
-def _is_test_restore_note(value: str) -> bool:
-    return bool(_TEST_RESTORE_NOTE.search(value))
+def _is_test_restore_note(value: str, *, legacy: bool = False) -> bool:
+    if not legacy and re.match(r"\s*\[복원\]", value):
+        return True
+    if not legacy and re.match(r"\s*\[준비\]", value):
+        return False
+    marked = not legacy and bool(re.match(r"\s*\[(?:시험\s*절차\s*메모|복원)\]", value))
+    return bool(_TEST_RESTORE_NOTE.search(value)) or (marked and bool(re.search(r"복원|원복", value)))
 
 
-def _is_test_procedure_note(value: str) -> bool:
+def _is_test_procedure_note(value: str, *, legacy: bool = False) -> bool:
     """Return True only for explicit test setup or post-test restoration notes."""
 
-    return _is_test_setup_note(value) or _is_test_restore_note(value)
+    return _is_test_setup_note(value, legacy=legacy) or _is_test_restore_note(value, legacy=legacy)
+
+
+def _acceptance_delivery_contract(request: ChangeRequest, *, legacy: bool = False,
+                                  legacy_wording_checks: bool = True) -> list[dict[str, str]]:
+    """Expose the same conservative note routing used by CP1, without editing it."""
+    rows = []
+    for index, note in enumerate(request.acceptance_notes, 1):
+        if not legacy_wording_checks:
+            destination = ("excluded_scope" if _normalize(note) in {_normalize(s) for s in request.out_of_scope}
+                           else "procedure_notes" if re.match(r"\s*\[(?:준비|복원|시험 절차 메모)\]", note)
+                           else "confirmed_conditions.source_text / procedure_notes / explicit information_gaps")
+        elif (not legacy and _normalize(note) in {_normalize(s) for s in request.out_of_scope}) or _is_scope_exclusion_text(note, legacy=legacy):
+            destination = "excluded_scope"
+        elif _is_test_procedure_note(note, legacy=legacy):
+            destination = "request.acceptance_notes (Agent 2 procedure)"
+        elif re.search(r"미정|미확정|정하지\s*않|정해지지\s*않|정의되지\s*않|불명확|아직\s*결정", note):
+            destination = "information_gaps + excluded_information_gaps + excluded_scope (PARTIAL_PROCEED only)"
+        else:
+            destination = "confirmed_conditions.source_text"
+        rows.append({"note_id": f"NOTE-{index:03d}", "source_text": note, "destination": destination})
+    return rows
 
 
 def _is_redundant_reconfirmation(question: str, request: ChangeRequest) -> bool:
@@ -349,7 +486,13 @@ def evaluate_checkpoint1(
     require_meaning_guard: bool = True,
     require_scope_guard: bool = True,
     allow_request_trace: bool = True,
+    require_input_contract: bool = True,
+    legacy_wording_checks: bool = True,
+    allow_background_range_paraphrase: bool = False,
+    allow_srs_quote_parts: bool = False,
 ) -> Checkpoint1Result:
+    # The default preserves historical callers. New runs explicitly disable
+    # wording heuristics and record that policy in their immutable manifest.
     checks: list[CheckResult] = []
 
     def add(rule_id: str, status: CheckStatus, message: str) -> None:
@@ -491,6 +634,8 @@ def evaluate_checkpoint1(
     for condition in analysis.confirmed_conditions:
         if condition.source_type == ConditionSource.CHANGE_REQUEST:
             grounded = contains_source(request_authority, condition.source_text)
+        elif allow_srs_quote_parts and "|" in condition.source_text:
+            grounded = _srs_quote_is_grounded(condition.source_text, condition.requirement_ids, requirements)
         else:
             grounded = any(
                 requirement_id in requirements
@@ -504,20 +649,27 @@ def evaluate_checkpoint1(
         if not grounded:
             invalid_conditions.append(condition.condition_id)
         if require_meaning_guard:
-            if (_meaning_conflicts(condition.source_text, condition.statement)
+            if ((legacy_wording_checks and _meaning_conflicts(condition.source_text, condition.statement, compare_relations=require_input_contract))
                     or _numeric_facts(condition.statement) - _numeric_facts(condition.source_text)):
                 invalid_conditions.append(condition.condition_id + ": 원문과 분석의 값·의미 불일치")
-            if condition.source_type == ConditionSource.SRS and not all(
-                requirement_id in requirements and contains_source(
-                    f"{requirements[requirement_id].statement} {requirements[requirement_id].acceptance_criteria}",
-                    condition.source_text,
-                ) for requirement_id in condition.requirement_ids
+            if condition.source_type == ConditionSource.SRS and not (
+                grounded if allow_srs_quote_parts and "|" in condition.source_text else all(
+                    requirement_id in requirements and contains_source(
+                        f"{requirements[requirement_id].statement} {requirements[requirement_id].acceptance_criteria}",
+                        condition.source_text,
+                    ) for requirement_id in condition.requirement_ids
+                )
             ):
                 invalid_conditions.append(condition.condition_id + ": Requirement별 SRS 출처 누락")
-            if (condition.source_type == ConditionSource.CHANGE_REQUEST
+            if (legacy_wording_checks and condition.source_type == ConditionSource.CHANGE_REQUEST
                     and condition.change_role == ConditionChangeRole.UNCHANGED
                     and not re.search(r"유지|변경\s*없|그대로|unchanged|remain", condition.source_text, re.I)):
                 invalid_conditions.append(condition.condition_id + ": 유지 조건의 명시 근거 누락")
+        if (legacy_wording_checks and require_input_contract and condition.source_type == ConditionSource.CHANGE_REQUEST
+                and any(_normalize(condition.source_text) == _normalize(row["source_text"])
+                        and row["destination"].startswith("request.acceptance_notes")
+                        for row in _acceptance_delivery_contract(request))):
+            invalid_conditions.append(condition.condition_id + ": 시험 절차를 제품 확정 조건으로 분류")
 
     if duplicate_condition_ids:
         add(
@@ -540,14 +692,52 @@ def evaluate_checkpoint1(
         for condition in analysis.confirmed_conditions
         if condition.source_type == ConditionSource.CHANGE_REQUEST
     ]
-    positive_acceptance_notes = [
-        note
-        for note in request.acceptance_notes
-        if not _is_scope_exclusion_text(note) and not _is_test_procedure_note(note)
-    ]
-    scope_limit_acceptance_notes = [
-        note for note in request.acceptance_notes if _is_scope_exclusion_text(note)
-    ]
+    delivery = _acceptance_delivery_contract(
+        request, legacy=not require_input_contract, legacy_wording_checks=legacy_wording_checks
+    )
+    if not legacy_wording_checks:
+        # Preserve explicit role markers using the same routing list sent to
+        # Agent 1. No interpretation of the note's verbs or body is needed.
+        required_procedures = [row["source_text"] for row in delivery
+                               if row["destination"] == "procedure_notes"]
+        procedure_keys = [_normalize(note) for note in analysis.procedure_notes]
+        other_role_keys = {
+            _normalize(item) for item in [
+                *(condition.source_text for condition in analysis.confirmed_conditions),
+                *request.out_of_scope, *analysis.excluded_scope,
+                *analysis.information_gaps, *analysis.excluded_information_gaps,
+            ]
+        }
+        procedure_errors = []
+        if len(procedure_keys) != len(set(procedure_keys)):
+            procedure_errors.append("procedure_notes에 동일 원문을 중복 기록")
+        if any(note not in request.acceptance_notes for note in analysis.procedure_notes):
+            procedure_errors.append("입력에 없는 절차 원문")
+        missing_procedures = [note for note in required_procedures if note not in analysis.procedure_notes]
+        if missing_procedures:
+            procedure_errors.append("표시된 절차 원문은 procedure_notes에 보존: " + " | ".join(missing_procedures))
+        conflicting_procedures = [note for note in analysis.procedure_notes
+                                  if _normalize(note) in other_role_keys]
+        if conflicting_procedures:
+            procedure_errors.append("절차와 확정 조건·제외 범위·정보 부족의 중복 분류: " + " | ".join(conflicting_procedures))
+        # Only explicit input fields/markers determine routing. Unmarked notes
+        # must still be preserved in a condition or the explicit gap/scope lists;
+        # word fragments do not establish their meaning.
+        delivery = [
+            {"source_text": note, "destination": (
+                "excluded_scope" if _normalize(note) in {_normalize(s) for s in [*request.out_of_scope, *analysis.excluded_scope]}
+                else "request.acceptance_notes (Agent 2 procedure)" if note in analysis.procedure_notes
+                else "confirmed_conditions.source_text")}
+            for note in request.acceptance_notes
+        ]
+        add("CP1-012", CheckStatus.FAIL if procedure_errors else CheckStatus.PASS,
+            "절차 원문·역할 연결 오류: " + "; ".join(procedure_errors) if procedure_errors
+            else "절차 원문 연결을 확인했습니다. 절차 분류의 의미 정확성·실제 수행은 별도 확인 대상입니다.")
+    positive_acceptance_notes = [row["source_text"] for row in delivery
+                                if row["destination"] == "confirmed_conditions.source_text"
+                                or row["destination"].startswith("information_gaps")]
+    scope_limit_acceptance_notes = [row["source_text"] for row in delivery
+                                   if row["destination"] == "excluded_scope"]
     # Explicitly unresolved request notes may be handed off as gaps, not assertions.
     # All three records must retain the request verbatim; clear criteria still belong
     # in confirmed conditions even if the model labels them as a gap.
@@ -559,7 +749,8 @@ def evaluate_checkpoint1(
     unresolved_notes = {
         _normalize(note) for note in positive_acceptance_notes
         if _normalize(note) in recorded_gaps
-        and re.search(r"미정|미확정|정하지\s*않|정해지지\s*않|정의되지\s*않|불명확|아직\s*결정", note)
+        and (not legacy_wording_checks or any(row["source_text"] == note and row["destination"].startswith("information_gaps")
+                for row in delivery))
     }
     missing_acceptance_notes = [
         note
@@ -575,6 +766,28 @@ def evaluate_checkpoint1(
             if condition.source_type == ConditionSource.CHANGE_REQUEST
         )
     )
+    if require_input_contract:
+        # Only an unchanged, verbatim criterion of the SAME target may back a
+        # range mentioned in background description. Never replace a range in
+        # after_value, accept another requirement, or count arbitrary SRS values.
+        target = requirements.get(request.target_requirement_id)
+        background_ranges = _temperature_ranges(request.description) - _temperature_ranges(request.after_value)
+        if target:
+            for condition in analysis.confirmed_conditions:
+                source_parts = (_srs_quote_parts(condition.source_text)
+                                if allow_srs_quote_parts else [condition.source_text])
+                full_criteria = [part for part in source_parts if _normalize(part) in {
+                    _normalize(target.statement), _normalize(target.acceptance_criteria)}]
+                source_grounded = ("|" not in condition.source_text or not allow_srs_quote_parts
+                                   or _srs_quote_is_grounded(condition.source_text, condition.requirement_ids, requirements))
+                if (condition.source_type == ConditionSource.SRS
+                        and condition.change_role == ConditionChangeRole.UNCHANGED
+                        and condition.requirement_ids == [request.target_requirement_id]
+                        and (allow_background_range_paraphrase
+                             or _normalize(condition.statement) == _normalize(condition.source_text))
+                        and source_grounded and full_criteria):
+                    for criterion in full_criteria:
+                        delivered_ranges |= _temperature_ranges(criterion) & background_ranges
     missing_ranges = sorted(required_ranges - delivered_ranges)
     if missing_acceptance_notes or missing_ranges:
         details = []
@@ -594,15 +807,23 @@ def evaluate_checkpoint1(
         add("CP1-008", CheckStatus.PASS, "변경 요청의 인수 조건과 변경 후 범위가 모두 전달됩니다.")
 
     confirmed_statements = {_normalize(item.statement) for item in analysis.confirmed_conditions}
+    if not legacy_wording_checks:
+        confirmed_statements |= {_normalize(item.source_text) for item in analysis.confirmed_conditions}
     excluded = {_normalize(item) for item in analysis.excluded_scope}
     scope_limit_condition_ids = sorted(
         condition.condition_id
         for condition in analysis.confirmed_conditions
         if condition.source_type == ConditionSource.CHANGE_REQUEST
-        and _is_scope_exclusion_text(
-            f"{condition.statement} {condition.source_text}"
+        and legacy_wording_checks and _is_scope_exclusion_text(
+            f"{condition.statement} {condition.source_text}", legacy=not require_input_contract
         )
     )
+    if require_input_contract:
+        explicit_exclusions = {_normalize(item) for item in request.out_of_scope}
+        scope_limit_condition_ids = sorted(set(scope_limit_condition_ids) | {
+            c.condition_id for c in analysis.confirmed_conditions
+            if c.source_type == ConditionSource.CHANGE_REQUEST and _normalize(c.source_text) in explicit_exclusions
+        })
     missing_scope_limit_notes = [
         item
         for item in scope_limit_acceptance_notes
@@ -637,7 +858,7 @@ def evaluate_checkpoint1(
     redundant_questions = [
         question
         for question in analysis.user_questions
-        if _is_redundant_reconfirmation(question, request)
+        if legacy_wording_checks and _is_redundant_reconfirmation(question, request)
     ]
     partial_gap_mapping_matches = {
         _normalize(item) for item in analysis.excluded_information_gaps
@@ -684,7 +905,9 @@ def evaluate_checkpoint1(
         # for adding a product assertion. Keep each input field separate.
         positive_request_parts = [
             part for part in [request.after_value, request.description, *request.acceptance_notes]
-            if not _is_scope_exclusion_text(part) and not _is_test_procedure_note(part)
+            if (not legacy_wording_checks or not _is_scope_exclusion_text(part, legacy=not require_input_contract))
+            and (not legacy_wording_checks or not _is_test_procedure_note(part, legacy=not require_input_contract))
+            and _normalize(part) not in {_normalize(s) for s in request.out_of_scope}
         ]
         for effect in analysis.requirement_effects:
             if (effect.requirement_id == request.target_requirement_id
@@ -701,16 +924,19 @@ def evaluate_checkpoint1(
                     or not all(
                         item is not None
                         and item.source_type == ConditionSource.CHANGE_REQUEST
-                        and not _is_scope_exclusion_text(item.source_text)
-                        and not _is_test_procedure_note(item.source_text)
+                        and (not legacy_wording_checks or not _is_scope_exclusion_text(item.source_text, legacy=not require_input_contract))
+                        and (not legacy_wording_checks or not _is_test_procedure_note(item.source_text, legacy=not require_input_contract))
                         and any(_contains_fact(part, item.source_text) for part in positive_request_parts)
                         for item in sources
                     )):
                 scope_errors.append(f"{label}: 긍정 변경 요청 원문 조건에 연결되지 않은 범위 근거")
                 continue
-            if related is None or not any(
-                _contains_fact(part, proof.srs_source_text)
-                for part in [related.statement, related.acceptance_criteria]
+            if related is None or not (
+                _srs_quote_is_grounded(proof.srs_source_text, [label], requirements)
+                if allow_srs_quote_parts and "|" in proof.srs_source_text else any(
+                    _contains_fact(part, proof.srs_source_text)
+                    for part in [related.statement, related.acceptance_criteria]
+                )
             ):
                 scope_errors.append(f"{label}: 연관 Requirement의 영향 근거 원문 불일치")
                 continue
@@ -721,8 +947,9 @@ def evaluate_checkpoint1(
                         or effect.relation != RequirementRelation.VERIFY
                         or {item.condition_id for item in linked} != set(proof.request_condition_ids)
                         or not all(item.source_type == ConditionSource.CHANGE_REQUEST
-                                   and item.statement == item.source_text
-                                   and not re.search(r"(?:검사|검증|시험).*제외|검사하지|검증하지", item.source_text)
+                                   and (not legacy_wording_checks or item.statement == item.source_text)
+                                   and (not legacy_wording_checks or not (_is_scope_exclusion_text(item.source_text) if require_input_contract
+                                            else re.search(r"(?:검사|검증|시험).*제외|검사하지|검증하지", item.source_text)))
                                    for item in linked)):
                     scope_errors.append(
                         f"{label}: 근거 연결은 VERIFY와 요청 원문 그대로의 조건만 허용합니다. "
@@ -753,15 +980,7 @@ def evaluate_checkpoint1(
         else:
             add("CP1-011", CheckStatus.PASS, "요청 밖 검사 범위의 근거 없는 자동 확장이 없습니다.")
 
-    statuses = {check.status for check in checks}
-    if CheckStatus.ERROR in statuses:
-        status = CheckStatus.ERROR
-    elif CheckStatus.FAIL in statuses:
-        status = CheckStatus.FAIL
-    elif CheckStatus.REVIEW in statuses:
-        status = CheckStatus.REVIEW
-    else:
-        status = CheckStatus.PASS
+    status = _aggregate_check_status(check.status for check in checks)
     blocking_decision = analysis.decision == AnalysisDecision.WAITING_FOR_USER
     if status in {CheckStatus.FAIL, CheckStatus.ERROR}:
         handoff_status = HandoffStatus.BLOCKED

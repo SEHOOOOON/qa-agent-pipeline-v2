@@ -1,18 +1,208 @@
 # 자동 테스트 카탈로그
 
-최종 확인: 2026-09-19
-실행 기준: `python -m pytest --collect-only -q` → **487건**
-실제 정의 파일: `tests/test_srs_agent1.py`, `tests/test_agent2.py`, `tests/test_integrity_cli.py`, `tests/test_agent3.py`, `tests/test_orchestration_execution.py`, `tests/test_agent4_reporting.py`, `tests/test_pipeline_ui.py`
+최종 확인: 2026-09-25
+실행 기준: `python -m pytest --collect-only -q` → **1173건**
+실제 정의 파일: `tests/test_srs_agent1.py`, `tests/test_agent2.py`, `tests/test_integrity_cli.py`, `tests/test_agent3.py`, `tests/test_grounding.py`, `tests/test_orchestration_execution.py`, `tests/test_agent4_reporting.py`, `tests/test_pipeline_ui.py`
 
 이 문서는 현재 수집되는 자동 테스트를 사람이 확인하기 쉽게 정리한 목록입니다. 실행의 기준은 항상 테스트 코드와 Pytest 수집 결과이며, 테스트를 추가·삭제할 때는 이 문서도 같은 변경에서 갱신합니다.
+
+검사 규칙 자체의 목록은 [판단 지도](PROJECT_GUIDE.md#logic-map)에 있습니다. `scripts/audit_logic_inventory.py --self-test`는 별도 정적 색인 추출 도구의 Python/JavaScript 예제 확인이며 위 Pytest 수량에 포함하지 않습니다. `--check`는 소스·색인 및 Checkpoint 문서 목록의 일치 확인입니다. 이 도구의 성공을 해당 분기의 제품 시험이나 실제 모델 평가 성공으로 집계하지 않습니다.
 
 ## 수량 구조
 
 | 구성 | 수량 | 설명 |
 |---|---:|---|
-| 일반 테스트 함수 | 250 | 함수 하나가 Pytest 실행 1건 |
-| 파라미터 테스트 함수 | 45 | 서로 다른 입력·실패 조합으로 실행 237건 |
-| 합계 | **487** | 현재 Pytest 수집 수 |
+| 일반 테스트 함수 | 275 | 함수 하나가 Pytest 실행 1건 |
+| 파라미터 테스트 함수 | 131 | 서로 다른 입력·실패 조합으로 실행 898건 |
+| 합계 | **1173** | 현재 Pytest 수집 수 |
+
+코드 공개본은 수정 포폴을 공개하지 않으므로 시안 전용 자산 목록·안내 문구 검사 1건을 함께 제외합니다. 작업 브랜치의 1,174건과 수량 차이는 이 화면 검사뿐입니다. Agent 2 설계 변조 검사는 과거 자료의 체크아웃 줄바꿈에 의존하지 않도록 기존 합성 Run 생성기를 사용하고 변조 전 정상 로딩도 확인합니다. 파이프라인·승인·실행 검사 조건은 유지합니다.
+
+### 복수 근거·요청 시험 범위 · 추가 26건
+
+- 3.12/3.13 × 근거 1/2/3개·ER의 미확인 ID·TC의 미확인 ID·조건 연결 누락 12조합: 새 개수 제한 해제와 기존 추적성 차단·과거 규칙 유지.
+- 한정 범위·복수 명시 검사·요구/제외 충돌 × 지정한 SUPPORTED/UNSUPPORTED/UNCERTAIN 응답 9조합: 모든 조건/원문 전달과 기존 판정 경로 유지. 모델의 실제 의미 판정 정확도 테스트는 아님.
+- 새 3.13의 근거 검토 누락/파일 없음/해시 변경/과거 버전 우회/부적합 응답 차단 5조합.
+- 기존 작성/검토 어댑터와 CLI 인계 테스트는 지침 버전·범위 안내·최초/재작성/재검사 전달을 추가 확인.
+
+### 외부 검토 반례 보완 · 추가 64건
+
+2026-09-25에는 기존 Agent 2·검토 어댑터 테스트에 새 작성/복원 지침과 캐시 버전의 실제 전달 단언을 추가했습니다. 테스트 수는 늘리지 않았으며 지침 전달 확인을 실제 모델의 의미 판정 성공으로 집계하지 않습니다. 기존 오류·인용·입력 해시·기대결과 누락·재사용 차단 테스트는 유지합니다.
+
+- 숫자 전체 인용 20조합·분할 SRS 인용 2조합: 소수·부호·지수의 일부 추출 거부와 정상 범위/공백/코드 인용 유지.
+- 후보 결과 별칭 7조합: 단일/목록/일치 형식 호환, 상태·해시·ID·복수 목록 충돌 거부. 기존 증거 누락 테스트는 양쪽 별칭을 함께 바꿔 검사 의도를 분리.
+- 장비 ID 6조합: 인덱스 0/4와 관찰 ID 일치/다름/미확인, 과거 계약 유지.
+- 입력 조건 역방향 검토 12조합·복합 ER 일부 필드 2조합: 출력 삭제로 검토 항목이 사라지지 않음, 잘못된 기존 동작 대조, 지정한 모델 판정의 전달/중단, 구검토 해시 재사용 차단. 실제 모델의 정답률 시험은 아님.
+- 새 A2/A3 검토 계약 10조합: 검토 표식·파일·해시·다운그레이드·UNSUPPORTED 처리. 기존 A2 실행/저장 로더 테스트에 새 조건 검토 항목과 3.11 하향 재사용 차단 단언을 추가.
+- 승인 TC 검토서 2조합·검토 항목 0건 표현 1건: 정상 스냅샷 상세 공유, 손상 시 현재 자산으로 대체하지 않음, 공식 승인과 수치 구분.
+- editable 안내·실행 위치 1건, Windows 줄바꿈 설정의 공개/승인 증거 add/checkout 바이트 보존 1건. 별도 venv 실제 editable 설치 확인은 인계 문서의 수동 검증이며 Pytest 건수에 추가 합산하지 않음.
+
+### 지원 확장·오류 기록·사용량 보완 · 추가 7건
+
+- 지원 확장 사유의 SUPPORTED/UNCERTAIN/UNSUPPORTED 3조합: 금지된 빈 Assertion을 누락으로 검사하지 않으며, 정상/불확실은 REVIEW를 유지하고 잘못된 TC ID는 계속 차단.
+- 생성 어댑터 3종의 SDK 오류 원문이 표시 메시지·출력 traceback에 노출되지 않는지 확인.
+- 검토 응답의 입력 해시가 틀려 후속 검증이 실패해도 수신한 사용량 기록이 남는지 확인.
+- 기존 A1/A2/A3 검토 오류 테스트에 생성 사용량 보존·미제공 사용량 null 검증 추가. 새 테스트 수에 중복 합산하지 않음.
+
+사용량 영수증은 수신한 구조화 응답의 진단 기록입니다. 응답을 받지 못한 호출이나 거부·파싱 실패의 과금까지 복원하는 청구서가 아닙니다.
+
+### 중복 책임·미검증 분기 보완 · 81건
+
+- 공통 상태 집계 17건: 빈 입력 및 상태 쌍의 ERROR/FAIL/REVIEW/PASS 우선순위와 공개 재수출 동일성.
+- 공식 자산 손상 10건, 카탈로그 Snapshot 형식 3건, 중복 ID/잘못된 해시 1건, 후보 인계 Manifest 손상 8건. 임시 복사본만 변경하며 공식 원본 불변 확인.
+- A1 드문 실패/보류 분기 8건, SRS 누락·중복·없는 연관 ID 3건.
+- UI Inventory 미지원 인터페이스/파일 4건, 사전조건·조작 순서 검사 번호 분리 3건.
+- 단일 후보 호환 함수의 정상 위임/인계 차단 보존 2건.
+- 보고 상태와 종료 코드 6건, 증거 무결성 4건, 회귀 출처 손상 6건.
+- 승인 재검사의 오류 안내 분리 3건, UI 입력 제약 3건. 안내 분리 테스트는 출처 검사를 대역 처리한 단위 테스트이며 실제 승인 완료 검증이 아님.
+
+분기 감사 도구의 색인 생성은 실행 테스트가 아닙니다. 커버리지의 분기 수와 테스트 수는 다르며, 관련 테스트 이름을 찾았다는 사실만으로 특정 분기가 실행됐다고 집계하지 않습니다.
+
+### 공통 모델 근거 검토 · 최초 80건 (위 추가 포함 현재 87건)
+
+- 세 단계의 검토 대상 누락·중복·순서/ID 오류·없는 인용·인용 누락·근거 부족·불확실·수정 후 해시·단계/계약 오류, 36건.
+- 복합 기대결과 2건, 검색/이메일/다른 부수효과의 사전 지정 검토 판정 연결 3건. 키워드 금지 목록이 아니라 검토 결과가 실제 차단에 사용되는지 검사.
+- Agent 2에 최초 원문 전달, 새 기능/다른 표현 허용 지침, 카탈로그/화면 로컬 경로 제외, 각 1건.
+- 실제 SDK 어댑터를 Fake Client로 시험: 정상·거부/응답 없음·통신 오류, 3건.
+- Agent 1 CLI의 정상·수정·미해결·불확실·오류 경로와 사용량 합산, 5건.
+- A1/A2/A3 저장 검토의 계약 누락·파일 누락·해시 변경·과거 버전 위장·거부 판정, 15건.
+- Agent 2 인계 및 Agent 3 제품 시험 차단: 근거 부족·불확실·통신 오류, 6건. 후보 제외 사유 전달 포함.
+- 구조 실패 시 검토 호출 생략, 불확실한 단일 사실 여부의 REVIEW 보존, 각 1건.
+- 생성 3종·검토 클라이언트의 SDK 자동 재시도 0회 설정, 4건.
+- 줄바꿈·따옴표가 있는 원문을 JSON 이스케이프 표현이 아닌 실제 텍스트로 인용, 1건.
+
+판정은 테스트에서 지정한 대역 응답입니다. 실제 모델이 없는 기능을 정확히 찾아냈다거나 정상 표현을 항상 허용한다는 평가가 아닙니다. 새 검토의 Live 정확도·오탐·비용은 별도 확인 대상입니다.
+
+### SRS 복수 인용 · 위치와 무관한 출처 연결
+
+- `test_srs_pipe_quotes_validate_each_part_and_each_linked_id`: 정순·역순·세 조각·같은 필드의 복수 인용·2/3개 Requirement 연결과 숫자 변경·없는 조각·빈 조각·ID 누락/추가/미등록·숫자 토큰 분할, 15건. CP1-007과 입력 불변 확인.
+- `test_combined_background_range_retains_target_and_complete_source_guards`: 순서 2종 × 정상·임의 조각·잘못된 ID·부분 범위·변경 후 정책 대체 5종, 10건. CP1-008의 기존/새 판정 확인.
+- `test_scope_evidence_combined_quotes_stay_bound_to_effect_requirement`: 알림/상태 2종 × 정순·역순·다른 Requirement 조각·빈 조각, 8건. CP1-011의 effect별 출처 보호.
+- `test_srs_pipe_policy_does_not_split_change_request_source`: 변경 요청 인용에는 분할 예외를 적용하지 않음, 1건.
+- `test_srs_quote_policy_initial_rewrite_and_verified_loader`: 최초·재작성 2건. 실제 CLI/로더와 현재 2.11 계약 적용, 인용/근거 검토 계약 누락·하향 불일치 차단. 과거 결합 인용 판정은 별도 과거 기록 검증으로 유지.
+
+위 추가 36건은 로컬·모델 대역 검증이며 새 API 결과가 아닙니다. 원문 조각이 존재해도 조합한 설명의 의미 전체가 정확하다는 보장은 하지 않습니다.
+
+### 전체 로직 감사 · 과도한 차단과 누락 보호
+
+- `test_background_range_uses_frozen_source_not_verbatim_explanation`: 배경 범위 설명의 바꿔 쓰기는 허용하되 원문·Requirement·유지 역할·수치·변경 후 범위 대체 오류 6종은 차단. 과거 규칙과 원본 불변 포함, 7건.
+- `test_structured_hvac_restore_does_not_require_magic_words`: 한글/영문 복원 설명 2종 × 정상·계약 누락·확인 누락·기준 변경·순서 변경 5조합, 10건. 새 구조화 정책만 정상 표현을 허용.
+- `test_reference_only_srs_does_not_force_extra_state_assertion`: 참고 연결·직접 상태 요구·상태 정합성 TC·명시 REQUIRED 4조합. 참고 연결만으로 추가 이중 검증을 강제하지 않음.
+- `test_terminal_observation_uses_last_test_action_without_invented_click`: READ_ONLY TC의 마지막 확인은 Assertion으로 구현하며 이른 시점·복원 뒤 판정·조작 누락·중간 확인·기대값 변경·Assertion 누락·상태 변경 TC는 차단, 8건. 기존 계약 판정도 확인.
+- 수정 포폴 전용 `test_portfolio_catalog_matches_current_assets_and_historical_scope` 1건은 시안과 함께 작업 브랜치에 보존하며 현재 공개본 수집 대상에서 제외합니다.
+- 기존 CLI·후속 로더 시험은 현재 A1 2.11, A2 3.11, A3 4.9 계약을 검증합니다. A2의 범위/복원 정책 누락·버전 불일치 거부를 포함합니다.
+
+함수별 위 30건은 모델 대역·로컬 검사입니다. 실제 API 응답·저장 응답 재검증·브라우저 실행 결과를 서로 합산하지 않습니다.
+
+### 역할 안내·분할 절차 보존 후속 회귀
+
+- `test_agent1_prompt_requires_exclusive_roles_without_dropping_gap_contract`: 최초·재작성 2건에서 역할 선택·중복 금지·정보 부족 계약 안내와 입력 불변 확인.
+- `test_split_procedure_preservation_requires_contiguous_complete_source`: 한글/영문 × 전체·분할·누락·역순·내용 변경·중간 삽입·필드 분산·TC 분산·복원 비활성 9종, 18건. 새 계약과 과거 단일 항목 대조를 구분하며 원본 불변 확인.
+- `test_agent2_sends_approved_procedures_on_initial_and_rewrite_calls`: 기존 시험에 분할 보존·UI 근거·내부 코드와 화면 표시 구분 안내를 추가 확인.
+- `test_agent1_to_agent2_cli_handoff_with_frozen_inputs`: 절차 분할 × 정상·재작성·미해결 3조합 추가. 최초·재작성·실제 로더의 새 계약 적용, 계약 누락/알 수 없는 값/버전 하향 불일치 거부, 과거 계약 조회 확인.
+
+### 과거 Checkpoint 성공 안내 호환과 판정 보호
+
+- `test_checkpoint_revalidation_limits_legacy_pass_message_compatibility`: CP1/CP2 × 과거/새 계약 × 11가지 변경, 44건. 과거 PASS 안내만 허용하고 실패·검토 메시지, ID·순서·누락·중복·판정 변경은 거부. 원본 불변 확인.
+- `test_checkpoint_revalidation_preserves_review_notes_and_handoff`: 최종 검토 사항·인계 상태·Checkpoint 모델 변경 3건 거부.
+- `test_historical_checkpoint_loader_preserves_hash_and_decision_guards`: CP1/CP2 × 성공 안내·해시 불일치·실패 판정·항목 누락·재계산 실패, 10건. 실제 파일 로더로 확인하며 API 클라이언트 생성 금지와 파일 불변도 검사.
+
+단위 로더 시험은 임시 합성 계약 자료를 사용합니다. 과거 Live 원본을 덮어쓰지 않으며 실제 저장 사례 재실행 결과는 인계 문서에 별도로 기록합니다.
+
+### 절차 역할·중복 분류·과거 인계 후속 회귀
+
+- `test_structural_cp1_preserves_marked_procedure_roles_with_free_body_wording`: 준비·복원·시험 절차 표시 3종, 다른 본문 표현과 입력 불변 확인.
+- `test_structural_cp1_rejects_marked_procedure_omission_or_role_change`: 표시 원문의 누락·제품 조건/제외/정보 부족 이동 4종 차단.
+- `test_structural_cp1_rejects_procedure_and_gap_role_overlap`: 절차와 정보 부족·제외된 정보 부족의 중복 2종 차단.
+- `test_structural_cp1_explicit_scope_exclusion_precedes_procedure_marker`: 요청의 명시 제외 우선, 절차에 중복 기록하면 차단.
+- `test_legacy_cp1_keeps_marker_routing_without_new_procedure_notes_field`: 과거 CP1의 빈 절차 필드 호환과 새 정책의 필수 역할 보존 구분.
+- `test_new_agent2_rejects_historical_analysis_before_any_side_effect`: 과거 2.6/2.7 × 표시/무표시 준비·복원 4종, 8조합. 과거 조회·해시 불변, 새 모델 클라이언트/예약/카탈로그 작성 전 중단.
+- `test_agent1_to_agent2_cli_handoff_with_frozen_inputs`: 정상·재작성 해결·미해결 × 절차 없음/표시/무표시/분할 4종, 12조합. 새 분류의 실제 원문 인계와 과거 계약 조회를 함께 확인.
+
+이 검사는 새 의미 판별 규칙을 추가하지 않으며 API를 호출하지 않습니다. 과거 원문에서 절차를 자동 추측해 채우는 대신, 새 실행의 인계 조건을 명확히 검사합니다.
+
+### 새 실행의 문장 표현 검사 제외와 보호 검사
+
+- `test_new_wording_policy_routes_declared_procedures_without_verb_guessing`: 한글·영문 절차 3종. 분류 단어 대신 명시 목록을 사용하고 입력에 없는 원문과 기록 누락을 차단.
+- `test_new_wording_policy_preserves_cp1_integrity`: 정상·ID·출처·수치·변경 후 값·누락 6종.
+- `test_new_wording_policy_does_not_claim_boundary_sentence_semantics`: 같은 수치의 이상/초과 차이를 새 문장 검사로 증명하지 않는 한계 명시. 과거 계약의 판정도 유지.
+- `test_new_wording_policy_accepts_target_labels_but_requires_bindings`: 확인 대상 표현 3종 허용, 없는 단계·대상 누락 차단.
+- `test_new_wording_policy_preserves_cp2_integrity`: 정상·ID·조건·기대값·대상·시점 6종.
+- `test_new_wording_policy_preserves_procedure_handoff_without_keywords`: 한글·영문 절차 2종. 인계 누락·시험 제외로 이동 차단.
+- `test_new_wording_policy_preserves_execution_contract`: 화면 이름의 다른 표현과 실제 실행 보호 7종. 미관찰 Selector·없는 원문·Assertion·값·복원·연결 변경 차단.
+- `test_wording_policy_is_bound_to_contract_version`: Agent별 4버전 × 정상/누락/알 수 없는 정책/하향 변경/과거 계약 5종, 20조합.
+- `test_declared_procedures_reach_final_review_for_existing_tests`: 기존 TC만 선택한 경우 명시한 절차를 수행 완료로 간주하지 않고 최종 검토로 전달.
+
+기존 문장 검사 테스트는 과거 계약 호환성을 검증합니다. 새 정책 테스트는 `legacy_wording_checks=False` 또는 실제 CLI/Fake Client 인계를 사용합니다. 기존 통합 재작성 테스트의 실패 입력은 문구 차이 대신 실제 observation_target 누락이며, 정상·재작성·미해결 차단을 계속 검증합니다. 자동 테스트는 실제 새 모델 실행을 뜻하지 않습니다.
+
+### 입력 분류와 원문 기반 차이 검사
+
+- `test_product_boundaries_are_not_test_exclusions`: 온도·속도·용량·압력 × 경계 표현 3종, 12조합. 제품 경계를 제외로 오인하지 않고 조건 누락은 계속 차단.
+- `test_explicit_exclusions_remain_binding_without_product_keyword_guessing`: 명시적 제외 5종. out_of_scope 필드의 표현이 짧아도 확정 조건으로 바꾸지 못함.
+- `test_explicit_procedure_markers_do_not_depend_on_time_wording`: 준비/복원 표시와 다른 시점 표현 5조합. 제품 판정 조건으로 이동하면 차단.
+- `test_explicit_procedure_role_does_not_guess_from_body_words`: `[준비]`·`[복원]`의 명시 역할을 본문 속 다른 동작 단어보다 우선.
+- `test_same_frame_boundary_relation_changes_are_rejected`: 온도·속도·중량 × 이상/초과·이하/미만 변경 4종, 12조합. 같은 문장 구조의 경계 변경 거절, 공백·소수 표기 허용, 과거 계약 보존.
+- `test_relation_checker_does_not_claim_general_paraphrase_or_target_matching`: 다른 대상/단위 및 문장 구조가 다른 바꿔 쓰기 2조합. 지원된 비교를 찾지 못한 것을 의미 동등성 증명으로 사용하지 않음.
+- `test_ordered_input_output_values_are_not_a_bag_of_numbers`: 온도·속도·용량 3조합. 같은 숫자 집합이라도 입력/기대값 대응을 뒤집으면 차단.
+- `test_srs_maintenance_range_requires_same_target_verbatim_background_authority`: 정상·누락·다른 Requirement·변경 역할·원문 변조·after_value 대체의 6조합.
+- `test_marked_restoration_is_preserved_as_procedure_not_exclusion`: 복원 표시 2조합, CP2에서 누락/제외는 실패하고 restore_steps 보존은 통과.
+- `test_cp2_boundary_relation_compares_linked_condition_not_shared_numbers`: 원문 유지/경계 포함 여부 변경 2조합, CP2-017에 공통 비교 적용.
+- 기존 인계 테스트에 입력 분류 계약 1.0 누락·하향 변경 차단을 추가. 새 API 호출이나 모든 자연어 의미 판별 성공을 뜻하지 않음.
+
+### 구조화 복원 인계와 실제 비교
+
+- `test_cp2_structured_restoration_checks_ids_coverage_and_policy`: 정상·계약 누락·대상 누락/변경/중복·기준/시점 변경·조작 누락·순서·원문 연결 10조합.
+- `test_structured_restoration_read_only_and_strict_api_schema`: 조회의 빈 복원 계약과 실제 SDK의 엄격한 필수 JSON 필드 확인.
+- `test_structured_restoration_id_normalization_keeps_local_references`: TC 간 기술 ID 변경 시 복원 참조 유지, 같은 TC의 모호한 중복 ID는 자동 수정하지 않음.
+- `test_structured_restoration_does_not_parse_description_vocabulary`: 자연어 설명 6종에서 같은 CP3·컴파일·정적 검사 결과. 설명의 의미 정확성 자체를 평가하는 테스트는 아님.
+- `test_structured_restore_plan_rejects_execution_contract_changes`: 확인 누락·기준/ID/원문 변조·복원 조작/reader 누락·가짜 조작 8조합.
+- `test_structured_restoration_executes_real_baseline_comparison`: 실제 브라우저 스위치 예제의 정상 복원/내부값 복원 실패 2조합. 성공 로그·실패 상태·환경 폐기 확인.
+- 기존 `test_agent1_to_agent2_cli_handoff_with_frozen_inputs` 인계 테스트에도 구조화 계약 누락·하향 변경·과거 계약 호환 검증을 연결.
+
+### 공통 작성·검사 기준의 표현 및 누락 반례
+
+- `test_acceptance_routing_is_shared_by_initial_repair_and_checkpoint`: 대상 제한·온도·모드·풍량·조회·미정·제외·준비·복원 10조합. 같은 인수 조건 목록이 최초/재작성 입력과 CP1에서 사용되며 누락은 계속 거부하는지 검사.
+- `test_common_observation_binding_has_no_feature_specific_exception`: 5종 대상 이름 × 정상·다른 대상·중복 수식어·없는 판정 단계 4종, 20조합. 특정 기능명 예외 없이 연결 검사.
+- `test_agent2_repair_receives_same_binding_diagnostics_without_mutation`: 작성 안내와 검사 함수의 진단 전달·원본 TC 불변 확인.
+- `test_cp2_cp3_share_baseline_vocabulary_across_observation_targets`: 5종 시점 표현 × 5종 확인 대상 이름, 25조합. 같은 구조화 읽기 경로의 표시 문구만 바꿔 CP2·CP3의 일관성을 확인하며 다섯 실제 제품 기능의 실행 증거가 아님.
+- `test_shared_baseline_does_not_approve_wrong_comparison`: 시험 후·종료 후·다음 시험·다른 상태 비교의 4조합을 CP3에서 차단.
+- 기존 잘못된 초기값·대상 간 기준 차용·부정·누락·조회/변경/차단·실제 브라우저 복원 테스트와 함께 실행. 모델 대역·로컬 검증이며 Live 반복 안정성 검증은 별도.
+
+### 준비 전 원상태와 시험 직전 상태 분리
+
+- `test_checkpoint2_distinguishes_hvac_preparation_from_original_restore`: 새 정책에서 준비 완료 초기값과 관찰 원복이 공존하는 경우 및 과거 계약의 제한 유지, 2조합.
+- `test_hvac_preparation_restores_original_not_prepared_state`: 제어된 모의 제품으로 정상 변경·정상 차단·잘못된 변경·준비 적용 실패·부분 준비 실패·복원 실패·원래 송풍·원래 제습의 8조합. 실제 생성 코드와 Chromium 실행, 준비 전 값과 준비 후 값 혼동 방지.
+- `test_hvac_preparation_on_controller_copy`: 실제 V2 HTML의 임시 사본에서 원래 COOL/FAN/DRY의 준비·시험·원복 3조합. 원본 해시 불변 확인.
+- `test_hvac_preparation_rejects_unproved_recovery`: 관찰 역동작 누락·지원 밖 준비 조작·준비 값을 최종 복원 기준으로 사용·대상 선택 전에 준비 변경의 4조합.
+- API 호출 없는 로컬 검증이며 실제 모델이 이 TC·계획을 작성했다는 뜻은 아님.
+
+### 새 TC의 유형별 상태 복원 정책
+
+- `test_tc_state_restoration_policy_required_for_new_contract`: 조회·변경·차단 분류 누락과 복원 필요 여부의 7조합.
+- `test_blocked_change_requires_state_observation_not_just_notification`: 알림만으로 상태 유지 근거를 대신하지 못하도록 검사.
+- `test_state_restoration_policy_in_real_browser`: 정상 복원·조회·조회 사전조건 실패·정상 차단·잘못된 차단 후 복원·복원 실패·제품/복원 동시 실패·변경 전 사전조건 실패의 8조합. 실제 로컬 Chromium과 생성 코드를 실행하며 API를 호출하지 않음.
+- `test_state_restoration_policy_rejects_unsafe_plans`: 조회에 변경 동작, 복원 누락, 지원되지 않은 범용 준비 변경, 관찰 누락, 비활성 표시만으로 차단을 주장하는 계획의 5조합.
+- `test_verified_restoration_status_reaches_human_review`: 5종 복원 상태의 사람 검토서 문구·변조 로그 제외·FAILED의 자동화 문제 분류.
+- 기존 인계 테스트에 상태 복원 계약 누락·하향 변경 차단과 과거 계약 호환성을 추가. 기존 풍량·온도·모드 복원 브라우저 테스트의 명시 비교 기준 조합은 새 STATE_CHANGE 정책으로 실행하고 나머지는 과거 계약을 유지.
+
+### 복합 조건의 기존 TC 연결 안내
+
+- `test_compound_existing_reuse_requires_actual_condition_links`: 풍량·온도·모드 3종 × 분담 연결·한 TC 충족·다른 조건에만 연결·실제 값 미검증 4종, 총 12조합. 정상 분담은 허용하고 근거 누락은 계속 차단합니다.
+- `test_agent2_sends_compound_link_guidance_on_initial_and_repair`: Fake Client 최초/재작성 요청의 연결 안내·추출 값·미연결 값과 원본 불변을 검사합니다.
+- `test_reuse_link_diagnostics_do_not_infer_coverage_from_unknown_tests_or_candidates`: 카탈로그 밖 TC와 후보 담당 표시를 기존 검증 근거로 오인하지 않고 최초 입력의 미작성 상태를 구분합니다.
+- CP2 판정 코드는 변경하지 않았습니다. 이 검사는 작성 안내와 제한된 연결 진단의 테스트이며 실제 모델의 항상 올바른 연결을 보장하지 않습니다.
+
+### 이미 반영된 SRS의 불필요한 개정 차단
+
+- `test_srs_revision_exemption_requires_full_exact_current_criteria`: 전체 일치·앞뒤 공백·다른 값·부분 일치·대소문자·문장 내부 공백 6조합. 원본 설계 불변 및 과거 계약의 개정 필수 판정도 확인합니다.
+- `test_srs_revision_policy_keeps_invalid_proposals_and_related_changes_blocked`: 동일 제안·표현만 바꾼 불필요한 제안·다른 영향 Requirement의 개정 누락·대상 SRS 누락 4조합을 차단합니다.
+- `test_agent2_sends_reflected_srs_policy_on_initial_and_repair_without_mutation`: Fake Client로 최초·재작성 입력의 개정 범위 안내와 SRS 불변을 확인합니다.
+- 기존 `test_agent1_to_agent2_cli_handoff_with_frozen_inputs`에 새 개정 계약 1.1의 인계·누락/하향/다른 버전 조합 차단 및 과거 계약 1.0 로딩을 추가했습니다. 실제 모델 호출 테스트는 아닙니다.
+
+### 사용자 확인 요청의 최종 보고 연결
+
+- `test_verified_user_questions_become_final_actions`: 확인 질문의 원문 전달·중복 제거, 질문 없는 정상 사례, 분석 파일 변조 차단의 3조합.
+- `test_existing_only_procedure_notes_reach_final_human_review`: 기존 절차 확인과 함께 사용자 질문이 최종 JSON 및 사람 검토서까지 전달되는지 확인합니다. 신규 모델 호출이나 외부 게시 검사가 아닙니다.
 
 ### 공식 등록 후 배포 무결성: 추가 2개 실행 조합
 
@@ -281,7 +471,7 @@ HTTP 대역으로 본문 생성·전송 계약을 검사합니다. 실제 Notion
 | `test_partial_scope_exclusions_must_be_preserved_by_agent2` | Agent 1 제외 범위·정보 부족의 Agent 2 인계 |
 | `test_agent2_preserves_setup_and_restore_notes_as_tc_procedures` | 시험 준비·종료 후 복원을 제외하지 않고 TC 절차로 보존 |
 | `test_playwright_code_is_rejected` | TC 내 Playwright 코드 혼입 차단 |
-| `test_verified_agent1_run_can_handoff_to_agent2` | 검증된 Agent 1 SHA 인계 |
+| `test_historical_agent1_run_remains_readable` | 과거 Agent 1 SHA·Checkpoint 조회 호환 |
 | `test_modified_agent1_artifact_is_blocked_before_agent2` | 변조된 Agent 1 산출물 차단 |
 | `test_paused_manifest_is_blocked_before_agent2` | PAUSE Manifest 차단 |
 | `test_agent1_to_agent2_cli_handoff_with_frozen_inputs` | CLI 동결 입력 인계 |

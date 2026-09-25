@@ -3,6 +3,39 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize('blocked', [False, True])
+def test_single_tc_compatibility_wrapper_keeps_verified_loader(tmp_path, monkeypatch, blocked):
+    design = cp2_valid_design()
+    calls = []
+    def verified(run_dir, run_id):
+        calls.append((run_dir, run_id))
+        if blocked: raise ValueError('handoff integrity rejected')
+        return None, None, None, design, None, None
+    monkeypatch.setattr(pipeline_orchestrator, '_load_verified_agent2_run', verified)
+    if blocked:
+        with pytest.raises(ValueError, match='integrity rejected'):
+            pipeline._select_agent3_tc_from_run(tmp_path, 'fixture')
+    else:
+        selected, summaries = pipeline._select_agent3_tcs(design)
+        assert pipeline._select_agent3_tc_from_run(tmp_path, 'fixture') == (selected[0] if selected else None, summaries)
+    assert calls == [(tmp_path, 'fixture')]
+
+@pytest.mark.parametrize("variant", ["normal", "empty", "tampered"])
+def test_verified_user_questions_become_final_actions(tmp_path, variant):
+    questions = [] if variant == "empty" else ["허용할 온도 하한을 지정해 주세요."] * 2
+    analysis = agent1_analysis().model_copy(update={"user_questions": questions})
+    path = tmp_path / "agent1_change_analysis.json"
+    _write_json(path, analysis.model_dump(mode="json", by_alias=True))
+    _write_json(tmp_path / "run_manifest.json", {"agent1_analysis_sha256": _sha256_file(path)})
+    if variant == "tampered":
+        path.write_text(path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+        with pytest.raises(ValueError):
+            pipeline._final_review_notes_for_validation(tmp_path)
+    else:
+        notes = pipeline._final_review_notes_for_validation(tmp_path)
+        assert notes == ([] if not questions else ["사용자 확인 요청: " + questions[0]])
+
+
 def test_agent3_precondition_feedback_repairs_only_unstated_context(tmp_path, monkeypatch):
     case, valid, observation = precondition_guard_fixture()
     source = "중앙 관제 패널에서 오류와 잠금이 없는 단일 장비를 대상으로 한다."
@@ -51,7 +84,7 @@ def test_agent3_precondition_feedback_repairs_only_unstated_context(tmp_path, mo
         target_html=str(target), model="fixture", timeout=60)) == 0
     assert calls == ["model", "model", "trial"]
     assert (case.model_dump_json(), invalid.model_dump_json()) == preserved
-    assert pipeline._read_json_payload(run / "agent3_manifest.json")["prompt_version"] == "agent3-3.28"
+    assert pipeline._read_json_payload(run / "agent3_manifest.json")["prompt_version"] == "agent3-3.33"
     assert pipeline._read_json_payload(run / "agent3_automation_plan_attempt_1.json") == invalid.model_dump(mode="json")
     assert pipeline._read_json_payload(run / "agent3_automation_plan_attempt_2.json") == valid.model_dump(mode="json")
 
@@ -81,8 +114,9 @@ def test_agent3_requires_proof_on_new_runs_and_records_it(tmp_path, monkeypatch,
     assert pipeline.run_agent3(args) == (0 if include_proof else 2)
     manifest = pipeline._read_json_payload(run / "agent3_manifest.json")
     assert manifest["precondition_proof_contract"] == "1.0"
-    assert manifest["contract_version"] == "4.4"
-    assert manifest["plan_fidelity_contract"] == "1.0"
+    assert manifest["contract_version"] == "4.10"
+    assert manifest["plan_fidelity_contract"] == "1.2"
+    assert manifest["wording_policy"] == "STRUCTURAL_ONLY_V1"
     assert manifest["restore_confirmation_contract"] == "1.2"
     assert calls == (["model", "trial"] if include_proof else ["model", "model"])
     assert pipeline._read_json_payload(run / "agent3_automation_plan_attempt_1.json") == plan.model_dump(mode="json")

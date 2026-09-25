@@ -191,8 +191,9 @@ def _select_agent3_tc_from_run(
     run_dir: Path,
     run_id: str,
 ) -> tuple[str | None, list[dict[str, Any]]]:
-    _, _, _, design, _, _ = _load_verified_agent2_run(run_dir, run_id)
-    return _select_agent3_tc(design)
+    """Compatibility entry point: retain old imports, share verified selection."""
+    selected, summaries = _select_agent3_tcs_from_run(run_dir, run_id)
+    return (selected[0] if selected else None), summaries
 
 
 def _select_agent3_tcs_from_run(
@@ -240,9 +241,15 @@ def _agent3_run_entry(
             if isinstance(reasons, list) and reasons:
                 entry["reason"] = " / ".join(str(item) for item in reasons)
         checkpoint_file = artifact_dir / "checkpoint3.json"
+        if checkpoint_file.is_file():
+            grounding_findings = [check.get("message", "")
+                for check in _read_json_payload(checkpoint_file).get("checks", [])
+                if check.get("rule_id") == "AGENT3-GROUNDING" and check.get("status") in {"FAIL", "REVIEW"}]
+            if grounding_findings:
+                entry["reason"] = " / ".join(filter(None, [entry["reason"], "근거·검사 연결 검토: " + " / ".join(grounding_findings)]))
         if entry["reason"] is None and checkpoint_file.is_file():
             proof_failures = [check.get("message", "") for check in _read_json_payload(checkpoint_file).get("checks", [])
-                              if check.get("rule_id") in {"CP3-006A", "CP3-006B"} and check.get("status") == "FAIL"]
+                              if check.get("rule_id") in {"CP3-006A", "CP3-006B", "CP3-006D"} and check.get("status") == "FAIL"]
             if proof_failures:
                 entry["reason"] = "사전조건 증명·조작·복원 확인 계획 보완 필요: " + " / ".join(proof_failures)
     eligibility_file = artifact_dir / "agent3_eligibility.json"
@@ -588,7 +595,7 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument(
         "--tc-id",
         default="AUTO",
-        help="Current-Run TC ID, or AUTO to select one eligible CP2 candidate",
+        help="Current-Run TC ID, or AUTO to process every eligible CP2 candidate",
     )
     pipeline.add_argument(
         "--target-html",
