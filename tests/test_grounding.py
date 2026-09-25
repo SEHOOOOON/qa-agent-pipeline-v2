@@ -200,6 +200,44 @@ def test_real_reviewer_adapter_with_fake_sdk(result_kind):
             reviewer.review(payload)
     assert len(calls) == 1 and calls[0]["store"] is False
     assert calls[0]["text_format"] is grounding.GroundingReview
+    assert calls[0]["prompt_cache_key"] == "qa-v2-grounding-1-3"
+    instructions = calls[0]["input"][0]["content"]
+    assert instructions == grounding.REVIEW_INSTRUCTIONS
+    assert "같은 관찰 위치에서 그 실제 기록값과 비교" in instructions
+    assert "source_documents 원문을 인용" in instructions
+    assert "임의 기본값으로 복원" in instructions
+    assert "준비·복원 항목 자체의 검토를 생략하지 않습니다" in instructions
+    assert "유지 조건도 반드시 검토" in instructions
+    assert "요청 원문과 명시적 제외" in instructions
+    assert "제외와 요구가 충돌하거나 시험 범위가 불명확하면 UNCERTAIN" in instructions
+    assert "각 TC가 모든 검사를 중복 수행할 필요는 없습니다" in instructions
+    assert "일부 범위 시험을 전체 SRS 검증 완료로 주장" in instructions
+
+
+@pytest.mark.parametrize("verdict", ["SUPPORTED", "UNSUPPORTED", "UNCERTAIN"])
+@pytest.mark.parametrize("scope", ["bounded", "explicit_multiple", "conflict"])
+def test_scope_guidance_never_silently_drops_preserved_conditions(scope, verdict):
+    request, analysis, requirements = cp1_combined_srs_case()
+    design = cp2_valid_design()
+    # Distinct scopes must remain visible; this test scripts judgment, not accuracy.
+    if scope == "bounded":
+        request.out_of_scope.append("별도 하한 경계 시험")
+    elif scope == "explicit_multiple":
+        request.acceptance_notes.append("요청한 두 경계에서 화면과 내부 값 모두 확인합니다.")
+    else:
+        request.acceptance_notes.append("동일 대상의 추가 알림을 확인합니다.")
+        request.out_of_scope.append("동일 대상의 추가 알림을 확인합니다.")
+    payload = grounding.build_grounding_input("AGENT2", request, requirements, design,
+        analysis=analysis, catalog=pipeline.EXISTING_REGRESSION_CATALOG, include_condition_coverage=True)
+    coverage = [i for i in payload["items"] if i["kind"] == "CONDITION_COVERAGE"]
+    assert [i["content"]["condition"] for i in coverage] == [c.model_dump(mode="json") for c in analysis.confirmed_conditions]
+    source_values = [d["text"] for d in payload["source_documents"]]
+    assert all(value in source_values for value in request.out_of_scope + request.acceptance_notes)
+    record = fake_grounding_record(payload)
+    target = coverage[0]["item_id"]
+    next(item for item in record["review"]["items"] if item["item_id"] == target)["verdict"] = verdict
+    assert grounding.check_review_record(payload, record).status == {
+        "SUPPORTED": CheckStatus.PASS, "UNSUPPORTED": CheckStatus.FAIL, "UNCERTAIN": CheckStatus.REVIEW}[verdict]
 
 
 @pytest.mark.parametrize("outcome", ["supported", "repair", "unresolved", "uncertain", "error"])
@@ -253,7 +291,7 @@ def test_agent1_grounding_controls_rewrite_handoff_and_cost(tmp_path, monkeypatc
             pipeline._load_verified_agent1_run(run, run.name)
 
 
-@pytest.mark.parametrize("stage,version", [("AGENT1", "2.11"), ("AGENT2", "3.11"), ("AGENT2", "3.12"), ("AGENT3", "4.9"), ("AGENT3", "4.10")])
+@pytest.mark.parametrize("stage,version", [("AGENT1", "2.11"), ("AGENT2", "3.11"), ("AGENT2", "3.12"), ("AGENT2", "3.13"), ("AGENT3", "4.9"), ("AGENT3", "4.10")])
 @pytest.mark.parametrize("mutation", ["missing_marker", "missing_file", "changed_hash", "downgrade", "unsupported"])
 def test_review_artifact_required_on_new_handoff(tmp_path, stage, version, mutation):
     payload = review_payload(stage)

@@ -333,6 +333,45 @@ def test_trace_only_expected_results_cannot_expand_original_request(mutation):
     assert cp2_check(result, "CP2-017").status == (CheckStatus.PASS if mutation is None else CheckStatus.FAIL)
 
 
+@pytest.mark.parametrize("version", ["3.12", "3.13"])
+@pytest.mark.parametrize("mutation", ["one", "two", "three", "unknown_er", "unknown_tc", "lost_condition"])
+def test_trace_source_count_is_not_new_semantic_authority(version, mutation):
+    from qa_pipeline_contracts import RequirementScopeEvidence, ScopeBasis
+    from qa_pipeline_execution import _agent2_checkpoint_options, _current_agent2_contract
+    analysis, design = cp2_analysis(), cp2_valid_design()
+    condition = analysis.confirmed_conditions[2]
+    analysis.requirement_effects[2].scope_evidence = RequirementScopeEvidence(
+        basis=ScopeBasis.REQUEST_TRACE_ONLY, request_condition_ids=[condition.condition_id],
+        srs_source_text="Toast 표시")
+    expected = design.test_cases[0].expected_results[2]
+    expected.statement = condition.source_text
+    if mutation in {"two", "three", "unknown_er", "unknown_tc"}:
+        expected.source_condition_ids.append("COND-001")
+    if mutation == "three":
+        expected.source_condition_ids.append("COND-002")
+    if mutation == "unknown_er":
+        expected.source_condition_ids.append("COND-999")
+    if mutation == "unknown_tc":
+        design.test_cases[0].source_condition_ids.append("COND-999")
+        expected.source_condition_ids.append("COND-999")
+    if mutation == "lost_condition":
+        design.test_cases[0].source_condition_ids.remove(condition.condition_id)
+    settings = _agent2_checkpoint_options({**_current_agent2_contract(), "contract_version": version})
+    # Isolate the changed rule using historical compact fixtures, not a Live verdict.
+    result = evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements(),
+        legacy_wording_checks=settings["legacy_wording_checks"],
+        allow_multiple_trace_sources=settings["allow_multiple_trace_sources"])
+    assert (cp2_check(result, "CP2-017").status == CheckStatus.PASS) == (
+        version == "3.13" or mutation in {"one", "lost_condition"})
+    if mutation == "unknown_er":
+        assert cp2_check(result, "CP2-005").status == CheckStatus.FAIL
+    elif mutation == "unknown_tc":
+        assert cp2_check(result, "CP2-003").status == CheckStatus.FAIL
+    elif mutation == "lost_condition":
+        assert cp2_check(result, "CP2-004").status == CheckStatus.FAIL
+    # Multiple valid IDs alone never prove that their combined meaning is correct.
+
+
 def test_trace_reference_does_not_force_unrequested_notification_layer():
     from qa_pipeline_contracts import RequirementScopeEvidence, ScopeBasis
     analysis, design = cp2_analysis(), cp2_valid_design()
@@ -660,6 +699,13 @@ def test_agent2_sends_approved_procedures_on_initial_and_rewrite_calls():
         assert approved[0].reuse_context_json in text
         assert "승인 TC 명세가 제공되면" in instructions
         assert instructions == AGENT2_SYSTEM_INSTRUCTIONS
+        assert "내부 분류명·정책 키" in instructions
+        assert "해당 구조화 필드와 SRS 개정안은 기존 규칙대로 작성" in instructions
+        assert "추가 확인 사항이 없으면 빈 목록" in instructions
+        assert "근거 개수와 검증 사실 개수는 다릅니다" in instructions
+        assert "유지 조건이라는 이유로 이번 요청에 필요한 검사를 생략" in instructions
+        assert "후보와 기존 TC를 합친 실제 검사 범위" in instructions
+        assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-40"
         assert "같은 TC의 같은 절차 배열" in instructions
         assert "조작 수단이 없는 입력에서 버튼·횟수를 추정하지 않습니다" in instructions
         assert "UI 기대결과에 내부 enum을 곧바로 화면 표시 문자열처럼 쓰지 않습니다" in instructions
@@ -838,7 +884,7 @@ def test_agent2_uses_structured_responses_api() -> None:
     assert response.usage["total_tokens"] == 300
     assert responses.kwargs["text_format"] is Agent2TestDesign
     assert responses.kwargs["store"] is False
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-38"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-40"
     agent2_input = responses.kwargs["input"][1]["content"]
     assert "[기존 사람 작성·자동화 TC 카탈로그]" in agent2_input
     assert '[코드로 확인한 SRS 개정 범위]' in agent2_input

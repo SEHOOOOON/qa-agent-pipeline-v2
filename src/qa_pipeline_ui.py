@@ -241,7 +241,8 @@ def _verify_candidate_sources(run_dir: Path, tc_id: str) -> None:
     _verify_final_report_sources(run_dir, run_dir.name)
     request, requirements, analysis, design, _, source = _load_verified_agent2_run(run_dir, run_dir.name)
     current_cp2 = evaluate_checkpoint2(request, analysis, design, requirements,
-                                     legacy_wording_checks=_legacy_wording_policy(source, {"3.8", "3.9", "3.10", "3.11", "3.12"}),
+                                     legacy_wording_checks=_legacy_wording_policy(source, {"3.8", "3.9", "3.10", "3.11", "3.12", "3.13"}),
+                                     allow_multiple_trace_sources=source.get("contract_version") == "3.13",
                                      allow_split_procedure_notes=source.get("procedure_preservation_contract") == "1.0",
                                      use_structured_scope_restoration=source.get("scope_restoration_policy") == "STRUCTURED_V1")
     if any(check.rule_id == "CP2-017" and check.status != CheckStatus.PASS for check in current_cp2.checks):

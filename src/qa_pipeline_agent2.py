@@ -37,6 +37,9 @@ def _contains_any(value: str, terms: tuple[str, ...]) -> bool:
 # Agent 2: 제품 기능 테스트케이스 설계
 # ---------------------------------------------------------------------------
 AGENT2_SYSTEM_INSTRUCTIONS = """
+하나의 기대결과에 실제 근거인 조건 ID 여러 개를 연결할 수 있습니다. 근거 개수와 검증 사실 개수는 다릅니다. 기대결과는 여전히 한 대상·한 시점의 한 사실이어야 하며 근거를 늘려 새 검사나 값을 만들지 않습니다.
+유지 SRS 조건은 제품 기준이며 그 전체가 이번 실행 범위라는 뜻은 아닙니다. 변경 요청의 대상·동작·확인값·명시적 제외를 기준으로 이번에 검증할 부분을 설계하고, 후보와 기존 TC를 합친 실제 검사 범위만 설명하세요. 유지 조건이라는 이유로 이번 요청에 필요한 검사를 생략하거나, 일부 시험을 전체 SRS 검증 완료로 표현하지 않습니다. 제외·요청이 충돌하거나 범위를 확정할 근거가 없으면 사람 확인 사항으로 남깁니다.
+설명 필드(coverage_notes·최종_확인_사항 등)에는 실제 시험 범위·기존 TC와의 차이·사람이 확인할 사항만 적습니다. REQUEST_TRACE_ONLY, required_requirement_ids 같은 내부 분류명·정책 키나 '코드 검사에서 확인했다'는 처리 과정을 풀어 쓰지 않습니다. 해당 구조화 필드와 SRS 개정안은 기존 규칙대로 작성하며, 요청·SRS 문장이 같아 개정이 불필요한 경우에는 그 사실만 설명합니다. 추가 확인 사항이 없으면 빈 목록으로 두고 이미 작성한 절차·복원 규칙을 주석에 반복하지 않습니다.
 REQUEST_TRACE_ONLY는 요청된 결과의 참고 근거입니다. REQ-STATE-001을 참고로 연결했다는 이유만으로 이중 검증을 추가하지 않습니다. 실제 상태 정합성 시험이나 명시적으로 선택한 REQUIRED 정책에는 UI·내부 결과가 모두 필요합니다. 구조화 복원이 있으면 실행 기준은 restoration 필드이며, 설명에 특정 단어를 반복해 검사를 맞추지 않습니다. 조작·확인 대상·기준·시점은 빠짐없이 보존합니다.
 화면 조작 설명과 내부 데이터 값은 구분합니다. 입력창·버튼·클릭 횟수·화면 표시명이 제공된 근거에 없으면 추정하지 않습니다. 입력창 근거가 없는데 '입력한다'고 단정하지 말고 대상·목표값·행동을 설명하며 실제 조작 수단은 Agent 3의 화면 관찰로 확인합니다. 근거가 있으면 그 수단과 횟수를 구체적으로 적습니다. UI 기대결과에 내부 enum을 곧바로 화면 표시 문자열처럼 쓰지 않습니다. 화면은 요구된 상태를, 내부 값은 해당 필드와 코드를 각각 기술하고 미확인 표시명·색상은 coverage_notes에 구분합니다. 근거가 있는 중간 판정만 단계에 연결하며 상세함을 위해 알림·색상·새 기대값을 추가하지 않습니다.
 절차 원문은 같은 TC의 같은 절차 배열 안에서 연속 항목으로 나눌 수 있습니다. 분할 항목을 순서대로 공백으로 연결하면 원문 전체가 보존돼야 합니다. 일부 생략·재배열·다른 단계 삽입·다른 TC나 사전조건/조작/복원 사이로 조각 분산은 허용하지 않습니다. 추가 설명은 원문 항목 앞뒤에 별도로 적습니다.
@@ -304,7 +307,7 @@ class OpenAIAgent2:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent2-2-38",
+                prompt_cache_key="qa-v2-agent2-2-40",
                 input=[
                     {"role": "system", "content": AGENT2_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
@@ -658,6 +661,7 @@ def evaluate_checkpoint2(
     legacy_wording_checks: bool = True,
     allow_split_procedure_notes: bool = False,
     use_structured_scope_restoration: bool = False,
+    allow_multiple_trace_sources: bool = False,
 ) -> Checkpoint2Result:
     checks: list[CheckResult] = []
 
@@ -1444,7 +1448,7 @@ def evaluate_checkpoint2(
         for result in tc.expected_results:
             result_condition_ids = set(result.source_condition_ids)
             if result_condition_ids & trace_only_conditions and (
-                len(result_condition_ids) != 1
+                (not allow_multiple_trace_sources and len(result_condition_ids) != 1)
                 or (legacy_wording_checks and result.statement != known_conditions[next(iter(result_condition_ids))].source_text)
             ):
                 minimality_errors.append(

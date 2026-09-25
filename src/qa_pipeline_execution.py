@@ -378,13 +378,13 @@ def _load_verified_agent1_run(run_dir: Path, run_id: str) -> tuple[
 def _current_agent2_contract() -> dict[str, str]:
     """One declaration for new manifests and both initial/rewrite checks."""
     return {
-        "contract_version": "3.12",
+        "contract_version": "3.13",
         "grounding_contract": "1.0",
         "scope_restoration_policy": "STRUCTURED_V1",
         "procedure_preservation_contract": "1.0",
         "wording_policy": "STRUCTURAL_ONLY_V1",
         "input_routing_contract": "1.0",
-        "prompt_version": "agent2-2.38",
+        "prompt_version": "agent2-2.40",
         "structured_restoration_contract": "1.0",
         "state_restoration_contract": "1.0",
         "tc_detail_contract": "1.2",
@@ -407,7 +407,8 @@ def _agent2_checkpoint_options(manifest: dict[str, Any]) -> dict[str, bool]:
     revision = manifest.get("srs_revision_contract")
     return {
         "require_input_contract": manifest.get("input_routing_contract") == "1.0",
-        "legacy_wording_checks": _legacy_wording_policy(manifest, {"3.8", "3.9", "3.10", "3.11", "3.12"}),
+        "allow_multiple_trace_sources": manifest.get("contract_version") == "3.13",
+        "legacy_wording_checks": _legacy_wording_policy(manifest, {"3.8", "3.9", "3.10", "3.11", "3.12", "3.13"}),
         "allow_split_procedure_notes": manifest.get("procedure_preservation_contract") == "1.0",
         "use_structured_scope_restoration": manifest.get("scope_restoration_policy") == "STRUCTURED_V1",
         "require_meaning_guard": manifest.get("meaning_guard_contract") == "1.0",
@@ -719,33 +720,33 @@ def _load_verified_agent2_run(
     ) or (
         manifest.get("contract_version") == "3.2" and detail_contract != "1.1"
     ) or (
-        manifest.get("contract_version") in {"3.3", "3.4", "3.5", "3.6", "3.7", "3.8", "3.9", "3.10", "3.11", "3.12"} and detail_contract != "1.2"
+        manifest.get("contract_version") in {"3.3", "3.4", "3.5", "3.6", "3.7", "3.8", "3.9", "3.10", "3.11", "3.12", "3.13"} and detail_contract != "1.2"
     ):
         raise ValueError("지원하지 않거나 누락된 TC 상세화 계약입니다.")
     revision_contract = manifest.get("srs_revision_contract")
     if revision_contract not in {None, "1.0", "1.1"} or (
-        manifest.get("contract_version") in {"3.4", "3.5", "3.6", "3.7", "3.8", "3.9", "3.10", "3.11", "3.12"} and revision_contract != "1.1"
-    ) or (revision_contract == "1.1" and manifest.get("contract_version") not in {"3.4", "3.5", "3.6", "3.7", "3.8", "3.9", "3.10", "3.11", "3.12"}):
+        manifest.get("contract_version") in {"3.4", "3.5", "3.6", "3.7", "3.8", "3.9", "3.10", "3.11", "3.12", "3.13"} and revision_contract != "1.1"
+    ) or (revision_contract == "1.1" and manifest.get("contract_version") not in {"3.4", "3.5", "3.6", "3.7", "3.8", "3.9", "3.10", "3.11", "3.12", "3.13"}):
         raise ValueError("지원하지 않거나 누락된 SRS 개정 계약입니다.")
     state_contract = manifest.get("state_restoration_contract")
     if (state_contract not in {None, "1.0"}
-        or (manifest.get("contract_version") in {"3.5", "3.6", "3.7", "3.8", "3.9", "3.10", "3.11", "3.12"}) != (state_contract == "1.0")
+        or (manifest.get("contract_version") in {"3.5", "3.6", "3.7", "3.8", "3.9", "3.10", "3.11", "3.12", "3.13"}) != (state_contract == "1.0")
         or (any(tc.state_effect is not None for tc in design.test_cases) and state_contract != "1.0")):
         raise ValueError("지원하지 않거나 누락된 상태 복원 계약입니다.")
     structured_contract = manifest.get("structured_restoration_contract")
     if (structured_contract not in {None, "1.0"}
-            or (manifest.get("contract_version") in {"3.6", "3.7", "3.8", "3.9", "3.10", "3.11", "3.12"}) != (structured_contract == "1.0")
+            or (manifest.get("contract_version") in {"3.6", "3.7", "3.8", "3.9", "3.10", "3.11", "3.12", "3.13"}) != (structured_contract == "1.0")
             or (any(tc.restoration is not None for tc in design.test_cases) and structured_contract != "1.0")):
         raise ValueError("지원하지 않거나 누락된 구조화 복원 계약입니다.")
     input_contract = manifest.get("input_routing_contract")
-    if input_contract not in {None, "1.0"} or (manifest.get("contract_version") in {"3.7", "3.8", "3.9", "3.10", "3.11", "3.12"}) != (input_contract == "1.0"):
+    if input_contract not in {None, "1.0"} or (manifest.get("contract_version") in {"3.7", "3.8", "3.9", "3.10", "3.11", "3.12", "3.13"}) != (input_contract == "1.0"):
         raise ValueError("지원하지 않거나 누락된 입력 분류 계약입니다.")
-    legacy_wording = _legacy_wording_policy(manifest, {"3.8", "3.9", "3.10", "3.11", "3.12"})
+    legacy_wording = _legacy_wording_policy(manifest, {"3.8", "3.9", "3.10", "3.11", "3.12", "3.13"})
     procedure_contract = manifest.get("procedure_preservation_contract")
-    if procedure_contract not in {None, "1.0"} or (manifest.get("contract_version") in {"3.9", "3.10", "3.11", "3.12"}) != (procedure_contract == "1.0"):
+    if procedure_contract not in {None, "1.0"} or (manifest.get("contract_version") in {"3.9", "3.10", "3.11", "3.12", "3.13"}) != (procedure_contract == "1.0"):
         raise ValueError("지원하지 않거나 누락된 절차 보존 계약입니다.")
     policy = manifest.get("scope_restoration_policy")
-    if policy not in {None, "STRUCTURED_V1"} or (manifest.get("contract_version") in {"3.10", "3.11", "3.12"}) != (policy == "STRUCTURED_V1"):
+    if policy not in {None, "STRUCTURED_V1"} or (manifest.get("contract_version") in {"3.10", "3.11", "3.12", "3.13"}) != (policy == "STRUCTURED_V1"):
         raise ValueError("지원하지 않거나 누락된 범위·복원 검사 정책입니다.")
     recomputed = evaluate_checkpoint2(
         request,
@@ -755,9 +756,9 @@ def _load_verified_agent2_run(
         **_agent2_checkpoint_options(manifest),
         existing_catalog=existing_catalog,
     )
-    recomputed = _load_grounding_review(run_dir, manifest, "AGENT2", ("3.11", "3.12"),
+    recomputed = _load_grounding_review(run_dir, manifest, "AGENT2", ("3.11", "3.12", "3.13"),
         build_grounding_input("AGENT2", request, requirements, design, analysis=analysis, catalog=existing_catalog,
-                              include_condition_coverage=manifest.get("contract_version") == "3.12"), recomputed)
+                              include_condition_coverage=manifest.get("contract_version") in {"3.12", "3.13"}), recomputed)
     if not _checkpoint_revalidation_matches(checkpoint, recomputed, legacy=legacy_wording):
         raise ValueError("Stored Checkpoint 2 differs from the current CP2 rules.")
     if checkpoint.status != CheckStatus.PASS:
