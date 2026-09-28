@@ -84,13 +84,15 @@ def test_agent3_precondition_feedback_repairs_only_unstated_context(tmp_path, mo
         target_html=str(target), model="fixture", timeout=60)) == 0
     assert calls == ["model", "model", "trial"]
     assert (case.model_dump_json(), invalid.model_dump_json()) == preserved
-    assert pipeline._read_json_payload(run / "agent3_manifest.json")["prompt_version"] == "agent3-3.33"
+    assert pipeline._read_json_payload(run / "agent3_manifest.json")["prompt_version"] == "agent3-3.42"
+    assert pipeline._read_json_payload(run / "agent3_manifest.json")["terminal_observation_contract"] == "1.0"
+    assert pipeline._read_json_payload(run / "agent3_manifest.json")["task_boundary_contract"] == "1.3"
     assert pipeline._read_json_payload(run / "agent3_automation_plan_attempt_1.json") == invalid.model_dump(mode="json")
     assert pipeline._read_json_payload(run / "agent3_automation_plan_attempt_2.json") == valid.model_dump(mode="json")
 
 
 @pytest.mark.parametrize("include_proof", [False, True])
-def test_agent3_requires_proof_on_new_runs_and_records_it(tmp_path, monkeypatch, include_proof):
+def test_agent3_reviews_precondition_coverage_on_new_runs_and_records_it(tmp_path, monkeypatch, include_proof):
     case, plan, observation = precondition_guard_fixture()
     if not include_proof:
         plan.precondition_checks = []
@@ -104,6 +106,17 @@ def test_agent3_requires_proof_on_new_runs_and_records_it(tmp_path, monkeypatch,
         None, {}, None, SimpleNamespace(test_cases=[case]), None, {"agent2_design_sha256": "a" * 64}))
     monkeypatch.setattr(pipeline_execution, "inspect_target_ui", lambda *a, **kw: observation)
     calls = []
+    def review(payload):
+        calls.append('review')
+        coverage = [item for item in payload['items'] if item['kind'] == 'PRECONDITION_COVERAGE']
+        assert [item['content']['source'] for item in coverage] == case.preconditions
+        record = fake_grounding_record(payload)
+        if not include_proof:
+            # A scripted finding verifies routing, not live model accuracy.
+            first = next(item for item in record['review']['items'] if item['item_id'] == coverage[0]['item_id'])
+            first.update(verdict='UNSUPPORTED', reason='필수 시작 상태 확인 누락')
+        return record
+    monkeypatch.setattr(pipeline_execution, 'OpenAIGroundingReviewer', lambda **kw: SimpleNamespace(review=review))
     def model_plan(*args, **kwargs):
         calls.append("model")
         return pipeline.Agent3Response(plan=plan, response_id=None, model="fixture", usage={})
@@ -118,7 +131,7 @@ def test_agent3_requires_proof_on_new_runs_and_records_it(tmp_path, monkeypatch,
     assert manifest["plan_fidelity_contract"] == "1.2"
     assert manifest["wording_policy"] == "STRUCTURAL_ONLY_V1"
     assert manifest["restore_confirmation_contract"] == "1.2"
-    assert calls == (["model", "trial"] if include_proof else ["model", "model"])
+    assert calls == (["model", "review", "trial"] if include_proof else ["model", "review", "model", "review"])
     assert pipeline._read_json_payload(run / "agent3_automation_plan_attempt_1.json") == plan.model_dump(mode="json")
     if include_proof:
         # Even an unexpected checkpoint exception must leave the paid plan intact.
@@ -133,7 +146,8 @@ def test_agent3_requires_proof_on_new_runs_and_records_it(tmp_path, monkeypatch,
         assert pipeline._read_json_payload(failed_run / "agent3_automation_plan_attempt_1.json") == plan.model_dump(mode="json")
     if not include_proof:
         entry = pipeline_orchestrator._agent3_run_entry(run, case.tc_id, run, 2)
-        assert "사전조건 증명" in entry["reason"]
+        assert "필수 시작 상태 확인 누락" in entry["reason"]
+        assert "근거·검사 연결 검토" in entry["reason"]
         assert not (run / "agent3_error.json").exists()
 
 
@@ -159,11 +173,14 @@ def test_missing_observed_interface_is_tc_exclusion_not_internal_error(tmp_path,
     pipeline.Agent3EligibilityResult.model_validate({key: value for key, value in payload.items() if key in fields})
 
 
-@pytest.mark.parametrize("mode", ["raise", "saved_error", "selection", "unknown"])
+@pytest.mark.parametrize("mode", ["raise", "saved_error", "late_saved_error", "selection", "unknown"])
 def test_orchestrator_records_internal_errors_and_explicit_scope(tmp_path, monkeypatch, mode):
     args = _pipeline_args(tmp_path)
     _write_text_atomic(Path(args.target_html), "<html></html>")
     selected = ["TC-CAND-003", "TC-CAND-004"]
+    error_index = 1 if mode == "late_saved_error" else 0
+    if mode == "late_saved_error":
+        selected.append("TC-CAND-005")
     calls = []
     def agent1(a):
         run = Path(a.runs_root) / a.run_id
@@ -177,7 +194,7 @@ def test_orchestrator_records_internal_errors_and_explicit_scope(tmp_path, monke
         calls.append(a.tc_id)
         if mode == "raise":
             raise RuntimeError("injected internal error")
-        if mode == "saved_error":
+        if mode in {"saved_error", "late_saved_error"} and a.tc_id == selected[error_index]:
             _write_json(Path(a.artifact_dir) / "agent3_error.json", {"error_type": "RuntimeError"})
             return 1
         _write_json(Path(a.artifact_dir) / "agent3_manifest.json", {"status": "PASS"})
@@ -204,11 +221,19 @@ def test_orchestrator_records_internal_errors_and_explicit_scope(tmp_path, monke
         assert summary["unselected_tc_ids"] == [selected[1]]
         assert summary["자동화_제외_TC"][0]["tc_id"] == selected[1]
     else:
-        assert calls == selected  # One failure does not discard the other candidate.
+        assert calls == selected[:error_index + 1]  # Keep earlier success; stop later calls.
         assert exit_code == 1 and summary["status"] == "ERROR"
-        assert summary["internal_error_tc_ids"] == selected
+        assert summary["internal_error_tc_ids"] == [selected[error_index]]
+        assert summary["executed_tc_ids"] == selected[:error_index]
+        assert summary["unattempted_tc_ids"] == selected[error_index + 1:]
+        pending_id = selected[error_index + 1]
+        pending = next(item for item in summary["자동화_제외_TC"] if item["tc_id"] == pending_id)
+        assert pending["candidate_status"] == "BLOCKED" and pending["artifact_dir"] is None
+        assert "미실행" in pending["reason"]
+        assert not (run / "agent3_candidates" / pending_id).exists()
         manifest = pipeline._read_json_payload(run / "orchestrator_manifest.json")
         assert "agent3" not in manifest["completed_stages"]
+        assert manifest["stopped_at"] == "agent3"
 
 
 def test_error_manifest_preserves_original_error_with_broken_summary(tmp_path):
@@ -753,6 +778,7 @@ def test_existing_regression_runs_from_a_copied_neutral_workspace(
     assert result.test_id == "TC-TEMP-001"
     assert "OPENAI_API_KEY" not in captured["env"]
     assert captured["command"][-2:] == ["-p", "no:cacheprovider"]
+    assert "-rP" in captured["command"]
     assert _sha256_file(baseline) == baseline_hash
     assert _sha256_file(target) == target_hash
     assert result.evidence_complete is True
@@ -768,6 +794,23 @@ def test_existing_regression_runs_from_a_copied_neutral_workspace(
     assert str(Path.home().resolve()) not in trace_payload
     assert "qa-regression-" not in trace_payload
     assert "<REGRESSION_WORKSPACE>" in trace_payload
+
+@pytest.mark.parametrize("with_confirmation", [False, True])
+def test_existing_regression_preserves_success_output_without_inventing_checks(tmp_path, with_confirmation):
+    spec = next(item for item in pipeline.EXISTING_REGRESSION_CATALOG if item.tc_id == "TC-TEMP-001")
+    baseline = tmp_path / "test_controller.py"
+    marker = "RESTORE_CONFIRMATIONS_VERIFIED: ER-001,ER-002"
+    statement = f"print({marker!r})" if with_confirmation else "pass"
+    baseline.write_text(f"def {spec.test_function}():\n    {statement}\n", encoding="utf-8")
+    target = tmp_path / "virtual-controller.html"
+    target.write_text("<!doctype html>", encoding="utf-8")
+    result = pipeline.run_existing_regression(spec, baseline, target,
+        tmp_path / "run" / "validation_evidence", timeout_seconds=30)
+    assert result.status == pipeline.NeutralExecutionStatus.PASSED
+    stdout = tmp_path / "run" / result.stdout_file
+    assert (marker in stdout.read_text(encoding="utf-8")) == with_confirmation
+    assert result.evidence_sha256[result.stdout_file] == _sha256_file(stdout)
+
 
 def test_candidate_trial_is_reused_only_after_hash_and_evidence_checks(
     tmp_path: Path, monkeypatch
@@ -849,12 +892,16 @@ def test_candidate_handoff_rejects_evidence_changed_after_agent3(
     with pytest.raises(ValueError, match="시험 증거 SHA-256"):
         pipeline._candidate_execution_record(run_dir, run_id, target)
 
+@pytest.mark.parametrize("explicit", [False, True])
 def test_current_compiler_reuses_identical_code_and_retrials_stale_code(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, explicit
 ) -> None:
     run_id = "RUN-20260816-015000-ABCDEF"
     run_dir = tmp_path / run_id
     run_dir.mkdir()
+    _write_json(run_dir / "agent3_manifest.json",
+                {"contract_version": "4.10", "prompt_version": "agent3-3.42" if explicit else "agent3-3.41",
+                 **({"product_verdict_contract": "1.0"} if explicit else {})})
     target = tmp_path / "virtual-controller.html"
     target.write_text("<!doctype html>", encoding="utf-8")
     test_case = agent3_test_case()
@@ -862,7 +909,7 @@ def test_current_compiler_reuses_identical_code_and_retrials_stale_code(
     _write_json(
         run_dir / "agent3_automation_plan.json", plan.model_dump(mode="json")
     )
-    current_code = compile_automation_candidate(run_id, test_case, plan)
+    current_code = compile_automation_candidate(run_id, test_case, plan, explicit_expectations_only=explicit)
     stored_candidate = run_dir / "candidates" / "test_tc_cand_003.py"
     stored_candidate.parent.mkdir()
     stored_candidate.write_text(current_code, encoding="utf-8")
@@ -934,6 +981,8 @@ def test_current_candidate_trial_returns_technical_failure_for_agent4(
     run_id = "RUN-20260816-015500-ABCDEF"
     run_dir = tmp_path / run_id
     run_dir.mkdir()
+    _write_json(run_dir / "agent3_manifest.json",
+                {"contract_version": "4.10", "prompt_version": "agent3-3.41"})
     target = tmp_path / "virtual-controller.html"
     target.write_text("<!doctype html>", encoding="utf-8")
     test_case = agent3_test_case()

@@ -138,6 +138,57 @@ def _save_received_usage(directory, stage, attempt, source, response):
     })
 
 
+def _prepare_agent3_plan(directory, attempt, plan, observation, test_case=None, ui_bindings=None):
+    """Keep the model's raw plan and the bounded, auditable format conversion."""
+    frozen = test_case is not None and test_case.execution_spec is not None
+    normalized, changes = _normalize_agent3_plan_values(plan, observation)
+    if frozen and (ui_bindings is None or assemble_tc_bindings(test_case, ui_bindings) != plan):
+        raise ValueError("Agent 3 화면 연결 원본과 TC 조립 결과가 다릅니다.")
+    filename = f"agent3_plan_value_format_attempt_{attempt}.json"
+    payload = {"contract": "2.0" if frozen else "1.0", "raw_plan": plan.model_dump(mode="json"), "changes": changes}
+    if frozen:
+        payload["ui_bindings"] = ui_bindings.model_dump(mode="json")
+    _write_json(directory / filename, payload)
+    return normalized, {"attempt": attempt, "sha256": _sha256_file(directory / filename)}
+
+
+def _verify_agent3_plan_value_formats(directory, manifest, observation, final_plan, test_case=None):
+    mapped = test_case is not None and test_case.execution_spec is not None and test_case.execution_spec.binding_contract == "controller-map-1.0"
+    if manifest.get("binding_contract") != ("controller-map-1.0" if mapped else None):
+        raise ValueError("TC와 실행 기록의 화면 연결 방식이 다릅니다.")
+    records = manifest.get("plan_value_formats")
+    if records is None:  # Historical plans remain unchanged and use their original checks.
+        if manifest.get("prompt_version") == "agent3-3.43":
+            raise ValueError("TC 직접 인계의 화면 연결 원본 기록이 없습니다.")
+        return
+    if (not isinstance(records, list) or not records or len(records) > 2
+            or any(not isinstance(r, dict) or type(r.get("attempt")) is not int
+                   or r["attempt"] != i for i, r in enumerate(records, 1))):
+        raise ValueError("Agent 3 계획 값 형식 기록 순서가 잘못됐습니다.")
+    for record in records:
+        filename = f"agent3_plan_value_format_attempt_{record['attempt']}.json"
+        _verify_sha256(directory / filename, record.get("sha256"), "Agent 3 계획 값 형식 기록")
+        payload = _read_json_payload(directory / filename)
+        if payload.get("contract") not in {"1.0", "2.0"}:
+            raise ValueError("지원하지 않는 Agent 3 계획 값 형식 계약입니다.")
+        if (payload.get("contract") == "2.0") != (manifest.get("prompt_version") == "agent3-3.43"):
+            raise ValueError("TC 직접 인계와 값 형식 기록 버전이 다릅니다.")
+        raw = Agent3AutomationPlan.model_validate(payload.get("raw_plan"))
+        if payload["contract"] == "2.0":
+            if test_case is None or test_case.execution_spec is None:
+                raise ValueError("TC 직접 인계의 실행 정의가 없습니다.")
+            bindings = Agent3UiBindings.model_validate(payload.get("ui_bindings"))
+            if assemble_tc_bindings(test_case, bindings) != raw:
+                raise ValueError("저장된 화면 연결과 TC 조립 결과가 다릅니다.")
+            if mapped and bindings != resolve_controller_bindings(test_case, observation):
+                raise ValueError("저장된 화면 연결이 공통 연결표/관찰과 다릅니다.")
+        normalized, changes = _normalize_agent3_plan_values(raw, observation)
+        if payload.get("changes") != changes:
+            raise ValueError("Agent 3 계획 값 형식 변경 기록이 재계산과 다릅니다.")
+    if normalized != final_plan:
+        raise ValueError("Agent 3 최종 계획이 기록된 값 형식 정리 결과와 다릅니다.")
+
+
 def _run_grounding_review(directory, stage, attempt, payload, checkpoint, model, records):
     """One review per structurally valid generation; never retry a reviewer silently."""
     path = directory / f"{stage.lower()}_grounding_review.json"
@@ -148,6 +199,7 @@ def _run_grounding_review(directory, stage, attempt, payload, checkpoint, model,
         try:
             record = OpenAIGroundingReviewer(model=model).review(payload)
             _save_received_usage(directory, stage, attempt, "review", record)
+            _write_json(directory / f"{stage.lower()}_grounding_review_attempt_{attempt}.json", record)
             checkpoint = attach_grounding_check(checkpoint, check_review_record(payload, record))
         except Exception as exc:
             safe_message = "모델 근거 검토를 완료하지 못했습니다. 기록된 오류 종류와 호출 한도를 확인하세요."
@@ -201,10 +253,10 @@ def run_agent1(args: argparse.Namespace) -> int:
     try:
         response = agent.analyze(request, requirements)
         _save_received_usage(run_dir, "AGENT1", 1, "generation", response)
-        checkpoint = evaluate_checkpoint1(request, response.analysis, requirements, legacy_wording_checks=False, allow_background_range_paraphrase=True, allow_srs_quote_parts=True)
+        checkpoint = evaluate_checkpoint1(request, response.analysis, requirements, legacy_wording_checks=False, allow_background_range_paraphrase=True, allow_srs_quote_parts=True, review_range_semantics="1.3", review_scope_semantics=True)
         _write_json(run_dir / "agent1_change_analysis_attempt_1.json", response.analysis.model_dump(mode="json"))
         checkpoint = _run_grounding_review(run_dir, "AGENT1", 1,
-            build_grounding_input("AGENT1", request, requirements, response.analysis),
+            build_grounding_input("AGENT1", request, requirements, response.analysis, allow_output_tolerance=True, include_task_boundaries="1.3", review_scope_semantics=True),
             checkpoint, args.model, grounding_records)
         attempts = [
             {
@@ -235,10 +287,10 @@ def run_agent1(args: argparse.Namespace) -> int:
                 ],
             )
             _save_received_usage(run_dir, "AGENT1", 2, "generation", response)
-            checkpoint = evaluate_checkpoint1(request, response.analysis, requirements, legacy_wording_checks=False, allow_background_range_paraphrase=True, allow_srs_quote_parts=True)
+            checkpoint = evaluate_checkpoint1(request, response.analysis, requirements, legacy_wording_checks=False, allow_background_range_paraphrase=True, allow_srs_quote_parts=True, review_range_semantics="1.3", review_scope_semantics=True)
             _write_json(run_dir / "agent1_change_analysis_attempt_2.json", response.analysis.model_dump(mode="json"))
             checkpoint = _run_grounding_review(run_dir, "AGENT1", 2,
-                build_grounding_input("AGENT1", request, requirements, response.analysis),
+                build_grounding_input("AGENT1", request, requirements, response.analysis, allow_output_tolerance=True, include_task_boundaries="1.3", review_scope_semantics=True),
                 checkpoint, args.model, grounding_records)
             attempts.append(
                 {
@@ -263,8 +315,10 @@ def run_agent1(args: argparse.Namespace) -> int:
                 "wording_policy": "STRUCTURAL_ONLY_V1",
                 "input_routing_contract": "1.0",
                 "meaning_guard_contract": "1.0",
-                "scope_guard_contract": "1.1",
-                "prompt_version": "agent1-2.17",
+                "scope_guard_contract": "1.2",
+                "prompt_version": "agent1-2.23",
+                "task_boundary_contract": "1.3",
+                "output_tolerance_contract": "1.0",
                 "run_id": run_id,
                 "stage": "AGENT_1_CP1",
                 "status": checkpoint.status.value,
@@ -339,16 +393,20 @@ def _load_verified_agent1_run(run_dir: Path, run_id: str) -> tuple[
     analysis = _read_json_model(analysis_file, Agent1Analysis)
     checkpoint = _read_json_model(checkpoint_file, Checkpoint1Result)
     scope_contract = manifest.get("scope_guard_contract")
-    if scope_contract != "1.1" and any(
+    if scope_contract not in {"1.1", "1.2"} and any(
         item.scope_evidence is not None
         and item.scope_evidence.basis == ScopeBasis.REQUEST_TRACE_ONLY
         for item in analysis.requirement_effects
     ):
         raise ValueError("요청 근거 연결에는 검사 범위 계약 1.1이 필요합니다.")
-    if scope_contract not in {None, "1.0", "1.1"} or (
+    if scope_contract not in {None, "1.0", "1.1", "1.2"} or (
         manifest.get("contract_version") == "2.5" and scope_contract != "1.0"
     ) or (
-        manifest.get("contract_version") in {"2.6", "2.7", "2.8", "2.9", "2.10", "2.11"} and scope_contract != "1.1"
+        manifest.get("contract_version") in {"2.6", "2.7", "2.8", "2.9", "2.10", "2.11"} and scope_contract not in {"1.1", "1.2"}
+    ) or (
+        (scope_contract == "1.2") != (manifest.get("prompt_version") == "agent1-2.23")
+    ) or (
+        scope_contract == "1.2" and manifest.get("contract_version") != "2.11"
     ):
         raise ValueError("지원하지 않거나 누락된 검사 범위 계약입니다.")
     input_contract = manifest.get("input_routing_contract")
@@ -362,17 +420,94 @@ def _load_verified_agent1_run(run_dir: Path, run_id: str) -> tuple[
         legacy_wording_checks=legacy_wording,
         allow_background_range_paraphrase=manifest.get("contract_version") in {"2.9", "2.10", "2.11"},
         allow_srs_quote_parts=quote_contract == "1.0",
+        review_range_semantics=_task_boundary_policy(manifest),
+        review_scope_semantics=scope_contract == "1.2",
         require_input_contract=input_contract == "1.0",
         require_meaning_guard=manifest.get("meaning_guard_contract") == "1.0",
-        require_scope_guard=scope_contract in {"1.0", "1.1"},
-        allow_request_trace=scope_contract == "1.1")
+        require_scope_guard=scope_contract in {"1.0", "1.1", "1.2"},
+        allow_request_trace=scope_contract in {"1.1", "1.2"})
     recomputed = _load_grounding_review(run_dir, manifest, "AGENT1", "2.11",
-        build_grounding_input("AGENT1", request, requirements, analysis), recomputed)
+        build_grounding_input("AGENT1", request, requirements, analysis,
+                              allow_output_tolerance=_output_tolerance_policy(manifest),
+                              include_task_boundaries=_task_boundary_policy(manifest),
+                              review_scope_semantics=scope_contract == "1.2"), recomputed)
     if not _checkpoint_revalidation_matches(checkpoint, recomputed, legacy=legacy_wording):
         raise ValueError("현재 CP1 규칙으로 재검증한 결과가 저장된 Checkpoint 1과 다릅니다.")
     if checkpoint.status not in {CheckStatus.PASS, CheckStatus.REVIEW} or checkpoint.handoff_status != HandoffStatus.CONTINUE:
         raise ValueError("Checkpoint 1이 Agent 2 실행을 허용하지 않습니다.")
     return request, requirements, analysis, checkpoint, manifest
+
+
+def _output_tolerance_policy(manifest: dict[str, Any]) -> bool:
+    """Opt in once for new output metadata/order rules; review hashes bind it."""
+    marker = manifest.get("output_tolerance_contract")
+    enabled = marker == "1.0"
+    if (marker not in {None, "1.0"} or (enabled and manifest.get("grounding_contract") != "1.0")
+            or (manifest.get("prompt_version") in {"agent2-2.46", "agent2-2.47", "agent2-2.48", "agent2-2.49", "agent2-2.50", "agent2-2.51", "agent2-2.52", "agent2-2.53", "agent2-2.54"} and not enabled)):
+        raise ValueError("지원하지 않거나 누락된 출력 허용 계약입니다.")
+    return enabled
+
+
+def _task_boundary_policy(manifest: dict[str, Any]) -> str | None:
+    """One opt-in shared by live/rewrite/load/approval; old review hashes stay old."""
+    versions = {"agent1-2.19": ("2.11", "1.0"), "agent2-2.47": ("3.13", "1.0"), "agent3-3.37": ("4.10", "1.0"),
+                "agent1-2.20": ("2.11", "1.1"), "agent2-2.48": ("3.13", "1.1"), "agent3-3.38": ("4.10", "1.1"),
+                "agent1-2.21": ("2.11", "1.2"), "agent3-3.39": ("4.10", "1.2"),
+                "agent1-2.22": ("2.11", "1.3"), "agent2-2.49": ("3.13", "1.3"),
+                "agent3-3.40": ("4.10", "1.3"), "agent1-2.23": ("2.11", "1.3"),
+                "agent2-2.50": ("3.13", "1.3"), "agent2-2.51": ("3.13", "1.3"), "agent2-2.52": ("3.13", "1.3"), "agent2-2.53": ("3.13", "1.3"), "agent2-2.54": ("3.13", "1.3"), "agent3-3.41": ("4.10", "1.3"), "agent3-3.42": ("4.10", "1.3"), "agent3-3.43": ("4.10", "1.3")}
+    prompt = manifest.get("prompt_version")
+    marker = manifest.get("task_boundary_contract")
+    enabled = marker is not None
+    if (marker not in {None, "1.0", "1.1", "1.2", "1.3"} or enabled != (prompt in versions)
+            or (enabled and ((manifest.get("contract_version"), marker) != versions[prompt]
+                or manifest.get("grounding_contract") != "1.0"
+                or manifest.get("output_tolerance_contract") != "1.0"
+                or manifest.get("wording_policy") != "STRUCTURAL_ONLY_V1"))):
+        raise ValueError("지원하지 않거나 누락된 작업 경계 계약입니다.")
+    return marker
+
+
+def _explicit_product_verdict_policy(manifest: dict[str, Any]) -> bool:
+    """Pin new compilation and review semantics; never reinterpret old evidence."""
+    marker = manifest.get("product_verdict_contract")
+    enabled = marker == "1.0"
+    if (marker not in {None, "1.0"}
+            or enabled != (manifest.get("prompt_version") in {"agent3-3.42", "agent3-3.43"})
+            or (enabled and manifest.get("contract_version") != "4.10")):
+        raise ValueError("지원하지 않거나 누락된 제품 판정 계약입니다.")
+    return enabled
+
+
+def _agent3_review_options(manifest: dict[str, Any]) -> dict[str, bool]:
+    """Use the same version-bound CP3/review options for execution and approval."""
+    boundary = _task_boundary_policy(manifest)
+    terminal = manifest.get("terminal_observation_contract")
+    if (terminal not in {None, "1.0"}
+            or (terminal == "1.0") != (manifest.get("prompt_version") in {"agent3-3.41", "agent3-3.42", "agent3-3.43"})):
+        raise ValueError("지원하지 않거나 누락된 마지막 관찰 연결 계약입니다.")
+    return {
+        "allow_state_change_terminal_observation": terminal == "1.0",
+        "explicit_expectations_only": _explicit_product_verdict_policy(manifest),
+        "review_value_roles": boundary in {"1.1", "1.2", "1.3"},
+        "shared_evidence": boundary in {"1.2", "1.3"},
+        "include_execution_contract": manifest.get("prompt_version") in {
+            "agent3-3.35", "agent3-3.36", "agent3-3.37", "agent3-3.38", "agent3-3.39", "agent3-3.40", "agent3-3.41", "agent3-3.42", "agent3-3.43"},
+    }
+
+
+def _review_responsibility_policy(manifest: dict[str, Any], stage: str) -> bool:
+    """One opt-in for new review ownership; old runs retain their exact policy."""
+    version, prompts = {"AGENT2": ("3.13", {"agent2-2.45", "agent2-2.46", "agent2-2.47", "agent2-2.48", "agent2-2.49", "agent2-2.50", "agent2-2.51", "agent2-2.52", "agent2-2.53", "agent2-2.54"}),
+                        "AGENT3": ("4.10", {"agent3-3.36", "agent3-3.37", "agent3-3.38", "agent3-3.39", "agent3-3.40", "agent3-3.41", "agent3-3.42", "agent3-3.43"})}[stage]
+    marker = manifest.get("review_responsibility_contract")
+    enabled = marker == "1.0"
+    if (marker not in {None, "1.0"} or enabled != (manifest.get("prompt_version") in prompts)
+            or (enabled and (manifest.get("contract_version") != version
+                or manifest.get("grounding_contract") != "1.0"
+                or manifest.get("wording_policy") != "STRUCTURAL_ONLY_V1"))):
+        raise ValueError("지원하지 않거나 누락된 검토 책임 계약입니다.")
+    return enabled
 
 
 def _current_agent2_contract() -> dict[str, str]:
@@ -381,10 +516,14 @@ def _current_agent2_contract() -> dict[str, str]:
         "contract_version": "3.13",
         "grounding_contract": "1.0",
         "scope_restoration_policy": "STRUCTURED_V1",
-        "procedure_preservation_contract": "1.0",
+        "procedure_preservation_contract": "2.0",
         "wording_policy": "STRUCTURAL_ONLY_V1",
         "input_routing_contract": "1.0",
-        "prompt_version": "agent2-2.41",
+        "prompt_version": "agent2-2.54",
+        "scope_guard_contract": "1.2",
+        "task_boundary_contract": "1.3",
+        "output_tolerance_contract": "1.0",
+        "review_responsibility_contract": "1.0",
         "structured_restoration_contract": "1.0",
         "state_restoration_contract": "1.0",
         "tc_detail_contract": "1.2",
@@ -405,11 +544,21 @@ def _agent2_checkpoint_options(manifest: dict[str, Any]) -> dict[str, bool]:
     """
     detail = manifest.get("tc_detail_contract")
     revision = manifest.get("srs_revision_contract")
+    scope = manifest.get("scope_guard_contract")
+    if (scope not in {None, "1.2"}
+            or (scope == "1.2") != (manifest.get("prompt_version") in {"agent2-2.50", "agent2-2.51", "agent2-2.52", "agent2-2.53", "agent2-2.54"})):
+        raise ValueError("지원하지 않거나 누락된 Agent 2 범위 의미 검토 계약입니다.")
     return {
+        "review_scope_semantics": scope == "1.2",
         "require_input_contract": manifest.get("input_routing_contract") == "1.0",
+        "review_expected_result_values": _review_responsibility_policy(manifest, "AGENT2"),
+        "review_value_roles": _task_boundary_policy(manifest) in {"1.1", "1.3"},
+        "allow_target_verification_candidate": _task_boundary_policy(manifest) == "1.3",
+        "require_qa_explanation_metadata": not _output_tolerance_policy(manifest),
         "allow_multiple_trace_sources": manifest.get("contract_version") == "3.13",
         "legacy_wording_checks": _legacy_wording_policy(manifest, {"3.8", "3.9", "3.10", "3.11", "3.12", "3.13"}),
         "allow_split_procedure_notes": manifest.get("procedure_preservation_contract") == "1.0",
+        "review_procedure_coverage": manifest.get("procedure_preservation_contract") == "2.0",
         "use_structured_scope_restoration": manifest.get("scope_restoration_policy") == "STRUCTURED_V1",
         "require_meaning_guard": manifest.get("meaning_guard_contract") == "1.0",
         "require_tc_detail": detail in {"1.0", "1.1", "1.2"},
@@ -531,7 +680,9 @@ def run_agent2(args: argparse.Namespace) -> int:
         _write_json(run_dir / "agent2_test_design_attempt_1.json", response.design.model_dump(mode="json"))
         checkpoint2 = _run_grounding_review(run_dir, "AGENT2", 1,
             build_grounding_input("AGENT2", request, requirements, response.design,
-                                  analysis=analysis, catalog=existing_catalog, include_condition_coverage=True),
+                                  analysis=analysis, catalog=existing_catalog, include_condition_coverage=True,
+                                  include_procedure_coverage=True, include_execution_contract=True, include_review_responsibilities=True,
+                                  allow_output_tolerance=True, include_task_boundaries="1.3", review_scope_semantics=True),
             checkpoint2, args.model, grounding_records)
         attempts[-1]["status"] = checkpoint2.status.value
         if checkpoint2.status == CheckStatus.FAIL:
@@ -590,7 +741,9 @@ def run_agent2(args: argparse.Namespace) -> int:
             _write_json(run_dir / "agent2_test_design_attempt_2.json", response.design.model_dump(mode="json"))
             checkpoint2 = _run_grounding_review(run_dir, "AGENT2", 2,
                 build_grounding_input("AGENT2", request, requirements, response.design,
-                                      analysis=analysis, catalog=existing_catalog, include_condition_coverage=True),
+                                      analysis=analysis, catalog=existing_catalog, include_condition_coverage=True,
+                                      include_procedure_coverage=True, include_execution_contract=True, include_review_responsibilities=True,
+                                      allow_output_tolerance=True, include_task_boundaries="1.3", review_scope_semantics=True),
                 checkpoint2, args.model, grounding_records)
             attempts.append(
                 {
@@ -743,11 +896,13 @@ def _load_verified_agent2_run(
         raise ValueError("지원하지 않거나 누락된 입력 분류 계약입니다.")
     legacy_wording = _legacy_wording_policy(manifest, {"3.8", "3.9", "3.10", "3.11", "3.12", "3.13"})
     procedure_contract = manifest.get("procedure_preservation_contract")
-    if procedure_contract not in {None, "1.0"} or (manifest.get("contract_version") in {"3.9", "3.10", "3.11", "3.12", "3.13"}) != (procedure_contract == "1.0"):
+    if procedure_contract not in {None, "1.0", "2.0"} or (manifest.get("contract_version") in {"3.9", "3.10", "3.11", "3.12", "3.13"}) != (procedure_contract in {"1.0", "2.0"}):
         raise ValueError("지원하지 않거나 누락된 절차 보존 계약입니다.")
     policy = manifest.get("scope_restoration_policy")
     if policy not in {None, "STRUCTURED_V1"} or (manifest.get("contract_version") in {"3.10", "3.11", "3.12", "3.13"}) != (policy == "STRUCTURED_V1"):
         raise ValueError("지원하지 않거나 누락된 범위·복원 검사 정책입니다.")
+    if (procedure_contract == "2.0" and (manifest.get("contract_version") != "3.13" or manifest.get("grounding_contract") != "1.0")) or (manifest.get("prompt_version") in {"agent2-2.43", "agent2-2.44", "agent2-2.45", "agent2-2.46", "agent2-2.47", "agent2-2.48", "agent2-2.49", "agent2-2.50", "agent2-2.51", "agent2-2.52", "agent2-2.53", "agent2-2.54"} and procedure_contract != "2.0"):
+        raise ValueError("새 절차 검토 계약에는 전체 모델 근거 검토가 필요합니다.")
     recomputed = evaluate_checkpoint2(
         request,
         analysis,
@@ -758,7 +913,13 @@ def _load_verified_agent2_run(
     )
     recomputed = _load_grounding_review(run_dir, manifest, "AGENT2", ("3.11", "3.12", "3.13"),
         build_grounding_input("AGENT2", request, requirements, design, analysis=analysis, catalog=existing_catalog,
-                              include_condition_coverage=manifest.get("contract_version") in {"3.12", "3.13"}), recomputed)
+                              include_condition_coverage=manifest.get("contract_version") in {"3.12", "3.13"},
+                              include_procedure_coverage=procedure_contract == "2.0",
+                              include_execution_contract=manifest.get("prompt_version") in {"agent2-2.44", "agent2-2.45", "agent2-2.46", "agent2-2.47", "agent2-2.48", "agent2-2.49", "agent2-2.50", "agent2-2.51", "agent2-2.52", "agent2-2.53", "agent2-2.54"},
+                              include_review_responsibilities=_review_responsibility_policy(manifest, "AGENT2"),
+                              allow_output_tolerance=_output_tolerance_policy(manifest),
+                              include_task_boundaries=_task_boundary_policy(manifest),
+                              review_scope_semantics=_agent2_checkpoint_options(manifest)["review_scope_semantics"]), recomputed)
     if not _checkpoint_revalidation_matches(checkpoint, recomputed, legacy=legacy_wording):
         raise ValueError("Stored Checkpoint 2 differs from the current CP2 rules.")
     if checkpoint.status != CheckStatus.PASS:
@@ -834,7 +995,7 @@ def run_candidate_trial(
                 outcome = TrialOutcome.PASS
             elif re.search(r"^[ \t]*(?:E[ \t]+)?AssertionError:[ \t]*PRECONDITION_NOT_MET:", combined, re.M):
                 outcome = TrialOutcome.AUTOMATION_ERROR
-            elif "PRODUCT_MISMATCH:" in combined:
+            elif re.search(r"^[ \t]*(?:E[ \t]+)?(?:AssertionError:[ \t]*)?PRODUCT_MISMATCH:", combined, re.M):
                 outcome = TrialOutcome.PRODUCT_MISMATCH_CANDIDATE
             elif any(
                 marker in combined
@@ -1082,8 +1243,11 @@ def run_agent3(args: argparse.Namespace) -> int:
         )
         observation_file = artifact_dir / "agent3_ui_observation.json"
         _write_json(observation_file, observation.model_dump(mode="json"))
-        preview_payload = build_agent3_model_input(test_case, observation, requirements)
-        preview_payload["model"] = args.model or os.getenv("OPENAI_MODEL", "gpt-5.6-terra")
+        preview_payload = build_agent3_model_input(test_case, observation, requirements, shared_evidence=True)
+        mapped = test_case.execution_spec is not None and test_case.execution_spec.binding_contract == "controller-map-1.0"
+        preview_payload["model"] = "local-controller-map-1.0" if mapped else args.model or os.getenv("OPENAI_MODEL", "gpt-5.6-terra")
+        preview_payload["binding_model_call_required"] = not mapped
+        preview_payload["semantic_review_still_required"] = True
         preview_file = artifact_dir / "agent3_model_input_preview.json"
         _write_json(preview_file, preview_payload)
         if getattr(args, "preview_only", False):
@@ -1092,14 +1256,18 @@ def run_agent3(args: argparse.Namespace) -> int:
             print(f"Preview: {preview_file}")
             return 0
 
-        agent = OpenAIAgent3(model=args.model)
+        agent = ControllerMapAgent3() if mapped else OpenAIAgent3(model=args.model)
         grounding_records = []
         response = agent.plan(test_case, observation, requirements)
         _save_received_usage(artifact_dir, "AGENT3", 1, "generation", response)
+        normalized_plan, value_format = _prepare_agent3_plan(artifact_dir, 1, response.plan, observation, test_case, response.ui_bindings)
+        response = Agent3Response(plan=normalized_plan, response_id=response.response_id,
+                                  model=response.model, usage=response.usage)
+        value_formats = [value_format]
         _write_json(artifact_dir / "agent3_automation_plan_attempt_1.json", response.plan.model_dump(mode="json"))
-        checkpoint = evaluate_checkpoint3_plan(test_case, response.plan, observation, require_precondition_proof=True, require_restore_plan_links=True, require_restore_comparison_basis=True, legacy_wording_checks=False, allow_terminal_observation_anchor=True, require_assertion_target_identity=True)
+        checkpoint = evaluate_checkpoint3_plan(test_case, response.plan, observation, require_precondition_proof=True, require_restore_plan_links=True, require_restore_comparison_basis=True, legacy_wording_checks=False, allow_terminal_observation_anchor=True, require_assertion_target_identity=True, review_precondition_coverage=True, review_value_roles=True, shared_evidence=True, allow_state_change_terminal_observation=True)
         checkpoint = _run_grounding_review(artifact_dir, "AGENT3", 1,
-            build_grounding_input("AGENT3", None, requirements, response.plan, test_case=test_case, observation=observation),
+            build_grounding_input("AGENT3", None, requirements, response.plan, test_case=test_case, observation=observation, include_execution_contract=True, include_review_responsibilities=True, allow_output_tolerance=True, include_task_boundaries="1.3", allow_state_change_terminal_observation=True, explicit_expectations_only=True),
             checkpoint, args.model, grounding_records)
         attempts = [
             {
@@ -1107,10 +1275,10 @@ def run_agent3(args: argparse.Namespace) -> int:
                 "status": checkpoint.status.value,
                 "model": response.model,
                 "usage": response.usage,
-                "usage_source": "AGENT_3_MODEL_CALL",
+                "usage_source": "LOCAL_CONTROLLER_BINDING" if mapped else "AGENT_3_MODEL_CALL",
             }
         ]
-        if checkpoint.status == CheckStatus.FAIL:
+        if checkpoint.status == CheckStatus.FAIL and not mapped:
             _write_json(artifact_dir / "checkpoint3_attempt_1.json", checkpoint.model_dump(mode="json"))
             response = agent.plan(
                 test_case,
@@ -1120,10 +1288,14 @@ def run_agent3(args: argparse.Namespace) -> int:
                 checkpoint_feedback=[item.message for item in checkpoint.checks if item.status == CheckStatus.FAIL],
             )
             _save_received_usage(artifact_dir, "AGENT3", 2, "generation", response)
+            normalized_plan, value_format = _prepare_agent3_plan(artifact_dir, 2, response.plan, observation, test_case, response.ui_bindings)
+            response = Agent3Response(plan=normalized_plan, response_id=response.response_id,
+                                      model=response.model, usage=response.usage)
+            value_formats.append(value_format)
             _write_json(artifact_dir / "agent3_automation_plan_attempt_2.json", response.plan.model_dump(mode="json"))
-            checkpoint = evaluate_checkpoint3_plan(test_case, response.plan, observation, require_precondition_proof=True, require_restore_plan_links=True, require_restore_comparison_basis=True, legacy_wording_checks=False, allow_terminal_observation_anchor=True, require_assertion_target_identity=True)
+            checkpoint = evaluate_checkpoint3_plan(test_case, response.plan, observation, require_precondition_proof=True, require_restore_plan_links=True, require_restore_comparison_basis=True, legacy_wording_checks=False, allow_terminal_observation_anchor=True, require_assertion_target_identity=True, review_precondition_coverage=True, review_value_roles=True, shared_evidence=True, allow_state_change_terminal_observation=True)
             checkpoint = _run_grounding_review(artifact_dir, "AGENT3", 2,
-                build_grounding_input("AGENT3", None, requirements, response.plan, test_case=test_case, observation=observation),
+                build_grounding_input("AGENT3", None, requirements, response.plan, test_case=test_case, observation=observation, include_execution_contract=True, include_review_responsibilities=True, allow_output_tolerance=True, include_task_boundaries="1.3", allow_state_change_terminal_observation=True, explicit_expectations_only=True),
                 checkpoint, args.model, grounding_records)
             attempts.append(
                 {
@@ -1143,7 +1315,7 @@ def run_agent3(args: argparse.Namespace) -> int:
         if checkpoint.status == CheckStatus.PASS:
             candidate_dir.mkdir(parents=True, exist_ok=False)
             candidate_file = candidate_dir / f"test_{args.tc_id.lower().replace('-', '_')}.py"
-            code = compile_automation_candidate(args.run_id, test_case, response.plan)
+            code = compile_automation_candidate(args.run_id, test_case, response.plan, explicit_expectations_only=True)
             static_checks = evaluate_compiled_candidate(test_case, code)
             checkpoint.checks.extend(static_checks)
             if any(item.status == CheckStatus.FAIL for item in static_checks):
@@ -1181,7 +1353,12 @@ def run_agent3(args: argparse.Namespace) -> int:
             "plan_fidelity_contract": "1.2",
             "precondition_proof_contract": "1.0",
             "restore_confirmation_contract": "1.2",
-            "prompt_version": "agent3-3.33",
+            "prompt_version": "agent3-3.43" if test_case.execution_spec is not None else "agent3-3.42",
+            "product_verdict_contract": "1.0",
+            "terminal_observation_contract": "1.0",
+            "task_boundary_contract": "1.3",
+            "output_tolerance_contract": "1.0",
+            "review_responsibility_contract": "1.0",
             "run_id": args.run_id,
             "source_stage": "AGENT_2_CP2",
             "stage": "AGENT_3_CP3_TRIAL",
@@ -1192,6 +1369,7 @@ def run_agent3(args: argparse.Namespace) -> int:
             "usage": _aggregate_agent3_usage(attempts + grounding_records),
             "final_attempt_usage": response.usage,
             "attempts": attempts,
+            "plan_value_formats": value_formats,
             "source_agent2_manifest_sha256": _sha256_file(run_dir / "agent2_manifest.json"),
             "source_agent2_design_sha256": source_manifest["agent2_design_sha256"],
             "eligibility_sha256": _sha256_file(eligibility_file),
@@ -1210,6 +1388,8 @@ def run_agent3(args: argparse.Namespace) -> int:
             "project1_modified": _sha256_file(target_html) != observation.target_sha256,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
+        if mapped:
+            manifest_payload["binding_contract"] = "controller-map-1.0"
         _write_json(artifact_dir / "agent3_manifest.json", manifest_payload)
     except AutomationInterfaceUnavailable as exc:
         unavailable = eligibility.model_copy(update={
@@ -1341,6 +1521,8 @@ def _candidate_execution_record(
     test_case = next((item for item in design.test_cases if item.tc_id == tc_id), None)
     if test_case is None:
         raise ValueError("Agent 3 선택 TC가 현재 Agent 2 설계에 없습니다.")
+    if (test_case.execution_spec is not None) != (agent3_manifest.get("prompt_version") == "agent3-3.43"):
+        raise ValueError("TC 실행 정의와 Agent 3 인계 버전이 다릅니다.")
 
     artifact_hashes = (
         ("agent3_eligibility.json", "eligibility_sha256", "Agent 3 Eligibility"),
@@ -1358,6 +1540,7 @@ def _candidate_execution_record(
     plan = _read_json_model(
         artifact_dir / "agent3_automation_plan.json", Agent3AutomationPlan
     )
+    _verify_agent3_plan_value_formats(artifact_dir, agent3_manifest, observation, plan, test_case)
     restore_contract = agent3_manifest.get("restore_confirmation_contract")
     if restore_contract not in {None, "1.0", "1.1", "1.2"} or (
         agent3_manifest.get("contract_version") == "4.1" and restore_contract != "1.0"
@@ -1382,18 +1565,30 @@ def _candidate_execution_record(
                 and (agent3_manifest.get("contract_version") in {"4.5", "4.7"}) != (structured_contract == "1.0"))
             or (test_case.restoration is not None) != (structured_contract == "1.0")):
         raise ValueError("지원하지 않거나 누락된 구조화 복원 계획 계약입니다.")
+    review_options = _agent3_review_options(agent3_manifest)
     current_checkpoint3 = evaluate_checkpoint3_plan(test_case, plan, observation,
         legacy_wording_checks=_legacy_wording_policy(agent3_manifest, {"4.6", "4.7", "4.8", "4.9", "4.10"}),
         require_plan_fidelity=fidelity_contract in {"1.0", "1.1", "1.2"},
         allow_terminal_observation_anchor=fidelity_contract in {"1.1", "1.2"},
+        allow_state_change_terminal_observation=review_options["allow_state_change_terminal_observation"],
         require_assertion_target_identity=fidelity_contract == "1.2",
         require_precondition_proof=agent3_manifest.get("precondition_proof_contract") == "1.0",
+        review_precondition_coverage=_review_responsibility_policy(agent3_manifest, "AGENT3"),
+        review_value_roles=review_options["review_value_roles"],
+        shared_evidence=review_options["shared_evidence"],
         require_restore_confirmation_detail=restore_contract in {"1.0", "1.1", "1.2"},
         require_restore_plan_links=restore_contract in {"1.1", "1.2"},
         require_restore_comparison_basis=restore_contract == "1.2")
     current_checkpoint3 = _load_grounding_review(artifact_dir, agent3_manifest, "AGENT3", ("4.9", "4.10"),
-        build_grounding_input("AGENT3", None, {}, plan, test_case=test_case, observation=observation), current_checkpoint3)
-    current_code = compile_automation_candidate(run_id, test_case, plan)
+        build_grounding_input("AGENT3", None, {}, plan, test_case=test_case, observation=observation,
+                              include_execution_contract=review_options["include_execution_contract"],
+                              include_review_responsibilities=_review_responsibility_policy(agent3_manifest, "AGENT3"),
+                              allow_output_tolerance=_output_tolerance_policy(agent3_manifest),
+                              include_task_boundaries=_task_boundary_policy(agent3_manifest),
+                              allow_state_change_terminal_observation=review_options["allow_state_change_terminal_observation"],
+                              explicit_expectations_only=review_options["explicit_expectations_only"]), current_checkpoint3)
+    current_code = compile_automation_candidate(run_id, test_case, plan,
+        explicit_expectations_only=review_options["explicit_expectations_only"])
     current_static_checks = evaluate_compiled_candidate(test_case, current_code)
     current_checkpoint3.checks.extend(current_static_checks)
     if any(check.status == CheckStatus.FAIL for check in current_static_checks):
@@ -1607,7 +1802,9 @@ def _current_candidate_execution_record(
     plan = _read_json_model(
         artifact_dir / "agent3_automation_plan.json", Agent3AutomationPlan
     )
-    current_code = compile_automation_candidate(run_id, test_case, plan)
+    manifest = _read_json_payload(artifact_dir / "agent3_manifest.json")
+    current_code = compile_automation_candidate(run_id, test_case, plan,
+        explicit_expectations_only=_explicit_product_verdict_policy(manifest))
     stored_candidate_file = _candidate_file_for_result(run_dir, stored_result)
     if (
         stored_candidate_file.is_file()
@@ -1743,6 +1940,7 @@ def run_existing_regression(
                     "pytest",
                     f"tests/test_controller.py::{spec.test_function}",
                     "-q",
+                    "-rP",
                     "--browser",
                     "chromium",
                     "-p",

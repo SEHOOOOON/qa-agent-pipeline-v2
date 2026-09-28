@@ -2,6 +2,193 @@
 
 from pipeline_test_support import *
 
+@pytest.mark.parametrize("basis", ["DIRECT_REQUEST", "REQUEST_TRACE_ONLY", "CHANGE_DEPENDENCY"])
+@pytest.mark.parametrize("requirement_id", ["REQ-NOTIFY-001", "REQ-STATE-001"])
+def test_scope_meaning_review_does_not_gate_on_label_or_literal_srs(basis, requirement_id):
+    from qa_pipeline_contracts import ScopeBasis
+    request, analysis, requirements = cp1_scope_case(direct=True, requirement_id=requirement_id)
+    condition = analysis.confirmed_conditions[-1]
+    request.acceptance_notes[-1] = "화면에 변경한 설정값을 표시합니다."
+    condition.statement = condition.source_text = request.acceptance_notes[-1]
+    effect = next(e for e in analysis.requirement_effects if e.requirement_id == requirement_id)
+    effect.scope_evidence.basis = ScopeBasis(basis)
+    current = evaluate_checkpoint1(request, analysis, requirements,
+        legacy_wording_checks=False, review_scope_semantics=True)
+    assert cp1_check(current, "CP1-011").status == CheckStatus.PASS
+    assert current.handoff_status == HandoffStatus.CONTINUE
+    historical = evaluate_checkpoint1(request, analysis, requirements, legacy_wording_checks=False)
+    assert cp1_check(historical, "CP1-011").status == (
+        CheckStatus.PASS if basis == "REQUEST_TRACE_ONLY" else CheckStatus.REVIEW)
+
+
+@pytest.mark.parametrize("basis", ["DIRECT_REQUEST", "REQUEST_TRACE_ONLY", "CHANGE_DEPENDENCY"])
+@pytest.mark.parametrize("mutation", ["missing", "unknown_condition", "duplicate_condition",
+    "srs_condition", "invented_request", "invented_srs", "wrong_link"])
+def test_scope_meaning_review_keeps_source_and_link_guards(basis, mutation):
+    from qa_pipeline_contracts import ScopeBasis
+    request, analysis, requirements = cp1_scope_case(direct=True)
+    condition = analysis.confirmed_conditions[-1]
+    effect = next(e for e in analysis.requirement_effects if e.requirement_id == "REQ-NOTIFY-001")
+    effect.scope_evidence.basis = ScopeBasis(basis)
+    if mutation == "missing":
+        effect.scope_evidence = None
+    elif mutation == "unknown_condition":
+        effect.scope_evidence.request_condition_ids = ["COND-999"]
+    elif mutation == "duplicate_condition":
+        effect.scope_evidence.request_condition_ids *= 2
+    elif mutation == "srs_condition":
+        condition.source_type = ConditionSource.SRS
+    elif mutation == "invented_request":
+        condition.source_text = "요청에 없는 기능을 추가한다."
+    elif mutation == "invented_srs":
+        effect.scope_evidence.srs_source_text = "SRS에 없는 기능이다."
+    else:
+        condition.requirement_ids = [request.target_requirement_id]
+    result = evaluate_checkpoint1(request, analysis, requirements,
+        legacy_wording_checks=False, review_scope_semantics=True)
+    assert cp1_check(result, "CP1-011").status == CheckStatus.FAIL
+    assert result.handoff_status == HandoffStatus.BLOCKED
+
+@pytest.mark.parametrize("initial", [19, 27, 35])
+def test_baseline_initial_value_is_reviewed_not_literal_matched_to_srs(initial):
+    import qa_pipeline_grounding as grounding
+    request, analysis = cp1_request(), cp1_valid_analysis()
+    request.before_value = analysis.before_condition = f"{initial}°C"
+    analysis.requirement_effects[0].relation = RequirementRelation.VERIFY
+    result = evaluate_checkpoint1(request, analysis, cp1_requirements(),
+        legacy_wording_checks=False, review_range_semantics="1.3")
+    assert cp1_check(result, "CP1-004").status == CheckStatus.PASS
+    payload = grounding.build_grounding_input("AGENT1", request, cp1_requirements(), analysis,
+        include_task_boundaries="1.3")
+    source = next(i for i in payload["items"] if i["item_id"] == "REQUEST_COVERAGE/before_value")
+    assert source["content"]["source_text"] == request.before_value
+    # A reviewer must still reject 35 as a valid preparation under the baseline.
+    record = fake_grounding_record(payload)
+    verdict = "UNSUPPORTED" if initial == 35 else "SUPPORTED"
+    next(i for i in record["review"]["items"] if i["item_id"] == source["item_id"])["verdict"] = verdict
+    assert grounding.check_review_record(payload, record).status == (
+        CheckStatus.FAIL if initial == 35 else CheckStatus.PASS)
+    analysis.before_condition = "99°C"
+    changed = evaluate_checkpoint1(request, analysis, cp1_requirements(),
+        legacy_wording_checks=False, review_range_semantics="1.3")
+    assert cp1_check(changed, "CP1-004").status == CheckStatus.FAIL
+
+@pytest.mark.parametrize("relation,expected", [("VERIFY", "PASS"), ("MODIFIED", "PASS"),
+    ("NO_IMPACT", "FAIL"), ("UPDATE_REQUIRED", "FAIL")])
+def test_target_scenario_relation_contract(relation, expected):
+    request, analysis = cp1_request(), cp1_valid_analysis()
+    analysis.requirement_effects[0].relation = RequirementRelation(relation)
+    result = evaluate_checkpoint1(request, analysis, cp1_requirements(),
+        legacy_wording_checks=False, review_range_semantics="1.3")
+    assert cp1_check(result, "CP1-006").status.value == expected
+    if relation == "VERIFY":
+        old = evaluate_checkpoint1(request, analysis, cp1_requirements(),
+            legacy_wording_checks=False, review_range_semantics="1.2")
+        assert cp1_check(old, "CP1-006").status == CheckStatus.FAIL
+    # Structural routing only: mandatory model review must reject a false VERIFY.
+
+
+@pytest.mark.parametrize("value", [17, 21, 24, 29, 31])
+def test_srs_context_can_reference_request_value_without_literal_in_range(value):
+    request, analysis = cp1_request(), cp1_valid_analysis()
+    request.description += f" 시험 입력은 {value}°C입니다."
+    condition = analysis.confirmed_conditions[2]
+    condition.statement = f"입력 {value}°C는 기존 범위 16~30°C와 대조한다."
+    current = evaluate_checkpoint1(request, analysis, cp1_requirements(),
+        legacy_wording_checks=False, review_range_semantics="1.3")
+    assert cp1_check(current, "CP1-007").status == CheckStatus.PASS
+    old = evaluate_checkpoint1(request, analysis, cp1_requirements(),
+        legacy_wording_checks=False, review_range_semantics="1.2")
+    assert cp1_check(old, "CP1-007").status == CheckStatus.FAIL
+    condition.statement = "입력 99°C를 허용한다."
+    bad = evaluate_checkpoint1(request, analysis, cp1_requirements(),
+        legacy_wording_checks=False, review_range_semantics="1.3")
+    assert cp1_check(bad, "CP1-007").status == CheckStatus.FAIL
+    # A sourced 31 is not proven allowed. Semantic review decides allow/block.
+
+
+@pytest.mark.parametrize("layout", ["joined", "reversed", "larger"])
+@pytest.mark.parametrize("fact", ["모드는 난방이다.", "풍량은 강풍이다.", "전원은 운전이다.", "잠금은 해제다.", "온도는 21°C다."])
+def test_shared_request_quotes_preserve_all_notes(layout, fact):
+    request, analysis, requirements = cp1_request(), cp1_valid_analysis(), cp1_requirements()
+    request.description = "준비 후 " + fact
+    first = analysis.confirmed_conditions[0]
+    original = first.source_text
+    if layout == "larger":
+        request.description = original + " " + fact
+        first.source_text = request.description
+    else:
+        first.source_text = " | ".join([original, request.description][::(-1 if layout == "reversed" else 1)])
+    current = evaluate_checkpoint1(request, analysis, requirements, legacy_wording_checks=False,
+        allow_srs_quote_parts=True, review_range_semantics="1.2")
+    assert cp1_check(current, "CP1-007").status == CheckStatus.PASS
+    assert cp1_check(current, "CP1-008").status == CheckStatus.PASS
+    historical = evaluate_checkpoint1(request, analysis, requirements, legacy_wording_checks=False,
+        allow_srs_quote_parts=True, review_range_semantics="1.1")
+    assert cp1_check(historical, "CP1-008").status == CheckStatus.FAIL
+
+
+@pytest.mark.parametrize("fault,rule", [("invented", "CP1-007"), ("empty", "CP1-007"),
+    ("missing", "CP1-008"), ("wrong_number", "CP1-007"), ("excluded", "CP1-009"), ("procedure", "CP1-012")])
+def test_shared_request_quotes_keep_provenance_and_roles(fault, rule):
+    request, analysis, requirements = cp1_request(), cp1_valid_analysis(), cp1_requirements()
+    first = analysis.confirmed_conditions[0]
+    first.source_text += " | " + request.after_value
+    if fault == "invented": first.source_text += " | 없는 원문"
+    elif fault == "empty": first.source_text += " | "
+    elif fault == "missing": first.source_text = request.after_value
+    elif fault == "wrong_number": first.statement = "99°C를 허용한다."
+    elif fault == "excluded":
+        request.out_of_scope = [request.acceptance_notes[0]]
+        analysis.excluded_scope.append(request.acceptance_notes[0])
+    else:
+        note = "[준비] 원래 상태를 기록합니다."
+        request.acceptance_notes.append(note)
+        analysis.procedure_notes = [note]
+        first.source_text += " | " + note
+    cp = evaluate_checkpoint1(request, analysis, requirements, legacy_wording_checks=False,
+        allow_srs_quote_parts=True, review_range_semantics="1.2")
+    assert cp1_check(cp, rule).status == CheckStatus.FAIL
+
+
+@pytest.mark.parametrize("old,new", [("16~30", "18~30"), ("10~40", "15~35"), ("-5~25", "0~20")])
+@pytest.mark.parametrize("template", [
+    "과거 {old}°C가 아닌 {new}°C를 적용한다.",
+    "허용 범위를 {old}°C에서 {new}°C로 변경한다.",
+    "새 기준은 {new}°C이다. 폐기할 기준은 {old}°C이다.",
+])
+def test_task_boundaries_do_not_require_every_prose_range(old, new, template):
+    request, analysis, requirements = cp1_request(), cp1_valid_analysis(), cp1_requirements()
+    request.after_value = request.description = template.format(old=old, new=new)
+    analysis.after_condition = request.after_value
+    condition = analysis.confirmed_conditions[-1]
+    condition.source_text = f"{new}°C"
+    condition.statement = f"변경 후 범위는 {new}°C이다."
+    old_cp = evaluate_checkpoint1(request, analysis, requirements, legacy_wording_checks=False)
+    new_cp = evaluate_checkpoint1(request, analysis, requirements,
+        legacy_wording_checks=False, review_range_semantics=True)
+    assert cp1_check(old_cp, "CP1-008").status == CheckStatus.FAIL
+    assert cp1_check(new_cp, "CP1-008").status == CheckStatus.PASS
+    # This checks removal of the faulty heuristic, not model interpretation.
+    assert request.after_value == template.format(old=old, new=new)
+
+
+@pytest.mark.parametrize("mutation,rule", [
+    ("missing_note", "CP1-008"), ("invented_source", "CP1-007"),
+    ("wrong_identity", "CP1-001"),
+])
+def test_task_boundaries_keep_structural_analysis_protections(mutation, rule):
+    request, analysis, requirements = cp1_request(), cp1_valid_analysis(), cp1_requirements()
+    if mutation == "missing_note":
+        analysis.confirmed_conditions = analysis.confirmed_conditions[1:]
+    elif mutation == "invented_source":
+        analysis.confirmed_conditions[0].source_text = "요청에 없는 온도 99°C"
+    else:
+        analysis.request_id = "CR-OTHER"
+    result = evaluate_checkpoint1(request, analysis, requirements,
+        legacy_wording_checks=False, review_range_semantics=True)
+    assert cp1_check(result, rule).status == CheckStatus.FAIL
+
 
 @pytest.mark.parametrize("source,quote,valid", [
     ("0.5°C", "5°C", False), ("-18°C", "18°C", False),
@@ -743,11 +930,11 @@ def test_agent1_uses_structured_responses_api() -> None:
     assert result.response_id == "resp_test"
     assert result.usage["total_tokens"] == 150
     assert responses.kwargs["text_format"] is Agent1Analysis
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent1-2-17"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent1-2-23"
     assert responses.kwargs["store"] is False
     instructions = responses.kwargs["input"][0]["content"]
-    assert "현재 SRS는 변경 전 제품 상태" in instructions
-    assert "변경 후 정책의 권한 있는 입력" in instructions
+    assert "현재 SRS는 제품 기능과 허용 조건" in instructions
+    assert "단순 상태 전환의 시작값·목표값" in instructions
     assert "acceptance_notes는 제공된 인수 조건 전달 목록" in instructions
     assert "Agent 2가 TC의 판정 기준" in instructions
     assert "VERIFY, 이번 변경과 무관한 기준은 NO_IMPACT" in instructions

@@ -19,10 +19,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from openai import OpenAI
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, model_validator, model_serializer
 from qa_pipeline_trace import redact_playwright_trace as _redact_playwright_trace
 from qa_pipeline_io import *
 
@@ -281,13 +281,13 @@ class ConditionExecution(str, Enum):
 
 
 class TestData(StrictModel):
-    initial_mode: NonEmptyStr | None = None
-    requested_mode: NonEmptyStr | None = None
-    requested_modes: list[NonEmptyStr] = Field(default_factory=list)
+    initial_mode: NonEmptyStr | None = Field(default=None, description="운전 모드의 준비 완료 상태. 복원 기본값이나 풍량·전원·잠금 값이 아님.")
+    requested_mode: NonEmptyStr | None = Field(default=None, description="본 시험에서 확인할 단일 운전 모드. 준비·복원 값이나 다른 관제점 값을 넣지 않음.")
+    requested_modes: list[NonEmptyStr] = Field(default_factory=list, description="본 시험이 여러 운전 모드를 각각 확인할 때만 사용. 시작 상태와 목표 상태라는 이유로 묶지 않음.")
     initial_temperature_c: float | None = None
     requested_temperature_c: float | None = None
     requested_temperatures_c: list[float] = Field(default_factory=list)
-    restore_observed_hvac_state: bool = False
+    restore_observed_hvac_state: bool = Field(default=False, description="모드·온도 관찰 복원의 과거 호환 옵션. 일반 복원 사용 여부가 아님. 풍량·전원·잠금만 변경하면 false이고 restoration으로 복원합니다.")
 
 
 class ExpectedResult(StrictModel):
@@ -375,6 +375,15 @@ class ProductTestCaseCandidate(StrictModel):
     restoration: StructuredRestoration | None = None
     automation_candidate: bool
     automation_reason: NonEmptyStr
+    execution_spec: TcExecutionSpec | None = None
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_execution_payload(self, handler):
+        payload = handler(self)
+        # Do not change historical TC/review digests by injecting a null field.
+        if self.execution_spec is None:
+            payload.pop("execution_spec", None)
+        return payload
 
     @model_validator(mode="after")
     def restore_contract_must_be_consistent(self) -> "ProductTestCaseCandidate":
@@ -399,8 +408,14 @@ def _structured_restoration_errors(tc: ProductTestCaseCandidate) -> list[str]:
                 if contract.operation_steps or contract.confirmations or tc.restore_steps else [])
     errors = []
     sources = [item.source_text for item in contract.confirmations]
+    if len(set(tc.restore_steps)) != len(tc.restore_steps):
+        errors.append(
+            "복원 절차에 동일 문장이 중복되어 있습니다. 같은 대상·준비 전 관찰값을 확인하는 경우에만 "
+            "하나의 confirmation에 관련 result_ids와 comparisons를 모두 연결하세요. "
+            "다른 대상·기준의 확인이나 별도 조작은 합치지 말고 구분해서 작성하세요. "
+            "ER 또는 비교 항목을 삭제하지 마세요."
+        )
     if (not contract.operation_steps or not sources
-            or len(set(tc.restore_steps)) != len(tc.restore_steps)
             or contract.operation_steps + sources != tc.restore_steps):
         errors.append("복원 절차는 조작 목록 다음 확인 목록으로 빠짐없이 한 번씩 연결해야 합니다")
     results = {r.result_id: r for r in tc.expected_results}
@@ -523,12 +538,14 @@ class AutomationActionType(str, Enum):
     CHECK = "CHECK"
     UNCHECK = "UNCHECK"
     RESTORE_OBSERVED_HVAC = "RESTORE_OBSERVED_HVAC"
+    RESTORE_OBSERVED_CONTROLLER = "RESTORE_OBSERVED_CONTROLLER"
 
 
 class AssertionStrategy(str, Enum):
     UI_TEMPERATURE = "UI_TEMPERATURE"
     INTERNAL_SET_TEMP = "INTERNAL_SET_TEMP"
     INTERNAL_DEVICE_FIELDS_EQUALS = "INTERNAL_DEVICE_FIELDS_EQUALS"
+    CONTROLLER_UI_FIELDS_EQUALS = "CONTROLLER_UI_FIELDS_EQUALS"
     TOAST_VISIBLE = "TOAST_VISIBLE"
     TOAST_BLOCKING = "TOAST_BLOCKING"
     CONTROLS_DISABLED = "CONTROLS_DISABLED"
@@ -621,7 +638,17 @@ class VerifiedExecutionContext(StrictModel):
     evidence: list[NonEmptyStr] = Field(default_factory=list)
 
 
+class TcOperation(StrictModel):
+    action_id: Annotated[str, StringConstraints(pattern=r"^ACT-\d{3}$")]
+    phase: AutomationPhase
+    action_type: AutomationActionType
+    value: str | float | int | bool | None = None
+    source_text: NonEmptyStr
+    target: NonEmptyStr = Field(description="이 조작의 논리적 대상/선택값. DOM selector가 아님. 한 문장의 여러 조작도 각각 구분.")
+
+
 class AutomationAction(StrictModel):
+    # Keep historical field order: review source documents contain JSON strings.
     action_id: Annotated[str, StringConstraints(pattern=r"^ACT-\d{3}$")]
     phase: AutomationPhase
     action_type: AutomationActionType
@@ -635,6 +662,27 @@ class DeviceFieldExpectation(StrictModel):
     expected_value: str | float | int | bool
 
 
+class TcVerification(StrictModel):
+    result_id: Annotated[str, StringConstraints(pattern=r"^ER-\d{3}$")]
+    observation_layer: ObservationLayer
+    strategy: AssertionStrategy
+    expected_number: float | None = None
+    expected_text: str | None = None
+    expected_value: str | float | int | bool | None = None
+    expected_fields: list[DeviceFieldExpectation] = Field(
+        default_factory=list
+    )
+    after_action_id: Annotated[str, StringConstraints(pattern=r"^ACT-\d{3}$")] | None = None
+    target: NonEmptyStr | None = Field(default=None, description="연결표의 논리적 관찰 항목. 화면/내부 위치를 구분하며 정답 값은 포함하지 않음.")
+
+    @model_serializer(mode="wrap")
+    def serialize_target(self, handler):
+        result = handler(self)
+        if self.target is None:
+            result.pop("target", None)
+        return result
+
+
 class AutomationAssertion(StrictModel):
     result_id: Annotated[str, StringConstraints(pattern=r"^ER-\d{3}$")]
     observation_layer: ObservationLayer
@@ -643,9 +691,7 @@ class AutomationAssertion(StrictModel):
     expected_number: float | None = None
     expected_text: str | None = None
     expected_value: str | float | int | bool | None = None
-    expected_fields: list[DeviceFieldExpectation] = Field(
-        default_factory=list
-    )
+    expected_fields: list[DeviceFieldExpectation] = Field(default_factory=list)
     after_action_id: Annotated[str, StringConstraints(pattern=r"^ACT-\d{3}$")] | None = None
 
 
@@ -655,6 +701,7 @@ class Agent3PlanningStatus(str, Enum):
 
 
 class PreconditionReadKind(str, Enum):
+    CONTROLLER_UI_FIELD = "CONTROLLER_UI_FIELD"
     UI_TEXT = "UI_TEXT"
     UI_VALUE = "UI_VALUE"
     UI_CHECKED = "UI_CHECKED"
@@ -663,11 +710,199 @@ class PreconditionReadKind(str, Enum):
     BASELINE_CONTEXT = "BASELINE_CONTEXT"
 
 
+QA_EXECUTION_CONTRACT = """Host execution contract (not a new product requirement):
+restore_required and structured restoration define ordinary restoration. restore_observed_hvac_state is only the legacy mode/temperature compatibility option, NOT a master restoration switch. False is correct for fan/power/lock-only tests with valid restoration.
+For state_effect TCs, the compiler saves original observations BEFORE setup, checks preconditions AFTER setup, then runs TEST. RESTORE_OBSERVED_CONTROLLER restores all changed controller fields through the UI. restore_confirmations link ER readers to their saved original values; selectors/reader implementations need not be repeated in each confirmation. Actual success still requires runtime evidence.
+SELECT_DEVICE clicks the target card and waits for window.__vccs.selectedUnitId == plan.target_device_id. INTERNAL_DEVICE_FIELDS_EQUALS resolves devices by that same id, not by an unspecified array index.
+CONTROLLER_UI_FIELDS_EQUALS reads the card DOM at #device-card-1, or panel DOM at .detail-panel. These are different locations and must match the TC observation target; neither substitutes for the other or for internal state. Values are decoded as status OPERATION/STOP, mode COOL/HEAT/FAN/DRY/AUTO, fanSpeed LOW/MED/HIGH/AUTO, locked boolean, setTemp number (unavailable display gives null). Use codes, not translated labels, for these decoded field readers.
+Precondition CONTROLLER_UI_FIELD uses a virtual reader selector card.status/card.mode/card.fanSpeed/card.setTemp/card.locked or panel.status/panel.mode/panel.fanSpeed/panel.setTemp/panel.locked. It reads one of the same DOM fields. card.selected reads the target card's selected class (boolean), not internal state. These selectors are reader names, not arbitrary CSS or executable code; the corresponding #device-card-1 or .detail-panel must be observed uniquely. Read original capture instructions with the compiler's automatic pre-setup snapshot, not an invented fixed initial value. Every explicit prepared value still requires its own runtime check.
+SRS changes and official TC registration require separate human approval. Checkpoint passage permits the next automatic stage only. Pipeline approval notes are workflow facts, not new product features, and do not mean approval has already occurred.
+"""
+
+
+QA_EXPECTATION_SCOPE_GUIDANCE = """차단·제한과 상태 유지의 범위를 구분합니다. 원문이 금지한 동작, 보존할 대상과 판정 시점만 기대결과에 연결합니다. 차단이라는 분류만으로 시험 시작 상태 전체 유지, 다른 관제점 불변, UI 선택 비활성이나 원래 값 복귀를 추가하지 않습니다. 반대로 원문에 명시된 유지·필수 검사도 생략하지 않습니다. 선택/입력 중 패널 값과 적용 후 장비 값은 서로 다른 관찰 대상이며, 연속 조작을 단일 입력으로 바꾸어 해석하지 않습니다. 화면 관찰은 조작 수단의 근거이지 제품 정답의 근거가 아닙니다. 근거가 모호하면 확인 사항으로 남기고 실제 관찰값에 맞춰 기대값을 바꾸지 않습니다.
+"""
+
+
+QA_PRODUCT_VERDICT_CONTRACT = """Host product-verdict contract 1.0 (not product requirements):
+Product outcomes are judged only by the approved TC assertions at their linked observation times. BLOCKED_CHANGE is a cleanup classification, not an implicit assertion that every observed field equals its state before TEST. Explicit retention requirements must still be represented and checked in TC assertions. Snapshot differences trigger restoration when needed; they do not independently add a product failure. Capture, restoration verification and environment retirement on restoration failure remain mandatory.
+TEST actions attempt the approved operation independently of the expected output; PRECONDITION actions must establish the required setup. For the existing SET_TEMPERATURE button adapter, TEST stops attempting when the panel stops changing and the linked assertions judge the actual result. It does not silently change the expected value or declare success on reaching a different value. Setup and restore retain strict target attainment; missing UI/readers and non-settling operations remain technical errors.
+"""
+
+
+QA_TASK_BOUNDARIES = """Host task-boundary contract (not product expectations):
+Interpret requested changes against their original sources, separating previous/negated values, new values, retained policies and explicit exclusions. A number occurring in prose is not necessarily a required new value. Cover every requested outcome and boundary without treating the old range as an additional new range. Unclear or conflicting requirements remain review/blocking matters.
+Test context is part of the requirement: an explicitly named mode, power, lock or other starting condition belongs in preparation and its runtime checks. A same-context observation during the requested operation is not automatically a new feature; assess whether it confirms that requested context or invents an unrelated postcondition. Do not require a duplicate product ER solely to implement preparation or cleanup.
+Target selection and applying the requested value are necessary procedures when supported by EXECUTION_CONTRACT. Concrete selectors still require Agent 3 UI inventory and target identity checks. Do not invent controls or success notifications.
+For the supported five-control central adapter, RESTORE_OBSERVED_CONTROLLER captures the original controller snapshot BEFORE_SETUP and compares that snapshot AFTER_RESTORE independently of product ER IDs. It includes preparation changes. Existing ER restore comparisons remain mandatory and supplement, not replace, this host cleanup check. Describe restoring all prepared/changed controls in restoration.operation_steps; confirmations link only actual product ER readers. Do not add product ERs merely to name preparation-only recovery fields.
+At Agent 2 this is an execution capability, not proof of a plan or successful restoration. At Agent 3, only compiler facts bound to the actual RESTORE-phase action establish planned automatic coverage. Missing action, unsupported control, missing requested state check or failed restoration is not excused by this contract. Runtime evidence is required for success.
+Review each item for its own role. Report unrelated errors on their own items, not as failures of every otherwise-supported condition. Rewriting feedback is fallible: preserve source requirements and correct only supported issues, without adding product ERs to satisfy cleanup feedback.
+"""
+
+
+QA_REVIEW_RESPONSIBILITIES = """Execution/review responsibilities for new runs:
+The host checks IDs, allowed readers/actions, target identity, typed plan values and actual execution. Review requirement meaning, observation targets, missing checks and unjustified additions, not the host reader implementation again.
+For INTERNAL_VALUE device-index paths, the host checks the observed index's id against target_device_id AND emits a runtime id guard before reading; an index path with this guard is not an unbound device read. This does not prove that the TC chose the correct semantic target.
+Preconditions may contain state facts, setup instructions and instructions to record original values. State facts require concrete runtime checks; setup instructions require corresponding actions and any stated post-setup checks. Pure recording instructions may use the host's listed automatic baseline captures. Capture or a setup action alone is not proof of a required initial state. Visibility does not prove a recorded value, mode, power or lock state. Do not invent a fixed initial value to represent a capture instruction. If the required target is not covered, reject; if unclear, request human review.
+Agent 2 expected-result prose can mention the triggering input and observation time. Review the actual expected output against the original request/SRS; do not treat a triggering input as the expected output. Unsupported expected values and missing observations still fail review.
+"""
+
+
+class TcPreconditionVerification(StrictModel):
+    source_text: NonEmptyStr
+    read_kind: PreconditionReadKind
+    expected_value: str | float | int | bool
+    observation_target: NonEmptyStr = Field(description="확인할 화면 위치 또는 내부 필드의 의미. DOM selector가 아님.")
+
+
 class PreconditionCheck(StrictModel):
     source_text: NonEmptyStr
     read_kind: PreconditionReadKind
     selector: NonEmptyStr
     expected_value: str | float | int | bool
+
+
+class TcExecutionSpec(StrictModel):
+    """Agent 2 owns operations/values/timing. No DOM selectors or Python."""
+    operations: list[TcOperation]
+    verifications: list[TcVerification]
+    precondition_verifications: list[TcPreconditionVerification]
+    binding_contract: Literal["controller-map-1.0"] | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_binding_contract(self, handler):
+        result = handler(self)
+        if self.binding_contract is None:
+            result.pop("binding_contract", None)
+        return result
+
+
+ProductTestCaseCandidate.model_rebuild()
+Agent2TestDesign.model_rebuild()
+
+
+class LiveTcVerification(TcVerification):
+    target: NonEmptyStr
+
+
+class LiveTcExecutionSpec(TcExecutionSpec):
+    binding_contract: Literal["controller-map-1.0"]
+    verifications: list[LiveTcVerification]
+
+
+class LiveProductTestCaseCandidate(ProductTestCaseCandidate):
+    # New model output cannot silently fall back to legacy reinterpretation.
+    execution_spec: LiveTcExecutionSpec | None
+
+    @model_validator(mode="after")
+    def automatic_candidate_requires_definition(self):
+        if self.automation_candidate and self.execution_spec is None:
+            raise ValueError("새 자동화 후보에는 TC 실행 정의가 필요합니다.")
+        return self
+
+
+class LiveAgent2TestDesign(Agent2TestDesign):
+    test_cases: list[LiveProductTestCaseCandidate] = Field(default_factory=list)
+
+
+class OperationBinding(StrictModel):
+    action_id: Annotated[str, StringConstraints(pattern=r"^ACT-\d{3}$")]
+    selector: NonEmptyStr
+
+
+class VerificationBinding(StrictModel):
+    result_id: Annotated[str, StringConstraints(pattern=r"^ER-\d{3}$")]
+    selector: NonEmptyStr
+
+
+class PreconditionBinding(StrictModel):
+    verification_index: int = Field(ge=0)
+    selector: NonEmptyStr
+
+
+class Agent3UiBindings(StrictModel):
+    """Only locations may be supplied by Agent 3; never expectation values."""
+    planning_status: Agent3PlanningStatus
+    operations: list[OperationBinding]
+    verifications: list[VerificationBinding]
+    preconditions: list[PreconditionBinding]
+    extension_reasons: list[NonEmptyStr]
+    technical_notes: list[NonEmptyStr]
+
+
+def tc_execution_spec_errors(tc: ProductTestCaseCandidate) -> list[str]:
+    """Validate references/shape, not Korean prose or product truth."""
+    spec = tc.execution_spec
+    if spec is None:
+        return []
+    errors = []
+    operations = {op.action_id: op for op in spec.operations}
+    results = {er.result_id: er for er in tc.expected_results}
+    if len(operations) != len(spec.operations):
+        errors.append("실행 조작 ID 중복")
+    ids = [check.result_id for check in spec.verifications]
+    if len(ids) != len(set(ids)) or set(ids) != set(results):
+        errors.append("TC 기대결과와 실행 확인 항목의 누락·중복")
+    phase_rank = {AutomationPhase.PRECONDITION: 0, AutomationPhase.TEST: 1, AutomationPhase.RESTORE: 2}
+    ranks = [phase_rank[op.phase] for op in spec.operations]
+    if ranks != sorted(ranks):
+        errors.append("준비·시험·복원 조작 순서 불일치")
+    for phase, sources in ((AutomationPhase.PRECONDITION, tc.preconditions),
+                           (AutomationPhase.TEST, tc.steps),
+                           (AutomationPhase.RESTORE, tc.restore_steps)):
+        indices = []
+        for op in spec.operations:
+            if op.phase != phase:
+                continue
+            if op.source_text not in sources:
+                errors.append(f"{op.action_id}: TC 원문 연결 누락")
+            else:
+                indices.append(sources.index(op.source_text))
+        if indices != sorted(indices):
+            errors.append(f"{phase.value}: TC 조작 순서 변경")
+    for check in spec.verifications:
+        er = results.get(check.result_id)
+        anchor = operations.get(check.after_action_id)
+        if er is None:
+            continue
+        if check.observation_layer != er.observation_layer:
+            errors.append(f"{check.result_id}: 관찰 계층 변경")
+        if er.verify_after_step not in tc.steps or anchor is None or anchor.phase != AutomationPhase.TEST:
+            errors.append(f"{check.result_id}: 시험 시점 연결 누락")
+            continue
+        step_index = tc.steps.index(er.verify_after_step)
+        preceding = [op for op in spec.operations if op.phase == AutomationPhase.TEST
+                     and op.source_text in tc.steps and tc.steps.index(op.source_text) <= step_index]
+        if not preceding or preceding[-1].action_id != check.after_action_id:
+            errors.append(f"{check.result_id}: 확인 시점 이전의 마지막 조작과 불일치")
+        numeric = check.strategy in {AssertionStrategy.UI_TEMPERATURE, AssertionStrategy.INTERNAL_SET_TEMP}
+        fields = check.strategy in {AssertionStrategy.INTERNAL_DEVICE_FIELDS_EQUALS, AssertionStrategy.CONTROLLER_UI_FIELDS_EQUALS}
+        text = check.strategy == AssertionStrategy.UI_TEXT_CONTAINS
+        scalar = check.strategy in {AssertionStrategy.UI_VALUE_EQUALS, AssertionStrategy.UI_CHECKED_EQUALS,
+                                   AssertionStrategy.UI_ENABLED_EQUALS, AssertionStrategy.INTERNAL_VALUE_EQUALS}
+        if ((check.expected_number is not None) != numeric
+                or bool(check.expected_fields) != fields
+                or (check.expected_text is not None) != text
+                or (check.expected_value is not None) != scalar):
+            errors.append(f"{check.result_id}: 확인 방식과 기대값 자료형 불일치")
+        if check.strategy in {AssertionStrategy.UI_CHECKED_EQUALS, AssertionStrategy.UI_ENABLED_EQUALS} and type(check.expected_value) is not bool:
+            errors.append(f"{check.result_id}: 참/거짓 기대값 필요")
+    implemented = {op.source_text for op in spec.operations if op.phase == AutomationPhase.TEST}
+    observed = {er.verify_after_step for er in tc.expected_results}
+    if any(step not in implemented | observed for step in tc.steps):
+        errors.append("조작 또는 관찰에 연결되지 않은 시험 절차")
+    if any(check.source_text not in tc.preconditions for check in spec.precondition_verifications):
+        errors.append("사전조건 확인의 TC 원문 연결 누락")
+    restore_ops = [op for op in spec.operations if op.phase == AutomationPhase.RESTORE]
+    if not tc.restore_required and restore_ops:
+        errors.append("조회 TC에 불필요한 복원 조작")
+    restore_sources = [op.source_text for index, op in enumerate(restore_ops)
+                       if index == 0 or op.source_text != restore_ops[index - 1].source_text]
+    if tc.restoration is not None and restore_sources != tc.restoration.operation_steps:
+        errors.append("TC 복원 조작과 실행 항목 불일치")
+    if tc.state_effect == TcStateEffect.READ_ONLY and any(op.action_type != AutomationActionType.SELECT_DEVICE for op in spec.operations):
+        errors.append("조회 TC에 상태 변경 조작")
+    return errors
 
 
 class Agent3AutomationPlan(StrictModel):

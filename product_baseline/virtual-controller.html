@@ -2497,8 +2497,15 @@
         }
       }
       
-      if (selectedUnitId !== null) {
-        const device = devices.find(d => d.id === selectedUnitId);
+      syncPanelFromSelectedDevice();
+      saveStateToLocalStorage();
+    }
+
+    // Read back applied state only after selection or an apply attempt, never while editing.
+    // For multi-select, keep the existing last-selected device as the display reference.
+    function syncPanelFromSelectedDevice() {
+      const device = devices.find(d => d.id === selectedUnitId);
+      if (device) {
         pendingState = {
           id: device.id,
           status: device.status,
@@ -2513,7 +2520,6 @@
       }
       
       updatePanelUI();
-      saveStateToLocalStorage();
     }
 
     // Update Right 제어 패널 display based on pendingState (with multi-select header support)
@@ -2539,7 +2545,8 @@
           displayName += ` 외 ${names.length - 1}대`;
         }
         document.getElementById('det-unit-name').innerText = displayName;
-        document.getElementById('det-unit-info').innerText = `[복수 제어 모드] 총 ${selectedUnitIds.length}대 기기 선택됨`;
+        const activeDevice = devices.find(d => d.id === selectedUnitId);
+        document.getElementById('det-unit-info').innerText = `[복수 제어 모드] 총 ${selectedUnitIds.length}대 기기 선택됨 · 표시 기준: ${activeDevice.name}`;
       }
       
       // Check if any selected unit is offline
@@ -2555,11 +2562,10 @@
         if (isGatewayOnline && anyOffline) {
           document.getElementById('det-unit-info').innerText += ' (일부 기기 통신불가 포함)';
         }
-        return;
+      } else {
+        controlSec.style.pointerEvents = 'auto';
+        controlSec.style.opacity = '1';
       }
-      
-      controlSec.style.pointerEvents = 'auto';
-      controlSec.style.opacity = '1';
       
       // Active states mapping
       // Power buttons
@@ -2675,6 +2681,7 @@
     function applyPanelCommands() {
       // 0. Authority check (Critical Security Requirement)
       if (currentUserRole === 'VIEWER') {
+        syncPanelFromSelectedDevice();
         showToast('뷰어 권한은 제어 명령을 전송할 수 없습니다.', true);
         appendQALog('SYSTEM', '권한 차단: [Viewer] 권한 세션으로 중앙 제어 패널 적용 시도 거부됨.', 'error');
         return;
@@ -2682,6 +2689,7 @@
 
       // 1. Connection check
       if (!isGatewayOnline) {
+        syncPanelFromSelectedDevice();
         showToast('게이트웨이 오프라인 상태입니다. 명령 전송에 실패하였습니다.', false);
         appendQALog('SYSTEM', '오프라인 상태로 중앙 원격 제어 명령 송신 실패 (패킷 드롭됨)', 'error');
         return;
@@ -2689,6 +2697,7 @@
 
       if (selectedUnitIds.length === 0) {
         showToast('제어할 기기가 선택되지 않았습니다.', false);
+        syncPanelFromSelectedDevice();
         return;
       }
       
@@ -2832,6 +2841,7 @@
         if (c) c.classList.add('selected');
       });
 
+      syncPanelFromSelectedDevice();
       saveStateToLocalStorage();
     }
 

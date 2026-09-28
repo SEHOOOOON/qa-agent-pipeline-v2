@@ -904,6 +904,241 @@ def structured_restoration_fixture(wording="실행 전 관찰값과 같은지 �
     plan.restore_confirmations = [c.model_copy(deep=True) for c in confirmations]
     return case, plan, observation
 
+def fan_transition_restoration_fixture(initial, changed):
+    """One TC/plan template for the product's fan transitions; no value-specific execution."""
+    labels = {"LOW": "약풍", "MED": "중풍", "HIGH": "강풍"}
+    case, plan, observation = structured_restoration_fixture()
+    case.title = f"풍량 {initial} → {changed}: 화면·내부값 적용 및 복원"
+    case.requirement_ids = ["REQ-FAN-001", "REQ-STATE-001"]
+    case.preconditions = [
+        "대상 장비는 오류와 잠금이 없는 단일 장비다.",
+        f"대상 장비의 내부 fanSpeed는 {initial}이고 장비 카드에 {labels[initial]}이 표시된다.",
+    ]
+    case.steps = ["대상 장비 카드를 선택한다.", f"풍량 {changed}를 선택한다.", "선택한 풍량을 적용한다."]
+    operations = [f"풍량 {initial}를 선택해 시험 전 값으로 복원한다.", "복원한 풍량을 적용한다."]
+    targets = ["대상 장비 카드의 풍량 표시", "대상 장비의 내부 fanSpeed"]
+    for result, target, statement in zip(case.expected_results, targets,
+            [f"대상 장비 카드에 {labels[changed]}이 표시된다.", f"대상 장비의 내부 fanSpeed는 {changed}이다."]):
+        result.statement, result.observation_target = statement, target
+        result.verify_after_step = case.steps[-1]
+    confirmations = [pipeline.RestoreConfirmation(
+        source_text=f"{target}가 시험 전 관찰값과 같은지 확인한다.",
+        result_ids=[result.result_id], comparisons=[pipeline.RestoreComparison(
+            result_id=result.result_id, source_excerpt=f"{target}가 시험 전 관찰값과 같은지 확인한다.",
+            basis="OBSERVED_BASELINE")]) for result, target in zip(case.expected_results, targets)]
+    case.restoration = pipeline.StructuredRestoration(operation_steps=operations,
+        confirmations=confirmations, verify_when="AFTER_RESTORE")
+    case.restore_steps = operations + [c.source_text for c in confirmations]
+    plan.actions = [AutomationAction(action_id=f"ACT-{i:03}", phase=phase, action_type=kind,
+        selector=selector, value=value, source_text=source) for i, (phase, kind, selector, value, source) in enumerate([
+            ("TEST", "SELECT_DEVICE", "#device-card-1 .card-body-split", 1, case.steps[0]),
+            ("TEST", "CLICK", f"#det-fan-{changed.lower()}", None, case.steps[1]),
+            ("TEST", "CLICK", ".btn-apply-cmd", None, case.steps[2]),
+            ("RESTORE", "CLICK", f"#det-fan-{initial.lower()}", None, operations[0]),
+            ("RESTORE", "CLICK", ".btn-apply-cmd", None, operations[1]),
+        ], 1)]
+    plan.assertions = [
+        AutomationAssertion(result_id=case.expected_results[0].result_id, observation_layer="UI",
+            strategy="UI_TEXT_CONTAINS", selector="#device-card-1", expected_text=labels[changed], after_action_id="ACT-003"),
+        AutomationAssertion(result_id=case.expected_results[1].result_id, observation_layer="INTERNAL_STATE",
+            strategy="INTERNAL_VALUE_EQUALS", selector="window.__vccs.devices[0].fanSpeed",
+            expected_value=changed, after_action_id="ACT-003"),
+    ]
+    plan.precondition_checks = [pipeline.PreconditionCheck(source_text=case.preconditions[0],
+        read_kind="BASELINE_CONTEXT", selector=key, expected_value=True) for key in ["target_device_visible", "error_free", "unlocked"]] + [
+        pipeline.PreconditionCheck(source_text=case.preconditions[1], read_kind="UI_TEXT",
+            selector="#device-card-1", expected_value=labels[initial]),
+        pipeline.PreconditionCheck(source_text=case.preconditions[1], read_kind="INTERNAL_VALUE",
+            selector="window.__vccs.devices[0].fanSpeed", expected_value=initial),
+    ]
+    plan.restore_confirmations = [c.model_copy(deep=True) for c in confirmations]
+    observation.harness_values = {"window.__vccs.devices[0].id": 1, "window.__vccs.devices[0].fanSpeed": initial}
+    observation.verified_execution_context = observation.verified_execution_context.model_copy(update={
+        "target_device_visible": True, "device_state_available": True, "error_free": True, "unlocked": True})
+    observation.device_state_fields = ["id", "fanSpeed"]
+    observation.elements = [ObservedUiElement(selector=selector, tag="button", text=text,
+        visible=True, enabled=True, action_hint="CLICK") for selector, text in [
+            ("#device-card-1 .card-body-split", "대상 장비"), ("#device-card-1", f"풍량 {labels[initial]}"),
+            (".btn-apply-cmd", "적용"), *[(f"#det-fan-{value.lower()}", label) for value, label in labels.items()],
+        ]]
+    return case, plan, observation
+
+
+def controller_lifecycle_fixture(field, initial, requested, *, blocked=False, read_only=False, blocked_by_lock=True, prepare=None, prove_ui=False):
+    """One data-driven contract for all five controls; setup always uses UI actions."""
+    case, plan, observation = structured_restoration_fixture()
+    labels = {'status': '전원', 'mode': '모드', 'fanSpeed': '풍량', 'setTemp': '온도', 'locked': '잠금'}
+    case.title = f'{labels[field]} {initial} → {requested}: 준비·시험·원상 복원'
+    case.requirement_ids = [{'status': 'REQ-POWER-001', 'mode': 'REQ-MODE-001', 'fanSpeed': 'REQ-FAN-001',
+                             'setTemp': 'REQ-TEMP-001', 'locked': 'REQ-LOCK-001'}[field]]
+    case.test_data = pipeline.TestData()
+    if field == 'mode':
+        case.test_data.initial_mode = initial
+        if not read_only:
+            case.test_data.requested_mode = requested
+    if field == 'setTemp':
+        case.test_data.initial_mode = 'COOL'
+        case.test_data.initial_temperature_c = initial
+        if not read_only:
+            case.test_data.requested_temperature_c = requested
+    case.state_effect = pipeline.TcStateEffect.READ_ONLY if read_only else (pipeline.TcStateEffect.BLOCKED_CHANGE if blocked else pipeline.TcStateEffect.STATE_CHANGE)
+    case.restore_required = not read_only
+    prepared = {field: initial}
+    if field == 'setTemp':
+        prepared = {'mode': 'COOL', 'setTemp': initial}
+    if prepare:
+        # Explicit preparation comes first (e.g. unlock before mode/temperature).
+        # Override a default context without reordering the existing setup.
+        prepared = {**prepare, **{key: prepare.get(key, value) for key, value in prepared.items()}, field: initial}
+        if field == 'setTemp':
+            case.test_data.initial_mode = prepared['mode']
+    if blocked and blocked_by_lock and field != 'locked':
+        prepared['locked'] = True
+    case.preconditions = [f'대상 장비의 {k} 값은 {str(v).lower() if isinstance(v, bool) else v}이다.' for k, v in prepared.items()]
+    case.steps = [f'대상 장비의 {field} 값 {str(requested).lower() if isinstance(requested, bool) else requested}를 선택한다.', '선택한 값을 적용한다.']
+    if read_only:
+        case.steps = ['대상 장비 카드를 선택한다.']
+    expected = initial if blocked or read_only else requested
+    targets = [f'대상 장비 카드의 {field} 표시', f'대상 장비의 내부 {field}']
+    for result, target in zip(case.expected_results, targets):
+        result.statement = f'{target} 값은 {str(expected).lower() if isinstance(expected, bool) else expected}이다.'
+        result.observation_target = target
+        result.verify_after_step = case.steps[-1]
+    operation = '준비와 시험으로 바뀐 관제점 값을 준비 전 관찰한 원래 상태로 복원하고 적용한다.'
+    confirmations = [pipeline.RestoreConfirmation(source_text=f'{target}를 준비 전 관찰값과 비교한다.',
+        result_ids=[result.result_id], comparisons=[pipeline.RestoreComparison(result_id=result.result_id,
+        source_excerpt=f'{target}를 준비 전 관찰값과 비교한다.', basis='OBSERVED_BASELINE')])
+        for result, target in zip(case.expected_results, targets)]
+    case.restoration = None if read_only else pipeline.StructuredRestoration(operation_steps=[operation], confirmations=confirmations, verify_when='AFTER_RESTORE')
+    case.restore_steps = [] if read_only else [operation] + [c.source_text for c in confirmations]
+    plan.actions = []
+    def action(phase, kind, selector, value, source):
+        plan.actions.append(AutomationAction(action_id=f'ACT-{len(plan.actions)+1:03}', phase=phase,
+            action_type=kind, selector=selector, value=value, source_text=source))
+    def set_value(phase, key, value, source):
+        if key == 'setTemp':
+            action(phase, 'SET_TEMPERATURE', '#det-temp-display', value, source)
+        elif key == 'mode':
+            action(phase, 'SET_MODE', pipeline._MODE_SELECTOR[value], value, source)
+        else:
+            action(phase, 'CLICK', pipeline._CONTROLLER_BUTTONS[key][value], None, source)
+        action(phase, 'APPLY_COMMANDS', '.btn-apply-cmd', None, source)
+    action('TEST' if read_only else 'PRECONDITION', 'SELECT_DEVICE', '#device-card-1 .card-body-split', 1,
+           case.steps[0] if read_only else case.preconditions[0])
+    if not read_only:
+        for (key, value), source in zip(prepared.items(), case.preconditions):
+            set_value('PRECONDITION', key, value, source)
+        if field == 'setTemp':
+            action('TEST', 'SET_TEMPERATURE', '#det-temp-display', requested, case.steps[0])
+        elif field == 'mode':
+            action('TEST', 'SET_MODE', pipeline._MODE_SELECTOR[requested], requested, case.steps[0])
+        else:
+            action('TEST', 'CLICK', pipeline._CONTROLLER_BUTTONS[field][requested], None, case.steps[0])
+        action('TEST', 'APPLY_COMMANDS', '.btn-apply-cmd', None, case.steps[-1])
+    anchor = plan.actions[-1].action_id
+    if not read_only:
+        action('RESTORE', 'RESTORE_OBSERVED_CONTROLLER', '.btn-apply-cmd', None, operation)
+    plan.assertions = [AutomationAssertion(result_id=r.result_id, observation_layer=r.observation_layer,
+        strategy='CONTROLLER_UI_FIELDS_EQUALS' if r.observation_layer == ObservationLayer.UI else 'INTERNAL_DEVICE_FIELDS_EQUALS',
+        selector='#device-card-1' if r.observation_layer == ObservationLayer.UI else 'window.__vccs.devices',
+        expected_fields=[pipeline.DeviceFieldExpectation(field_name=field, expected_value=expected)], after_action_id=anchor)
+        for r in case.expected_results]
+    plan.precondition_checks = [pipeline.PreconditionCheck(source_text=source, read_kind='INTERNAL_VALUE',
+        selector=f'window.__vccs.devices[0].{key}', expected_value=value)
+        for (key, value), source in zip(prepared.items(), case.preconditions)]
+    if prove_ui:
+        for (key, value), source in zip(prepared.items(), case.preconditions):
+            for location in ('card', 'panel'):
+                plan.precondition_checks.append(pipeline.PreconditionCheck(source_text=source,
+                    read_kind='CONTROLLER_UI_FIELD', selector=f'{location}.{key}', expected_value=value))
+        selection = '시험 대상 장비 카드를 선택한 상태인지 확인한다.'
+        case.preconditions.append(selection)
+        plan.precondition_checks.append(pipeline.PreconditionCheck(source_text=selection,
+            read_kind='CONTROLLER_UI_FIELD', selector='card.selected', expected_value=True))
+    plan.restore_confirmations = [] if read_only else confirmations
+    return case, plan
+
+
+def frozen_tc_and_bindings(case, plan):
+    """Test fixture only: freeze a reviewed reference plan; production never infers this."""
+    case = case.model_copy(deep=True)
+    case.execution_spec = pipeline.TcExecutionSpec(
+        operations=[pipeline.TcOperation(**a.model_dump(exclude={"selector"}), target=a.source_text) for a in plan.actions],
+        verifications=[pipeline.TcVerification.model_validate(a.model_dump(exclude={"selector"})) for a in plan.assertions],
+        precondition_verifications=[pipeline.TcPreconditionVerification(**c.model_dump(exclude={"selector"}),
+                                    observation_target=c.selector.rsplit(".", 1)[-1])
+                                   for c in plan.precondition_checks])
+    bindings = pipeline.Agent3UiBindings(planning_status="READY",
+        operations=[pipeline.OperationBinding(action_id=a.action_id, selector=a.selector) for a in plan.actions],
+        verifications=[pipeline.VerificationBinding(result_id=a.result_id, selector=a.selector) for a in plan.assertions],
+        preconditions=[pipeline.PreconditionBinding(verification_index=i, selector=c.selector)
+                       for i, c in enumerate(plan.precondition_checks)],
+        extension_reasons=[], technical_notes=[])
+    return case, bindings
+
+
+def mapped_tc_fixture(field="setTemp", initial=27, requested=21, **kwargs):
+    """Local reference builder only; production never infers keys from selectors."""
+    from qa_pipeline_agent3 import controller_connection_catalog
+    case, plan = controller_lifecycle_fixture(field, initial, requested, **kwargs)
+    case, bindings = frozen_tc_and_bindings(case, plan)
+    catalog = controller_connection_catalog()
+    case.execution_spec.binding_contract = "controller-map-1.0"
+    for op, action in zip(case.execution_spec.operations, plan.actions):
+        op.target = next(key for key, (kind, selector) in catalog["actions"].items()
+                         if kind == action.action_type.value and selector == action.selector)
+    for check, assertion in zip(case.execution_spec.verifications, plan.assertions):
+        location = "internal" if assertion.observation_layer == ObservationLayer.INTERNAL_STATE else "card"
+        check.target = f"{location}.{field}"
+    for check, proof in zip(case.execution_spec.precondition_verifications, plan.precondition_checks):
+        check.observation_target = next(key for key, (kind, selector) in catalog["preconditions"].items()
+            if kind == proof.read_kind.value and selector == proof.selector)
+    return case, plan
+
+
+def permitted_then_blocked_fixture(field, initial, permitted, rejected):
+    """A permitted transition followed by a lock-blocked command in the same TC."""
+    case, plan = controller_lifecycle_fixture(field, initial, permitted)
+    case.state_effect = pipeline.TcStateEffect.BLOCKED_CHANGE
+    restore = plan.actions.pop()
+    suffix = []
+    if field != "locked":
+        suffix += [("설정 변경 후 잠금을 선택한다.", "CLICK", "#det-lock-on-btn", None),
+                   ("잠금 설정을 적용한다.", "APPLY_COMMANDS", ".btn-apply-cmd", None)]
+    key = "fanSpeed" if field == "locked" else field
+    selector = ("#det-temp-display" if key == "setTemp" else
+                pipeline._MODE_SELECTOR[rejected] if key == "mode" else
+                pipeline._CONTROLLER_BUTTONS[key][rejected])
+    kind = "SET_TEMPERATURE" if key == "setTemp" else "SET_MODE" if key == "mode" else "CLICK"
+    suffix += [(f"잠긴 상태에서 {key}의 {rejected} 변경을 시도한다.", kind, selector,
+                rejected if kind != "CLICK" else None),
+               ("잠긴 상태의 변경 명령을 적용한다.", "APPLY_COMMANDS", ".btn-apply-cmd", None)]
+    first_results = list(case.expected_results)
+    first_assertions = list(plan.assertions)
+    for index, (source, action_type, selector, value) in enumerate(suffix):
+        case.steps.append(source)
+        plan.actions.append(AutomationAction(action_id=f"ACT-{100 + index:03}", phase="TEST",
+            action_type=action_type, selector=selector, value=value, source_text=source))
+    for result, assertion, confirmation in zip(first_results, first_assertions, case.restoration.confirmations):
+        result_id = "ER-" + str(int(result.result_id.split("-")[1]) + 100).zfill(3)
+        case.expected_results.append(result.model_copy(deep=True, update={
+            "result_id": result_id, "verify_after_step": case.steps[-1]}))
+        plan.assertions.append(assertion.model_copy(deep=True, update={
+            "result_id": result_id, "after_action_id": plan.actions[-1].action_id}))
+        confirmation.result_ids.append(result_id)
+        confirmation.comparisons.append(confirmation.comparisons[0].model_copy(
+            deep=True, update={"result_id": result_id}))
+    plan.restore_confirmations = case.restoration.confirmations
+    plan.actions.append(restore)
+    if field == "mode":
+        case.test_data.requested_mode = None
+        case.test_data.requested_modes = [permitted, rejected]
+    if field == "setTemp":
+        case.test_data.requested_temperature_c = None
+        case.test_data.requested_temperatures_c = [permitted, rejected]
+    return case, plan
+
+
 def agent3_plan() -> Agent3AutomationPlan:
     return Agent3AutomationPlan(
         tc_id="TC-CAND-003",
@@ -963,6 +1198,80 @@ class Agent3FakeResponses:
     def parse(self, **kwargs):
         self.kwargs = kwargs
         return SimpleNamespace(id="resp_agent3", output_parsed=agent3_plan(), usage=SimpleNamespace(input_tokens=50, output_tokens=30, total_tokens=80))
+
+def mixed_precondition_fixture(field, initial, requested, variant="mixed"):
+    case, plan = controller_lifecycle_fixture(field, initial, requested)
+    source = "대상 장비가 표시되어 있고 잠금 해제되어 있다."
+    case.preconditions.append(source)
+    plan.precondition_checks.append(pipeline.PreconditionCheck(source_text=source,
+        read_kind="BASELINE_CONTEXT", selector="target_device_visible", expected_value=True))
+    if variant != "missing":
+        plan.precondition_checks.append(pipeline.PreconditionCheck(source_text=source,
+            read_kind="BASELINE_CONTEXT" if variant == "baseline" else "INTERNAL_VALUE",
+            selector="unlocked" if variant == "baseline" else
+                "window.__vccs.devices[1].locked" if variant == "wrong_device" else
+                "window.__vccs.devices[0].absent" if variant == "unknown_reader" else
+                "window.__vccs.devices[0].locked",
+            expected_value=True if variant == "baseline" else False))
+    return case, plan
+
+
+def controller_grouped_boundary_fixture(*, split=True, second_expected=21):
+    case, plan = controller_lifecycle_fixture("setTemp", 24, 31)
+    case.condition_execution = pipeline.ConditionExecution.SEQUENTIAL_TRANSITION
+    case.grouping_reason = "상한 요청 뒤 정상 범위 요청을 순차 확인한다."
+    case.test_data.requested_temperature_c = None
+    case.test_data.requested_temperatures_c = [31, 21]
+    first_apply = case.steps[-1]
+    if not split:
+        case.steps = ["온도를 31도로 요청하고 적용한다."]
+        for action in plan.actions:
+            if action.phase == AutomationPhase.TEST:
+                action.source_text = case.steps[0]
+        first_apply = case.steps[0]
+    lower_steps = ["온도를 21도로 요청한다.", "정상 범위 요청을 적용한다."] if split else ["온도를 21도로 요청하고 적용한다."]
+    case.steps += lower_steps
+    for result, assertion in zip(case.expected_results, plan.assertions):
+        result.statement = f"{result.observation_target} 값은 30이다."
+        result.verify_after_step = first_apply
+        assertion.expected_fields[0].expected_value = 30
+    for i in range(2):
+        result = case.expected_results[i].model_copy(deep=True)
+        result.result_id = f"ER-{92+i:03}"
+        result.statement = f"{result.observation_target} 값은 {second_expected}이다."
+        result.verify_after_step = lower_steps[-1]
+        case.expected_results.append(result)
+        assertion = plan.assertions[i].model_copy(deep=True)
+        assertion.result_id, assertion.after_action_id = result.result_id, "ACT-101"
+        assertion.expected_fields[0].expected_value = second_expected
+        plan.assertions.append(assertion)
+        confirmation = case.restoration.confirmations[i]
+        confirmation.result_ids.append(result.result_id)
+        confirmation.comparisons.append(pipeline.RestoreComparison(result_id=result.result_id,
+            source_excerpt=confirmation.source_text, basis="OBSERVED_BASELINE"))
+    plan.restore_confirmations = [c.model_copy(deep=True) for c in case.restoration.confirmations]
+    plan.actions[-1:-1] = [
+        AutomationAction(action_id="ACT-100", phase="TEST", action_type="SET_TEMPERATURE",
+            selector="#det-temp-display", value=21, source_text=lower_steps[0]),
+        AutomationAction(action_id="ACT-101", phase="TEST", action_type="APPLY_COMMANDS",
+            selector=".btn-apply-cmd", source_text=lower_steps[-1])]
+    return case, plan
+
+
+def split_boundary_fixture(*, split=True, request_value=31.0, expected_value=30.0):
+    case, plan = grouped_agent3_case_and_plan()
+    upper = case.steps[-1]
+    plan.actions[-2].value = request_value
+    plan.assertions[-1].expected_number = expected_value
+    case.test_data.requested_temperatures_c[-1] = request_value
+    if split:
+        case.steps[-1:] = [f"Request {request_value} degrees.", "Apply the pending command."]
+        plan.actions[-2].source_text, plan.actions[-1].source_text = case.steps[-2:]
+        for result in case.expected_results:
+            if result.verify_after_step == upper:
+                result.verify_after_step = case.steps[-1]
+    return case, plan
+
 
 def grouped_agent3_case_and_plan() -> tuple[ProductTestCaseCandidate, Agent3AutomationPlan]:
     base_case = agent3_test_case()
@@ -1560,6 +1869,21 @@ def fake_grounding_record(payload, *, verdict="SUPPORTED", single_fact=True):
             "citations": [{"source_id": source["source_id"], "quote": source["text"]}],
             "reason": "Scripted fixture; semantic judgment supplied by the test, not inferred."}
             for item in payload["items"]]}}
+
+
+def source_selected_review_record(payload, *, verdict="SUPPORTED"):
+    """Scripted ID selection; never claims semantic correctness."""
+    import qa_pipeline_grounding as grounding
+    record = fake_grounding_record(payload, verdict=verdict)
+    selection = grounding.GroundingSourceSelection(items=[
+        grounding.ReviewSourceSelection(
+            **{k: v for k, v in item.items() if k != "citations"},
+            source_ids=[c["source_id"] for c in item["citations"]])
+        for item in record["review"]["items"]])
+    record["citation_binding_contract"] = "source-id-1.0"
+    record["source_selection"] = selection.model_dump(mode="json")
+    record["review"] = grounding.bind_review_sources(payload, selection).model_dump(mode="json")
+    return record
 
 
 @pytest.fixture(autouse=True)

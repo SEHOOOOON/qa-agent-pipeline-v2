@@ -716,6 +716,42 @@ def test_agent4_reports_all_excluded_candidates_for_human_review(
     assert report.automation_exclusions == [exclusion]
     assert report.total_results == 2
 
+@pytest.mark.parametrize("fixture_only", [False, True])
+def test_agent4_environment_only_is_not_product_pass(tmp_path, fixture_only):
+    run_dir, run_id = _write_agent4_inputs(tmp_path, include_candidate=False)
+    bundle = pipeline._read_json_payload(run_dir / "validation_execution.json")
+    if fixture_only:
+        bundle["regression_results"][0]["test_id"] = "TC-PIPE-001"
+        bundle["selected_regression_ids"] = ["TC-PIPE-001"]
+    else:
+        bundle.update(selected_regression_ids=[], regression_results=[])
+    _write_json(run_dir / "validation_execution.json", bundle)
+    manifest = pipeline._read_json_payload(run_dir / "validation_manifest.json")
+    manifest["validation_execution_sha256"] = _sha256_file(run_dir / "validation_execution.json")
+    _write_json(run_dir / "validation_manifest.json", manifest)
+    assert pipeline.run_agent4(SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))) == 0
+    report = pipeline.FinalReport.model_validate_json((run_dir / "final_report.json").read_text(encoding="utf-8"))
+    assert report.product_result_count == 0 and report.environment_result_count == 1
+    assert report.recommendation == pipeline.FinalRecommendation.HOLD
+    assert "제품 시험 결과 없음" in pipeline_reporting.verification_scope_summary(report.model_dump(mode="json"))
+    for name in ("slack_payload.json", "notion_payload.json", "사람_최종_검토.md"):
+        assert "제품 시험 결과 없음" in (run_dir / name).read_text(encoding="utf-8")
+    assert any(f.category == pipeline.Agent4FindingCategory.INSUFFICIENT_EVIDENCE for f in report.findings)
+
+
+@pytest.mark.parametrize("count,recommendation,expected", [
+    (0, "HOLD", "제품 시험 결과 없음"), (2, "HOLD", "보류"),
+    (2, "HUMAN_REVIEW", "사람 검토 필요"), (2, "PASS", "실행 대상 통과"),
+    (None, "PASS", "제품 시험 범위 미확인"), (2, None, "최종 판정 미확인")])
+def test_scope_summary_uses_final_recommendation(count, recommendation, expected):
+    payload = dict(checkpoint_status="PASS", status_counts={"PASSED": 2})
+    if count is not None:
+        payload["product_result_count"] = count
+    if recommendation is not None:
+        payload["recommendation"] = recommendation
+    assert expected in pipeline_reporting.verification_scope_summary(payload)
+
+
 def test_agent4_passes_existing_only_execution_without_new_candidate(
     tmp_path: Path,
 ) -> None:

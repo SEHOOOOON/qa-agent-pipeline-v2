@@ -42,6 +42,18 @@ def verification_scope_summary(payload: dict[str, Any]) -> str:
         return f"미확인 항목 있음: 자동화 제외 {len(exclusions)}건 · 정보 부족 {len(gaps)}건"
     if payload.get("checkpoint_status") != "PASS":
         return "검증 범위: 최종 증거 확인 미완료"
+    product_count = payload.get("product_result_count")
+    if type(product_count) is not int or product_count < 0:
+        return "검증 범위: 제품 시험 범위 미확인"
+    if product_count == 0:
+        return "제품 시험 결과 없음 · 환경 점검만으로 제품 통과를 판단하지 않음"
+    recommendation = payload.get("recommendation")
+    if recommendation == "HOLD":
+        return "최종 판정 보류 · 실패·미실행·증거 부족 등 개별 사유 확인 필요"
+    if recommendation == "HUMAN_REVIEW":
+        return "사람 검토 필요 · 개별 관찰 결과와 확인 사항 검토 필요"
+    if recommendation != "PASS":
+        return "검증 범위: 최종 판정 미확인"
     counts = payload.get("status_counts") or {}
     if any(value for key, value in counts.items() if key != "PASSED"):
         return "실행 결과에 실패·미실행 있음: 개별 결과 확인 필요"
@@ -1614,6 +1626,14 @@ def run_agent4(args: argparse.Namespace) -> int:
                     finding_id=f"FIND-{len(findings) + 1:03d}",
                     category=Agent4FindingCategory.INSUFFICIENT_EVIDENCE,
                     rationale="환경 사전 점검 차단으로 선택된 관련 회귀가 실행되지 않았습니다.",
+                )
+            )
+        if not product_results:
+            findings.append(
+                Agent4Finding(
+                    finding_id=f"FIND-{len(findings) + 1:03d}",
+                    category=Agent4FindingCategory.INSUFFICIENT_EVIDENCE,
+                    rationale="제품 TC 실행 결과가 없습니다. 환경 점검·파이프라인 고정 사례만으로 제품 시험 통과를 권고할 수 없습니다.",
                 )
             )
         status_counts = {status: sum(result.status == status for result in results) for status in NeutralExecutionStatus}

@@ -34,16 +34,16 @@ from qa_pipeline_agent2 import *
 # ---------------------------------------------------------------------------
 # Agent 3: Evidence-grounded automation planning
 # ---------------------------------------------------------------------------
-AGENT3_SYSTEM_INSTRUCTIONS = """
+AGENT3_SYSTEM_INSTRUCTIONS = QA_EXPECTATION_SCOPE_GUIDANCE + """
 For a TC with restoration, use its STRUCTURED contract instead of interpreting confirmation prose: copy restoration.confirmations verbatim into restore_confirmations, including full source_excerpt, result_ids and OBSERVED_BASELINE basis. Implement restoration.operation_steps as RESTORE Actions in order. verify_when=AFTER_RESTORE is implemented by the compiler after restoration, comparing the same ER reader to its original value captured before preparation. Do NOT split descriptions into clauses or infer values, timing or extra targets from them. The legacy prose/excerpt guidance below applies ONLY to TCs without restoration. All action allowlists, source grounding, assertion coverage, original expectations and precondition checks still apply.
-For TCs with state_effect: READ_ONLY permits observation and SELECT_DEVICE navigation only, no mutation or restore actions. STATE_CHANGE and BLOCKED_CHANGE require approved restore operations and same-target comparisons. Preserve the original state BEFORE preparation separately from the prepared state BEFORE TEST. A blocked operation is compared with the prepared state; final restoration is compared with the original state. PRECONDITION writes are supported only for the existing central HVAC SET_MODE/SET_TEMPERATURE/APPLY_COMMANDS path, with test_data.restore_observed_hvac_state=true and exactly one RESTORE_OBSERVED_HVAC restore action. All non-restore operations in that plan must be SELECT_DEVICE or those HVAC operations. Initial mode/temperature describe the required prepared state, not a fixed restoration value. Use OBSERVED_BASELINE restoration comparisons. The compiler restores even after partial preparation or failed precondition checks. BLOCKED_CHANGE skips restore writes only when no preparation write happened and observed state stayed unchanged. Unsupported recovery/read targets require AUTOMATION_SUPPORT_EXTENSION_REQUIRED, never invented inverse actions or defaults. A restore failure retires that browser context; later independent tests run only in fresh contexts.
+For TCs with state_effect: READ_ONLY permits observation and SELECT_DEVICE navigation only, no mutation or restore actions. STATE_CHANGE and BLOCKED_CHANGE require approved restore operations and same-target comparisons. Preserve the original state BEFORE preparation separately from the prepared state BEFORE TEST. Product verdicts use the approved TC assertions at their linked action anchors, not an implicit equality with the whole prepared state. Snapshot differences decide cleanup only; final restoration is compared with the original state. For the observed existing central controller's power/status, mode, fanSpeed, setTemp and locked controls, use a single RESTORE_OBSERVED_CONTROLLER action (RESTORE phase, selector=.btn-apply-cmd, value=null) when the structured restoration operation calls for restoring the original observed controls. Select the target device before any write. Use SELECT_DEVICE, SET_MODE, SET_TEMPERATURE, APPLY_COMMANDS and observed CLICKs on those five controls only. The compiler snapshots and verifies the five internal fields, panel selection/display and card state, including preparation changes; it restores through UI, unlocking separately before other commands and restoring the original lock last. Initial values describe required prepared state, not fixed restore defaults. Do not add unrelated product Expected Results merely to support cleanup. Historical RESTORE_OBSERVED_HVAC with restore_observed_hvac_state=true remains a narrower compatibility path. Use OBSERVED_BASELINE restoration comparisons. The compiler restores even after partial preparation or failed precondition checks. BLOCKED_CHANGE skips restore writes only when no preparation write happened and applied state stayed unchanged. Unsupported recovery/read targets require AUTOMATION_SUPPORT_EXTENSION_REQUIRED, never invented inverse actions or defaults. A restore failure retires that browser context; later independent tests run only in fresh contexts.
 Check only conditions stated in the approved TC preconditions; observed facts are available evidence, not additional requirements. Do not add online, visibility, login or selected-state checks merely because the inventory mentions them. A single-device target scope does not itself request a selectedUnitId assertion; an explicitly required selected state still needs its own observed proof.
 For BASELINE_CONTEXT, error_free applies to a stated no-error condition, unlocked to a stated unlocked condition, online only to explicit 온라인/online, and target_device_visible to a matching target-device/visibility phrase. Include all facts stated in a compound line, not every available context field. Unknown role/login conditions require their own observed read-only evidence, never the baseline context. Never rewrite the TC source to justify an extra check.
 The per-source precondition_context_bindings list exposes the current checker's allowed BASELINE_CONTEXT selectors for each exact TC line. Use only selectors listed for that source; do not borrow selectors from another source or from the overall inventory. These hints cover baseline context only, not all precondition values: explicit initial values still need their matching observed readers. An empty list does not mean the condition is optional or unsupported; inspect the other allowed readers before deciding support is missing.
-Every READY plan must include precondition_checks covering EVERY exact TC preconditions line, including already-satisfied conditions and setup actions. Use multiple checks for multiple explicit values in a line. They execute after all PRECONDITION actions and BEFORE the first TEST action; setup actions alone are not proof. Each check has source_text, read_kind, selector, expected_value.
+Every required starting state needs matching precondition_checks, including already-satisfied states. Use multiple checks for multiple explicit values in a line. They execute after all PRECONDITION actions and BEFORE the first TEST action; setup actions alone are not proof. Each check has source_text, read_kind, selector, expected_value. Instructions solely to capture original values can use the compiler's existing same-target baseline capture; do not invent a fixed value or a visibility check for them. All TC preconditions are separately reviewed for coverage, including lines without an explicit check.
 Read kinds: UI_TEXT (contains grounded state/value, not a generic label), UI_VALUE (exact string), UI_CHECKED/UI_ENABLED (boolean), INTERNAL_VALUE (exact observed, TC-grounded scalar path), BASELINE_CONTEXT (selector target_device_visible/error_free/unlocked/online, expected_value=true, only for the matching observed baseline fact).
 If a stated precondition cannot be observed with these readers, return AUTOMATION_SUPPORT_EXTENSION_REQUIRED with that precise reason. Never delete, invent, or silently weaken preconditions. Product assertions cannot run in PRECONDITION phase.
-For state expectations, UI_TEXT_CONTAINS must include the expected state, never only a static control label. CONTROLS_DISABLED requires an explicitly disabled Expected Result. Historical plans without state_effect retain their original prepared-state comparison. New state_effect plans preserve the original pre-setup state for final restoration; RESTORE_OBSERVED_HVAC is the supported inverse for HVAC preparation.
+For state expectations, UI_TEXT_CONTAINS must include the expected state, never only a static control label. CONTROLS_DISABLED requires an explicitly disabled Expected Result. Historical plans without state_effect retain their original prepared-state comparison. New state_effect plans preserve the original pre-setup state for final restoration. CONTROLLER_UI_FIELDS_EQUALS on observed #device-card-1 reads status from card state-run/state-stop classes, mode from mode-* classes, fanSpeed from its displayed fan label, locked from the card lock indication and setTemp from the displayed Celsius value (disabled temperature is not a number). Use expected_fields for the existing five fields, only as grounded in that UI Expected Result. It reads DOM, not the internal harness; INTERNAL_DEVICE_FIELDS_EQUALS separately reads internal values. Do not substitute the fixed text of a power/lock button for its selected state.
 Implement every approved TEST and RESTORE operation in order. Trailing read-only verification steps are implemented by their corresponding assertions, not invented clicks.
 For UI_TEXT_CONTAINS, copy a complete product value or meaningful message phrase from the Expected Result, never a substring inside a label. This also applies to temperature/mode plans: preserve every step and intermediate reset in the original order.
 Keep original restore-operation lines unchanged. A trailing restore confirmation may name an existing Expected Result's exact observation_target and compare it with the pre-test state, or with an initial value already proved for that same target. The compiler performs these existing baseline comparisons; do not invent RESTORE clicks or new product Expected Results for confirmation-only lines. A new observation target or unsupported restore comparison requires support extension, not silent omission.
@@ -75,7 +75,8 @@ Rules:
    Values that differ from the observed clean state still need approved setup actions.
 6. TEST actions implement only the approved TC steps. Never assume a blocked request changes the value.
 7. Create RESTORE actions only when restore_required=true and use only the approved restore values.
-   When test_data.restore_observed_hvac_state=true, create exactly one RESTORE_OBSERVED_HVAC action using
+   For new structured state_effect TCs using the five-control inverse, use RESTORE_OBSERVED_CONTROLLER even if the
+   grouped HVAC compatibility flag is present. Otherwise, when test_data.restore_observed_hvac_state=true, create exactly one RESTORE_OBSERVED_HVAC action using
    selector=.btn-apply-cmd, value=null, and the exact approved restore_steps line that says to restore the observed
    pre-trial mode and temperature. The guarded compiler captures those two values at runtime and restores them; never
    invent fixed values. Do not use this action for a generic product feature or when the flag is false.
@@ -104,6 +105,10 @@ Rules:
 11. Generic action values must occur in the approved precondition, step, or restore text. Generic assertion values
     must occur in the matching Expected Result. Do not translate a product meaning into an ungrounded boolean or value.
 12. Keep source_text as the exact approved precondition, step, or restore line implemented by the action.
+    Treat it as a source reference, not a description to paraphrase. Copy punctuation and wording.
+    A trailing observation-only step, including in STATE_CHANGE/BLOCKED_CHANGE tests, is implemented by
+    its assertion after the last TEST action; do not invent a click for reading. Earlier observations
+    and mixed operation/observation steps still need their actual operation and ordering.
 13. The legacy temperature actions and assertions are compatibility adapters for the already observed V1 controller,
     not an extension pattern for new product features. For that existing controller, use UI_TEMPERATURE and
     INTERNAL_SET_TEMP for their corresponding observations.
@@ -140,12 +145,118 @@ class Agent3Response:
     response_id: str | None
     model: str
     usage: dict[str, int | None]
+    ui_bindings: Agent3UiBindings | None = None
+
+
+AGENT3_BINDING_INSTRUCTIONS = """
+You bind an approved TC execution_spec to the observed UI, not design another test.
+Return only Agent3UiBindings: operation IDs, result IDs, zero-based precondition verification
+indices and their observed selectors. Do not write/change values, action kinds, readers,
+order, expected results, or timing. The host copies those from the CP2-approved TC.
+Use every reference exactly once. Binding-list order is irrelevant; the host preserves
+the TC operation order by ID. Copying a similarly named feature
+is not a valid binding. Card, panel and internal state are different observation locations.
+For a READY result leave extension_reasons empty. If a required interface cannot be
+observed, return AUTOMATION_SUPPORT_EXTENSION_REQUIRED, empty binding lists, and precise
+missing-interface reasons. Do not change the TC or substitute an existing AUTO mode for
+a separately requested function. A TC can be valid while automation is unavailable.
+Use only unique observed interfaces appropriate for the fixed operation or reader.
+SELECT_DEVICE=#device-card-1 .card-body-split; SET_TEMPERATURE=#det-temp-display;
+APPLY_COMMANDS and RESTORE_OBSERVED_CONTROLLER=.btn-apply-cmd for the existing controller.
+SET_MODE uses the observed button for that fixed mode. CLICK binds the control named by
+source_text, not any other control with the same word. Do not invent a missing selector.
+UI_TEMPERATURE=#det-temp-display; INTERNAL_SET_TEMP and INTERNAL_DEVICE_FIELDS_EQUALS
+use window.__vccs.devices. CONTROLLER_UI_FIELDS_EQUALS uses #device-card-1 or .detail-panel,
+as specified by the ER observation_target. Generic UI readers use the corresponding
+observed element. INTERNAL_VALUE_EQUALS uses an exact observed scalar harness path.
+CONTROLS_DISABLED=#det-temp-down-btn; DISABLED_TEMPERATURE_TEXT=#det-temp-display;
+TOAST_VISIBLE/TOAST_BLOCKING=#global-toast. Availability never proves test success.
+""" + QA_EXECUTION_CONTRACT
+
+
+def assemble_tc_bindings(tc: ProductTestCaseCandidate, bindings: Agent3UiBindings) -> Agent3AutomationPlan:
+    """Only UI locations come from Agent 3. Copy all test meaning from Agent 2."""
+    spec = tc.execution_spec
+    if spec is None:
+        raise Agent3Error("화면 연결에 필요한 Agent 2 실행 정의가 없습니다.")
+    errors = tc_execution_spec_errors(tc)
+    if errors:
+        raise Agent3Error("Agent 2 실행 정의: " + " / ".join(errors))
+    common = dict(tc_id=tc.tc_id, target_device_id=1, summary=tc.title,
+                  planning_status=bindings.planning_status,
+                  extension_reasons=bindings.extension_reasons, technical_notes=bindings.technical_notes)
+    if bindings.planning_status == Agent3PlanningStatus.AUTOMATION_SUPPORT_EXTENSION_REQUIRED:
+        if bindings.operations or bindings.verifications or bindings.preconditions:
+            raise Agent3Error("지원 부족 응답에는 일부 실행 연결을 넣을 수 없습니다.")
+        return Agent3AutomationPlan(**common)
+    for actual, required in (
+        ([b.action_id for b in bindings.operations], [op.action_id for op in spec.operations]),
+        ([b.result_id for b in bindings.verifications], [v.result_id for v in spec.verifications]),
+        ([b.verification_index for b in bindings.preconditions], list(range(len(spec.precondition_verifications))))):
+        if len(actual) != len(set(actual)) or set(actual) != set(required):
+            raise Agent3Error("Agent 2 실행 정의의 연결이 누락·중복되거나 알 수 없는 ID입니다.")
+    operations = {b.action_id: b.selector for b in bindings.operations}
+    verifications = {b.result_id: b.selector for b in bindings.verifications}
+    preconditions = {b.verification_index: b.selector for b in bindings.preconditions}
+    return Agent3AutomationPlan(**common,
+        actions=[AutomationAction(**op.model_dump(exclude={"target"}), selector=operations[op.action_id])
+                 for op in spec.operations],
+        assertions=[AutomationAssertion(**v.model_dump(exclude={"target"}), selector=verifications[v.result_id])
+                    for v in spec.verifications],
+        precondition_checks=[PreconditionCheck(**v.model_dump(exclude={"observation_target"}), selector=preconditions[i])
+                             for i, v in enumerate(spec.precondition_verifications)],
+        restore_confirmations=[c.model_copy(deep=True) for c in tc.restoration.confirmations] if tc.restoration else [])
+
+
+def tc_plan_handoff_errors(tc: ProductTestCaseCandidate, plan: Agent3AutomationPlan) -> list[str]:
+    """Recheck compiled/saved plans; do not trust model or historical PASS flags."""
+    if tc.execution_spec is None:
+        return []
+    errors = tc_execution_spec_errors(tc)
+    if errors or plan.planning_status != Agent3PlanningStatus.READY:
+        return errors
+    if tc.execution_spec.binding_contract == "controller-map-1.0":
+        mapped = resolve_controller_bindings(tc)
+        if mapped.planning_status != Agent3PlanningStatus.READY:
+            return ["연결표에 없는 항목을 실행 계획으로 변환할 수 없습니다."]
+        if (plan.target_device_id != 1
+                or [(a.action_id, a.selector) for a in plan.actions] != [(b.action_id, b.selector) for b in mapped.operations]
+                or [(a.result_id, a.selector) for a in plan.assertions] != [(b.result_id, b.selector) for b in mapped.verifications]
+                or [c.selector for c in plan.precondition_checks] != [b.selector for b in mapped.preconditions]):
+            return ["TC 연결표의 장비·조작·관찰 위치가 변경되었습니다."]
+    try:
+        reference = assemble_tc_bindings(tc, Agent3UiBindings(planning_status="READY",
+            operations=[OperationBinding(action_id=a.action_id, selector=a.selector) for a in plan.actions],
+            verifications=[VerificationBinding(result_id=a.result_id, selector=a.selector) for a in plan.assertions],
+            preconditions=[PreconditionBinding(verification_index=i, selector=c.selector)
+                           for i, c in enumerate(plan.precondition_checks)],
+            extension_reasons=[], technical_notes=[]))
+    except Agent3Error as exc:
+        return [str(exc)]
+    # Only the existing finite-domain spelling conversion is equivalent. No
+    # observation is claimed here; CP3 independently checks real interfaces/IDs.
+    reference, _ = _normalize_agent3_plan_values(reference, None)
+    comparable, _ = _normalize_agent3_plan_values(plan, None)
+    for name, actual, expected in (
+        ("조작", comparable.actions, reference.actions),
+        ("기대값·시점", comparable.assertions, reference.assertions),
+        ("사전조건", comparable.precondition_checks, reference.precondition_checks)):
+        actual_values = [v.model_dump(mode="json", exclude={"selector"}) for v in actual]
+        expected_values = [v.model_dump(mode="json", exclude={"selector"}) for v in expected]
+        # JSON comparison deliberately distinguishes false from 0.
+        if json.dumps(actual_values, sort_keys=True) != json.dumps(expected_values, sort_keys=True):
+            errors.append(f"Agent 2 → Agent 3 {name} 정의 변경·누락")
+    confirmations = tc.restoration.confirmations if tc.restoration else []
+    if plan.restore_confirmations != confirmations:
+        errors.append("Agent 2 복원 확인 연결 변경")
+    return errors
 
 
 def build_agent3_model_input(
     test_case: ProductTestCaseCandidate,
     observation: UiObservation,
     requirements: dict[str, SrsRequirement],
+    *, shared_evidence: bool = False,
 ) -> dict[str, Any]:
     related = {
         key: value.model_dump(mode="json")
@@ -174,6 +285,10 @@ def build_agent3_model_input(
     )
 
     def internal_name_is_grounded(value: str) -> bool:
+        if shared_evidence:
+            field = value.rsplit(".", 1)[-1]
+            if field in {*_CONTROLLER_BUTTONS, "setTemp", "id"}:
+                return True
         identifiers = re.findall(r"[A-Za-z_$][A-Za-z0-9_$]*", value)
         return any(
             len(identifier) >= 3
@@ -198,13 +313,14 @@ def build_agent3_model_input(
         for field_name in observation.device_state_fields
         if internal_name_is_grounded(field_name)
     ]
-    return {
+    payload = {
         "destination": "OpenAI Responses API",
         "store": False,
-        "system_instructions": AGENT3_SYSTEM_INSTRUCTIONS,
+        "system_instructions": AGENT3_BINDING_INSTRUCTIONS if test_case.execution_spec is not None else AGENT3_SYSTEM_INSTRUCTIONS,
         "test_case": test_case.model_dump(mode="json"),
         "observation_binding_rules": TC_OBSERVATION_BINDING_RULES,
-        "related_srs_requirements": related,
+        "execution_contract": QA_EXECUTION_CONTRACT,
+        "related_srs_requirements": {} if test_case.execution_spec is not None else related,
         "ui_observation": observation_payload,
         "precondition_context_bindings": [
             {
@@ -218,7 +334,7 @@ def build_agent3_model_input(
                     and (name == "target_device_visible" or observation.verified_execution_context.device_state_available)
                 ],
             }
-            for source in test_case.preconditions
+            for source in (test_case.preconditions if test_case.execution_spec is None else [])
         ],
         "excluded": [
             "API keys and authentication values",
@@ -226,14 +342,28 @@ def build_agent3_model_input(
             "screenshots and Playwright traces",
         ],
     }
+    if test_case.execution_spec is not None:
+        payload["precondition_context_bindings"] = [
+            {"verification_index": i, "source_text": v.source_text,
+             "observation_target": v.observation_target, "read_kind": v.read_kind.value}
+            for i, v in enumerate(test_case.execution_spec.precondition_verifications)]
+    if shared_evidence:
+        payload["controller_evidence"] = controller_evidence(observation)
+    return payload
 
 
 AGENT3_SYSTEM_INSTRUCTIONS += """
+Use the shared observed controller adapter for both UI and internal-value bindings. Its available fields are capabilities, not permission to add tests. Keep the approved TC's target, value, timing and scope unchanged; display labels and internal enums can represent the same state. Never substitute a similarly named existing control for a distinct requested feature. If the required control or reader is absent, request support extension without invented selectors or success claims.
 Implement the whole fact of each ExpectedResult, not just a matching result_id or numeric token.
 Do not silently omit an independent claim attached to an ExpectedResult. If the approved TC combines
 facts that cannot be faithfully asserted, return support-extension/review reasons; never shorten the TC.
 The semantic grounding review checks actual actions/assertions against the approved TC separately.
 """
+
+
+AGENT3_SYSTEM_INSTRUCTIONS += "\n" + QA_EXECUTION_CONTRACT
+AGENT3_SYSTEM_INSTRUCTIONS += "\n" + QA_REVIEW_RESPONSIBILITIES
+AGENT3_SYSTEM_INSTRUCTIONS += "\n" + QA_TASK_BOUNDARIES
 
 
 class OpenAIAgent3:
@@ -256,7 +386,11 @@ class OpenAIAgent3:
         previous_plan: Agent3AutomationPlan | None = None,
         checkpoint_feedback: list[str] | None = None,
     ) -> Agent3Response:
-        payload = build_agent3_model_input(test_case, observation, requirements)
+        payload = build_agent3_model_input(test_case, observation, requirements, shared_evidence=True)
+        binding_only = test_case.execution_spec is not None
+        errors = tc_execution_spec_errors(test_case)
+        if errors:
+            raise Agent3Error("Agent 2 실행 정의: " + " / ".join(errors))
         user_input = (
             "[CP2-approved product test case]\n"
             f"{json.dumps(payload['test_case'], ensure_ascii=False, indent=2)}\n\n"
@@ -264,10 +398,20 @@ class OpenAIAgent3:
             f"{json.dumps(payload['related_srs_requirements'], ensure_ascii=False, indent=2)}\n\n"
             "[Observed real UI inventory]\n"
             f"{json.dumps(payload['ui_observation'], ensure_ascii=False, indent=2)}\n\n"
-            "[Per-source BASELINE_CONTEXT bindings; other readers may still be required]\n"
+            "[Precondition reader references]\n"
             f"{json.dumps(payload['precondition_context_bindings'], ensure_ascii=False, indent=2)}"
         )
-        if previous_plan is not None:
+        user_input += "\n[Observed controller adapter; availability is not TC authority]\n" + json.dumps(
+            payload["controller_evidence"], ensure_ascii=False)
+        if previous_plan is not None and binding_only:
+            user_input += "\n[Previous UI bindings; fix locations only]\n" + json.dumps({
+                "operations": [{"action_id": a.action_id, "selector": a.selector} for a in previous_plan.actions],
+                "verifications": [{"result_id": a.result_id, "selector": a.selector} for a in previous_plan.assertions],
+                "preconditions": [{"verification_index": i, "selector": c.selector}
+                                  for i, c in enumerate(previous_plan.precondition_checks)],
+                "feedback": checkpoint_feedback or [],
+            }, ensure_ascii=False)
+        elif previous_plan is not None:
             feedback = "\n".join(f"- {item}" for item in (checkpoint_feedback or []))
             user_input += (
                 "\n\n[Previous automation plan]\n"
@@ -288,12 +432,12 @@ class OpenAIAgent3:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent3-3-33",
+                prompt_cache_key="qa-v2-agent3-3-43" if binding_only else "qa-v2-agent3-3-42",
                 input=[
-                    {"role": "system", "content": AGENT3_SYSTEM_INSTRUCTIONS},
+                    {"role": "system", "content": payload["system_instructions"]},
                     {"role": "user", "content": user_input},
                 ],
-                text_format=Agent3AutomationPlan,
+                text_format=Agent3UiBindings if binding_only else Agent3AutomationPlan,
             )
         except Exception as exc:
             raise Agent3Error(f"Agent 3 model call failed ({type(exc).__name__}). External error body omitted.") from None
@@ -301,13 +445,25 @@ class OpenAIAgent3:
         if parsed is None:
             raise Agent3Error("The model did not return a structured Agent 3 automation plan.")
         return Agent3Response(
-            plan=parsed,
+            plan=assemble_tc_bindings(test_case, parsed) if binding_only else parsed,
             response_id=getattr(response, "id", None),
             model=self.model,
             usage=_response_usage_summary(response),
+            ui_bindings=parsed if binding_only else None,
         )
 
 _UI_SELECTOR_INVENTORY = {
+    ".detail-panel": "READ_STATE: control panel selected values, distinct from device card",
+    "#device-card-1": "READ_STATE",
+    "#det-power-on-btn": "CLICK",
+    "#det-power-off-btn": "CLICK",
+    "#det-fan-low": "CLICK",
+    "#det-fan-med": "CLICK",
+    "#det-fan-high": "CLICK",
+    "#det-fan-auto": "CLICK",
+    "#det-lock-on-btn": "CLICK",
+    "#det-lock-off-btn": "CLICK",
+    "#det-temp-limit-text": "Read temperature unit",
     "#device-card-1 .card-body-split": "Select PRIMARY_TEST_DEVICE",
     "#det-mode-cool": "Request COOL mode",
     "#det-mode-heat": "Request HEAT mode",
@@ -342,6 +498,23 @@ _REQUIRED_HARNESS_KEYS = {
     "selectUnit",
     "applyPanelCommands",
 }
+
+
+def _observed_action_hint(tag: str, role: str | None, input_type: str | None) -> str:
+    """Describe the observed control capability, never its prose label."""
+    if tag == "select":
+        return "SELECT_OPTION"
+    if tag == "textarea" or (tag == "input" and input_type not in {
+        "checkbox", "radio", "button", "submit", "reset", "hidden", "file", "image"
+    }):
+        return "FILL"
+    if input_type == "checkbox" or role in {"switch", "checkbox"}:
+        return "CHECK_OR_UNCHECK"
+    if tag == "button" or role == "button" or (
+        tag == "input" and input_type in {"button", "submit", "reset"}
+    ):
+        return "CLICK"
+    return "READ_STATE"
 
 
 def inspect_target_ui(
@@ -417,13 +590,28 @@ def inspect_target_ui(
         # <body> made a valid device intermittently appear absent on delayed pages.
         primary_card = page.locator("#device-card-1 .card-body-split").first
         primary_visible = primary_card.count() > 0 and primary_card.is_visible()
+        internal_fields = sorted({"id"} | {
+            key.removeprefix("internal.")
+            for key, (kind, _) in controller_connection_catalog()["preconditions"].items()
+            if key.startswith("internal.") and kind == "INTERNAL_VALUE"
+        })
         primary_state = page.evaluate(
-            """() => {
+            """fields => {
                 const devices = window.__vccs && Array.isArray(window.__vccs.devices)
                     ? window.__vccs.devices : [];
                 const device = devices.find(item => item && item.id === 1);
                 if (!device || typeof device !== 'object') return null;
+                const observed = {};
+                for (const field of fields) {
+                    if (!Object.prototype.hasOwnProperty.call(device, field)) continue;
+                    const value = device[field];
+                    if (value === null || ['string', 'boolean'].includes(typeof value)
+                        || (typeof value === 'number' && Number.isFinite(value))) {
+                        observed[field] = value;
+                    }
+                }
                 return {
+                    observed,
                     id: device.id,
                     index: devices.indexOf(device),
                     mode: typeof device.mode === 'string' ? device.mode : null,
@@ -433,7 +621,7 @@ def inspect_target_ui(
                     errorCode: device.errorCode ?? null,
                     hasErrorCode: Object.prototype.hasOwnProperty.call(device, 'errorCode'),
                 };
-            }"""
+            }""", arg=internal_fields
         )
         state_available = isinstance(primary_state, dict)
         error_free = (
@@ -464,21 +652,28 @@ def inspect_target_ui(
             unlocked=unlocked,
             evidence=evidence,
         )
-        for selector, hint in _UI_SELECTOR_INVENTORY.items():
+        for selector in _UI_SELECTOR_INVENTORY:
             if selector not in selectors_to_observe:
                 continue
             locator = page.locator(selector).first
             if locator.count() == 0:
                 continue
+            metadata = locator.evaluate("""el => ({
+                tag: el.tagName.toLowerCase(),
+                role: el.getAttribute('role'),
+                input_type: el.tagName.toLowerCase() === 'input' ? el.type : null
+            })""")
             elements.append(
                 ObservedUiElement(
                     selector=selector,
                     match_count=page.locator(selector).count(),
-                    tag=locator.evaluate("el => el.tagName.toLowerCase()"),
+                    tag=metadata["tag"],
                     text=(locator.inner_text() or "").strip(),
                     visible=locator.is_visible(),
                     enabled=locator.is_enabled(),
-                    action_hint=hint,
+                    action_hint=_observed_action_hint(**metadata),
+                    role=metadata["role"],
+                    input_type=metadata["input_type"],
                 )
             )
         if discover_generic:
@@ -515,11 +710,6 @@ def inspect_target_ui(
                         const tag = element.tagName.toLowerCase();
                         const role = element.getAttribute('role');
                         const inputType = tag === 'input' ? (element.getAttribute('type') || 'text') : null;
-                        let hint = 'READ_STATE';
-                        if (tag === 'select') hint = 'SELECT_OPTION';
-                        else if (tag === 'textarea' || (tag === 'input' && !['checkbox','radio','button','submit'].includes(inputType))) hint = 'FILL';
-                        else if (inputType === 'checkbox' || role === 'switch' || role === 'checkbox') hint = 'CHECK_OR_UNCHECK';
-                        else if (tag === 'button' || role === 'button') hint = 'CLICK';
                         result.push({
                             selector,
                             match_count: document.querySelectorAll(selector).length,
@@ -527,7 +717,6 @@ def inspect_target_ui(
                             text: (element.innerText || element.textContent || '').trim().slice(0, 300),
                             visible,
                             enabled: !element.disabled && element.getAttribute('aria-disabled') !== 'true',
-                            action_hint: hint,
                             role,
                             input_type: inputType,
                             accessible_name: (element.getAttribute('aria-label')
@@ -544,6 +733,9 @@ def inspect_target_ui(
             known = {item.selector for item in elements}
             for item in generic_items:
                 if item["selector"] not in known:
+                    item["action_hint"] = _observed_action_hint(
+                        item["tag"], item["role"], item["input_type"]
+                    )
                     elements.append(ObservedUiElement.model_validate(item))
                     known.add(item["selector"])
         available_harness_keys = set(
@@ -553,7 +745,8 @@ def inspect_target_ui(
         harness_values: dict[str, str | float | int | bool | None] = {}
         if state_available:
             prefix = f"window.__vccs.devices[{primary_state['index']}]"
-            harness_values.update({f"{prefix}.{name}": primary_state[name] for name in ("id", "mode", "setTemp")})
+            harness_values.update({f"{prefix}.{name}": value
+                                   for name, value in primary_state["observed"].items()})
         device_state_fields: list[str] = []
         if "devices" in available_harness_keys:
             device_state_fields = page.evaluate(
@@ -640,6 +833,337 @@ _SUPPORTED_AGENT3_TARGET_ROLES = {
     "PRIMARY_TEST_DEVICE",
     "CENTRAL_COMMAND_ALLOWED_ROLE",
 }
+
+# Product adapter, not scenario templates: one bounded inverse for the five
+# central controls. Keep historical HVAC artifacts on their original path.
+_CONTROLLER_BUTTONS = {
+    "status": {"OPERATION": "#det-power-on-btn", "STOP": "#det-power-off-btn"},
+    "mode": _MODE_SELECTOR,
+    "fanSpeed": {value: f"#det-fan-{value.lower()}" for value in ("LOW", "MED", "HIGH", "AUTO")},
+    "locked": {True: "#det-lock-on-btn", False: "#det-lock-off-btn"},
+}
+_CONTROLLER_WRITE_SELECTORS = {s for values in _CONTROLLER_BUTTONS.values() for s in values.values()} | {
+    ".btn-apply-cmd", "#det-temp-up-btn", "#det-temp-down-btn",
+}
+_CONTROLLER_RESTORE_SELECTORS = _CONTROLLER_WRITE_SELECTORS | {
+    "#det-temp-display", "#det-temp-limit-text", "#device-card-1",
+}
+
+
+def _controller_device_selection_valid(value, target_id, *, implicit=False):
+    """An omitted mapped value uses the fixed device; explicit IDs stay strict."""
+    return (implicit and value is None) or (type(value) is int and value == target_id)
+
+# Display labels of the existing central-controller adapter, not request examples.
+# Numeric values, arbitrary UI text, selectors and product observations are never normalized.
+_CONTROLLER_VALUE_LABELS = {
+    "status": {"운전": "OPERATION", "정지": "STOP"},
+    "mode": {"냉방": "COOL", "난방": "HEAT", "송풍": "FAN", "제습": "DRY", "자동": "AUTO"},
+    "fanSpeed": {"약풍": "LOW", "중풍": "MED", "강풍": "HIGH", "자동": "AUTO"},
+    "locked": {"잠금": True, "설정": True, "해제": False},
+}
+
+
+def controller_connection_catalog():
+    """Product locations/capabilities only. Never stores scenario expected values."""
+    actions = {
+        "device.select": ("SELECT_DEVICE", "#device-card-1 .card-body-split"),
+        "temperature.set": ("SET_TEMPERATURE", "#det-temp-display"),
+        "temperature.increase": ("CLICK", "#det-temp-up-btn"),
+        "temperature.decrease": ("CLICK", "#det-temp-down-btn"),
+        "command.apply": ("APPLY_COMMANDS", ".btn-apply-cmd"),
+        "controller.restore": ("RESTORE_OBSERVED_CONTROLLER", ".btn-apply-cmd"),
+    }
+    for field, choices in _CONTROLLER_BUTTONS.items():
+        for value, selector in choices.items():
+            name = ("on" if value else "off") if field == "locked" else str(value).lower()
+            actions[f"{field}.{name}"] = ("SET_MODE" if field == "mode" else "CLICK", selector)
+    fields = (*_CONTROLLER_BUTTONS, "setTemp")
+    readers = {}
+    for field in fields:
+        for location, selector in (("card", "#device-card-1"), ("panel", ".detail-panel"),
+                                   ("internal", "window.__vccs.devices")):
+            strategy = "INTERNAL_DEVICE_FIELDS_EQUALS" if location == "internal" else "CONTROLLER_UI_FIELDS_EQUALS"
+            readers[f"{location}.{field}"] = {strategy: selector}
+    readers["panel.setTemp"]["UI_TEMPERATURE"] = "#det-temp-display"
+    readers["internal.setTemp"]["INTERNAL_SET_TEMP"] = "window.__vccs.devices"
+    readers["temperature.controls"] = {"CONTROLS_DISABLED": "#det-temp-down-btn"}
+    readers["temperature.display"] = {"DISABLED_TEMPERATURE_TEXT": "#det-temp-display"}
+    readers["notification.toast"] = {kind: "#global-toast" for kind in ("TOAST_VISIBLE", "TOAST_BLOCKING", "UI_TEXT_CONTAINS")}
+    preconditions = {f"{location}.{field}": ("CONTROLLER_UI_FIELD", f"{location}.{field}")
+                     for location in ("card", "panel") for field in fields}
+    preconditions["card.selected"] = ("CONTROLLER_UI_FIELD", "card.selected")
+    preconditions.update({f"internal.{field}": ("INTERNAL_VALUE", f"window.__vccs.devices[0].{field}") for field in fields})
+    preconditions.update({f"context.{key}": ("BASELINE_CONTEXT", key) for key in _BASELINE_PRECONDITION_READS})
+    return {"actions": actions, "readers": readers, "preconditions": preconditions}
+
+
+def resolve_controller_bindings(tc, observation=None):
+    """Resolve exact logical keys, not prose. No fallback to AI or similar keys."""
+    spec = tc.execution_spec
+    if spec is None or spec.binding_contract != "controller-map-1.0":
+        raise Agent3Error("현재 연결표용 TC 실행 정의가 필요합니다.")
+    errors = tc_execution_spec_errors(tc)
+    if errors:
+        raise Agent3Error("Agent 2 실행 정의: " + " / ".join(errors))
+    catalog = controller_connection_catalog()
+    reasons, operations, verifications, preconditions = [], [], [], []
+    observed = {e.selector: e for e in observation.elements} if observation else {}
+
+    def available(selector):
+        if observation is None:
+            return True
+        if selector.startswith("window."):
+            return (observation.verified_execution_context.target_device_id == 1
+                    and observation.verified_execution_context.device_state_available
+                    and (selector == "window.__vccs.devices" or (
+                        selector in observation.harness_values
+                        and observation.harness_values.get("window.__vccs.devices[0].id") == 1)))
+        target = _controller_precondition_target(selector)
+        if target:
+            selector = target[0]
+        elif selector in _BASELINE_PRECONDITION_READS:
+            return isinstance(getattr(observation.verified_execution_context, selector, None), bool)
+        return selector in observed and observed[selector].match_count == 1
+
+    for op in spec.operations:
+        entry = catalog["actions"].get(op.target)
+        valid = entry is not None and op.action_type.value == entry[0]
+        if valid and op.action_type == AutomationActionType.SET_MODE:
+            valid = _MODE_SELECTOR.get(_normalize_controller_plan_value("mode", op.value)) == entry[1]
+        if valid and op.action_type == AutomationActionType.SELECT_DEVICE:
+            valid = _controller_device_selection_valid(op.value, 1, implicit=True)
+        elif valid and op.action_type not in {AutomationActionType.SET_MODE, AutomationActionType.SET_TEMPERATURE}:
+            valid = op.value is None
+        if not valid or not available(entry[1]):
+            reasons.append(f"{op.action_id}: 조작 연결 미지원 또는 실제 위치 없음 ({op.target})")
+        else:
+            operations.append(OperationBinding(action_id=op.action_id, selector=entry[1]))
+    for check in spec.verifications:
+        selector = catalog["readers"].get(check.target, {}).get(check.strategy.value)
+        field = check.target.split(".", 1)[-1] if check.target else None
+        fields_match = not check.expected_fields or [f.field_name for f in check.expected_fields] == [field]
+        internal_available = (observation is None or check.observation_layer != ObservationLayer.INTERNAL_STATE
+                              or field in observation.device_state_fields)
+        if not selector or not fields_match or not internal_available or not available(selector):
+            reasons.append(f"{check.result_id}: 관찰 연결 미지원 또는 실제 위치 없음 ({check.target})")
+        else:
+            verifications.append(VerificationBinding(result_id=check.result_id, selector=selector))
+    for i, check in enumerate(spec.precondition_verifications):
+        entry = catalog["preconditions"].get(check.observation_target)
+        if not entry or check.read_kind.value != entry[0] or not available(entry[1]):
+            reasons.append(f"사전조건 {i}: 연결 미지원 또는 실제 위치 없음 ({check.observation_target})")
+        else:
+            preconditions.append(PreconditionBinding(verification_index=i, selector=entry[1]))
+    if reasons:
+        return Agent3UiBindings(planning_status="AUTOMATION_SUPPORT_EXTENSION_REQUIRED",
+            operations=[], verifications=[], preconditions=[], extension_reasons=reasons, technical_notes=[])
+    return Agent3UiBindings(planning_status="READY", operations=operations, verifications=verifications,
+                            preconditions=preconditions, extension_reasons=[], technical_notes=[])
+
+
+class ControllerMapAgent3:
+    """Deterministic binding; semantic review remains a separate existing stage."""
+    def plan(self, test_case, observation, requirements, **kwargs):
+        bindings = resolve_controller_bindings(test_case, observation)
+        return Agent3Response(plan=assemble_tc_bindings(test_case, bindings), response_id=None,
+            model="local-controller-map-1.0", usage={"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+            ui_bindings=bindings)
+
+
+def controller_evidence(observation):
+    """Bounded product-adapter vocabulary shared by writer and reviewer."""
+    observed = {item.selector for item in observation.elements if item.match_count == 1}
+    return {field: {"buttons": [{"value": value, "selector": selector}
+                    for value, selector in buttons.items() if selector in observed],
+                    "display_labels": _CONTROLLER_VALUE_LABELS[field]}
+            for field, buttons in _CONTROLLER_BUTTONS.items()
+            if field in observation.device_state_fields}
+
+
+def _normalize_controller_plan_value(field: str, value: Any) -> Any:
+    """Canonicalize a whole finite-domain token, never extract a token from prose."""
+    if not isinstance(value, str) or field not in _CONTROLLER_BUTTONS:
+        return value
+    token = value.strip()
+    if token.endswith("."):
+        token = token[:-1]  # Exactly one terminal period; no punctuation stripping.
+    choices = {str(choice).casefold(): choice for choice in _CONTROLLER_BUTTONS[field]}
+    choices.update(_CONTROLLER_VALUE_LABELS[field])
+    return choices.get(token.casefold(), value)
+
+
+def _normalize_agent3_plan_values(
+    plan: Agent3AutomationPlan, observation: UiObservation | None,
+) -> tuple[Agent3AutomationPlan, list[dict[str, Any]]]:
+    """Normalize new model plans only, before all checks/review/compilation.
+
+    Execution requires an observed existing controller reader/action. None is
+    used only for finite-domain equivalence comparison, not interface approval.
+    No TC, source sentence, selector, field name, timing or observation is rewritten.
+    Checkpoint and semantic review still establish whether the chosen value is right.
+    """
+    result = plan.model_copy(deep=True)
+    changes: list[dict[str, Any]] = []
+    observed = {item.selector for item in observation.elements if item.match_count == 1} if observation is not None else set()
+
+    def supported(field):
+        return (field in _CONTROLLER_BUTTONS and (observation is None or (
+                field in observation.device_state_fields
+                and any(selector in observed for selector in _CONTROLLER_BUTTONS[field].values()))))
+
+    def update(owner, attribute, field, path):
+        if not supported(field):
+            return
+        before = getattr(owner, attribute)
+        after = _normalize_controller_plan_value(field, before)
+        if type(before) is not type(after) or before != after:
+            setattr(owner, attribute, after)
+            changes.append({"path": path, "field": field, "before": before, "after": after})
+
+    def internal_field(selector):
+        match = re.fullmatch(r"window\.__vccs\.devices\[(\d+)\]\.(\w+)", selector)
+        if not match or (observation is not None and selector not in observation.harness_values):
+            return None
+        if observation is None:
+            return match[2]
+        prefix = f"window.__vccs.devices[{match[1]}]"
+        return match[2] if observation.harness_values.get(prefix + ".id") == plan.target_device_id else None
+
+    for index, action in enumerate(result.actions):
+        if action.action_type == AutomationActionType.SET_MODE and (observation is None or action.selector in observed):
+            update(action, "value", "mode", f"actions/{index}/value")
+    for index, assertion in enumerate(result.assertions):
+        if ((assertion.strategy == AssertionStrategy.INTERNAL_DEVICE_FIELDS_EQUALS
+             and assertion.selector == "window.__vccs.devices")
+                or (assertion.strategy == AssertionStrategy.CONTROLLER_UI_FIELDS_EQUALS
+                    and assertion.selector in {"#device-card-1", ".detail-panel"}
+                    and (observation is None or assertion.selector in observed))):
+            for field_index, entry in enumerate(assertion.expected_fields):
+                update(entry, "expected_value", entry.field_name,
+                       f"assertions/{index}/expected_fields/{field_index}/expected_value")
+        elif assertion.strategy == AssertionStrategy.INTERNAL_VALUE_EQUALS:
+            update(assertion, "expected_value", internal_field(assertion.selector),
+                   f"assertions/{index}/expected_value")
+    for index, check in enumerate(result.precondition_checks):
+        field = None
+        if check.read_kind == PreconditionReadKind.INTERNAL_VALUE:
+            field = internal_field(check.selector)
+        elif check.read_kind == PreconditionReadKind.CONTROLLER_UI_FIELD:
+            target = _controller_precondition_target(check.selector)
+            if target and (observation is None or target[0] in observed):
+                field = target[2]
+        update(check, "expected_value", field, f"precondition_checks/{index}/expected_value")
+    return result, changes
+
+
+def controller_recovery_plan_facts(test_case, plan):
+    """Describe emitted cleanup independently of product ERs, never trial success."""
+    actions = [a for a in plan.actions
+               if a.phase == AutomationPhase.RESTORE
+               and a.action_type == AutomationActionType.RESTORE_OBSERVED_CONTROLLER]
+    if (test_case.state_effect not in {TcStateEffect.STATE_CHANGE, TcStateEffect.BLOCKED_CHANGE}
+            or plan.planning_status != Agent3PlanningStatus.READY or len(actions) != 1):
+        return None
+    return {
+        "action_id": actions[0].action_id, "target_device_id": plan.target_device_id,
+        "capture_timing": "BEFORE_SETUP", "comparison_timing": "AFTER_RESTORE",
+        "comparison": "FULL_CONTROLLER_SNAPSHOT_EQUALS_ORIGINAL",
+        "internal_fields": sorted([*_CONTROLLER_BUTTONS, "setTemp"]),
+        "ui_observations": ["panel active selections", "panel temperature and enabled state",
+                            "card classes", "card mode/fan/temperature text", "card lock visibility"],
+        "includes_preparation_changes": True, "depends_on_product_result_ids": False,
+        "trial_success_proved": False,
+    }
+
+
+# Emitted into standalone candidates; no runtime dependency on this repository.
+_CONTROLLER_RESTORE_HELPERS = '''
+def _controller_ui_fields(page, device_id, location='card'):
+    ui = _controller_snapshot(page, device_id)['ui']
+    if location == 'panel':
+        values = {}
+        for field, choices in _CONTROLLER_BUTTONS.items():
+            active = [value for value, selector in choices.items() if ui[field][selector]]
+            values[field] = active[0] if len(active) == 1 else None
+        temperature = re.search(r'-?\\d+(?:\\.\\d+)?', ui['temperature'])
+        values['setTemp'] = float(temperature.group()) if temperature else None
+        return values
+    classes = ui['card_classes']
+    power = [value for css, value in (('state-run', 'OPERATION'), ('state-stop', 'STOP')) if css in classes]
+    mode_labels = {'COOL': '냉방', 'HEAT': '난방', 'FAN': '송풍', 'DRY': '제습', 'AUTO': '자동'}
+    mode = [value for value, label in mode_labels.items() if 'mode-' + value.lower() in classes and ui['card_values'][0].strip().endswith(label)]
+    fan_text = ' '.join(ui['card_values'][1].split())
+    fan = {'약풍': 'LOW', '중풍': 'MED', '강풍': 'HIGH', 'A 자동': 'AUTO', '자동': 'AUTO'}.get(fan_text)
+    temperature = re.search(r'-?\\d+(?:\\.\\d+)?', ui['card_values'][2])
+    return {'status': power[0] if len(power) == 1 else None,
+            'mode': mode[0] if len(mode) == 1 else None, 'fanSpeed': fan,
+            'locked': 'locked' in classes and ui['card_locked'],
+            'setTemp': float(temperature.group()) if temperature else None}
+
+def _controller_snapshot(page, device_id):
+    # One read-only observation turn. UI is read from DOM, never synthesized
+    # from device fields. No product event or internal mutation is invoked.
+    return page.evaluate("""({id, buttons}) => {
+        const d = window.__vccs.devices.find(d => d.id === id);
+        const state = d ? {status:d.status, mode:d.mode, fanSpeed:d.fanSpeed, setTemp:d.setTemp, locked:d.locked} : null;
+        const card = document.querySelector('#device-card-' + id);
+        const ui = Object.fromEntries(Object.entries(buttons).map(([field, choices]) =>
+            [field, Object.fromEntries(Object.values(choices).map(selector => [selector, document.querySelector(selector).classList.contains('active')]))]));
+        ui.temperature = document.querySelector('#det-temp-display').innerText;
+        ui.temperature_enabled = ['#det-temp-up-btn','#det-temp-down-btn'].map(s => !document.querySelector(s).disabled);
+        ui.card_classes = Array.from(card.classList).filter(c => c !== 'selected').sort();
+        ui.card_values = ['.card-mode-text','.fan-speed-indicator','.card-set-temp'].map(s => card.querySelector(s).innerText);
+        const lock = card.querySelector('.card-lock-indicator');
+        ui.card_locked = getComputedStyle(lock).visibility !== 'hidden' && !!(lock.offsetWidth || lock.offsetHeight || lock.getClientRects().length);
+        return {state, ui};
+    }""", {'id': device_id, 'buttons': {field: list(choices.values()) for field, choices in _CONTROLLER_BUTTONS.items()}})
+
+def _controller_baseline(page, device_id):
+    selectors = [s for choices in _CONTROLLER_BUTTONS.values() for s in choices.values()]
+    selectors += ['.btn-apply-cmd', '#det-temp-display', '#det-temp-limit-text', '#det-temp-up-btn', '#det-temp-down-btn', f'#device-card-{device_id}']
+    if not page.evaluate('selectors => selectors.every(s => document.querySelectorAll(s).length === 1)', selectors):
+        raise RuntimeError('controller interface is missing or ambiguous; no write started')
+    snapshot = _controller_snapshot(page, device_id)
+    state = snapshot['state']
+    if not state or any(state.get(k) not in choices for k, choices in _CONTROLLER_BUTTONS.items()):
+        raise RuntimeError('controller baseline is unavailable or unsupported')
+    if type(state['locked']) is not bool or type(state['setTemp']) not in (int, float):
+        raise RuntimeError('controller baseline has unsupported value types')
+    if '°C' not in page.locator('#det-temp-limit-text').inner_text():
+        raise RuntimeError('controller restoration currently requires Celsius')
+    if page.evaluate("id => !!window.__vccs.devices.find(d => d.id === id).purify", device_id):
+        raise RuntimeError('purification recovery is outside the five-control adapter')
+    print('CONTROLLER_ORIGINAL: ' + repr(snapshot))
+    return snapshot
+
+def _restore_controller(page, device_id, original):
+    target = original['state']
+    # Re-select through the UI to discard an unapplied pending command.
+    page.locator(f'#device-card-{device_id} .card-body-split').click()
+    current = _controller_snapshot(page, device_id)['state']
+    if current == target:
+        return
+    if current['locked']:
+        page.locator(_CONTROLLER_BUTTONS['locked'][False]).click()
+        page.locator('.btn-apply-cmd').click()
+        if _controller_snapshot(page, device_id)['state']['locked']:
+            raise RuntimeError('controller unlock failed; restoration stopped')
+    # FAN/DRY hide temperature. Only use a writable mode when temperature
+    # really changed; no fixed initial values or direct internal writes.
+    current = _controller_snapshot(page, device_id)['state']
+    if current['setTemp'] != target['setTemp']:
+        writable = target['mode'] if target['mode'] not in ('FAN', 'DRY') else 'COOL'
+        page.locator(_CONTROLLER_BUTTONS['mode'][writable]).click()
+        _set_temperature(page, float(target['setTemp']))
+        page.locator('.btn-apply-cmd').click()
+        if _controller_snapshot(page, device_id)['state']['setTemp'] != target['setTemp']:
+            raise RuntimeError('controller temperature restoration failed')
+    for field in ('status', 'mode', 'fanSpeed', 'locked'):
+        page.locator(_CONTROLLER_BUTTONS[field][target[field]]).click()
+    page.locator('.btn-apply-cmd').click()
+
+'''
 _TEMPERATURE_TERMS = ("temperature", "degree", "settemp", "온도", "°")
 _MODE_TERMS = ("mode", "모드")
 _DISABLED_TERMS = ("disabled", "비활성", "조작할 수 없", "사용할 수 없")
@@ -673,6 +1197,25 @@ def evaluate_agent3_eligibility(
     test_case: ProductTestCaseCandidate,
 ) -> Agent3EligibilityResult:
     """Choose targeted inspection or generic discovery before a model call."""
+    if test_case.execution_spec is not None and test_case.execution_spec.binding_contract == "controller-map-1.0":
+        bindings = resolve_controller_bindings(test_case)
+        reasons = list(bindings.extension_reasons)
+        if not test_case.automation_candidate or test_case.control_path != ControlPath.CENTRAL:
+            reasons.append("중앙제어 자동화 후보가 아닙니다.")
+        selectors = {b.selector for b in bindings.operations + bindings.verifications
+                     if b.selector.startswith(("#", "."))}
+        selectors.update({"#device-card-1", ".detail-panel"})
+        # Runtime setup/cleanup uses the same five-control adapter, not inferred TC prose.
+        if any(op.action_type == AutomationActionType.RESTORE_OBSERVED_CONTROLLER for op in test_case.execution_spec.operations):
+            selectors.update(_CONTROLLER_RESTORE_SELECTORS)
+        if any(op.action_type == AutomationActionType.SET_TEMPERATURE for op in test_case.execution_spec.operations):
+            selectors.update({"#det-temp-up-btn", "#det-temp-down-btn"})
+        return Agent3EligibilityResult(tc_id=test_case.tc_id,
+            status=Agent3EligibilityStatus.NOT_AUTOMATABLE if reasons else Agent3EligibilityStatus.ELIGIBLE,
+            candidate_status=AutomationCandidateStatus.AUTOMATION_SUPPORT_EXTENSION_REQUIRED if reasons else None,
+            required_capabilities=["CONTROLLER_MAP_1"], missing_capabilities=reasons,
+            required_selectors=sorted(selectors), required_harness_keys=sorted(_REQUIRED_HARNESS_KEYS),
+            model_call_allowed=not reasons, extension_reasons=reasons)
     required_capabilities: set[str] = set()
     missing_capabilities: set[str] = set()
     required_selectors: set[str] = set()
@@ -726,6 +1269,11 @@ def evaluate_agent3_eligibility(
     if central_apply_required:
         required_capabilities.add("APPLY_CENTRAL_COMMAND")
         required_selectors.add(".btn-apply-cmd")
+    if test_case.state_effect is not None and test_case.restoration is not None and primary_device_target:
+        # Observe the entire bounded inverse, even for a temperature-only TC.
+        required_selectors.update(_CONTROLLER_RESTORE_SELECTORS)
+        required_selectors.update({'#det-temp-display', '#det-temp-limit-text', '#device-card-1', '.detail-panel'})
+        required_harness_keys.add('devices')
 
     if test_case.target_role not in _SUPPORTED_AGENT3_TARGET_ROLES:
         generic_discovery_required = True
@@ -901,12 +1449,33 @@ _BASELINE_PRECONDITION_READS = {
 }
 
 
-def _precondition_proof_errors(test_case, plan, observation, *, legacy_wording_checks: bool = True) -> list[str]:
+def _controller_precondition_target(selector):
+    location, separator, field = selector.partition('.')
+    allowed = {'status', 'mode', 'fanSpeed', 'setTemp', 'locked'}
+    if separator and location in {'card', 'panel'} and (field in allowed or (location == 'card' and field == 'selected')):
+        return ('#device-card-1' if location == 'card' else '.detail-panel'), location, field
+    return None
+
+
+def _controller_ui_value_is_grounded(field, value, source, *, legacy_wording_checks):
+    if _scalar_value_is_grounded(value, source):
+        return True
+    # A DOM-decoded enum (e.g. DRY) need not be the TC's display label.
+    # Under semantic review, validate the finite adapter value here; the shared
+    # execution contract lets the reviewer check its meaning against the TC.
+    return (not legacy_wording_checks and field in _CONTROLLER_BUTTONS
+            and any(type(value) is type(choice) and value == choice for choice in _CONTROLLER_BUTTONS[field]))
+
+
+def _precondition_proof_errors(test_case, plan, observation, *, legacy_wording_checks: bool = True,
+                               review_precondition_coverage: bool = False,
+                               review_value_roles: bool = False, shared_evidence: bool = False) -> list[str]:
     """Check explicit proof mappings, not general natural-language equivalence."""
     errors = []
+    frozen = test_case.execution_spec is not None
     approved = set(test_case.preconditions)
     observed = {item.selector: item for item in observation.elements}
-    available_paths = build_agent3_model_input(test_case, observation, {})["ui_observation"]["harness_values"]
+    available_paths = build_agent3_model_input(test_case, observation, {}, shared_evidence=shared_evidence)["ui_observation"]["harness_values"]
     grouped = {line: [] for line in test_case.preconditions}
     phases = {action.action_id: action.phase for action in plan.actions}
     if AutomationPhase.TEST not in phases.values():
@@ -918,14 +1487,23 @@ def _precondition_proof_errors(test_case, plan, observation, *, legacy_wording_c
             errors.append("proof source_text is not an exact approved precondition")
             continue
         grouped[check.source_text].append(check)
+        if check.read_kind == PreconditionReadKind.CONTROLLER_UI_FIELD:
+            target = _controller_precondition_target(check.selector)
+            if target is None or target[0] not in observed or observed[target[0]].match_count != 1 or plan.target_device_id != 1:
+                errors.append('unsupported or unobserved controller precondition reader')
+            if target and target[2] in {'locked', 'selected'} and not isinstance(check.expected_value, bool):
+                errors.append('controller boolean precondition requires a boolean')
+            if not frozen and target and target[2] != 'selected' and not _controller_ui_value_is_grounded(target[2], check.expected_value, check.source_text, legacy_wording_checks=legacy_wording_checks):
+                errors.append('controller precondition value is not grounded in its source')
+            continue
         if check.read_kind == PreconditionReadKind.BASELINE_CONTEXT:
             binding = _BASELINE_PRECONDITION_READS.get(check.selector)
             reason = None
             if binding is None or check.expected_value is not True:
                 reason = "허용된 기본 문맥 항목과 expected_value=true를 사용해야 합니다."
-            elif re.search(r"로그인|관리자|인증|login|admin|authenticat", check.source_text, re.I):
+            elif not frozen and re.search(r"로그인|관리자|인증|login|admin|authenticat", check.source_text, re.I):
                 reason = "로그인·권한 조건은 장비 기본 문맥으로 증명할 수 없습니다."
-            elif not re.search(binding[0], check.source_text, re.I):
+            elif not frozen and not re.search(binding[0], check.source_text, re.I):
                 matched = [key for key, (pattern, _) in _BASELINE_PRECONDITION_READS.items()
                            if re.search(pattern, check.source_text, re.I)]
                 reason = (
@@ -939,7 +1517,11 @@ def _precondition_proof_errors(test_case, plan, observation, *, legacy_wording_c
             if reason:
                 errors.append(f"사전조건 확인 #{check_index} [BASELINE_CONTEXT/{check.selector}] 원문={check.source_text!r}: {reason}")
             continue
-        if not _scalar_value_is_grounded(check.expected_value, check.source_text):
+        value_grounded = (_controller_ui_value_is_grounded(check.selector.rsplit(".", 1)[-1],
+                            check.expected_value, check.source_text, legacy_wording_checks=False)
+                          if shared_evidence and check.read_kind == PreconditionReadKind.INTERNAL_VALUE
+                          else _scalar_value_is_grounded(check.expected_value, check.source_text))
+        if not frozen and not value_grounded:
             errors.append("precondition expected value is not grounded in its source")
         if check.read_kind == PreconditionReadKind.INTERNAL_VALUE:
             if not _HARNESS_VALUE_PATH.fullmatch(check.selector) or check.selector not in available_paths:
@@ -957,26 +1539,30 @@ def _precondition_proof_errors(test_case, plan, observation, *, legacy_wording_c
                 errors.append("precondition UI target has no textual link to its source")
             if check.read_kind in {PreconditionReadKind.UI_CHECKED, PreconditionReadKind.UI_ENABLED} and not isinstance(check.expected_value, bool):
                 errors.append("precondition boolean observation requires a boolean value")
-            if check.read_kind == PreconditionReadKind.UI_ENABLED and _state_polarities(check.source_text, *_STATE_WORD_PAIRS[1]) != {check.expected_value}:
+            if not frozen and check.read_kind == PreconditionReadKind.UI_ENABLED and _state_polarities(check.source_text, *_STATE_WORD_PAIRS[1]) != {check.expected_value}:
                 errors.append("enabled-state proof requires the same explicit enabled/disabled precondition")
             if check.read_kind == PreconditionReadKind.UI_CHECKED and element.tag != "input":
                 errors.append("checked-state proof requires an observed input element")
             if check.read_kind in {PreconditionReadKind.UI_TEXT, PreconditionReadKind.UI_VALUE} and not isinstance(check.expected_value, str):
                 errors.append("precondition text/value observation requires a string")
-            if check.read_kind == PreconditionReadKind.UI_TEXT:
+            if not frozen and check.read_kind == PreconditionReadKind.UI_TEXT:
                 for positive, negative in _STATE_WORD_PAIRS:
                     state = _state_polarities(check.source_text, positive, negative)
                     if len(state) == 1 and _state_polarities(str(check.expected_value), positive, negative) != state:
                         errors.append("precondition text omits the required state")
     for source, checks in grouped.items():
         if not checks:
-            errors.append("missing runtime proof for precondition: " + source)
+            if not review_precondition_coverage:
+                errors.append("missing runtime proof for precondition: " + source)
             continue
         required = _explicit_behavior_values(source) - {"PRIMARY_TEST_DEVICE", "CENTRAL_COMMAND_ALLOWED_ROLE"}
         proved = set().union(*(_explicit_behavior_values(json.dumps(check.expected_value, ensure_ascii=False)) for check in checks))
-        if required - proved:
+        if not review_value_roles and required - proved:
             errors.append("precondition proof omits explicit values: " + ",".join(sorted(required - proved)))
-        if any(check.read_kind == PreconditionReadKind.BASELINE_CONTEXT for check in checks):
+        # The mandatory coverage review sees every reader for this source.
+        # Counting only context readers here rejects valid mixed-reader proofs.
+        # Keep the historical completeness rule when that review is not enabled.
+        if not review_precondition_coverage and any(check.read_kind == PreconditionReadKind.BASELINE_CONTEXT for check in checks):
             covered_context = {check.selector for check in checks if check.read_kind == PreconditionReadKind.BASELINE_CONTEXT}
             required_context = {key for key, (pattern, _) in _BASELINE_PRECONDITION_READS.items() if re.search(pattern, source, re.I)}
             if required_context - covered_context:
@@ -985,6 +1571,14 @@ def _precondition_proof_errors(test_case, plan, observation, *, legacy_wording_c
 
 
 def _precondition_read_expression(check: PreconditionCheck, target_device_id: int) -> str:
+    if check.read_kind == PreconditionReadKind.CONTROLLER_UI_FIELD:
+        target = _controller_precondition_target(check.selector)
+        if target is None:
+            raise Agent3Error('Unsupported controller precondition reader')
+        _, location, field = target
+        if field == 'selected':
+            return f"page.locator('#device-card-{target_device_id}').evaluate(\"e => e.classList.contains('selected')\")"
+        return f"_controller_ui_fields(page, {target_device_id}, {location!r})[{field!r}]"
     if check.read_kind == PreconditionReadKind.BASELINE_CONTEXT:
         if check.selector == "target_device_visible":
             return f"page.locator('#device-card-{target_device_id} .card-body-split').is_visible()"
@@ -1284,8 +1878,25 @@ def evaluate_checkpoint3_plan(
     require_plan_fidelity: bool = True,
     legacy_wording_checks: bool = True,
     allow_terminal_observation_anchor: bool = False,
+    allow_state_change_terminal_observation: bool = False,
     require_assertion_target_identity: bool = False,
+    review_precondition_coverage: bool = False,
+    review_value_roles: bool = False,
+    shared_evidence: bool = False,
 ) -> Checkpoint3Result:
+    frozen = test_case.execution_spec is not None
+    handoff_errors = tc_plan_handoff_errors(test_case, plan)
+    if handoff_errors:
+        return Checkpoint3Result(status=CheckStatus.FAIL,
+            candidate_status=AutomationCandidateStatus.REVISION_REQUIRED,
+            checks=[CheckResult(rule_id="CP3-014", status=CheckStatus.FAIL, message=" / ".join(handoff_errors))])
+    if frozen:
+        # The accepted TC's typed definitions replace prose value inference.
+        # Interface/identity/runtime checks and semantic UI-binding review remain.
+        legacy_wording_checks = False
+        review_value_roles = True
+        review_precondition_coverage = True
+        shared_evidence = True
     if test_case.control_path != ControlPath.CENTRAL:
         return Checkpoint3Result(
             status=CheckStatus.FAIL,
@@ -1337,11 +1948,15 @@ def evaluate_checkpoint3_plan(
         checks.append(CheckResult(rule_id=rule_id, status=status, message=message))
 
     if require_precondition_proof or plan.precondition_checks:
-        proof_errors = _precondition_proof_errors(test_case, plan, observation, legacy_wording_checks=legacy_wording_checks)
+        proof_errors = _precondition_proof_errors(test_case, plan, observation, legacy_wording_checks=legacy_wording_checks,
+                                                  review_precondition_coverage=review_precondition_coverage,
+                                                  review_value_roles=review_value_roles, shared_evidence=shared_evidence)
         # CP3-006A remains the historical action-sequence identifier. Saved
         # checkpoints are not rewritten; fresh proof checks have their own ID.
         add("CP3-006D", CheckStatus.FAIL if proof_errors else CheckStatus.PASS,
-            " / ".join(proof_errors) if proof_errors else "Every precondition has a grounded read-only runtime check before TEST.")
+            " / ".join(proof_errors) if proof_errors else
+            "Provided runtime checks are structurally valid; complete precondition coverage requires semantic review." if review_precondition_coverage else
+            "Every precondition has a grounded read-only runtime check before TEST.")
 
     observed_selectors = {item.selector for item in observation.elements}
     observed_by_selector = {item.selector: item for item in observation.elements}
@@ -1384,7 +1999,9 @@ def evaluate_checkpoint3_plan(
             )
         if item.action_type == AutomationActionType.SELECT_DEVICE and (
             item.selector != "#device-card-1 .card-body-split"
-            or item.value != plan.target_device_id
+            or not _controller_device_selection_valid(item.value, plan.target_device_id,
+                implicit=(test_case.execution_spec is not None
+                          and test_case.execution_spec.binding_contract == "controller-map-1.0"))
         ):
             action_errors.append(f"{item.action_id}: invalid device selector or target value")
         elif item.action_type == AutomationActionType.SET_MODE:
@@ -1396,6 +2013,14 @@ def evaluate_checkpoint3_plan(
                 action_errors.append(f"{item.action_id}: invalid temperature target")
         elif item.action_type == AutomationActionType.APPLY_COMMANDS and item.selector != ".btn-apply-cmd":
             action_errors.append(f"{item.action_id}: invalid apply selector")
+        elif item.action_type == AutomationActionType.RESTORE_OBSERVED_CONTROLLER:
+            required = _CONTROLLER_RESTORE_SELECTORS
+            missing = required - observed_selectors
+            if (item.phase != AutomationPhase.RESTORE or test_case.state_effect is None
+                    or test_case.restoration is None or item.selector != '.btn-apply-cmd' or item.value is not None
+                    or missing or any(observed_by_selector[s].match_count != 1 for s in required if s in observed_by_selector)
+                    or not {'status', 'mode', 'fanSpeed', 'setTemp', 'locked'}.issubset(observation.device_state_fields)):
+                action_errors.append(f'{item.action_id}: 공통 관제점 복원 계약 또는 관찰 인터페이스 누락')
         elif item.action_type == AutomationActionType.RESTORE_OBSERVED_HVAC:
             if (
                 item.phase != AutomationPhase.RESTORE
@@ -1446,7 +2071,7 @@ def evaluate_checkpoint3_plan(
             if item.action_type in {
                 AutomationActionType.FILL,
                 AutomationActionType.SELECT_OPTION,
-            } and not _scalar_value_is_grounded(item.value, item.source_text):
+            } and not frozen and not _scalar_value_is_grounded(item.value, item.source_text):
                 action_errors.append(
                     f"{item.action_id}: generic action value is not grounded in source_text"
                 )
@@ -1504,11 +2129,12 @@ def evaluate_checkpoint3_plan(
             anchoring_errors.append(
                 f"{assertion.result_id}: Expected Result has no verify_after_step"
             )
-        elif _normalize(anchor.source_text) != _normalize(result.verify_after_step):
+        elif not frozen and _normalize(anchor.source_text) != _normalize(result.verify_after_step):
             terminal_read = (
                 allow_terminal_observation_anchor
-                and test_case.state_effect == TcStateEffect.READ_ONLY
-                and all(a.action_type == AutomationActionType.SELECT_DEVICE for a in plan.actions)
+                and (allow_state_change_terminal_observation or (
+                    test_case.state_effect == TcStateEffect.READ_ONLY
+                    and all(a.action_type == AutomationActionType.SELECT_DEVICE for a in plan.actions)))
                 and _normalize(result.verify_after_step) in terminal_observations
                 and test_actions and anchor.action_id == test_actions[-1].action_id
             )
@@ -1516,7 +2142,7 @@ def evaluate_checkpoint3_plan(
                 anchoring_errors.append(
                     f"{assertion.result_id}: anchor action does not implement verify_after_step"
                 )
-        else:
+        elif not frozen:
             matching_actions = [
                 item
                 for item in plan.actions
@@ -1548,6 +2174,7 @@ def evaluate_checkpoint3_plan(
             fidelity_errors.append(f"{assertion.result_id}: invalid observation target")
         allowed_strategies = {
             ObservationLayer.UI: {
+                AssertionStrategy.CONTROLLER_UI_FIELDS_EQUALS,
                 AssertionStrategy.UI_TEMPERATURE,
                 AssertionStrategy.CONTROLS_DISABLED,
                 AssertionStrategy.DISABLED_TEMPERATURE_TEXT,
@@ -1573,28 +2200,31 @@ def evaluate_checkpoint3_plan(
                 }
             ),
         }
+        if frozen:
+            allowed_strategies[ObservationLayer.NOTIFICATION] = {
+                AssertionStrategy.TOAST_BLOCKING, AssertionStrategy.TOAST_VISIBLE, AssertionStrategy.UI_TEXT_CONTAINS}
         if assertion.strategy not in allowed_strategies[result.observation_layer]:
             fidelity_errors.append(f"{assertion.result_id}: assertion strategy changed the observation meaning")
-        if assertion.strategy == AssertionStrategy.CONTROLS_DISABLED:
+        if not frozen and assertion.strategy == AssertionStrategy.CONTROLS_DISABLED:
             if _state_polarities(result.statement, *_STATE_WORD_PAIRS[1]) != {False}:
                 fidelity_errors.append(f"{assertion.result_id}: disabled strategy requires an explicit disabled expectation")
         if assertion.strategy == AssertionStrategy.UI_TEXT_CONTAINS:
-            for positive, negative in _STATE_WORD_PAIRS:
+            for positive, negative in ([] if frozen else _STATE_WORD_PAIRS):
                 required_state = _state_polarities(result.statement, positive, negative)
                 if len(required_state) == 1 and _state_polarities(assertion.expected_text or "", positive, negative) != required_state:
                     fidelity_errors.append(f"{assertion.result_id}: text assertion omits the expected product state")
-            if not assertion.expected_text or not _contains(
+            if not assertion.expected_text or (not frozen and not _contains(
                 result.statement, assertion.expected_text
-            ):
+            )):
                 fidelity_errors.append(
                     f"{assertion.result_id}: expected text is not grounded in the Expected Result"
                 )
-            elif not re.sub(r"표시|화면|상태|텍스트|확인|display|visible|text|state|\W", "", assertion.expected_text, flags=re.I):
+            elif not frozen and not re.sub(r"표시|화면|상태|텍스트|확인|display|visible|text|state|\W", "", assertion.expected_text, flags=re.I):
                 fidelity_errors.append(f"{assertion.result_id}: expected text contains no product value or message")
-            elif require_plan_fidelity and not _complete_text_value(result.statement, assertion.expected_text):
+            elif not frozen and require_plan_fidelity and not _complete_text_value(result.statement, assertion.expected_text):
                 fidelity_errors.append(f"{assertion.result_id}: expected text is only part of a product value or message")
             elif (
-                result.observation_layer == ObservationLayer.NOTIFICATION
+                not frozen and result.observation_layer == ObservationLayer.NOTIFICATION
                 and len(_terms(assertion.expected_text)) >= len(_terms(result.statement))
             ):
                 fidelity_errors.append(
@@ -1609,7 +2239,7 @@ def evaluate_checkpoint3_plan(
                 fidelity_errors.append(f"{assertion.result_id}: numeric expectation is missing")
             else:
                 statement_numbers = {float(item) for item in re.findall(r"\d+(?:\.\d+)?", result.statement)}
-                if statement_numbers and float(assertion.expected_number) not in statement_numbers:
+                if not frozen and statement_numbers and float(assertion.expected_number) not in statement_numbers:
                     fidelity_errors.append(f"{assertion.result_id}: numeric expectation is not grounded in the Expected Result")
         if assertion.strategy in {
             AssertionStrategy.UI_VALUE_EQUALS,
@@ -1617,7 +2247,11 @@ def evaluate_checkpoint3_plan(
             AssertionStrategy.UI_ENABLED_EQUALS,
             AssertionStrategy.INTERNAL_VALUE_EQUALS,
         }:
-            if not _scalar_value_is_grounded(assertion.expected_value, result.statement):
+            value_grounded = (_controller_ui_value_is_grounded(assertion.selector.rsplit(".", 1)[-1],
+                                assertion.expected_value, result.statement, legacy_wording_checks=False)
+                              if shared_evidence and assertion.strategy == AssertionStrategy.INTERNAL_VALUE_EQUALS
+                              else _scalar_value_is_grounded(assertion.expected_value, result.statement))
+            if not frozen and not value_grounded:
                 fidelity_errors.append(
                     f"{assertion.result_id}: expected value is not grounded in the Expected Result"
                 )
@@ -1625,7 +2259,7 @@ def evaluate_checkpoint3_plan(
             fidelity_errors.append(
                 f"{assertion.result_id}: expected_value is not used by the selected strategy"
             )
-        if assertion.strategy == AssertionStrategy.INTERNAL_DEVICE_FIELDS_EQUALS:
+        if assertion.strategy in {AssertionStrategy.INTERNAL_DEVICE_FIELDS_EQUALS, AssertionStrategy.CONTROLLER_UI_FIELDS_EQUALS}:
             if not assertion.expected_fields:
                 fidelity_errors.append(
                     f"{assertion.result_id}: target-device expected_fields are missing"
@@ -1638,6 +2272,11 @@ def evaluate_checkpoint3_plan(
             for expected_field in assertion.expected_fields:
                 field_name = expected_field.field_name
                 expected_value = expected_field.expected_value
+                if assertion.strategy == AssertionStrategy.CONTROLLER_UI_FIELDS_EQUALS and (
+                    assertion.selector not in {'#device-card-1', '.detail-panel'} or field_name not in {'status', 'mode', 'fanSpeed', 'setTemp', 'locked'}
+                    or assertion.selector not in observed_by_selector or observed_by_selector[assertion.selector].match_count != 1
+                ):
+                    fidelity_errors.append(f'{assertion.result_id}: unsupported controller UI field/target')
                 if field_name not in observation.device_state_fields:
                     fidelity_errors.append(
                         f"{assertion.result_id}: target-device field was not observed: {field_name}"
@@ -1646,7 +2285,10 @@ def evaluate_checkpoint3_plan(
                     fidelity_errors.append(
                         f"{assertion.result_id}: target-device field is not named in the Expected Result: {field_name}"
                     )
-                if not _scalar_value_is_grounded(expected_value, result.statement):
+                value_grounded = (_controller_ui_value_is_grounded(field_name, expected_value, result.statement, legacy_wording_checks=legacy_wording_checks)
+                                  if assertion.strategy == AssertionStrategy.CONTROLLER_UI_FIELDS_EQUALS or shared_evidence
+                                  else _scalar_value_is_grounded(expected_value, result.statement))
+                if not frozen and not value_grounded:
                     fidelity_errors.append(
                         f"{assertion.result_id}: target-device field value is not grounded in the Expected Result: {field_name}"
                     )
@@ -1722,6 +2364,8 @@ def evaluate_checkpoint3_plan(
         if value
     }
     for item in plan.actions:
+        if frozen:
+            continue
         if item.action_type == AutomationActionType.SET_TEMPERATURE:
             if not isinstance(item.value, (int, float)) or float(item.value) not in {
                 float(value) for value in allowed_numbers
@@ -1731,6 +2375,11 @@ def evaluate_checkpoint3_plan(
             if item.value not in allowed_modes:
                 value_errors.append(f"{item.action_id}: mode not present in TC: {item.value}")
     for assertion in plan.assertions:
+        # Outputs need not equal inputs (e.g. a boundary clamp). CP3-004 checks
+        # each output against its ER; the mandatory shared-evidence review
+        # verifies its meaning. Retain the old input-membership rule for legacy.
+        if shared_evidence:
+            continue
         if assertion.expected_number is not None and float(assertion.expected_number) not in {
             float(value) for value in allowed_numbers
         }:
@@ -1786,11 +2435,12 @@ def evaluate_checkpoint3_plan(
     tc_modes = allowed_modes
     legacy_controller_flow = (
         test_case.control_path == ControlPath.CENTRAL
+        and test_case.state_effect != TcStateEffect.READ_ONLY
         and bool(tc_modes or allowed_numbers)
         and not (tc_modes - set(_MODE_SELECTOR))
     )
     if require_plan_fidelity or not legacy_controller_flow:
-        for phase, lines in ((AutomationPhase.TEST, test_case.steps), (AutomationPhase.RESTORE, test_case.restore_steps)):
+        for phase, lines in ([] if frozen else ((AutomationPhase.TEST, test_case.steps), (AutomationPhase.RESTORE, test_case.restore_steps))):
             implemented = [_normalize(item.source_text) for item in plan.actions if item.phase == phase]
             # A trailing read-only step is implemented by its mapped assertion,
             # not by an invented click. Earlier observations still need ordering.
@@ -1810,7 +2460,7 @@ def evaluate_checkpoint3_plan(
             item.phase == AutomationPhase.RESTORE for item in plan.actions
         ):
             sequence_errors.append("generic plan is missing approved restore actions")
-    if legacy_controller_flow:
+    if legacy_controller_flow and not frozen:
         target_index = max(plan.target_device_id - 1, 0)
         observed_initial_mode = observation.harness_values.get(
             f"window.__vccs.devices[{target_index}].mode"
@@ -1917,6 +2567,8 @@ def evaluate_checkpoint3_plan(
     restore_errors: list[str] = []
     if bool(restore_actions) != test_case.restore_required:
         restore_errors.append("restore action presence does not match restore_required")
+    elif any(a.action_type == AutomationActionType.RESTORE_OBSERVED_CONTROLLER for a in restore_actions):
+        restore_errors.extend(_state_restoration_plan_errors(test_case, plan))
     elif data.restore_observed_hvac_state:
         dynamic_restore_actions = [
             item
@@ -2009,6 +2661,10 @@ def _restoration_read_expression(assertion: AutomationAssertion, device_id: int)
         return "_displayed_temperature(page, '#det-temp-display')"
     if strategy == AssertionStrategy.INTERNAL_SET_TEMP:
         return f"page.evaluate('id => window.__vccs.devices.find(d => d.id === id).setTemp', {device_id})"
+    if strategy == AssertionStrategy.CONTROLLER_UI_FIELDS_EQUALS:
+        fields = sorted(f.field_name for f in assertion.expected_fields)
+        location = 'panel' if assertion.selector == '.detail-panel' else 'card'
+        return f'{{k: v for k, v in _controller_ui_fields(page, {device_id}, {location!r}).items() if k in {fields!r}}}'
     if strategy == AssertionStrategy.INTERNAL_VALUE_EQUALS:
         return f"page.evaluate({repr('() => ' + assertion.selector)})"
     if strategy == AssertionStrategy.INTERNAL_DEVICE_FIELDS_EQUALS:
@@ -2020,6 +2676,8 @@ def _restoration_read_expression(assertion: AutomationAssertion, device_id: int)
 
 def _state_restoration_plan_errors(test_case: ProductTestCaseCandidate, plan: Agent3AutomationPlan) -> list[str]:
     if test_case.state_effect is None:
+        if any(a.action_type == AutomationActionType.RESTORE_OBSERVED_CONTROLLER for a in plan.actions):
+            return ['공통 관제점 복원에는 state_effect 계약이 필요합니다']
         return []  # Historical artifacts keep their original contract.
     errors = []
     read_only = test_case.state_effect == TcStateEffect.READ_ONLY
@@ -2027,12 +2685,28 @@ def _state_restoration_plan_errors(test_case: ProductTestCaseCandidate, plan: Ag
         errors.append("조회는 복원 불필요, 변경·차단은 복원 필요")
     preparation = [a for a in plan.actions if a.phase == AutomationPhase.PRECONDITION
                    and a.action_type != AutomationActionType.SELECT_DEVICE]
+    controller_restore = any(a.action_type == AutomationActionType.RESTORE_OBSERVED_CONTROLLER for a in plan.actions)
+    if controller_restore:
+        restores = [a for a in plan.actions if a.phase == AutomationPhase.RESTORE]
+        if (test_case.restoration is None or not test_case.restore_required
+                or len(restores) != 1 or restores[0].action_type != AutomationActionType.RESTORE_OBSERVED_CONTROLLER
+                or restores[0].selector != '.btn-apply-cmd' or restores[0].value is not None):
+            errors.append('공통 관제점 복원은 구조화 복원 조작 하나에 연결해야 합니다')
+        allowed = {AutomationActionType.SELECT_DEVICE, AutomationActionType.SET_MODE,
+                   AutomationActionType.SET_TEMPERATURE, AutomationActionType.APPLY_COMMANDS}
+        for a in (a for a in plan.actions if a.phase != AutomationPhase.RESTORE):
+            if a.action_type not in allowed and not (a.action_type == AutomationActionType.CLICK and a.selector in _CONTROLLER_WRITE_SELECTORS):
+                errors.append('공통 복원 지원 밖 조작: ' + a.selector)
+        if not plan.actions or plan.actions[0].action_type != AutomationActionType.SELECT_DEVICE:
+            errors.append('공통 관제점 시험은 변경 전에 대상 장비를 선택해야 합니다')
+        if any(c.basis != RestoreComparisonBasis.OBSERVED_BASELINE for r in plan.restore_confirmations for c in r.comparisons):
+            errors.append('공통 관제점 복원은 준비 전 관찰값과 비교해야 합니다')
     if preparation:
         # Reuse the bounded HVAC inverse, not arbitrary DOM/state rollback.
         reversible = {AutomationActionType.SELECT_DEVICE, AutomationActionType.SET_MODE,
                       AutomationActionType.SET_TEMPERATURE, AutomationActionType.APPLY_COMMANDS}
         restores = [a for a in plan.actions if a.phase == AutomationPhase.RESTORE]
-        if (not test_case.test_data.restore_observed_hvac_state
+        if not controller_restore and (not test_case.test_data.restore_observed_hvac_state
                 or len(restores) != 1
                 or restores[0].action_type != AutomationActionType.RESTORE_OBSERVED_HVAC
                 or any(a.action_type not in reversible for a in plan.actions if a.phase != AutomationPhase.RESTORE)):
@@ -2057,7 +2731,7 @@ def _state_restoration_plan_errors(test_case: ProductTestCaseCandidate, plan: Ag
                                AssertionStrategy.DISABLED_TEMPERATURE_TEXT}
         for a in plan.assertions
     ):
-        errors.append("버튼 비활성·안내 표시만으로 변경 대상 상태의 유지를 증명할 수 없습니다")
+        errors.append("버튼 비활성·안내 표시만으로 요구된 차단 결과의 대상 상태를 증명할 수 없습니다")
     return errors
 
 
@@ -2073,8 +2747,13 @@ def compile_automation_candidate(
     run_id: str,
     test_case: ProductTestCaseCandidate,
     plan: Agent3AutomationPlan,
+    *,
+    explicit_expectations_only: bool = False,
 ) -> str:
-    """Compile a constrained plan into deterministic pytest + Playwright code."""
+    """Compile a constrained plan; historical callers retain their verdict policy."""
+    handoff_errors = tc_plan_handoff_errors(test_case, plan)
+    if handoff_errors:
+        raise Agent3Error("TC 실행 정의 인계 오류: " + " / ".join(handoff_errors))
     policy_errors = _state_restoration_plan_errors(test_case, plan)
     if policy_errors:
         raise Agent3Error("상태 복원 정책: " + " / ".join(policy_errors))
@@ -2100,12 +2779,16 @@ def compile_automation_candidate(
             + ", ".join(sorted(unknown_assertion_anchors))
         )
     requested_temperature = test_case.test_data.requested_temperature_c
+    def assertion_temperature(assertion):
+        if assertion.strategy in {AssertionStrategy.UI_TEMPERATURE, AssertionStrategy.INTERNAL_SET_TEMP}:
+            return assertion.expected_number
+        if assertion.strategy in {AssertionStrategy.INTERNAL_DEVICE_FIELDS_EQUALS, AssertionStrategy.CONTROLLER_UI_FIELDS_EQUALS}:
+            return next((f.expected_value for f in assertion.expected_fields if f.field_name == 'setTemp'), None)
+        return None
     asserted_temperatures = {
-        float(assertion.expected_number)
+        float(value)
         for assertion in plan.assertions
-        if assertion.strategy
-        in {AssertionStrategy.UI_TEMPERATURE, AssertionStrategy.INTERNAL_SET_TEMP}
-        and assertion.expected_number is not None
+        if (value := assertion_temperature(assertion)) is not None
     }
     blocked_request = (
         requested_temperature is not None
@@ -2119,21 +2802,29 @@ def compile_automation_candidate(
     def is_blocked_temperature_action(action: AutomationAction) -> bool:
         if action.phase != AutomationPhase.TEST:
             return False
+        # Follow this input to its first apply, never into the next temperature
+        # request. Detailed TC steps may separate input and apply prose.
+        anchors = {action.action_id}
+        action_index = next(i for i, item in enumerate(plan.actions) if item.action_id == action.action_id)
+        for following in plan.actions[action_index + 1:]:
+            if following.phase != AutomationPhase.TEST or following.action_type == AutomationActionType.SET_TEMPERATURE:
+                break
+            if (following.action_type == AutomationActionType.APPLY_COMMANDS
+                    or (following.action_type == AutomationActionType.CLICK and following.selector == ".btn-apply-cmd")):
+                anchors.add(following.action_id)
+                break
         linked_expected_numbers = {
-            float(assertion.expected_number)
+            float(value)
             for assertion in plan.assertions
-            if assertion.strategy
-            in {AssertionStrategy.UI_TEMPERATURE, AssertionStrategy.INTERNAL_SET_TEMP}
-            and assertion.expected_number is not None
-            and (
-                result := expected_results_by_id.get(assertion.result_id)
-            ) is not None
-            and result.verify_after_step is not None
-            and _normalize(result.verify_after_step) == _normalize(action.source_text)
+            if (value := assertion_temperature(assertion)) is not None
+            and assertion.result_id in expected_results_by_id
+            and assertion.after_action_id in anchors
         }
         if linked_expected_numbers:
             return float(action.value) not in linked_expected_numbers
-        return blocked_request
+        # Unanchored historical single-flow plans used end-of-test assertions.
+        # Never borrow another segment's value in an explicitly anchored plan.
+        return blocked_request if all(a.after_action_id is None for a in plan.assertions) else False
     generic_plan = any(
         item.action_type in _GENERIC_ACTION_TYPES for item in plan.actions
     ) or any(
@@ -2147,9 +2838,13 @@ def compile_automation_candidate(
         item.action_type == AutomationActionType.RESTORE_OBSERVED_HVAC
         for item in plan.actions
     )
+    uses_controller_restore = any(a.action_type == AutomationActionType.RESTORE_OBSERVED_CONTROLLER for a in plan.actions)
+    uses_controller_helpers = (uses_controller_restore or any(a.strategy == AssertionStrategy.CONTROLLER_UI_FIELDS_EQUALS for a in plan.assertions)
+        or any(c.read_kind == PreconditionReadKind.CONTROLLER_UI_FIELD for c in plan.precondition_checks))
     needs_legacy_temperature_helpers = (
         uses_legacy_temperature_action
         or uses_dynamic_hvac_restore
+        or uses_controller_helpers
         or any(
             item.strategy == AssertionStrategy.UI_TEMPERATURE
             for item in plan.assertions
@@ -2239,6 +2934,9 @@ def compile_automation_candidate(
                 "",
             ]
         )
+    if uses_controller_helpers:
+        lines.append(f'_CONTROLLER_BUTTONS = {_py_literal(_CONTROLLER_BUTTONS)}')
+        lines.extend(_CONTROLLER_RESTORE_HELPERS.splitlines())
     lines.extend(
         [
         f"def test_{test_case.tc_id.lower().replace('-', '_')}():",
@@ -2263,7 +2961,8 @@ def compile_automation_candidate(
         # navigation/precondition checks fail before any product action.
         marker = lines.index("        try:")
         lines[marker:marker] = ["        state_change_started = False", "        preparation_started = False",
-                               "        test_state_started = False", "        unexpected_state_change = False"]
+                               "        test_state_started = False"] + (
+                                   [] if explicit_expectations_only else ["        unexpected_state_change = False"])
     if uses_dynamic_hvac_restore:
         lines.extend(
             [
@@ -2313,6 +3012,8 @@ def compile_automation_candidate(
                 + ")"
             )
     baseline_block = lines[baseline_start:]
+    if uses_controller_restore:
+        baseline_block.insert(0, f'{indent}controller_original = _controller_baseline(page, {plan.target_device_id})')
     if state_policy:
         # UI observations belong to the selected target, not the panel shown
         # before SELECT_DEVICE. Capture once, before the first write.
@@ -2331,6 +3032,12 @@ def compile_automation_candidate(
                 f"{indent}    if actual_hvac != prepared_hvac_baseline:",
                 f"{indent}        changes.append('HVAC state differs from prepared observation')",
             ])
+        if uses_controller_restore:
+            lines.extend([
+                f'{indent}    actual_controller = _controller_snapshot(page, {plan.target_device_id})',
+                f"{indent}    if actual_controller['state'] != controller_prepared['state'] or any(actual_controller['ui'][k] != controller_prepared['ui'][k] for k in ('card_classes', 'card_values', 'card_locked')):",
+                f"{indent}        changes.append('controller applied state differs from prepared observation')",
+            ])
         lines.append(f"{indent}    return changes")
     action_blocks: list[tuple[str, list[str]]] = []
     for action in [item for item in plan.actions if item.phase != AutomationPhase.RESTORE]:
@@ -2342,7 +3049,7 @@ def compile_automation_candidate(
         elif action.action_type == AutomationActionType.SET_MODE:
             lines.append(f"{indent}page.locator({_py_literal(action.selector)}).click()")
         elif action.action_type == AutomationActionType.SET_TEMPERATURE:
-            if is_blocked_temperature_action(action):
+            if (explicit_expectations_only and action.phase == AutomationPhase.TEST) or is_blocked_temperature_action(action):
                 lines.append(f"{indent}_request_temperature(page, {float(action.value)})")
             else:
                 lines.append(f"{indent}_set_temperature(page, {float(action.value)})")
@@ -2374,7 +3081,14 @@ def compile_automation_candidate(
         block_start = len(lines)
         marker = f"{indent}# EXPECTED_RESULT: {assertion.result_id}"
         lines.append(marker)
-        if assertion.strategy == AssertionStrategy.UI_TEMPERATURE:
+        if assertion.strategy == AssertionStrategy.CONTROLLER_UI_FIELDS_EQUALS:
+            expected = {f.field_name: f.expected_value for f in assertion.expected_fields}
+            lines.extend([
+                f'{indent}actual = {_restoration_read_expression(assertion, plan.target_device_id)}',
+                f'{indent}if actual != {expected!r}:',
+                f"{indent}    mismatches.append({assertion.result_id!r} + ': controller UI=' + repr(actual))",
+            ])
+        elif assertion.strategy == AssertionStrategy.UI_TEMPERATURE:
             lines.extend(
                 [
                     f"{indent}actual = _displayed_temperature(page, '#det-temp-display')",
@@ -2536,6 +3250,8 @@ def compile_automation_candidate(
             lines.extend(f"{indent}prepared_{variable} = {variable}" for variable, _ in restore_baselines)
             if uses_dynamic_hvac_restore:
                 lines.append(f"{indent}prepared_hvac_baseline = observed_hvac_baseline")
+            if uses_controller_restore:
+                lines.append(f'{indent}controller_prepared = controller_original')
             original_baseline_captured = True
         if has_preparation and not prepared_baseline_captured and phases_by_id[action_id] == AutomationPhase.TEST:
             # Capture the prepared state even when its verification fails.
@@ -2544,6 +3260,9 @@ def compile_automation_candidate(
                              for variable, assertion in restore_baselines)
                 if uses_dynamic_hvac_restore:
                     lines.append(f"{indent}prepared_hvac_baseline = page.evaluate(\"id => {{ const d = window.__vccs.devices.find(d => d.id === id); return d ? {{mode: d.mode, setTemp: d.setTemp}} : null; }}\", {plan.target_device_id})")
+                if uses_controller_restore:
+                    lines.append(f'{indent}controller_prepared = _controller_snapshot(page, {plan.target_device_id})')
+                    lines.append(f"{indent}print('CONTROLLER_PREPARED: ' + repr(controller_prepared))")
             else:
                 lines.extend(baseline_block)
             prepared_baseline_captured = True
@@ -2609,6 +3328,8 @@ def compile_automation_candidate(
             lines.append(
                 f"                page.locator({_py_literal(action.selector)}).uncheck()"
             )
+        elif action.action_type == AutomationActionType.RESTORE_OBSERVED_CONTROLLER:
+            lines.append(f'                _restore_controller(page, {plan.target_device_id}, controller_original)')
         elif action.action_type == AutomationActionType.RESTORE_OBSERVED_HVAC:
             lines.extend(
                 [
@@ -2636,6 +3357,12 @@ def compile_automation_candidate(
                 f"                _set_temperature(page, {float(action.value)})"
             )
     restore_observation_start = len(lines)
+    if uses_controller_restore:
+        lines.extend([
+            f'                restored_controller = _controller_snapshot(page, {plan.target_device_id})',
+            '                if restored_controller != controller_original:',
+            "                    restore_mismatches.append('controller original=' + repr(controller_original) + ', actual=' + repr(restored_controller))",
+        ])
     for action in restore_actions:
         if action.action_type in {
             AutomationActionType.FILL,
@@ -2695,7 +3422,7 @@ def compile_automation_candidate(
         restore_actions
         and uses_legacy_temperature_action
         and test_case.test_data.initial_temperature_c is not None
-        and not (state_policy and uses_dynamic_hvac_restore)
+        and not (state_policy and (uses_dynamic_hvac_restore or uses_controller_restore))
     ):
         initial_temperature = float(test_case.test_data.initial_temperature_c)
         lines.extend(
@@ -2721,8 +3448,8 @@ def compile_automation_candidate(
         del lines[restore_observation_start:]
         append_observation_group([restore_block], "                ", "restore_mismatches")
         if state_policy:
-            # Compare before touching the product: a correctly blocked change
-            # needs no restore clicks. Any unexpected change is still reported.
+            # Snapshot differences determine cleanup, not product expectations.
+            # Historical candidates retain their implicit blocked-state verdict.
             body = lines[restore_action_start:]
             action_count = restore_observation_start - restore_action_start
             action_body, verification_body = body[:action_count], body[action_count:]
@@ -2732,14 +3459,20 @@ def compile_automation_candidate(
                 "                    changes = observe_restoration() if test_state_started else []",
             ])
             if test_case.state_effect == TcStateEffect.BLOCKED_CHANGE:
-                lines.extend([
-                    "                    if test_state_started and changes:",
-                    "                        unexpected_state_change = True",
-                    "                        print('PRODUCT_MISMATCH: blocked operation changed observed state: ' + ' | '.join(changes))",
-                    "                    if preparation_started or changes:",
-                ])
+                if not explicit_expectations_only:
+                    lines.extend([
+                        "                    if test_state_started and changes:",
+                        "                        unexpected_state_change = True",
+                        "                        print('PRODUCT_MISMATCH: blocked operation changed observed state: ' + ' | '.join(changes))",
+                    ])
+                lines.append("                    if preparation_started or changes:")
             action_indent = "        " if test_case.state_effect == TcStateEffect.BLOCKED_CHANGE else "    "
             lines.extend(action_indent + line for line in action_body)
+            if uses_controller_restore and test_case.state_effect == TcStateEffect.BLOCKED_CHANGE:
+                lines.extend([
+                    '                    else:',
+                    f"                        page.locator('#device-card-{plan.target_device_id} .card-body-split').click()",
+                ])
             lines.extend("    " + line for line in verification_body)
             lines.extend([
                 "                    print('RESTORE_STATUS: ' + ('FAILED' if restore_mismatches else ('RESTORED' if preparation_started or changes else 'UNCHANGED')))"
@@ -2770,10 +3503,11 @@ def compile_automation_candidate(
                 "                print('RESTORE_STATUS: FAILED')",
                 "                print('ENVIRONMENT_RETIRED: restoration failed; browser context closed')",
             ]
-            lines.extend([
-                "            if unexpected_state_change and test_completed:",
-                "                raise AssertionError('PRODUCT_MISMATCH: blocked operation changed observed state')",
-            ])
+            if not explicit_expectations_only:
+                lines.extend([
+                    "            if unexpected_state_change and test_completed:",
+                    "                raise AssertionError('PRODUCT_MISMATCH: blocked operation changed observed state')",
+                ])
     else:
         lines.extend(
             [

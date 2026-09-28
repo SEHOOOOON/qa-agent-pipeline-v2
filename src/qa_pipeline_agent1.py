@@ -31,6 +31,10 @@ from qa_pipeline_contracts import *
 # Agent 1: 변경 요구사항 분석
 # ---------------------------------------------------------------------------
 AGENT1_SYSTEM_INSTRUCTIONS = """
+CHANGE_REQUEST source_text may join verbatim excerpts with |, just like SRS citations. Each excerpt must exist in after_value, description, reason or acceptance_notes; for a target VERIFY test, before_value may also ground its stated starting value, not a new product result. Preserve every acceptance note in full within the cited excerpts; larger verbatim quotes are allowed. Cite all sources needed for numbers in the condition, including a stated preparation value. Do not truncate quotes to pass a check or treat excerpt order as meaning. Original request coverage and semantic review remain mandatory.
+먼저 이번 요청의 대상·시작 상태·시험할 동작·기대결과·제외 범위를 구분하세요. SRS의 선택지 목록 전체나 before/after 문장에 그대로 남은 정책 전체가 이번 시험 범위는 아닙니다.
+confirmed_conditions의 statement는 이번에 확인할 사실 단위로 나눕니다. source_text는 근거 원문 그대로 인용하되 긴 인용 전체를 statement의 검증 범위로 복사하지 않습니다. 요청이 제한한 전환의 새 결과는 변경, 명시적으로 회귀 확인을 요청한 결과는 유지, 나머지 기존 정책은 필요한 경우 보조_근거로 구분합니다. 보조_근거는 제품 기준의 참고이지 전체 선택지 시험 완료 주장이 아닙니다.
+제외와 충돌하는 새 검사·간접 영향은 자동 추가하지 않습니다. 사용자가 여러 값·양쪽 경계·순차 결과를 실제로 요구했다면 각각 보존하며 단일 전환으로 축소하지 않습니다. 명시한 범위를 해석할 수 없으면 질문으로 남깁니다.
 각 acceptance_notes 원문은 제품 조건, 시험 절차, 명시 제외, 정보 부족 중 하나의 역할로 분류합니다. 전달 목록의 '/'는 선택지이며 모든 위치에 복사하라는 뜻이 아닙니다. procedure_notes는 acceptance_notes 전체의 복사본이 아닙니다. 확정 조건으로 전달한 원문을 절차에도 중복 기록하지 않습니다. 단, 분리 가능한 정보 부족은 기존 계약에 따라 information_gaps·제외된_정보_부족·excluded_scope 세 목록에 함께 보존합니다.
 분류 형식 예시(제품 기준이 아님): '적용 후 값은 X이다.'는 제품 조건에만, '[준비] 시험 전 상태를 기록한다.'는 절차에만 보존합니다. 표시 없는 문장도 역할 하나를 판단하되 제품 기대값을 절차로 옮겨 검사를 생략하지 않습니다. 예시의 X나 문장을 실제 산출물에 추가하지 않습니다.
 Input routing is not a keyword meaning verdict: an out-of-range product input is a test condition, not an out-of-scope test. Preserve explicit out_of_scope items separately. Explicit [시험 절차 메모], [준비], [복원] markers identify procedure notes; pass them unchanged to Agent 2, not as product expectations. Ambiguous or conflicting authority must be explained as a gap, not silently dropped.
@@ -41,9 +45,9 @@ Use UNCHANGED only for maintained behavior; do not label a new acceptance criter
 당신은 운영 중인 가상 중앙제어 시스템의 변경 요구사항을 분석하는 Agent 1입니다.
 
 입력의 권한 관계:
-- 현재 SRS는 변경 전 제품 상태를 설명하는 기준 문서입니다.
-- 변경 요청의 after_value, description, acceptance_notes는 사용자가 제안한 변경 후 정책의 권한 있는 입력입니다.
-- 변경 후 정책이 현재 SRS에 없다는 사실만으로 정보 부족이나 사용자 재확인으로 판정하지 않습니다.
+- 현재 SRS는 제품 기능과 허용 조건의 기준 문서입니다.
+- after_value, description, acceptance_notes는 요청한 시험 또는 명시적인 새 정책의 근거입니다. 단순 상태 전환의 시작값·목표값을 제품 허용 범위 개정으로 오해하지 않습니다.
+- 명시적인 신규 정책이 현재 SRS에 없다는 사실만으로 정보 부족으로 판정하지 않습니다. 기존 기준 시험은 해당 SRS 기능·허용 범위와 대조하며, 정책 변경인지 시험인지 불명확하면 확인이 필요합니다.
 
 반드시 지킬 규칙:
 1. 제공된 변경 요청과 SRS Requirement 행만 사실 근거로 사용합니다.
@@ -55,7 +59,7 @@ Use UNCHANGED only for maintained behavior; do not label a new acceptance criter
 7. acceptance_notes는 제공된 인수 조건 전달 목록에 따라 원문 전체를 해당 위치에 보존합니다. 제품 판정 기준은 confirmed_condition, 명시적 시험 제외는 excluded_scope, 준비·복원 메모는 원문 요청을 통해 Agent 2의 절차로 전달합니다. 제품 허용 범위를 벗어나는 입력을 시험 제외로 분류하지 않습니다. after_value의 변경 후 범위·경계·모드별 정책은 CHANGE_REQUEST 조건에 양쪽 경계와 원문을 보존합니다. description에만 있는 기존 유지 범위는 같은 대상 SRS의 요구사항 또는 인수 기준 전체를 그대로 인용한 SRS·유지 조건으로도 전달할 수 있습니다. 다른 요구사항의 같은 숫자로 대체하지 않습니다.
 8. 기존 SRS 조건은 source_type을 SRS로 지정합니다. source_text에는 연결 Requirement의 요구사항 또는 인수 기준에서 연속된 원문을 인용합니다. 여러 원문은 |로 구분할 수 있고 위치로 항목 종류를 정하지 않습니다. 각 조각의 출처와 모든 연결 Requirement의 근거가 있어야 합니다. scope_evidence.srs_source_text도 같은 방식이지만 해당 effect의 Requirement만 출처로 사용합니다. 구분자는 의미를 바꾸거나 임의 내용을 추가할 권한이 아닙니다.
 9. 각 confirmed_condition의 requirement_ids와 requirement_effects에는 제공된 SRS에 존재하는 ID만 사용합니다.
-10. target_requirement_id는 requirement_effects에서 MODIFIED로 분류합니다.
+10. target_requirement_id도 요청의 의미에 따라 분류합니다. 제품 정책·허용 범위·기능을 실제로 바꾸는 요청은 MODIFIED, 기존 SRS 기준 안에서 상태·값을 조작해 확인하는 시험은 VERIFY입니다. change_type=MODIFIED는 입력 형식이지 모든 요청이 SRS 개정이라는 뜻이 아닙니다. VERIFY의 reason에는 관련 SRS 기능·허용 범위와 시험의 관계를 설명합니다. SRS에 개별 시험 숫자가 문자 그대로 없다는 이유로 수정안을 요구하지 않습니다. 기존 기준을 유지하는 시험에서 준비값이나 성공 기대값이 허용 범위를 벗어나면 충돌로 남깁니다. 범위 밖 입력의 차단을 확인하는 음성 시험과 명시적인 정책 변경은 구분하며, 어느 쪽인지 모호하면 질문합니다.
 11. 대상 Requirement의 related_requirement_ids와 변경 요청이 직접 언급하는 기존 Requirement를 모두 검토합니다. 변경 후 정책 때문에 기존 문장이나 인수 기준의 수정이 필요한 연관 Requirement는 UPDATE_REQUIRED, 변경으로 실제 영향을 받을 수 있어 기존 동작 회귀가 필요한 기준은 VERIFY, 이번 변경과 무관한 기준은 NO_IMPACT로 분류하고 이유를 작성합니다. 모든 변경에 일반적으로 적용된다는 이유만으로 알림·상태·제어 Requirement를 일괄 VERIFY로 확장하지 않습니다. 연관 항목을 조용히 생략하지 않습니다.
 12. MODIFIED, UPDATE_REQUIRED 또는 VERIFY로 분류한 모든 Requirement는 confirmed_conditions의 requirement_ids에 최소 한 번 연결하고, 변경 요청 또는 해당 SRS의 검증 가능한 원문 조건을 함께 전달합니다.
 13. VERIFY로 분류할 Requirement에서 전달할 검증 조건 원문을 찾지 못하면 이유만 추측해 VERIFY로 두지 말고 NO_IMPACT로 분류합니다. UPDATE_REQUIRED는 변경 요청과 기존 SRS가 실제로 충돌하는 경우에만 사용합니다.
@@ -69,9 +73,14 @@ Use UNCHANGED only for maintained behavior; do not label a new acceptance criter
 20. 테스트케이스, 테스트 절차나 Playwright 코드는 작성하지 않습니다.
 21. Agent 1은 요구사항 영향도와 확정 조건을 Agent 2에 빠짐없이 전달하는 단계입니다. 현재 UI·하네스·자동화 구현 지원 여부를 이유로 영향 있는 Requirement를 NO_IMPACT로 낮추거나 확정된 제품 조건을 excluded_scope로 보내지 않습니다. TC 구성·기존 TC 선택·자동화 가능 여부는 Agent 2 이후 단계의 책임입니다.
 22. 대상 외 VERIFY·UPDATE_REQUIRED에는 scope_evidence를 작성합니다. request_condition_ids는 실제 변경 요청에서 인용한 CHANGE_REQUEST 조건만 연결하고, srs_source_text에는 해당 연관 Requirement 원문을 인용합니다. reason에는 어떤 요청 변경이 어떤 기존 동작에 영향을 주는지 적습니다. SRS에 존재하거나 같은 화면에서 실행된다는 이유만으로 검사 범위를 늘리지 않습니다. 근거가 없는 항목은 NO_IMPACT로 검토 기록만 남깁니다.
-23. 사용자가 직접 요구한 연관 동작이면 DIRECT_REQUEST, 요청에 없지만 변경의 영향으로 검사해야 한다고 판단하면 CHANGE_DEPENDENCY입니다. 간접 영향은 자동 확정하지 않고 범위 검토를 기다립니다. DIRECT_REQUEST도 인용된 요청에서 해당 Requirement ID 또는 SRS의 요구사항/인수 기준 전체 문장을 직접 대조할 수 없으면 CP1이 범위 확인을 위해 멈춥니다. 통과시키려고 원문에 없는 ID·문장을 만들거나 간접 영향을 직접 요청으로 바꾸지 않습니다. 사용자가 요청한 긍정 조건을 NO_IMPACT로 지우거나 주 대상에 잘못 연결해 이 검사를 피하지 않습니다.
-24. 새 검사 없이 사용자가 이미 요청한 결과에 관련 SRS 근거만 연결하는 경우에는 VERIFY + REQUEST_TRACE_ONLY를 사용합니다. 해당 Requirement에 연결하는 모든 조건은 request_condition_ids에 빠짐없이 기록하고 CHANGE_REQUEST의 긍정 제품 조건만 사용합니다. source_text에는 요청 원문을 보존하고 statement는 같은 의미로 설명할 수 있습니다. 설명의 문장 일치로 통과 여부를 맞추지 않습니다. 관련 SRS는 scope_evidence.srs_source_text에만 인용하며, 별도 SRS 조건·새 기대값·새 검사·SRS 개정 근거로 확대하지 않습니다. 예: 사용자가 화면의 이름과 저장된 값을 확인하라고 이미 요청했다면, 공통 상태 규칙을 근거로 연결하되 두 요청 조건만 검사합니다. 사용자가 요청하지 않은 알림이나 다른 상태까지 검사하려면 REQUEST_TRACE_ONLY가 아니라 CHANGE_DEPENDENCY로 범위 확인을 기다립니다. 실제 연관 SRS 개정이 필요한 경우에는 UPDATE_REQUIRED와 기존 범위 근거를 사용합니다.
+23. DIRECT_REQUEST·REQUEST_TRACE_ONLY·CHANGE_DEPENDENCY는 범위 근거를 설명하는 분류입니다. 분류명만으로 진행·보류를 정하지 않습니다. 요청 문장에 Requirement ID나 SRS 전체 문장을 넣을 필요는 없습니다. 실제 요청 조건과 연관 Requirement의 연결을 보존하고, 그 검사가 요청된 범위인지 기존 의미 검토에서 원문과 대조합니다. 원문에 없는 ID·문장을 만들거나 명시된 조건을 NO_IMPACT로 지우지 않습니다.
+24. 요청된 결과에 관련 SRS를 참고로 연결하는 것과 새 검사·정책 변경을 추가하는 것을 구분합니다. 참고 연결은 관련 SRS 전체를 시험한다는 뜻이 아닙니다. source_text에는 실제 요청 원문을, scope_evidence에는 연결 조건 ID와 해당 SRS 원문을 보존합니다. 분류와 무관하게 요청 밖 알림·기능·기대값을 추가하지 않습니다. 실제 범위가 불명확하면 질문하고, 단지 ID·전체 SRS 문장이 요청에 없다는 이유로 질문하거나 보류하지 않습니다.
 """.strip()
+
+
+AGENT1_SYSTEM_INSTRUCTIONS += """
+변경 후 기준은 원문 전체의 의미로 구분하세요. 이전/부정/제외된 범위와 실제 적용할 새 범위를 같은 필수 조건으로 만들지 않습니다. before/after와 인수 조건의 적용 대상·상하한·경계 포함 여부·허용/차단·기존값 유지를 보존하세요. after_value·description의 요구도 빠짐없이 조건 또는 해당 절차로 연결하고, 원문 인용은 자의적으로 바꾸지 않습니다. 불명확하면 정보 부족으로 남깁니다.
+"""
 
 
 class Agent1Error(RuntimeError):
@@ -178,7 +187,7 @@ class OpenAIAgent1:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent1-2-17",
+                prompt_cache_key="qa-v2-agent1-2-23",
                 input=[
                     {"role": "system", "content": AGENT1_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
@@ -267,6 +276,18 @@ def _srs_quote_is_grounded(
 def _numeric_facts(text: str) -> set[str]:
     text = re.sub(r"\b(?:REQ|TC|COND|ER)-[A-Z0-9-]+", "", text)
     return {f"{float(value):g}" for value in re.findall(r"(?<![\w.])-?\d+(?:\.\d+)?", text)}
+
+
+def _request_quote_parts(source_text: str, authority: list[str]) -> list[str]:
+    """Resolve provenance once; never infer meaning from excerpt position."""
+    authority = [part for part in authority if part]
+    # A literal pipe inside a genuine quote is not an invented separator.
+    if any(_contains_fact(part, source_text) for part in authority):
+        return [source_text.strip()]
+    excerpts = _srs_quote_parts(source_text)
+    return excerpts if excerpts and all(
+        any(_contains_fact(part, excerpt) for part in authority) for excerpt in excerpts
+    ) else []
 
 
 def _state_polarities(text: str, positive: str, negative: str) -> set[bool]:
@@ -490,10 +511,23 @@ def evaluate_checkpoint1(
     legacy_wording_checks: bool = True,
     allow_background_range_paraphrase: bool = False,
     allow_srs_quote_parts: bool = False,
+    review_range_semantics: bool = False,
+    review_scope_semantics: bool = False,
 ) -> Checkpoint1Result:
     # The default preserves historical callers. New runs explicitly disable
     # wording heuristics and record that policy in their immutable manifest.
     checks: list[CheckResult] = []
+    shared_sources = review_range_semantics in {"1.2", "1.3"}
+    scenario_review = review_range_semantics == "1.3"
+    baseline_test = scenario_review and any(
+        effect.requirement_id == request.target_requirement_id and effect.relation == RequirementRelation.VERIFY
+        for effect in analysis.requirement_effects)
+    request_parts = [request.after_value, request.description, request.reason, *request.acceptance_notes]
+    if baseline_test:
+        request_parts.append(request.before_value)
+
+    def request_quotes(source):
+        return _request_quote_parts(source, request_parts) if shared_sources else [source]
 
     def add(rule_id: str, status: CheckStatus, message: str) -> None:
         checks.append(CheckResult(rule_id=rule_id, status=status, message=message))
@@ -523,14 +557,15 @@ def evaluate_checkpoint1(
     )
     if not before_matches_output:
         add("CP1-004", CheckStatus.FAIL, "분석 결과의 변경 전 값이 요청과 다릅니다.")
-    elif not before_has_source:
+    elif not before_has_source and not baseline_test:
         add(
             "CP1-004",
             CheckStatus.REVIEW,
             "변경 전 값이 대상 SRS 행에서 직접 확인되지 않습니다.",
         )
     else:
-        add("CP1-004", CheckStatus.PASS, "변경 전 값이 요청과 SRS 근거에 연결됩니다.")
+        add("CP1-004", CheckStatus.PASS, "시험 시작값이 요청과 일치합니다. SRS 허용 여부는 필수 의미 검토 대상입니다."
+            if baseline_test else "변경 전 값이 요청과 SRS 근거에 연결됩니다.")
 
     if _contains(analysis.after_condition, request.after_value):
         add("CP1-005", CheckStatus.PASS, "변경 후 값이 입력 요청과 일치합니다.")
@@ -583,8 +618,11 @@ def evaluate_checkpoint1(
             CheckStatus.FAIL,
             f"중복된 Requirement 영향 항목: {', '.join(duplicate_effect_ids)}",
         )
-    elif len(target_effects) != 1 or target_effects[0].relation != RequirementRelation.MODIFIED:
-        add("CP1-006", CheckStatus.FAIL, "대상 Requirement가 MODIFIED로 한 번만 분류되지 않았습니다.")
+    elif len(target_effects) != 1 or target_effects[0].relation not in (
+        {RequirementRelation.MODIFIED, RequirementRelation.VERIFY} if scenario_review
+        else {RequirementRelation.MODIFIED}
+    ):
+        add("CP1-006", CheckStatus.FAIL, "대상 Requirement의 변경/시험 분류가 없거나 중복·허용되지 않은 분류입니다.")
     elif any(
         item.relation == RequirementRelation.MODIFIED
         and item.requirement_id != request.target_requirement_id
@@ -633,7 +671,8 @@ def evaluate_checkpoint1(
     contains_source = _contains_fact if require_meaning_guard else _contains
     for condition in analysis.confirmed_conditions:
         if condition.source_type == ConditionSource.CHANGE_REQUEST:
-            grounded = contains_source(request_authority, condition.source_text)
+            grounded = (bool(request_quotes(condition.source_text)) if shared_sources
+                        else contains_source(request_authority, condition.source_text))
         elif allow_srs_quote_parts and "|" in condition.source_text:
             grounded = _srs_quote_is_grounded(condition.source_text, condition.requirement_ids, requirements)
         else:
@@ -649,8 +688,15 @@ def evaluate_checkpoint1(
         if not grounded:
             invalid_conditions.append(condition.condition_id)
         if require_meaning_guard:
+            numeric_sources = condition.source_text
+            if scenario_review and condition.source_type == ConditionSource.SRS:
+                # A baseline range need not enumerate every requested test value.
+                # Presence is only provenance; mandatory review checks range/role.
+                numeric_sources += " " + request_authority
+                if baseline_test:
+                    numeric_sources += " " + request.before_value
             if ((legacy_wording_checks and _meaning_conflicts(condition.source_text, condition.statement, compare_relations=require_input_contract))
-                    or _numeric_facts(condition.statement) - _numeric_facts(condition.source_text)):
+                    or _numeric_facts(condition.statement) - _numeric_facts(numeric_sources)):
                 invalid_conditions.append(condition.condition_id + ": 원문과 분석의 값·의미 불일치")
             if condition.source_type == ConditionSource.SRS and not (
                 grounded if allow_srs_quote_parts and "|" in condition.source_text else all(
@@ -717,7 +763,9 @@ def evaluate_checkpoint1(
         if missing_procedures:
             procedure_errors.append("표시된 절차 원문은 procedure_notes에 보존: " + " | ".join(missing_procedures))
         conflicting_procedures = [note for note in analysis.procedure_notes
-                                  if _normalize(note) in other_role_keys]
+                                  if _normalize(note) in other_role_keys or (shared_sources and any(
+                                      _contains_fact(part, note) for source in change_request_sources
+                                      for part in request_quotes(source)))]
         if conflicting_procedures:
             procedure_errors.append("절차와 확정 조건·제외 범위·정보 부족의 중복 분류: " + " | ".join(conflicting_procedures))
         # Only explicit input fields/markers determine routing. Unmarked notes
@@ -756,9 +804,14 @@ def evaluate_checkpoint1(
         note
         for note in positive_acceptance_notes
         if _normalize(note) not in unresolved_notes
-        if not any(_normalize(note) == _normalize(source) for source in change_request_sources)
+        if not any((_contains_fact(part, note) if shared_sources else _normalize(note) == _normalize(part))
+                   for source in change_request_sources for part in request_quotes(source))
     ]
-    required_ranges = _temperature_ranges(f"{request.after_value} {request.description}")
+    # Numeric occurrence does not establish a new requirement (old/negated/
+    # conditional ranges may coexist). New runs review coverage from the raw
+    # request; retain this heuristic only to revalidate historical artifacts.
+    required_ranges = (set() if review_range_semantics else
+                       _temperature_ranges(f"{request.after_value} {request.description}"))
     delivered_ranges = _temperature_ranges(
         " ".join(
             f"{condition.statement} {condition.source_text}"
@@ -804,7 +857,9 @@ def evaluate_checkpoint1(
             "Agent 2 전달 조건에서 누락된 항목: " + "; ".join(details),
         )
     else:
-        add("CP1-008", CheckStatus.PASS, "변경 요청의 인수 조건과 변경 후 범위가 모두 전달됩니다.")
+        add("CP1-008", CheckStatus.PASS,
+            "인수 조건 원문 전달을 확인했습니다. 변경 전·후 범위와 조건 누락의 의미는 필수 원문 검토에서 확인합니다."
+            if review_range_semantics else "변경 요청의 인수 조건과 변경 후 범위가 모두 전달됩니다.")
 
     confirmed_statements = {_normalize(item.statement) for item in analysis.confirmed_conditions}
     if not legacy_wording_checks:
@@ -822,7 +877,10 @@ def evaluate_checkpoint1(
         explicit_exclusions = {_normalize(item) for item in request.out_of_scope}
         scope_limit_condition_ids = sorted(set(scope_limit_condition_ids) | {
             c.condition_id for c in analysis.confirmed_conditions
-            if c.source_type == ConditionSource.CHANGE_REQUEST and _normalize(c.source_text) in explicit_exclusions
+            if c.source_type == ConditionSource.CHANGE_REQUEST and (
+                _normalize(c.source_text) in explicit_exclusions or (shared_sources and any(
+                    _contains_fact(part, excluded_note) for part in request_quotes(c.source_text)
+                    for excluded_note in request.out_of_scope)))
         })
     missing_scope_limit_notes = [
         item
@@ -926,7 +984,8 @@ def evaluate_checkpoint1(
                         and item.source_type == ConditionSource.CHANGE_REQUEST
                         and (not legacy_wording_checks or not _is_scope_exclusion_text(item.source_text, legacy=not require_input_contract))
                         and (not legacy_wording_checks or not _is_test_procedure_note(item.source_text, legacy=not require_input_contract))
-                        and any(_contains_fact(part, item.source_text) for part in positive_request_parts)
+                        and (bool(_request_quote_parts(item.source_text, positive_request_parts)) if shared_sources
+                             else any(_contains_fact(part, item.source_text) for part in positive_request_parts))
                         for item in sources
                     )):
                 scope_errors.append(f"{label}: 긍정 변경 요청 원문 조건에 연결되지 않은 범위 근거")
@@ -939,6 +998,12 @@ def evaluate_checkpoint1(
                 )
             ):
                 scope_errors.append(f"{label}: 연관 Requirement의 영향 근거 원문 불일치")
+                continue
+            if review_scope_semantics:
+                # Source/link integrity is deterministic; scope meaning belongs
+                # to the existing mandatory grounding review, not a basis label.
+                if not all(label in item.requirement_ids for item in sources):
+                    scope_errors.append(f"{label}: 요청 조건과 Requirement 연결 불일치")
                 continue
             if proof.basis == ScopeBasis.REQUEST_TRACE_ONLY:
                 linked = [item for item in analysis.confirmed_conditions
@@ -978,7 +1043,9 @@ def evaluate_checkpoint1(
             add("CP1-011", CheckStatus.REVIEW,
                 "검사 범위를 자동 확정하지 않고 입력 보완을 기다립니다: " + "; ".join(scope_reviews))
         else:
-            add("CP1-011", CheckStatus.PASS, "요청 밖 검사 범위의 근거 없는 자동 확장이 없습니다.")
+            add("CP1-011", CheckStatus.PASS,
+                "범위 근거의 출처·연결을 확인했습니다. 범위의 의미는 별도 근거 검토에서 확인합니다."
+                if review_scope_semantics else "요청 밖 검사 범위의 근거 없는 자동 확장이 없습니다.")
 
     status = _aggregate_check_status(check.status for check in checks)
     blocking_decision = analysis.decision == AnalysisDecision.WAITING_FOR_USER

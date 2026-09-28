@@ -3,6 +3,1832 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("tag,role,input_type,expected", [
+    ("button", None, None, "CLICK"),
+    ("div", "button", None, "CLICK"),
+    ("input", None, "submit", "CLICK"),
+    ("input", None, "number", "FILL"),
+    ("textarea", None, None, "FILL"),
+    ("select", None, None, "SELECT_OPTION"),
+    ("input", None, "checkbox", "CHECK_OR_UNCHECK"),
+    ("div", "switch", None, "CHECK_OR_UNCHECK"),
+    ("span", None, None, "READ_STATE"),
+    ("input", None, "hidden", "READ_STATE"),
+    ("input", None, "file", "READ_STATE"),
+    ("input", None, "radio", "READ_STATE"),
+])
+def test_observed_action_capability(tag, role, input_type, expected):
+    from qa_pipeline_agent3 import _observed_action_hint
+    assert _observed_action_hint(tag, role, input_type) == expected
+
+
+@pytest.mark.parametrize("generic", [False, True])
+def test_observed_action_capability_known_and_generic(tmp_path, generic):
+    target = tmp_path / "capabilities.html"
+    target.write_text("""<!doctype html><title>Controls</title>
+        <button id="det-temp-up-btn">온도 올림 / Request higher</button>
+        <input id="det-temp-display" type="number" value="24">
+        <span id="det-temp-limit-text">16~30</span>
+        <button id="other">다른 버튼</button>""", encoding="utf-8")
+    obs = inspect_target_ui(target, required_selectors={
+        "#det-temp-up-btn", "#det-temp-display", "#det-temp-limit-text"
+    }, required_harness_keys=set(), discover_generic=generic)
+    items = {item.selector: item for item in obs.elements}
+    assert items["#det-temp-up-btn"].action_hint == "CLICK"
+    assert items["#det-temp-display"].action_hint == "FILL"
+    assert items["#det-temp-limit-text"].action_hint == "READ_STATE"
+    if generic:
+        assert items["#other"].action_hint == "CLICK"
+
+
+@pytest.fixture
+def panel_readback_browser():
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        yield browser
+        browser.close()
+
+
+@pytest.mark.parametrize("mutation", ["valid", "read_only", "input", "hidden", "disabled", "duplicate", "missing"])
+def test_observed_click_capability_preserves_cp3_guards(mutation):
+    from qa_pipeline_agent3 import _observed_action_hint
+    case, plan, obs = generic_control_guard_fixture()
+    action = plan.actions[0]
+    action.action_type = AutomationActionType.CLICK
+    element = obs.elements[-1]
+    element.tag = "button"
+    element.action_hint = _observed_action_hint("button", None, None)
+    if mutation == "read_only":
+        element.action_hint = _observed_action_hint("span", None, None)
+    elif mutation == "input":
+        element.action_hint = _observed_action_hint("input", None, "number")
+    elif mutation == "hidden":
+        element.visible = False
+    elif mutation == "disabled":
+        element.enabled = False
+    elif mutation == "duplicate":
+        element.match_count = 2
+    elif mutation == "missing":
+        obs.elements.pop()
+    # Only test this operation's CP3-002; other fixture checks are unrelated.
+    plan.actions = [action]
+    result = pipeline.evaluate_checkpoint3_plan(case, plan, obs, legacy_wording_checks=False)
+    check = next(item for item in result.checks if item.rule_id == "CP3-002")
+    assert check.status == (CheckStatus.PASS if mutation == "valid" else CheckStatus.FAIL)
+
+
+@pytest.fixture
+def panel_readback_page(panel_readback_browser):
+    context = panel_readback_browser.new_context()
+    context.route('**/*', lambda route: route.continue_() if route.request.url.startswith(('file:', 'data:')) else route.abort())
+    page = context.new_page()
+    page.goto((REPO_ROOT / 'product_baseline/virtual-controller.html').as_uri())
+    page.wait_for_function('!!window.__vccs')
+    # Fixture preparation only; all tested selections/apply use actual product controls.
+    page.evaluate('''() => {
+      for (const d of devices) Object.assign(d, {status:'STOP',mode:'COOL',setTemp:24,
+          fanSpeed:'LOW',locked:false,errorCode:null,purify:false});
+      isGatewayOnline=true; currentUserRole='ADMIN'; renderGrid(); selectUnit(1);
+    }''')
+    yield page
+    context.close()
+
+
+@pytest.mark.parametrize('reason', ['normal', 'error', 'viewer', 'offline', 'locked'])
+@pytest.mark.parametrize('field,value', [('status','OPERATION'),('mode','HEAT'),
+    ('fanSpeed','HIGH'),('setTemp',22)])
+def test_panel_apply_readback_preserves_pending_until_apply(reason, field, value, panel_readback_page):
+    page = panel_readback_page
+    if reason in {'error','locked'}:
+        page.evaluate('''reason => { const d=devices.find(d=>d.id===1);
+          if(reason==='locked') d.locked=true;
+          else {d.status='ERROR'; d.errorCode='CH05';} renderGrid(); selectUnit(1); }''', reason)
+    namespace = {'re': __import__('re'), '_CONTROLLER_BUTTONS': pipeline._CONTROLLER_BUTTONS}
+    exec(pipeline._CONTROLLER_RESTORE_HELPERS, namespace)
+    original = page.evaluate('() => structuredClone(devices)')
+    if field == 'setTemp':
+        page.locator('#det-temp-down-btn').click(click_count=2)
+    else:
+        page.locator(pipeline._CONTROLLER_BUTTONS[field][value]).click()
+    assert namespace['_controller_ui_fields'](page,1,'panel')[field] == value
+    assert page.evaluate('() => devices') == original
+    if reason == 'viewer': page.evaluate("currentUserRole='VIEWER'")
+    if reason == 'offline': page.evaluate('isGatewayOnline=false')
+    page.locator('.btn-apply-cmd').click()
+    expected = value if reason == 'normal' else original[0][field]
+    if field == 'status' and expected == 'ERROR':
+        # ERROR is shown in panel information, not as an OPERATION/STOP selection.
+        assert 'ERROR' in page.locator('#det-unit-info').inner_text()
+        assert page.locator('#det-power-on-btn.active, #det-power-off-btn.active').count() == 0
+        assert page.evaluate('pendingState.status') == 'ERROR'
+        assert page.locator('#device-card-1.state-error').count() == 1
+    else:
+        assert namespace['_controller_ui_fields'](page,1,'panel')[field] == expected
+        assert namespace['_controller_ui_fields'](page,1,'card')[field] == expected
+    assert page.evaluate('(field) => devices.find(d=>d.id===1)[field]',field) == expected
+    if reason != 'normal':
+        assert page.evaluate('() => devices') == original
+        assert '차단' in page.locator('#global-toast').inner_text() or reason in {'viewer','offline'}
+    else:
+        assert page.evaluate('() => devices.slice(1)') == original[1:]
+    if reason == 'offline':
+        assert page.locator('#det-control-section').evaluate("e=>e.style.pointerEvents") == 'none'
+
+
+@pytest.mark.parametrize('reason', ['normal','error','viewer','offline'])
+def test_panel_apply_readback_lock_field(reason, panel_readback_page):
+    page = panel_readback_page
+    if reason == 'error': page.evaluate("devices[0].status='ERROR'; devices[0].errorCode='CH05'; renderGrid(); selectUnit(1)")
+    page.locator('#det-lock-on-btn').click()
+    assert page.locator('#det-lock-on-btn').evaluate("e=>e.classList.contains('active')")
+    assert page.evaluate('devices[0].locked') is False
+    if reason == 'viewer': page.evaluate("currentUserRole='VIEWER'")
+    if reason == 'offline': page.evaluate('isGatewayOnline=false')
+    page.locator('.btn-apply-cmd').click()
+    expected = reason == 'normal'
+    assert page.evaluate('devices[0].locked') is expected
+    assert page.locator('#det-lock-on-btn').evaluate("e=>e.classList.contains('active')") is expected
+    assert page.evaluate('window.__vccs.pendingState.locked') is expected
+
+
+def test_panel_apply_readback_unlock_does_not_apply_other_pending_values(panel_readback_page):
+    page = panel_readback_page
+    page.evaluate('devices[0].locked=true; renderGrid(); selectUnit(1)')
+    page.locator('#det-temp-down-btn').click(click_count=2)
+    page.locator('#det-lock-off-btn').click()
+    page.locator('.btn-apply-cmd').click()
+    assert page.evaluate('devices[0].locked') is False
+    assert page.evaluate('devices[0].setTemp') == 24
+    assert '24.0' in page.locator('#det-temp-display').inner_text()
+    # A later, separate application remains allowed after unlocking.
+    page.locator('#det-temp-down-btn').click(click_count=2)
+    page.locator('.btn-apply-cmd').click()
+    assert page.evaluate('devices[0].setTemp') == 22
+
+
+@pytest.mark.parametrize('blocked,active', [(False,1),(False,2),(True,1),(True,2)])
+def test_panel_apply_readback_multi_does_not_overwrite_other_devices(blocked, active, panel_readback_page):
+    page = panel_readback_page
+    page.evaluate('''({blocked,active}) => { devices[0].locked=blocked; devices[1].setTemp=26;
+      document.getElementById('chk-multi-select').checked=true;
+      selectedUnitIds=[]; selectedUnitId=null; selectUnit(active===1?2:1); selectUnit(active); }''',dict(blocked=blocked,active=active))
+    non_targets=page.evaluate('() => structuredClone(devices.slice(2))')
+    if blocked:
+        # Explicitly keep lock ON: last-selected unlocked device must not turn this
+        # into the separate, permitted unlock-only branch.
+        page.locator('#det-lock-on-btn').click()
+    page.locator('#det-fan-high').click()
+    page.locator('.btn-apply-cmd').click()
+    assert page.evaluate('devices[0].fanSpeed') == ('LOW' if blocked else 'HIGH')
+    assert page.evaluate('devices[1].fanSpeed') == 'HIGH'
+    if blocked:
+        assert page.evaluate('devices[0].locked') is True
+    assert page.evaluate('window.__vccs.pendingState.fanSpeed') == ('LOW' if blocked and active==1 else 'HIGH')
+    assert page.evaluate('selectedUnitId') == active
+    assert set(page.evaluate('selectedUnitIds')) == {1,2}
+    assert page.evaluate('devices.slice(2)') == non_targets
+    assert '표시 기준:' in page.locator('#det-unit-info').inner_text()
+
+
+def test_panel_apply_readback_no_selection_is_safe(panel_readback_page):
+    page=panel_readback_page
+    page.evaluate("document.getElementById('chk-multi-select').checked=true; selectUnit(1)")
+    before=page.evaluate('() => structuredClone(devices)')
+    page.evaluate('applyPanelCommands()')
+    assert page.evaluate('pendingState') == {}
+    assert page.evaluate('devices') == before
+    assert page.locator('#det-control-section').evaluate('e=>e.style.pointerEvents') == 'none'
+
+
+@pytest.fixture(scope="module")
+def mapped_controller_observation():
+    return inspect_target_ui(REPO_ROOT / "product_baseline/virtual-controller.html",
+                             required_selectors=set(pipeline._UI_SELECTOR_INVENTORY),
+                             discover_generic=False)
+
+
+def test_controller_map_collects_all_declared_internal_values(mapped_controller_observation):
+    from qa_pipeline_agent3 import controller_connection_catalog
+    observation = mapped_controller_observation
+    internal = {path for kind, path in controller_connection_catalog()["preconditions"].values()
+                if kind == "INTERNAL_VALUE"}
+    assert set(observation.harness_values) == internal | {"window.__vccs.devices[0].id"}
+    assert observation.harness_values["window.__vccs.devices[0].id"] == 1
+    assert type(observation.harness_values["window.__vccs.devices[0].locked"]) is bool
+    assert observation.generic_discovery is False
+
+
+@pytest.mark.parametrize("variant", ["missing", "object", "wrong_device", "reordered", "future_field"])
+def test_controller_map_collection_preserves_actual_identity_and_missing_values(variant, tmp_path, monkeypatch):
+    import qa_pipeline_agent3 as agent3
+    device = {"id": 1, "mode": "COOL", "setTemp": 24, "status": "STOP", "locked": False,
+              "fanSpeed": "LOW", "errorCode": None, "privateNote": "do-not-collect"}
+    if variant == "missing":
+        del device["fanSpeed"]
+    elif variant == "object":
+        device["fanSpeed"] = {"invalid": True}
+    elif variant == "wrong_device":
+        device["id"] = 2
+    elif variant == "future_field":
+        device["probe"] = 0
+        catalog = agent3.controller_connection_catalog()
+        catalog["preconditions"]["internal.probe"] = ("INTERNAL_VALUE", "window.__vccs.devices[0].probe")
+        monkeypatch.setattr(agent3, "controller_connection_catalog", lambda: catalog)
+    devices = [device]
+    if variant == "reordered":
+        devices.insert(0, {**device, "id": 2, "fanSpeed": "HIGH"})
+    target = tmp_path / "observed.html"
+    target.write_text("<html><head><title>Observation fixture</title></head><body><button class='btn-apply-cmd'>Apply</button><script>window.__vccs=" + json.dumps({"devices": devices}) +
+                      ";</script></body></html>", encoding="utf-8")
+    observation = inspect_target_ui(target, required_selectors={".btn-apply-cmd"}, required_harness_keys={"devices"})
+    values = observation.harness_values
+    assert not any("privateNote" in key for key in values)
+    if variant == "wrong_device":
+        assert values == {}
+    elif variant == "reordered":
+        assert values["window.__vccs.devices[1].id"] == 1
+        assert values["window.__vccs.devices[1].fanSpeed"] == "LOW"
+        assert not any("[0]" in key for key in values)
+    elif variant == "future_field":
+        assert values["window.__vccs.devices[0].probe"] == 0
+    else:
+        assert "window.__vccs.devices[0].fanSpeed" not in values
+        assert values["window.__vccs.devices[0].locked"] is False
+
+
+@pytest.mark.parametrize("field,initial,target", [("status", "STOP", "OPERATION"),
+    ("mode", "COOL", "HEAT"), ("fanSpeed", "HIGH", "LOW"), ("setTemp", 27, 21), ("locked", False, True)])
+def test_controller_map_five_controls_execute_without_binding_model(field, initial, target,
+        mapped_controller_observation, tmp_path, monkeypatch, capsys):
+    from qa_pipeline_agent3 import ControllerMapAgent3, evaluate_agent3_eligibility
+    case, reference = mapped_tc_fixture(field, initial, target)
+    eligibility = evaluate_agent3_eligibility(case)
+    observation = mapped_controller_observation.model_copy(deep=True)
+    observation.elements = [e for e in observation.elements if e.selector in eligibility.required_selectors]
+    before = case.model_dump_json()
+    response = ControllerMapAgent3().plan(case, observation, {})
+    plan = response.plan
+    assert response.usage["total_tokens"] == 0 and response.response_id is None
+    assert [(a.action_type, a.selector, a.value) for a in plan.actions] == [(a.action_type, a.selector, a.value) for a in reference.actions]
+    cp = evaluate_checkpoint3_plan(case, plan, observation)
+    assert cp.status == CheckStatus.PASS, cp.model_dump_json(indent=2)
+    monkeypatch.setenv("QA_TARGET_URL", (REPO_ROOT / "product_baseline/virtual-controller.html").as_uri())
+    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
+    namespace = {}
+    exec(compile(compile_automation_candidate("MAP-LOCAL", case, plan, explicit_expectations_only=True), "mapped", "exec"), namespace)
+    namespace["test_tc_cand_090"]()
+    output = capsys.readouterr().out
+    assert "RESTORE_STATUS: RESTORED" in output and "PRODUCT_MISMATCH" not in output
+    assert case.model_dump_json() == before
+
+
+@pytest.mark.parametrize("value,allowed", [(None, True), (1, True), (2, False),
+    (True, False), (False, False), ("1", False), (1.0, False)])
+def test_controller_map_device_value_contract(value, allowed, mapped_controller_observation):
+    from qa_pipeline_agent3 import ControllerMapAgent3, _controller_device_selection_valid
+    case, _ = mapped_tc_fixture("fanSpeed", "AUTO", "HIGH")
+    next(o for o in case.execution_spec.operations if o.action_type.value == "SELECT_DEVICE").value = value
+    assert _controller_device_selection_valid(value, 1, implicit=True) is allowed
+    response = ControllerMapAgent3().plan(case, mapped_controller_observation, {})
+    if allowed:
+        assert response.plan.planning_status.value == "READY"
+        cp = evaluate_checkpoint3_plan(case, response.plan, mapped_controller_observation)
+        assert cp.status == CheckStatus.PASS, cp.model_dump_json(indent=2)
+        assert not _controller_device_selection_valid(None, 1, implicit=False)
+    else:
+        assert response.plan.planning_status.value == "AUTOMATION_SUPPORT_EXTENSION_REQUIRED"
+
+
+@pytest.mark.parametrize("missing", ["#det-temp-display", "#det-temp-limit-text", "#det-lock-off-btn"])
+def test_controller_map_restore_inspection_matches_validation(missing, mapped_controller_observation):
+    from qa_pipeline_agent3 import ControllerMapAgent3, evaluate_agent3_eligibility, _CONTROLLER_RESTORE_SELECTORS
+    case, _ = mapped_tc_fixture("fanSpeed", "AUTO", "HIGH")
+    eligibility = evaluate_agent3_eligibility(case)
+    assert _CONTROLLER_RESTORE_SELECTORS.issubset(eligibility.required_selectors)
+    plan = ControllerMapAgent3().plan(case, mapped_controller_observation, {}).plan
+    observation = mapped_controller_observation.model_copy(deep=True)
+    observation.elements = [e for e in observation.elements if e.selector != missing]
+    cp = evaluate_checkpoint3_plan(case, plan, observation)
+    assert cp.status == CheckStatus.FAIL
+
+
+@pytest.mark.parametrize("mutation", ["unknown", "missing_ui", "duplicate_ui", "wrong_device", "wrong_field", "wrong_mode"])
+def test_controller_map_never_guesses_missing_or_incompatible_binding(mutation, controller_observation):
+    from qa_pipeline_agent3 import ControllerMapAgent3
+    case, _ = mapped_tc_fixture("mode", "COOL", "HEAT")
+    observation = controller_observation.model_copy(deep=True)
+    if mutation == "unknown":
+        case.execution_spec.operations[0].target = "unsupported.automatic_switch"
+    elif mutation == "missing_ui":
+        observation.elements = [e for e in observation.elements if e.selector != "#det-mode-heat"]
+    elif mutation == "duplicate_ui":
+        next(e for e in observation.elements if e.selector == "#det-mode-heat").match_count = 2
+    elif mutation == "wrong_device":
+        observation.harness_values["window.__vccs.devices[0].id"] = 2
+    elif mutation == "wrong_field":
+        case.execution_spec.verifications[0].target = "card.fanSpeed"
+    else:
+        next(op for op in case.execution_spec.operations if op.target == "mode.heat").value = "COOL"
+    response = ControllerMapAgent3().plan(case, observation, {})
+    assert response.plan.planning_status == pipeline.Agent3PlanningStatus.AUTOMATION_SUPPORT_EXTENSION_REQUIRED
+    assert not response.plan.actions and not response.plan.assertions
+
+
+@pytest.mark.parametrize("mutation", ["panel", "device", "field", "operation"])
+def test_controller_map_rejects_wrong_locations_even_if_values_match(mutation, controller_observation):
+    from qa_pipeline_agent3 import ControllerMapAgent3
+    case, _ = mapped_tc_fixture()
+    plan = ControllerMapAgent3().plan(case, controller_observation, {}).plan
+    if mutation == "panel":
+        plan.assertions[0].selector = ".detail-panel"
+    elif mutation == "device":
+        plan.target_device_id = 2
+    elif mutation == "field":
+        plan.precondition_checks[0].selector = "window.__vccs.devices[0].status"
+    else:
+        plan.actions[0].selector = "#device-card-2 .card-body-split"
+    assert evaluate_checkpoint3_plan(case, plan, controller_observation).status == CheckStatus.FAIL
+    with pytest.raises(pipeline.Agent3Error, match="인계"):
+        compile_automation_candidate("MAP-MUTANT", case, plan)
+
+
+def test_controller_map_saved_bindings_recomputed(controller_observation, tmp_path):
+    from qa_pipeline_agent3 import ControllerMapAgent3
+    case, _ = mapped_tc_fixture()
+    response = ControllerMapAgent3().plan(case, controller_observation, {})
+    plan, record = pipeline_execution._prepare_agent3_plan(tmp_path, 1, response.plan, controller_observation,
+                                                          case, response.ui_bindings)
+    manifest = {"prompt_version": "agent3-3.43", "binding_contract": "controller-map-1.0", "plan_value_formats": [record]}
+    pipeline_execution._verify_agent3_plan_value_formats(tmp_path, manifest, controller_observation, plan, case)
+    manifest.pop("binding_contract")
+    with pytest.raises(ValueError, match="연결 방식"):
+        pipeline_execution._verify_agent3_plan_value_formats(tmp_path, manifest, controller_observation, plan, case)
+
+
+def test_controller_map_real_entry_uses_no_binding_model(controller_observation, tmp_path, monkeypatch):
+    case, _ = mapped_tc_fixture()
+    run_id = "RUN-20260928-120000-ABCDEF"
+    run = tmp_path / run_id
+    pipeline._write_json(run / "agent2_manifest.json", {"run_id": run_id})
+    monkeypatch.setattr(pipeline_execution, "_load_verified_agent2_run", lambda *_: (
+        None, {}, None, SimpleNamespace(test_cases=[case]), None, {"agent2_design_sha256": "a" * 64}))
+    monkeypatch.setattr(pipeline_execution, "inspect_target_ui", lambda *a, **kw: controller_observation)
+    monkeypatch.setattr(pipeline_execution, "OpenAIAgent3", lambda **kw: pytest.fail("Binding model must not be constructed"))
+    monkeypatch.setattr(pipeline_execution, "run_candidate_trial", lambda *a, **kw: _trial(TrialOutcome.PASS))
+    assert pipeline.run_agent3(SimpleNamespace(run_id=run_id, runs_root=str(tmp_path), tc_id=case.tc_id,
+        target_html=str(REPO_ROOT / "product_baseline/virtual-controller.html"), model="fixture", timeout=60)) == 0
+    manifest = pipeline._read_json_payload(run / "agent3_manifest.json")
+    assert manifest["binding_contract"] == "controller-map-1.0"
+    assert manifest["model"] == "local-controller-map-1.0"
+    assert len(manifest["attempts"]) == 1 and manifest["attempts"][0]["usage"]["total_tokens"] == 0
+
+@pytest.mark.parametrize("expected", [None, 30, 31])
+def test_controller_map_read_only_and_boundary_keep_tc_verdict(expected, controller_observation,
+        tmp_path, monkeypatch, capsys):
+    from qa_pipeline_agent3 import ControllerMapAgent3
+    if expected is None:
+        initial = controller_observation.harness_values["window.__vccs.devices[0].setTemp"]
+        case, _ = mapped_tc_fixture("setTemp", initial, initial, read_only=True)
+    else:
+        case, _ = mapped_tc_fixture("setTemp", 24, 31, blocked=True, blocked_by_lock=False)
+        for er, check in zip(case.expected_results, case.execution_spec.verifications):
+            er.statement = f"{er.observation_target} 값은 {expected}이다."
+            check.expected_fields[0].expected_value = expected
+    plan = ControllerMapAgent3().plan(case, controller_observation, {}).plan
+    assert evaluate_checkpoint3_plan(case, plan, controller_observation).status == CheckStatus.PASS
+    monkeypatch.setenv("QA_TARGET_URL", (REPO_ROOT / "product_baseline/virtual-controller.html").as_uri())
+    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
+    namespace = {}
+    code = compile_automation_candidate("MAP-BOUNDARY", case, plan, explicit_expectations_only=True)
+    exec(code, namespace)
+    if expected == 31:
+        # Deliberately incorrect oracle: the adapter must not silently change it to 30.
+        with pytest.raises(AssertionError, match="PRODUCT_MISMATCH"):
+            namespace["test_tc_cand_090"]()
+    else:
+        namespace["test_tc_cand_090"]()
+    output = capsys.readouterr().out
+    assert ("RESTORE_STATUS: NOT_REQUIRED" if expected is None else "RESTORE_STATUS: RESTORED") in output
+    if expected is None:
+        assert "_restore_controller(page, 1," not in code
+    else:
+        assert plan.assertions[0].expected_fields[0].expected_value == expected
+
+
+@pytest.mark.parametrize("field,initial,requested", [
+    ("status", "STOP", "OPERATION"), ("mode", "COOL", "HEAT"),
+    ("fanSpeed", "HIGH", "LOW"), ("setTemp", 27, 21), ("locked", False, True)])
+def test_frozen_tc_bindings_preserve_definition_and_local_execution(
+        field, initial, requested, controller_observation, tmp_path, monkeypatch, capsys):
+    from qa_pipeline_agent3 import assemble_tc_bindings, tc_plan_handoff_errors
+    case, reference = controller_lifecycle_fixture(field, initial, requested,
+        prepare={"mode": "HEAT"} if field == "setTemp" else None)
+    case, bindings = frozen_tc_and_bindings(case, reference)
+    before = case.model_dump_json()
+    plan = assemble_tc_bindings(case, bindings)
+    assert not tc_plan_handoff_errors(case, plan)
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation)
+    assert cp.status == CheckStatus.PASS, cp.model_dump_json(indent=2)
+    target = REPO_ROOT / "product_baseline/virtual-controller.html"
+    monkeypatch.setenv("QA_TARGET_URL", target.as_uri())
+    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
+    code = compile_automation_candidate("LOCAL-TC-HANDOFF", case, plan, explicit_expectations_only=True)
+    namespace = {}
+    exec(compile(code, "tc_handoff", "exec"), namespace)
+    namespace["test_tc_cand_090"]()
+    output = capsys.readouterr().out
+    assert "RESTORE_STATUS: RESTORED" in output and "RESTORE_CONFIRMATIONS_VERIFIED:" in output
+    assert "PRODUCT_MISMATCH" not in output and "RESTORE_MISMATCH" not in output
+    assert case.model_dump_json() == before
+
+
+@pytest.mark.parametrize("mutation", ["value", "input", "order", "missing", "timing", "precondition", "restore"])
+def test_frozen_tc_rejects_changed_definitions_before_compile(mutation, controller_observation):
+    from qa_pipeline_agent3 import assemble_tc_bindings
+    case, reference = controller_lifecycle_fixture("setTemp", 27, 21)
+    case, bindings = frozen_tc_and_bindings(case, reference)
+    plan = assemble_tc_bindings(case, bindings)
+    if mutation == "value":
+        plan.assertions[0].expected_fields[0].expected_value = 27
+    elif mutation == "input":
+        next(a for a in plan.actions if a.phase == AutomationPhase.TEST).value = 25
+    elif mutation == "order":
+        plan.actions[0], plan.actions[1] = plan.actions[1], plan.actions[0]
+    elif mutation == "missing":
+        plan.assertions.pop()
+    elif mutation == "timing":
+        plan.assertions[0].after_action_id = plan.actions[-1].action_id
+    elif mutation == "precondition":
+        plan.precondition_checks.clear()
+    else:
+        plan.restore_confirmations.clear()
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation)
+    assert cp.status == CheckStatus.FAIL and cp.checks[0].rule_id == "CP3-014"
+    with pytest.raises(pipeline.Agent3Error, match="인계"):
+        compile_automation_candidate("LOCAL-MUTANT", case, plan)
+
+
+@pytest.mark.parametrize("mutation", ["missing", "duplicate", "unknown", "precondition"])
+def test_frozen_tc_binding_reference_errors_never_assemble(mutation):
+    from qa_pipeline_agent3 import assemble_tc_bindings
+    case, reference = controller_lifecycle_fixture("mode", "COOL", "HEAT")
+    case, bindings = frozen_tc_and_bindings(case, reference)
+    if mutation == "missing":
+        bindings.verifications.pop()
+    elif mutation == "duplicate":
+        bindings.operations.append(bindings.operations[0])
+    elif mutation == "unknown":
+        bindings.verifications[0].result_id = "ER-999"
+    else:
+        bindings.preconditions[0].verification_index = 99
+    with pytest.raises(pipeline.Agent3Error, match="누락·중복"):
+        assemble_tc_bindings(case, bindings)
+
+
+def test_frozen_tc_binding_order_is_not_test_order():
+    from qa_pipeline_agent3 import assemble_tc_bindings
+    case, reference = controller_lifecycle_fixture("setTemp", 27, 21, prepare={"mode": "HEAT"})
+    case, bindings = frozen_tc_and_bindings(case, reference)
+    expected = assemble_tc_bindings(case, bindings)
+    bindings.operations.reverse()
+    bindings.verifications.reverse()
+    bindings.preconditions.reverse()
+    assert assemble_tc_bindings(case, bindings) == expected
+
+
+@pytest.mark.parametrize("field,initial,target,variant", [
+    ("mode", "COOL", "HEAT", "heat."), ("mode", "COOL", "HEAT", "난방"),
+    ("fanSpeed", "HIGH", "LOW", "low."), ("status", "STOP", "OPERATION", "operation."),
+    ("locked", True, False, "해제")])
+def test_frozen_tc_keeps_bounded_value_format_conversion(field, initial, target, variant, tmp_path, controller_observation):
+    from qa_pipeline_agent3 import assemble_tc_bindings, tc_plan_handoff_errors
+    case, reference = controller_lifecycle_fixture(field, initial, target)
+    case, bindings = frozen_tc_and_bindings(case, reference)
+    for check in case.execution_spec.verifications:
+        check.expected_fields[0].expected_value = variant
+    if field == "mode":
+        next(op for op in case.execution_spec.operations if op.phase == AutomationPhase.TEST).value = variant
+    raw = assemble_tc_bindings(case, bindings)
+    before = case.model_dump_json()
+    plan, record = pipeline_execution._prepare_agent3_plan(tmp_path, 1, raw, controller_observation, case, bindings)
+    assert plan.assertions[0].expected_fields[0].expected_value == target
+    assert not tc_plan_handoff_errors(case, plan)
+    assert pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation).status == CheckStatus.PASS
+    pipeline_execution._verify_agent3_plan_value_formats(tmp_path,
+        {"prompt_version": "agent3-3.43", "plan_value_formats": [record]}, controller_observation, plan, case)
+    assert case.model_dump_json() == before
+    plan.assertions[0].expected_fields[0].expected_value = initial
+    assert tc_plan_handoff_errors(case, plan)  # format equivalence is not value replacement
+
+
+def test_frozen_tc_model_returns_locations_only_and_missing_ui_stays_review(controller_observation):
+    from qa_pipeline_agent3 import assemble_tc_bindings
+    case, reference = controller_lifecycle_fixture("fanSpeed", "HIGH", "LOW")
+    case, bindings = frozen_tc_and_bindings(case, reference)
+    class Responses:
+        def parse(self, **kwargs):
+            self.kwargs = kwargs
+            return SimpleNamespace(output_parsed=bindings, id="local-binding", usage=None)
+    responses = Responses()
+    result = OpenAIAgent3(client=SimpleNamespace(responses=responses)).plan(case, controller_observation, {})
+    assert responses.kwargs["text_format"] is pipeline.Agent3UiBindings
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent3-3-43"
+    assert result.plan.actions == reference.actions
+    assert result.plan.assertions == reference.assertions
+    schema = json.dumps(pipeline.Agent3UiBindings.model_json_schema())
+    for forbidden in ("expected_value", "expected_number", "after_action_id", "action_type"):
+        assert forbidden not in schema
+    bindings.operations[0].selector = "#missing-control"
+    invalid = assemble_tc_bindings(case, bindings)
+    assert pipeline.evaluate_checkpoint3_plan(case, invalid, controller_observation).status == CheckStatus.FAIL
+    extension = pipeline.Agent3UiBindings(planning_status="AUTOMATION_SUPPORT_EXTENSION_REQUIRED",
+        operations=[], verifications=[], preconditions=[], extension_reasons=["필요한 독립 제어가 관찰되지 않음"], technical_notes=[])
+    plan = assemble_tc_bindings(case, extension)
+    assert pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation).status == CheckStatus.REVIEW
+    assert not plan.actions and not plan.assertions
+
+
+@pytest.mark.parametrize("expected,mismatch", [(30, False), (24, True), (31, True)])
+def test_frozen_tc_boundary_input_is_not_expected_output(expected, mismatch, controller_observation,
+        tmp_path, monkeypatch, capsys):
+    from qa_pipeline_agent3 import assemble_tc_bindings
+    case, reference = controller_lifecycle_fixture("setTemp", 24, 31, blocked=True, blocked_by_lock=False)
+    for er, a in zip(case.expected_results, reference.assertions):
+        er.statement = f"{er.observation_target} 값은 {expected}이다."
+        a.expected_fields[0].expected_value = expected
+    case, bindings = frozen_tc_and_bindings(case, reference)
+    plan = assemble_tc_bindings(case, bindings)
+    assert pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation).status == CheckStatus.PASS
+    monkeypatch.setenv("QA_TARGET_URL", (REPO_ROOT / "product_baseline/virtual-controller.html").as_uri())
+    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
+    namespace = {}
+    exec(compile_automation_candidate("LOCAL-FROZEN-BOUNDARY", case, plan, explicit_expectations_only=True), namespace)
+    if mismatch:
+        with pytest.raises(AssertionError, match="PRODUCT_MISMATCH"):
+            namespace["test_tc_cand_090"]()
+    else:
+        namespace["test_tc_cand_090"]()
+    assert "RESTORE_STATUS: RESTORED" in capsys.readouterr().out
+    assert plan.assertions[0].expected_fields[0].expected_value == expected
+
+
+@pytest.mark.parametrize("mutation", ["none", "plan", "bindings", "missing"])
+def test_frozen_tc_saved_binding_record_reassembles_original(tmp_path, mutation, controller_observation):
+    from qa_pipeline_agent3 import assemble_tc_bindings
+    case, reference = controller_lifecycle_fixture("mode", "COOL", "HEAT")
+    case, bindings = frozen_tc_and_bindings(case, reference)
+    plan = assemble_tc_bindings(case, bindings)
+    actual, record = pipeline_execution._prepare_agent3_plan(tmp_path, 1, plan, controller_observation, case, bindings)
+    assert actual == plan
+    manifest = {"prompt_version": "agent3-3.43", "plan_value_formats": [record]}
+    if mutation in {"plan", "bindings"}:
+        path = tmp_path / "agent3_plan_value_format_attempt_1.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if mutation == "plan":
+            payload["raw_plan"]["assertions"][0]["expected_fields"][0]["expected_value"] = "FAN"
+        else:
+            payload["ui_bindings"]["verifications"][0]["selector"] = ".detail-panel"
+        pipeline._write_json(path, payload)
+        record["sha256"] = pipeline._sha256_file(path)  # test beyond mere hash mismatch
+    elif mutation == "missing":
+        manifest.pop("plan_value_formats")
+    if mutation == "none":
+        pipeline_execution._verify_agent3_plan_value_formats(tmp_path, manifest, controller_observation, plan, case)
+    else:
+        with pytest.raises(ValueError):
+            pipeline_execution._verify_agent3_plan_value_formats(tmp_path, manifest, controller_observation, plan, case)
+
+
+def test_frozen_tc_agent3_orchestration_saves_binding_and_shared_review(tmp_path, monkeypatch, controller_observation):
+    from qa_pipeline_agent3 import assemble_tc_bindings
+    case, reference = controller_lifecycle_fixture("fanSpeed", "HIGH", "LOW")
+    case, bindings = frozen_tc_and_bindings(case, reference)
+    plan = assemble_tc_bindings(case, bindings)
+    run_id = "RUN-20260927-210000-ABCDEF"
+    run = tmp_path / run_id
+    pipeline._write_json(run / "agent2_manifest.json", {"run_id": run_id})
+    observation = controller_observation
+    monkeypatch.setattr(pipeline_execution, "_load_verified_agent2_run", lambda *_: (
+        None, {}, None, SimpleNamespace(test_cases=[case]), None, {"agent2_design_sha256": "a" * 64}))
+    monkeypatch.setattr(pipeline_execution, "inspect_target_ui", lambda *a, **kw: observation)
+    calls = []
+    def model_plan(*args, **kwargs):
+        calls.append("binding")
+        return pipeline.Agent3Response(plan=plan, response_id="local", model="fixture", usage={}, ui_bindings=bindings)
+    monkeypatch.setattr(pipeline_execution, "OpenAIAgent3", lambda **kw: SimpleNamespace(plan=model_plan))
+    monkeypatch.setattr(pipeline_execution, "run_candidate_trial", lambda *a, **kw: calls.append("trial") or _trial(TrialOutcome.PASS))
+    assert pipeline.run_agent3(SimpleNamespace(run_id=run_id, runs_root=str(tmp_path), tc_id=case.tc_id,
+        target_html=str(REPO_ROOT / "product_baseline/virtual-controller.html"), model="fixture", timeout=60)) == 0
+    assert calls == ["binding", "trial"]
+    manifest = pipeline._read_json_payload(run / "agent3_manifest.json")
+    assert manifest["prompt_version"] == "agent3-3.43"
+    pipeline_execution._agent3_review_options(manifest)
+    pipeline_execution._verify_agent3_plan_value_formats(run, manifest, observation, plan, case)
+    payload = pipeline._read_json_payload(run / "agent3_grounding_input_attempt_1.json")
+    assert any(d["source_id"] == "TC_EXECUTION_HANDOFF/definition_preserved" and d["text"] == "true"
+               for d in payload["source_documents"])
+
+
+@pytest.mark.parametrize("wording", ["난방 상태를 준비하고 시작합니다.", "운전 모드는 HEAT입니다.", "난방으로 전환된 상태에서 시험합니다."])
+def test_frozen_tc_paraphrases_do_not_reinterpret_values(wording, controller_observation):
+    from qa_pipeline_agent3 import assemble_tc_bindings
+    case, reference = controller_lifecycle_fixture("mode", "HEAT", "COOL")
+    old = case.preconditions[0]
+    case.preconditions[0] = wording
+    for a in reference.actions:
+        if a.source_text == old:
+            a.source_text = wording
+    for c in reference.precondition_checks:
+        if c.source_text == old:
+            c.source_text = wording
+    # Different wording, same reviewed executable meaning.
+    for er in case.expected_results:
+        er.statement = er.statement.replace("COOL", "냉방")
+    case, bindings = frozen_tc_and_bindings(case, reference)
+    plan = assemble_tc_bindings(case, bindings)
+    payload = pipeline.build_agent3_model_input(case, controller_observation, {})
+    assert payload["related_srs_requirements"] == {}
+    assert payload["precondition_context_bindings"]
+    assert all("allowed_baseline_context_selectors" not in c for c in payload["precondition_context_bindings"])
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation)
+    assert cp.status == CheckStatus.PASS, cp.model_dump_json(indent=2)
+
+
+@pytest.mark.parametrize("field,initial,permitted,rejected", [
+    ("status", "OPERATION", "STOP", "OPERATION"),
+    ("mode", "COOL", "HEAT", "FAN"),
+    ("fanSpeed", "LOW", "MED", "HIGH"),
+    ("setTemp", 18, 24, 27),
+    ("locked", False, True, "HIGH")])
+@pytest.mark.parametrize("explicit", [False, True])
+def test_product_verdict_does_not_invent_whole_test_retention(
+        tmp_path, monkeypatch, capsys, controller_observation, field, initial, permitted, rejected, explicit):
+    case, plan = permitted_then_blocked_fixture(field, initial, permitted, rejected)
+    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
+        legacy_wording_checks=False, shared_evidence=True, require_restore_plan_links=True,
+        require_plan_fidelity=True, require_assertion_target_identity=True)
+    assert checkpoint.status == CheckStatus.PASS, checkpoint.model_dump_json(indent=2)
+    original = case.model_dump_json(), plan.model_dump_json()
+    code = compile_automation_candidate("LOCAL-VERDICT-SCOPE", case, plan,
+        explicit_expectations_only=explicit)
+    assert all(c.status == CheckStatus.PASS for c in pipeline.evaluate_compiled_candidate(case, code))
+    target = Path(__file__).resolve().parents[1] / "product_baseline/virtual-controller.html"
+    monkeypatch.setenv("QA_TARGET_URL", target.as_uri())
+    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
+    namespace = {}
+    exec(compile(code, "verdict_scope", "exec"), namespace)
+    if explicit:
+        namespace["test_tc_cand_090"]()
+    else:
+        with pytest.raises(AssertionError, match="blocked operation changed observed state"):
+            namespace["test_tc_cand_090"]()
+    output = capsys.readouterr().out
+    assert "RESTORE_STATUS: RESTORED" in output
+    assert "RESTORE_MISMATCH" not in output
+    if explicit:
+        assert "PRODUCT_MISMATCH" not in output
+        assert "RESTORE_CONFIRMATIONS_VERIFIED" in output
+    assert original == (case.model_dump_json(), plan.model_dump_json())
+
+
+@pytest.mark.parametrize("initial,requested,expected,mismatch", [
+    (24, 31, 30, False), (29, 32, 30, False), (30, 31, 30, False),
+    (16, 15, 16, True), (24, 31, 24, True), (24, 31, 31, True)])
+def test_explicit_boundary_results_are_not_replaced_by_observation(
+        tmp_path, monkeypatch, capsys, controller_observation, initial, requested, expected, mismatch):
+    case, plan = controller_lifecycle_fixture("setTemp", initial, requested,
+        blocked=True, blocked_by_lock=False)
+    for result, assertion in zip(case.expected_results, plan.assertions):
+        result.statement = f"{result.observation_target} 값은 {expected}이다."
+        assertion.expected_fields[0].expected_value = expected
+    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
+        legacy_wording_checks=False, shared_evidence=True, require_plan_fidelity=True)
+    assert checkpoint.status == CheckStatus.PASS, checkpoint.model_dump_json(indent=2)
+    code = compile_automation_candidate("LOCAL-BOUNDARY-SCOPE", case, plan,
+        explicit_expectations_only=True)
+    target = Path(__file__).resolve().parents[1] / "product_baseline/virtual-controller.html"
+    monkeypatch.setenv("QA_TARGET_URL", target.as_uri())
+    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
+    namespace = {}
+    exec(compile(code, "boundary_scope", "exec"), namespace)
+    if mismatch:
+        with pytest.raises(AssertionError, match="PRODUCT_MISMATCH"):
+            namespace["test_tc_cand_090"]()
+    else:
+        namespace["test_tc_cand_090"]()
+    output = capsys.readouterr().out
+    assert "RESTORE_STATUS: RESTORED" in output and "RESTORE_MISMATCH" not in output
+    # The deliberately wrong 24 expectation must not be rewritten to the observed 30.
+    assert plan.assertions[0].expected_fields[0].expected_value == expected
+
+
+@pytest.mark.parametrize("requested", [21, 27, 31, 32])
+@pytest.mark.parametrize("expected", [16, 24, 30, 31])
+def test_product_action_is_independent_of_expected_output(requested, expected):
+    case, plan = controller_lifecycle_fixture("setTemp", 24, requested,
+        blocked=True, blocked_by_lock=False)
+    for assertion in plan.assertions:
+        assertion.expected_fields[0].expected_value = expected
+    code = compile_automation_candidate("LOCAL-ACTION-SCOPE", case, plan,
+        explicit_expectations_only=True)
+    assert f"_request_temperature(page, {float(requested)})" in code
+    assert "_set_temperature(page, 24.0)" in code  # setup remains strict
+    assert "unexpected_state_change" not in code
+    assert plan.assertions[0].expected_fields[0].expected_value == expected
+
+
+@pytest.mark.parametrize("field,initial,requested", [
+    ("status", "STOP", "OPERATION"), ("mode", "COOL", "HEAT"),
+    ("fanSpeed", "LOW", "AUTO"), ("setTemp", 27, 21), ("locked", False, True)])
+@pytest.mark.parametrize("mutation", ["none", "early", "restore_anchor", "missing_assertion",
+    "wrong_device", "missing_apply", "mixed_operation", "intermediate", "source_paraphrase"])
+def test_terminal_observation_preserves_execution_guards(field, initial, requested, mutation, controller_observation):
+    case, plan = controller_lifecycle_fixture(field, initial, requested)
+    observation_step = "장비 카드와 내부값을 확인한다."
+    case.steps.append(observation_step)
+    for result in case.expected_results:
+        result.verify_after_step = observation_step
+    test_actions = [a for a in plan.actions if a.phase == AutomationPhase.TEST]
+    if mutation == "early":
+        for assertion in plan.assertions: assertion.after_action_id = test_actions[0].action_id
+    elif mutation == "restore_anchor":
+        for assertion in plan.assertions: assertion.after_action_id = plan.actions[-1].action_id
+    elif mutation == "missing_assertion": plan.assertions.pop()
+    elif mutation == "wrong_device": plan.target_device_id = 2
+    elif mutation == "missing_apply": plan.actions.remove(test_actions[-1])
+    elif mutation == "mixed_operation":
+        case.steps[-1] = "장비 카드와 내부값을 확인하고 적용 버튼을 누른다."
+        for result in case.expected_results: result.verify_after_step = case.steps[-1]
+    elif mutation == "intermediate":
+        case.steps.remove(observation_step)
+        case.steps.insert(1, observation_step)
+    elif mutation == "source_paraphrase":
+        test_actions[-1].source_text = test_actions[-1].source_text.replace("한다", "합니다")
+    options = dict(legacy_wording_checks=False, allow_terminal_observation_anchor=True,
+        require_assertion_target_identity=True, require_precondition_proof=True,
+        require_restore_plan_links=True, require_restore_comparison_basis=True,
+        review_precondition_coverage=True, review_value_roles=True, shared_evidence=True)
+    before = case.model_dump_json(), plan.model_dump_json()
+    result = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
+        allow_state_change_terminal_observation=True, **options)
+    assert (result.status == CheckStatus.PASS) == (mutation == "none"), result.model_dump_json()
+    if mutation == "none":
+        legacy = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation, **options)
+        assert next(c for c in legacy.checks if c.rule_id == "CP3-003A").status == CheckStatus.FAIL
+        from qa_pipeline_agent2 import _tc_observation_binding_errors
+        assert not _tc_observation_binding_errors(case, legacy_wording_checks=False)
+    assert before == (case.model_dump_json(), plan.model_dump_json())
+
+
+@pytest.mark.parametrize("kind", ["state_change", "blocked_change", "read_only", "grouped"])
+def test_terminal_observation_local_trial_and_restoration(kind, controller_observation, tmp_path, monkeypatch, capsys):
+    if kind == "grouped":
+        case, plan = controller_grouped_boundary_fixture()
+    else:
+        case, plan = controller_lifecycle_fixture("fanSpeed", "LOW", "AUTO",
+            blocked=kind == "blocked_change", read_only=kind == "read_only")
+    final_action = [a for a in plan.actions if a.phase == AutomationPhase.TEST][-1].action_id
+    observation_step = "장비 카드와 내부값을 확인한다."
+    case.steps.append(observation_step)
+    final_ids = {a.result_id for a in plan.assertions if a.after_action_id == final_action}
+    for result in case.expected_results:
+        if result.result_id in final_ids: result.verify_after_step = observation_step
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
+        legacy_wording_checks=False, allow_terminal_observation_anchor=True,
+        allow_state_change_terminal_observation=True, require_assertion_target_identity=True,
+        require_restore_plan_links=True, review_precondition_coverage=True, review_value_roles=True, shared_evidence=True)
+    assert cp.status == CheckStatus.PASS, cp.model_dump_json()
+    code = compile_automation_candidate("LOCAL-TERMINAL-OBSERVATION", case, plan)
+    product = Path(__file__).resolve().parents[1] / "product_baseline/virtual-controller.html"
+    before = product.read_bytes()
+    monkeypatch.setenv("QA_TARGET_URL", product.as_uri())
+    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
+    namespace = {}
+    exec(compile(code, "terminal_observation", "exec"), namespace)
+    namespace["test_tc_cand_090"]()
+    output = capsys.readouterr().out
+    if kind != "read_only":
+        assert "RESTORE_STATUS: RESTORED" in output
+        assert "RESTORE_CONFIRMATIONS_VERIFIED:" in output
+    assert "PRODUCT_MISMATCH" not in output and "RESTORE_MISMATCH" not in output
+    assert product.read_bytes() == before
+
+
+@pytest.fixture(scope='module')
+def controller_observation():
+    from playwright.sync_api import Browser
+    original = Browser.new_context
+    def local_context(browser, *args, **kwargs):
+        context = original(browser, *args, **kwargs)
+        context.route('**/*', lambda route: route.continue_() if route.request.url.startswith(('file:', 'data:', 'http://127.0.0.1', 'http://localhost')) else route.abort())
+        return context
+    target = Path(__file__).resolve().parents[1] / 'product_baseline/virtual-controller.html'
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(Browser, 'new_context', local_context)
+        yield pipeline.inspect_target_ui(target, required_selectors=set(pipeline._UI_SELECTOR_INVENTORY), discover_generic=True)
+
+
+@pytest.mark.parametrize("numbered", [False, True])
+def test_repeated_apply_steps_require_unique_reference_not_fuzzy_matching(numbered, controller_observation):
+    from qa_pipeline_agent2 import _tc_observation_binding_errors
+    case, plan = controller_grouped_boundary_fixture()
+    apply_steps = [case.steps[1], case.steps[3]]
+    for index, source in enumerate(apply_steps):
+        replacement = f"{index + 1}. 적용 버튼을 누른다." if numbered else "적용 버튼을 누른다."
+        case.steps[case.steps.index(source)] = replacement
+        for result in case.expected_results:
+            if result.verify_after_step == source: result.verify_after_step = replacement
+        for action in plan.actions:
+            if action.source_text == source: action.source_text = replacement
+    errors = _tc_observation_binding_errors(case, legacy_wording_checks=False)
+    assert bool(errors) == (not numbered)
+    if numbered:
+        result = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
+            legacy_wording_checks=False, allow_terminal_observation_anchor=True,
+            allow_state_change_terminal_observation=True, require_assertion_target_identity=True,
+            require_restore_plan_links=True, review_precondition_coverage=True, review_value_roles=True, shared_evidence=True)
+        assert result.status == CheckStatus.PASS, result.model_dump_json()
+
+
+@pytest.mark.parametrize("field,initial,requested", [
+    ("status", "STOP", "OPERATION"), ("mode", "COOL", "HEAT"),
+    ("fanSpeed", "LOW", "HIGH"), ("setTemp", 24, 25), ("locked", False, True)])
+@pytest.mark.parametrize("variant", ["baseline", "mixed", "wrong_device", "unknown_reader"])
+def test_mixed_precondition_readers_share_coverage(field, initial, requested, variant, controller_observation):
+    case, plan = mixed_precondition_fixture(field, initial, requested, variant)
+    before = case.model_dump_json(), plan.model_dump_json()
+    errors = pipeline._precondition_proof_errors(case, plan, controller_observation,
+        legacy_wording_checks=False, review_precondition_coverage=True,
+        review_value_roles=True, shared_evidence=True)
+    assert bool(errors) == (variant in {"wrong_device", "unknown_reader"}), errors
+    legacy = pipeline._precondition_proof_errors(case, plan, controller_observation,
+        legacy_wording_checks=False, review_precondition_coverage=False,
+        review_value_roles=True, shared_evidence=True)
+    assert bool(legacy) == (variant != "baseline")
+    assert before == (case.model_dump_json(), plan.model_dump_json())
+
+
+@pytest.mark.parametrize("split", [False, True])
+@pytest.mark.parametrize("requested,expected", [(31, 30), (15, 16), (25, 25)])
+def test_temperature_helper_follows_action_anchor_not_prose(split, requested, expected):
+    case, plan = split_boundary_fixture(split=split, request_value=requested, expected_value=expected)
+    before = case.model_dump_json(), plan.model_dump_json()
+    code = compile_automation_candidate("LOCAL-ANCHOR", case, plan)
+    helper = "_request_temperature" if requested != expected else "_set_temperature"
+    assert f"{helper}(page, {float(requested)})" in code
+    # The intermediate reset is preparation, not this boundary's request.
+    assert "_set_temperature(page, 30.0)" in code
+    assert before == (case.model_dump_json(), plan.model_dump_json())
+
+
+@pytest.mark.parametrize("field,initial,requested", [
+    ("status", "STOP", "OPERATION"), ("mode", "COOL", "HEAT"),
+    ("fanSpeed", "LOW", "HIGH"), ("setTemp", 24, 25), ("locked", False, True)])
+def test_mixed_reader_local_trial_and_restoration(field, initial, requested, controller_observation,
+                                                 tmp_path, monkeypatch, capsys):
+    case, plan = mixed_precondition_fixture(field, initial, requested)
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
+        legacy_wording_checks=False, review_precondition_coverage=True, review_value_roles=True,
+        shared_evidence=True, require_assertion_target_identity=True, require_restore_plan_links=True)
+    assert cp.status == CheckStatus.PASS, cp.model_dump_json()
+    code = compile_automation_candidate("LOCAL-MIXED-READERS", case, plan)
+    product = Path(__file__).resolve().parents[1] / "product_baseline/virtual-controller.html"
+    before = product.read_bytes()
+    monkeypatch.setenv("QA_TARGET_URL", product.as_uri())
+    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
+    namespace = {}
+    exec(compile(code, "mixed_readers", "exec"), namespace)
+    namespace["test_tc_cand_090"]()
+    output = capsys.readouterr().out
+    assert "RESTORE_STATUS: RESTORED" in output
+    assert "RESTORE_CONFIRMATIONS_VERIFIED: ER-090,ER-091" in output
+    assert "PRODUCT_MISMATCH" not in output and "RESTORE_MISMATCH" not in output
+    assert product.read_bytes() == before
+
+
+@pytest.mark.parametrize("split,second_expected", [(False, 21), (True, 21), (True, 22)])
+def test_grouped_boundary_local_trial_preserves_assertions_and_restore(split, second_expected,
+        controller_observation, tmp_path, monkeypatch, capsys):
+    case, plan = controller_grouped_boundary_fixture(split=split, second_expected=second_expected)
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
+        legacy_wording_checks=False, review_precondition_coverage=True, review_value_roles=True,
+        shared_evidence=True, require_assertion_target_identity=True, require_restore_plan_links=True)
+    assert cp.status == CheckStatus.PASS, cp.model_dump_json()
+    code = compile_automation_candidate("LOCAL-GROUPED-BOUNDARY", case, plan)
+    assert "_request_temperature(page, 31.0)" in code
+    second_helper = "_set_temperature" if second_expected == 21 else "_request_temperature"
+    assert f"{second_helper}(page, 21.0)" in code
+    assert all(c.status == CheckStatus.PASS for c in pipeline.evaluate_compiled_candidate(case, code))
+    product = Path(__file__).resolve().parents[1] / "product_baseline/virtual-controller.html"
+    before = product.read_bytes()
+    monkeypatch.setenv("QA_TARGET_URL", product.as_uri())
+    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
+    namespace = {}
+    exec(compile(code, "grouped_boundary", "exec"), namespace)
+    if second_expected != 21:
+        with pytest.raises(AssertionError, match="PRODUCT_MISMATCH"):
+            namespace["test_tc_cand_090"]()
+    else:
+        namespace["test_tc_cand_090"]()
+    output = capsys.readouterr().out
+    assert "RESTORE_STATUS: RESTORED" in output and "RESTORE_MISMATCH" not in output
+    if second_expected == 21:
+        assert "RESTORE_CONFIRMATIONS_VERIFIED:" in output
+        assert all(result.result_id in output for result in case.expected_results)
+    assert product.read_bytes() == before
+
+
+@pytest.mark.parametrize("variant,verdict,expected", [
+    ("mixed", "SUPPORTED", "PASS"), ("missing", "UNSUPPORTED", "FAIL"),
+    ("missing", "UNCERTAIN", "REVIEW")])
+def test_mixed_reader_coverage_still_requires_review(controller_observation, variant, verdict, expected):
+    import qa_pipeline_grounding as g
+    case, plan = mixed_precondition_fixture("mode", "COOL", "HEAT", variant)
+    payload = g.build_grounding_input("AGENT3", None, {}, plan, test_case=case,
+        observation=controller_observation, include_execution_contract=True,
+        include_review_responsibilities=True, include_task_boundaries="1.2")
+    item = next(i for i in payload["items"] if i["kind"] == "PRECONDITION_COVERAGE"
+        and i["content"]["source"] == case.preconditions[-1])
+    assert len(item["content"]["checks"]) == (1 if variant == "missing" else 2)
+    record = fake_grounding_record(payload)
+    next(i for i in record["review"]["items"] if i["item_id"] == item["item_id"])["verdict"] = verdict
+    assert g.check_review_record(payload, record).status.value == expected
+    record["review"]["items"] = [i for i in record["review"]["items"] if i["item_id"] != item["item_id"]]
+    with pytest.raises(ValueError, match="검토 응답 오류"):
+        g.check_review_record(payload, record)
+
+
+def test_temperature_helper_does_not_borrow_later_condition():
+    case, plan = split_boundary_fixture()
+    # Remove the upper-bound observation. The lower bound must not authorize it.
+    plan.assertions = plan.assertions[:-1]
+    code = compile_automation_candidate("LOCAL-NO-BORROW", case, plan)
+    assert "_set_temperature(page, 31.0)" in code
+    # A late assertion must not leak past the first apply into another segment.
+    plan.assertions[0].after_action_id = "ACT-010"
+    code = compile_automation_candidate("LOCAL-NO-BORROW", case, plan)
+    assert "_set_temperature(page, 30.0)" in code
+
+
+@pytest.mark.parametrize("mutation", ["normal", "wrong_input", "wrong_output", "missing_assertion", "early_anchor"])
+def test_boundary_outputs_are_not_inputs_but_remain_bound_to_er(controller_observation, mutation):
+    case, plan = controller_grouped_boundary_fixture()
+    if mutation == "wrong_input":
+        next(a for a in plan.actions if a.action_id == "ACT-100").value = 99
+    elif mutation == "wrong_output":
+        plan.assertions[-1].expected_fields[0].expected_value = 99
+    elif mutation == "missing_assertion":
+        plan.assertions.pop()
+    elif mutation == "early_anchor":
+        plan.assertions[-1].after_action_id = "ACT-100"
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
+        legacy_wording_checks=False, review_precondition_coverage=True, review_value_roles=True,
+        shared_evidence=True, require_assertion_target_identity=True, require_restore_plan_links=True)
+    expected_rule = {"wrong_input": "CP3-005", "wrong_output": "CP3-004",
+        "missing_assertion": "CP3-003", "early_anchor": "CP3-003A"}.get(mutation)
+    if expected_rule:
+        assert any(c.rule_id == expected_rule and c.status == CheckStatus.FAIL for c in cp.checks)
+    else:
+        assert cp.status == CheckStatus.PASS, cp.model_dump_json()
+    legacy = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
+        legacy_wording_checks=False, review_precondition_coverage=True, review_value_roles=True,
+        shared_evidence=False)
+    assert any(c.rule_id == "CP3-005" and c.status == CheckStatus.FAIL for c in legacy.checks)
+
+
+_CONTROL_SCENARIOS = [
+    ('status', 'STOP', 'OPERATION', False), ('status', 'OPERATION', 'STOP', False),
+    *[('mode', initial, target, False) for initial in ('COOL', 'HEAT', 'FAN', 'DRY', 'AUTO')
+      for target in ('COOL', 'HEAT', 'FAN', 'DRY', 'AUTO') if initial != target],
+    *[('fanSpeed', initial, target, False) for initial in ('LOW', 'MED', 'HIGH', 'AUTO')
+      for target in ('LOW', 'MED', 'HIGH', 'AUTO') if initial != target],
+    ('setTemp', 18, 24, False), ('setTemp', 30, 18, False), ('setTemp', 18, 30, False),
+    ('setTemp', 30, 23, False),
+    ('locked', True, False, False), ('locked', False, True, False),
+    ('status', 'OPERATION', 'STOP', True), ('mode', 'COOL', 'HEAT', True),
+    ('fanSpeed', 'LOW', 'HIGH', True), ('setTemp', 24, 25, True),
+]
+
+
+_PLAN_FORMAT_VALUES = [
+    ("status", "OPERATION", "운전"), ("status", "STOP", "정지"),
+    ("mode", "COOL", "냉방"), ("mode", "HEAT", "난방"), ("mode", "FAN", "송풍"),
+    ("mode", "DRY", "제습"), ("mode", "AUTO", "자동"),
+    ("fanSpeed", "LOW", "약풍"), ("fanSpeed", "MED", "중풍"),
+    ("fanSpeed", "HIGH", "강풍"), ("fanSpeed", "AUTO", "자동"),
+    ("locked", True, "잠금"), ("locked", False, "해제"),
+]
+
+
+@pytest.mark.parametrize("field,initial,target,label", [
+    ("status", "STOP", "OPERATION", "운전"), ("mode", "COOL", "HEAT", "난방"),
+    ("fanSpeed", "LOW", "HIGH", "강풍"), ("locked", False, True, "설정"), ("setTemp", 27, 21, "21"),
+])
+def test_shared_evidence_writer_checker_reviewer_use_same_inventory(controller_observation, field, initial, target, label):
+    import qa_pipeline_grounding as g
+    case, plan = controller_lifecycle_fixture(field, initial, target)
+    for result in case.expected_results:
+        result.statement = "해당 관제점의 적용 결과는 " + label + " 상태이다."
+    # Remove English field names from human prose without editing technical paths.
+    for name in ("title",): setattr(case, name, "한글로 작성한 제어 시험")
+    case.preconditions = ["시작 상태를 준비한다."]
+    for action in plan.actions:
+        if action.phase == pipeline.AutomationPhase.PRECONDITION: action.source_text = case.preconditions[0]
+    for check in plan.precondition_checks: check.source_text = case.preconditions[0]
+    case.steps = ["목표 상태를 선택한다.", "선택한 값을 적용한다."]
+    for action in plan.actions:
+        if action.phase == pipeline.AutomationPhase.TEST and action.action_type != pipeline.AutomationActionType.APPLY_COMMANDS:
+            action.source_text = case.steps[0]
+    # State meaning is deliberately a model-review responsibility, not a word parser.
+    payload = pipeline.build_agent3_model_input(case, controller_observation, {}, shared_evidence=True)
+    review = g.build_grounding_input("AGENT3", None, {}, plan, test_case=case, observation=controller_observation,
+        include_execution_contract=True, include_review_responsibilities=True, include_task_boundaries="1.2")
+    assert field in payload["ui_observation"]["device_state_fields"]
+    assert f"window.__vccs.devices[0].{field}" in payload["ui_observation"]["harness_values"]
+    assert review["context"]["controller_evidence"] == payload["controller_evidence"]
+    documents = {d["source_id"]: d["text"] for d in review["source_documents"]}
+    for path, value in payload["ui_observation"]["harness_values"].items():
+        assert documents["UI_INVENTORY/harness_values/" + path] == (value if isinstance(value, str) else json.dumps(value))
+    assert len([i for i in review["items"] if i["kind"] == "EXPECTED_RESULT"]) == len(case.expected_results)
+    # Missing checks and unsupported readers remain structural failures.
+    plan.assertions.pop()
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
+        legacy_wording_checks=False, review_precondition_coverage=True, review_value_roles=True, shared_evidence=True)
+    assert cp.status == CheckStatus.FAIL
+
+
+@pytest.mark.parametrize("field,initial,target,label,wrong", [
+    ("status", "STOP", "OPERATION", "운전", "STOP"), ("mode", "COOL", "HEAT", "난방", "COOL"),
+    ("fanSpeed", "LOW", "HIGH", "강풍", "LOW"), ("locked", False, True, "잠금", False),
+])
+def test_shared_evidence_keeps_value_mismatch_in_mandatory_review(controller_observation, field, initial, target, label, wrong):
+    import qa_pipeline_grounding as g
+    case, plan = controller_lifecycle_fixture(field, initial, target)
+    case.expected_results[1].statement = "적용 후 내부 상태는 " + label + "이다."
+    opts = dict(legacy_wording_checks=False, review_precondition_coverage=True, review_value_roles=True)
+    assert pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation, **opts, shared_evidence=True).status == CheckStatus.PASS
+    # A valid enum is not proof of correct meaning. Scripted rejection tests routing only.
+    plan.assertions[1].expected_fields[0].expected_value = wrong
+    payload = g.build_grounding_input("AGENT3", None, {}, plan, test_case=case, observation=controller_observation,
+        include_review_responsibilities=True, include_task_boundaries="1.2")
+    record = fake_grounding_record(payload)
+    item_id = next(i["item_id"] for i in payload["items"]
+                   if i["kind"] == "EXPECTED_RESULT"
+                   and i["content"]["expected_result"]["result_id"] == case.expected_results[1].result_id)
+    next(i for i in record["review"]["items"] if i["item_id"] == item_id).update(
+        verdict="UNSUPPORTED", reason="Scripted counterexample: expected and planned states differ.")
+    assert g.check_review_record(payload, record).status == CheckStatus.FAIL
+
+
+def test_shared_evidence_missing_control_does_not_gain_auto_capability(controller_observation):
+    case, plan = controller_lifecycle_fixture("mode", "COOL", "AUTO")
+    case.title = "기존 AUTO 운전 모드와 별개인 자동 전환 설정 시험"
+    evidence = pipeline.build_agent3_model_input(case, controller_observation, {}, shared_evidence=True)
+    assert set(evidence["controller_evidence"]) == {"status", "mode", "fanSpeed", "locked"}
+    assert "automaticSwitch" not in evidence["ui_observation"]["device_state_fields"]
+    # Inventing a selector for a requested but absent control is still rejected.
+    action = next(a for a in plan.actions if a.phase == pipeline.AutomationPhase.TEST and a.selector)
+    action.selector = "#nonexistent-automatic-switch"
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
+        legacy_wording_checks=False, review_precondition_coverage=True, review_value_roles=True, shared_evidence=True)
+    assert cp.status == CheckStatus.FAIL
+    unsupported = Agent3AutomationPlan.model_validate(dict(tc_id=case.tc_id, target_device_id=1,
+        summary="요청한 독립 관제점이 관찰되지 않았습니다.",
+        planning_status="AUTOMATION_SUPPORT_EXTENSION_REQUIRED",
+        extension_reasons=["기존 AUTO 운전 모드는 별개이며 자동 전환 설정/해제 조작과 관찰 경로가 없습니다."]))
+    cp = pipeline.evaluate_checkpoint3_plan(case, unsupported, controller_observation, shared_evidence=True)
+    assert cp.status == CheckStatus.REVIEW
+    assert cp.candidate_status == pipeline.AutomationCandidateStatus.AUTOMATION_SUPPORT_EXTENSION_REQUIRED
+
+
+@pytest.mark.parametrize("field,value,label", _PLAN_FORMAT_VALUES)
+@pytest.mark.parametrize("spelling", ["canonical", "lower", "mixed", "period", "label"])
+def test_plan_value_format_accepts_only_finite_domain_tokens(field, value, label, spelling):
+    token = {"canonical": value, "lower": str(value).lower(), "mixed": str(value).capitalize(),
+             "period": "  " + str(value).lower() + ".  ", "label": " " + label + ". "}[spelling]
+    actual = pipeline._normalize_controller_plan_value(field, token)
+    assert type(actual) is type(value) and actual == value
+
+
+@pytest.mark.parametrize("field", ["status", "mode", "fanSpeed", "locked", "setTemp", "unknown"])
+@pytest.mark.parametrize("value", ["HEAT 또는 COOL", "HEAT 아님", "not HEAT", "HEAT..", ".HEAT",
+                                  "HEAT/COOL", "HEAT;", "HE AT", "heat .", "", "21.", 1, None])
+def test_plan_value_format_never_guesses_or_parses_sentences(field, value):
+    assert pipeline._normalize_controller_plan_value(field, value) == value
+
+
+@pytest.mark.parametrize("field,initial,target", [
+    ("status", "STOP", "OPERATION"), ("mode", "COOL", "HEAT"),
+    ("fanSpeed", "LOW", "HIGH"), ("locked", False, True), ("setTemp", 27, 21),
+])
+def test_plan_value_format_shared_across_plan_roles(tmp_path, monkeypatch, capsys, controller_observation, field, initial, target):
+    case, canonical = controller_lifecycle_fixture(field, initial, target, prove_ui=True)
+    raw = canonical.model_copy(deep=True)
+    if field != "setTemp":
+        for action in raw.actions:
+            if action.action_type == pipeline.AutomationActionType.SET_MODE:
+                action.value = " " + str(action.value).lower() + ". "
+        for assertion in raw.assertions:
+            for entry in assertion.expected_fields:
+                entry.expected_value = " " + str(entry.expected_value).lower() + ". "
+        for check in raw.precondition_checks:
+            if check.selector != "card.selected":
+                check.expected_value = " " + str(check.expected_value).lower() + ". "
+    before = raw.model_dump_json(), case.model_dump_json(), controller_observation.model_dump_json()
+    normalized, changes = pipeline._normalize_agent3_plan_values(raw, controller_observation)
+    assert normalized == canonical
+    assert bool(changes) == (field != "setTemp")
+    assert before == (raw.model_dump_json(), case.model_dump_json(), controller_observation.model_dump_json())
+    assert pipeline._normalize_agent3_plan_values(normalized, controller_observation) == (normalized, [])
+    cp = pipeline.evaluate_checkpoint3_plan(case, normalized, controller_observation,
+        legacy_wording_checks=False, require_restore_plan_links=True, require_restore_comparison_basis=True,
+        review_precondition_coverage=True, review_value_roles=True, require_assertion_target_identity=True)
+    assert cp.status == CheckStatus.PASS, cp.model_dump_json(indent=2)
+
+    # Execute the normalized plan against the unchanged local product, not a
+    # mocked trial. The temperature case also proves numeric values stay intact.
+    code = compile_automation_candidate("LOCAL-PLAN-VALUE-FORMAT", case, normalized)
+    assert all(check.status == CheckStatus.PASS for check in pipeline.evaluate_compiled_candidate(case, code))
+    product = Path(__file__).resolve().parents[1] / "product_baseline/virtual-controller.html"
+    before_product = product.read_bytes()
+    monkeypatch.setenv("QA_TARGET_URL", product.as_uri())
+    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
+    namespace = {}
+    exec(compile(code, "normalized_controller_candidate", "exec"), namespace)
+    namespace["test_tc_cand_090"]()
+    output = capsys.readouterr().out
+    assert "RESTORE_STATUS: RESTORED" in output
+    assert "RESTORE_CONFIRMATIONS_VERIFIED: ER-090,ER-091" in output
+    assert "PRODUCT_MISMATCH" not in output and "RESTORE_MISMATCH" not in output
+    assert product.read_bytes() == before_product
+
+
+def test_local_heat_temperature_trial_restores_preparation_state(tmp_path, monkeypatch, capsys, controller_observation):
+    # Hand-authored input, not an AI generation/evaluation success claim.
+    case, plan = controller_lifecycle_fixture("setTemp", 27, 21, prepare={"mode": "HEAT"}, prove_ui=True)
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
+        legacy_wording_checks=False, require_restore_plan_links=True, require_restore_comparison_basis=True,
+        review_precondition_coverage=True, review_value_roles=True, require_assertion_target_identity=True,
+        shared_evidence=True)
+    assert cp.status == CheckStatus.PASS, cp.model_dump_json(indent=2)
+    code = compile_automation_candidate("LOCAL-HEAT-27-21", case, plan)
+    assert all(check.status == CheckStatus.PASS for check in pipeline.evaluate_compiled_candidate(case, code))
+    product = Path(__file__).resolve().parents[1] / "product_baseline/virtual-controller.html"
+    before = product.read_bytes()
+    monkeypatch.setenv("QA_TARGET_URL", product.as_uri())
+    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
+    namespace = {}
+    exec(compile(code, "local_heat_candidate", "exec"), namespace)
+    namespace["test_tc_cand_090"]()
+    output = capsys.readouterr().out
+    assert "RESTORE_STATUS: RESTORED" in output
+    assert "RESTORE_CONFIRMATIONS_VERIFIED: ER-090,ER-091" in output
+    assert "PRODUCT_MISMATCH" not in output and "RESTORE_MISMATCH" not in output
+    assert product.read_bytes() == before
+
+
+def test_plan_value_format_does_not_fix_wrong_expectation_or_selector(controller_observation):
+    case, raw = controller_lifecycle_fixture("mode", "COOL", "HEAT")
+    raw.assertions[1].expected_fields[0].expected_value = "cool."
+    normalized, changes = pipeline._normalize_agent3_plan_values(raw, controller_observation)
+    assert changes and normalized.assertions[1].expected_fields[0].expected_value == "COOL"
+    cp = pipeline.evaluate_checkpoint3_plan(case, normalized, controller_observation,
+        legacy_wording_checks=False, review_precondition_coverage=True, review_value_roles=True)
+    assert any(c.rule_id == "CP3-004" and c.status == CheckStatus.FAIL for c in cp.checks)
+    case, raw = controller_lifecycle_fixture("mode", "COOL", "HEAT")
+    action = next(a for a in raw.actions if a.action_type == pipeline.AutomationActionType.SET_MODE)
+    action.value, action.selector = "cool.", "#det-mode-heat"
+    normalized, _ = pipeline._normalize_agent3_plan_values(raw, controller_observation)
+    assert normalized.actions[1].selector == raw.actions[1].selector
+    cp = pipeline.evaluate_checkpoint3_plan(case, normalized, controller_observation,
+        legacy_wording_checks=False, review_precondition_coverage=True, review_value_roles=True)
+    assert any(c.rule_id == "CP3-002" and c.status == CheckStatus.FAIL for c in cp.checks)
+
+
+def test_plan_value_format_preserves_text_numbers_and_other_product_paths(controller_observation):
+    _, raw = controller_lifecycle_fixture("mode", "COOL", "HEAT")
+    raw.assertions[0].strategy = pipeline.AssertionStrategy.UI_TEXT_CONTAINS
+    raw.assertions[0].expected_fields = []
+    raw.assertions[0].expected_text = " heat. "
+    raw.assertions[1].strategy = pipeline.AssertionStrategy.INTERNAL_VALUE_EQUALS
+    raw.assertions[1].expected_fields = []
+    raw.assertions[1].selector = "window.__vccs.feature.mode"
+    raw.assertions[1].expected_value = " heat. "
+    raw.actions[1].action_type = pipeline.AutomationActionType.FILL
+    raw.actions[1].value = " heat. "
+    before = raw.model_dump_json()
+    normalized, changes = pipeline._normalize_agent3_plan_values(raw, controller_observation)
+    assert normalized.model_dump_json() == before and changes == []
+
+
+@pytest.mark.parametrize("attempts", [1, 2])
+def test_plan_value_format_records_raw_and_checks_handoff(tmp_path, controller_observation, attempts):
+    _, canonical = controller_lifecycle_fixture("fanSpeed", "LOW", "HIGH")
+    raw = canonical.model_copy(deep=True)
+    raw.assertions[1].expected_fields[0].expected_value = "강풍."
+    records = []
+    for attempt in range(1, attempts + 1):
+        normalized, record = pipeline_execution._prepare_agent3_plan(tmp_path, attempt, raw, controller_observation)
+        records.append(record)
+    manifest = {"plan_value_formats": records}
+    pipeline_execution._verify_agent3_plan_value_formats(tmp_path, manifest, controller_observation, canonical)
+    assert normalized == canonical and raw.assertions[1].expected_fields[0].expected_value == "강풍."
+    pipeline_execution._verify_agent3_plan_value_formats(tmp_path, {}, controller_observation, raw)
+    with pytest.raises(ValueError, match="최종 계획"):
+        pipeline_execution._verify_agent3_plan_value_formats(tmp_path, manifest, controller_observation, raw)
+    path = tmp_path / "agent3_plan_value_format_attempt_1.json"
+    payload = pipeline._read_json_payload(path)
+    assert payload["raw_plan"] == raw.model_dump(mode="json")
+    payload["changes"] = []
+    pipeline._write_json(path, payload)
+    with pytest.raises(ValueError):
+        pipeline_execution._verify_agent3_plan_value_formats(tmp_path, manifest, controller_observation, canonical)
+    records[0]["sha256"] = pipeline._sha256_file(path)
+    with pytest.raises(ValueError, match="재계산"):
+        pipeline_execution._verify_agent3_plan_value_formats(tmp_path, manifest, controller_observation, canonical)
+
+
+@pytest.mark.parametrize("needs_repair", [False, True])
+def test_plan_value_format_pipeline_uses_same_plan_for_review_and_compile(tmp_path, monkeypatch, controller_observation, needs_repair):
+    case, canonical = controller_lifecycle_fixture("mode", "COOL", "HEAT")
+    observation = controller_observation.model_copy(deep=True)
+    raw = canonical.model_copy(deep=True)
+    for action in raw.actions:
+        if action.action_type == pipeline.AutomationActionType.SET_MODE:
+            action.value = str(action.value).lower() + "."
+    raw.assertions[1].expected_fields[0].expected_value = "난방."
+    preserved = case.model_dump_json(), raw.model_dump_json()
+    run_id = "RUN-20260927-120000-ABCDEF"
+    run = tmp_path / run_id
+    pipeline._write_json(run / "agent2_manifest.json", {"run_id": run_id})
+    target = tmp_path / "target.html"
+    pipeline._write_text_atomic(target, "<!doctype html><title>fixture</title>")
+    observation.target_sha256 = pipeline._sha256_file(target)
+    monkeypatch.setattr(pipeline_execution, "_load_verified_agent2_run", lambda *_: (
+        None, {}, None, SimpleNamespace(test_cases=[case]), None, {"agent2_design_sha256": "a" * 64}))
+    monkeypatch.setattr(pipeline_execution, "inspect_target_ui", lambda *a, **kw: observation)
+    calls = []
+    def generate(*args, **kwargs):
+        calls.append("model")
+        plan = raw.model_copy(deep=True)
+        if needs_repair and len(calls) == 1:
+            plan.assertions.pop(0)
+        return pipeline.Agent3Response(plan=plan, response_id=None, model="fixture", usage={})
+    def review(directory, stage, attempt, payload, checkpoint, model, records):
+        assert all(a["value"] in {"COOL", "HEAT"} for a in payload["context"]["plan"]["actions"]
+                   if a["action_type"] == "SET_MODE")
+        pipeline._write_json(directory / "agent3_grounding_review.json", {"fixture": True})
+        return checkpoint
+    monkeypatch.setattr(pipeline_execution, "OpenAIAgent3", lambda **kw: SimpleNamespace(plan=generate))
+    monkeypatch.setattr(pipeline_execution, "_run_grounding_review", review)
+    original_compile = pipeline_execution.compile_automation_candidate
+    def compile_plan(run_id, tc, plan, **kwargs):
+        assert plan == canonical
+        assert kwargs == {"explicit_expectations_only": True}
+        return original_compile(run_id, tc, plan, **kwargs)
+    monkeypatch.setattr(pipeline_execution, "compile_automation_candidate", compile_plan)
+    monkeypatch.setattr(pipeline_execution, "run_candidate_trial", lambda *a, **kw: _trial(TrialOutcome.PASS))
+    assert pipeline.run_agent3(SimpleNamespace(run_id=run_id, runs_root=str(tmp_path), tc_id=case.tc_id,
+        target_html=str(target), model="fixture", timeout=60)) == 0
+    assert calls == ["model"] * (2 if needs_repair else 1)
+    assert preserved == (case.model_dump_json(), raw.model_dump_json())
+    manifest = pipeline._read_json_payload(run / "agent3_manifest.json")
+    assert len(manifest["plan_value_formats"]) == len(calls)
+    pipeline_execution._verify_agent3_plan_value_formats(run, manifest, observation, canonical)
+
+
+@pytest.mark.parametrize('field,initial,requested,other', [
+    ('setTemp', 27, 21, 24), ('setTemp', 23, 28, 18),
+    ('mode', 'COOL', 'HEAT', 'AUTO'), ('mode', 'DRY', 'COOL', 'FAN'),
+    ('fanSpeed', 'MED', 'HIGH', 'LOW'), ('status', 'STOP', 'OPERATION', 'OFFLINE'),
+])
+def test_precondition_value_roles_preserve_only_required_starting_state(controller_observation, field, initial, requested, other):
+    case, plan = controller_lifecycle_fixture(field, initial, requested)
+    index = next(i for i, line in enumerate(case.preconditions) if field in line)
+    original = case.preconditions[index]
+    source = f'대상 장비의 {field}는 이전 값 {other}가 아니라 시작값 {initial}이다.'
+    case.preconditions[index] = source
+    for entry in [*plan.actions, *plan.precondition_checks]:
+        if entry.source_text == original: entry.source_text = source
+    opts = dict(legacy_wording_checks=False, require_precondition_proof=True, review_precondition_coverage=True,
+        require_restore_plan_links=True, require_restore_comparison_basis=True, require_assertion_target_identity=True)
+    old = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation, **opts)
+    assert any(c.rule_id == 'CP3-006D' and c.status == CheckStatus.FAIL for c in old.checks)
+    current = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation, review_value_roles=True, **opts)
+    assert current.status == CheckStatus.PASS, current.model_dump_json(indent=2)
+    # Structural support/identity and cited-value protection are not removed.
+    check = next(c for c in plan.precondition_checks if c.source_text == source)
+    check.expected_value = 'UNSUPPORTED_VALUE'
+    bad = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation, review_value_roles=True, **opts)
+    assert bad.status == CheckStatus.FAIL
+
+
+@pytest.mark.parametrize('fault', ['missing_start', 'wrong_start', 'wrong_target'])
+@pytest.mark.parametrize('verdict,expected', [('UNSUPPORTED', 'FAIL'), ('UNCERTAIN', 'REVIEW')])
+def test_precondition_semantic_coverage_is_required_after_value_role_relaxation(controller_observation, fault, verdict, expected):
+    import qa_pipeline_grounding as g
+    case, plan = controller_lifecycle_fixture('setTemp', 27, 21)
+    if fault == 'missing_start': plan.precondition_checks.pop()
+    elif fault == 'wrong_start': plan.precondition_checks[-1].expected_value = 21
+    else: plan.precondition_checks[-1].selector = 'window.__vccs.devices[0].mode'
+    payload = g.build_grounding_input('AGENT3', None, {}, plan, test_case=case, observation=controller_observation,
+        include_execution_contract=True, include_review_responsibilities=True, include_task_boundaries='1.1')
+    target = next(i for i in payload['items'] if i['item_id'] == 'PRECONDITION/1')
+    assert target['content']['source'] == case.preconditions[1]
+    record = fake_grounding_record(payload)
+    next(i for i in record['review']['items'] if i['item_id'] == target['item_id']).update(verdict=verdict,
+        reason='Scripted: starting value check is missing or mismatched.')
+    assert g.check_review_record(payload, record).status.value == expected
+
+
+@pytest.mark.parametrize("field,initial,target", [
+    ("status", "OPERATION", "STOP"), ("mode", "COOL", "AUTO"),
+    ("fanSpeed", "LOW", "HIGH"), ("setTemp", 27, 21), ("locked", False, True),
+])
+def test_preparation_recovery_has_compiler_facts_without_extra_product_ers(controller_observation, field, initial, target):
+    import qa_pipeline_grounding as grounding
+    case, plan = controller_lifecycle_fixture(field, initial, target, prepare={"mode": "HEAT"})
+    result_ids = [r.result_id for r in case.expected_results]
+    payload = grounding.build_grounding_input("AGENT3", None, {}, plan, test_case=case,
+        observation=controller_observation, include_execution_contract=True,
+        include_review_responsibilities=True, include_task_boundaries=True)
+    recovery = payload["context"]["compiler_plan_facts"]["controller_recovery"]
+    assert set(recovery["internal_fields"]) == {"status", "mode", "fanSpeed", "setTemp", "locked"}
+    assert recovery["target_device_id"] == plan.target_device_id
+    assert recovery["capture_timing"] == "BEFORE_SETUP"
+    assert recovery["comparison_timing"] == "AFTER_RESTORE"
+    assert not recovery["depends_on_product_result_ids"] and not recovery["trial_success_proved"]
+    code = compile_automation_candidate("RECOVERY-FACTS", case, plan)
+    assert "controller_original = _controller_baseline" in code
+    assert "if restored_controller != controller_original:" in code
+    assert [r.result_id for r in case.expected_results] == result_ids
+    assert all(field in r.observation_target for r in case.expected_results)
+    # Facts never fabricate a restore operation when the plan omits it.
+    plan.actions = [a for a in plan.actions if a.phase != AutomationPhase.RESTORE]
+    assert pipeline.controller_recovery_plan_facts(case, plan) is None
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
+        legacy_wording_checks=False, review_precondition_coverage=True, require_restore_plan_links=True)
+    assert cp.status == CheckStatus.FAIL
+
+
+@pytest.mark.parametrize("mutation", ["read_only", "legacy_restore", "wrong_phase", "duplicate"])
+def test_controller_recovery_facts_do_not_claim_unsupported_coverage(mutation):
+    case, plan = controller_lifecycle_fixture("fanSpeed", "MED", "LOW")
+    restore = next(a for a in plan.actions if a.phase == AutomationPhase.RESTORE)
+    if mutation == "read_only": case.state_effect = pipeline.TcStateEffect.READ_ONLY
+    elif mutation == "legacy_restore": restore.action_type = pipeline.AutomationActionType.RESTORE_OBSERVED_HVAC
+    elif mutation == "wrong_phase": restore.phase = AutomationPhase.TEST
+    else: plan.actions.append(restore.model_copy())
+    assert pipeline.controller_recovery_plan_facts(case, plan) is None
+
+
+@pytest.mark.parametrize("mode,initial,target", [("HEAT", 27, 21), ("AUTO", 23, 28), ("COOL", 25, 19)])
+@pytest.mark.parametrize("fault", [None, "mode_restore"])
+def test_temperature_context_recovers_mode_without_mode_product_er(
+        tmp_path, monkeypatch, capsys, controller_observation, mode, initial, target, fault):
+    case, plan = controller_lifecycle_fixture("setTemp", initial, target, prepare={"mode": mode}, prove_ui=True)
+    assert all("setTemp" in r.observation_target for r in case.expected_results)
+    assert case.test_data.initial_mode == mode
+    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
+        legacy_wording_checks=False, require_precondition_proof=True,
+        review_precondition_coverage=True, require_restore_plan_links=True,
+        require_restore_comparison_basis=True, require_assertion_target_identity=True)
+    assert checkpoint.status == CheckStatus.PASS, checkpoint.model_dump_json(indent=2)
+    code = compile_automation_candidate("CONTEXT-RECOVERY", case, plan)
+    target_html = REPO_ROOT / "product_baseline/virtual-controller.html"
+    monkeypatch.setenv("QA_TARGET_URL", target_html.as_uri())
+    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
+    namespace = {}
+    exec(compile(code, "context_recovery", "exec"), namespace)
+    if fault:
+        original_restore = namespace["_restore_controller"]
+        def broken_mode_restore(page, device_id, original):
+            original_restore(page, device_id, original)
+            different = "HEAT" if original["state"]["mode"] != "HEAT" else "COOL"
+            page.locator(pipeline._MODE_SELECTOR[different]).click()
+            page.locator(".btn-apply-cmd").click()
+        namespace["_restore_controller"] = broken_mode_restore
+        with pytest.raises(AssertionError, match="RESTORE_MISMATCH"):
+            namespace["test_tc_cand_090"]()
+    else:
+        namespace["test_tc_cand_090"]()
+    output = capsys.readouterr().out
+    assert "PRECONDITIONS_VERIFIED:" in output
+    assert ("RESTORE_STATUS: FAILED" if fault else "RESTORE_STATUS: RESTORED") in output
+    if fault:
+        assert "ENVIRONMENT_RETIRED" in output
+
+@pytest.mark.parametrize('field,initial,target', [
+    ('status', 'OPERATION', 'STOP'), ('mode', 'AUTO', 'DRY'), ('fanSpeed', 'HIGH', 'AUTO'),
+    ('setTemp', 24, 25), ('locked', False, True),
+])
+def test_automatic_capture_and_required_state_have_separate_review_coverage(controller_observation, field, initial, target):
+    import qa_pipeline_grounding as grounding
+    case, plan = controller_lifecycle_fixture(field, initial, target)
+    record_instruction = '준비 전 대상 장비의 화면 및 내부 원래 값을 기록한다.'
+    case.preconditions.append(record_instruction)
+    opts = dict(legacy_wording_checks=False, require_restore_plan_links=True, require_restore_comparison_basis=True,
+                require_assertion_target_identity=True)
+    old = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation, **opts)
+    assert old.status == CheckStatus.FAIL
+    new = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation, review_precondition_coverage=True, **opts)
+    assert new.status == CheckStatus.PASS, new.model_dump_json(indent=2)
+    payload = grounding.build_grounding_input('AGENT3', None, {}, plan, test_case=case, observation=controller_observation,
+        include_execution_contract=True, include_review_responsibilities=True)
+    coverage = [item for item in payload['items'] if item['kind'] == 'PRECONDITION_COVERAGE']
+    assert [item['content']['source'] for item in coverage] == case.preconditions
+    assert coverage[-1]['content']['checks'] == []
+    facts = payload['context']['compiler_plan_facts']
+    assert {item['result_id'] for item in facts['automatic_baseline_captures']} == {'ER-090', 'ER-091'}
+    assert all(set(item['reader']) == {'strategy', 'selector', 'field_names'} for item in facts['automatic_baseline_captures'])
+    assert all(item['observed_device_id'] == item['required_device_id'] == 1 for item in facts['indexed_internal_readers'])
+    assert not facts['trial_success_proved']
+    valid = fake_grounding_record(payload)
+    assert grounding.attach_grounding_check(new, grounding.check_review_record(payload, valid)).status == CheckStatus.PASS
+    missing_review = fake_grounding_record(payload)
+    missing_review['review']['items'] = [i for i in missing_review['review']['items'] if i['item_id'] != coverage[-1]['item_id']]
+    assert grounding.check_review_record(payload, missing_review).status == CheckStatus.FAIL
+    # Omission remains in the TC-driven review targets, even if no checks remain.
+    plan.precondition_checks = []
+    missing = grounding.build_grounding_input('AGENT3', None, {}, plan, test_case=case, observation=controller_observation,
+        include_execution_contract=True, include_review_responsibilities=True)
+    assert len([i for i in missing['items'] if i['kind'] == 'PRECONDITION_COVERAGE']) == len(case.preconditions)
+    record = fake_grounding_record(missing)
+    next(i for i in record['review']['items'] if i['item_id'] == 'PRECONDITION/0').update(
+        verdict='UNSUPPORTED', reason='시작 상태 확인이 누락됨')
+    assert grounding.check_review_record(missing, record).status == CheckStatus.FAIL
+
+
+@pytest.mark.parametrize('mutation', ['device', 'reader', 'expected_value', 'missing_assertion', 'missing_restore'])
+def test_review_ownership_keeps_structural_plan_protections(controller_observation, mutation):
+    case, plan = controller_lifecycle_fixture('fanSpeed', 'HIGH', 'AUTO')
+    if mutation == 'device': plan.target_device_id = 2
+    elif mutation == 'reader': plan.precondition_checks[0].selector = 'window.__vccs.unknown'
+    elif mutation == 'expected_value': plan.assertions[0].expected_fields[0].expected_value = 'HIGH'
+    elif mutation == 'missing_assertion': plan.assertions.pop()
+    elif mutation == 'missing_restore': plan.actions = [a for a in plan.actions if a.phase != AutomationPhase.RESTORE]
+    result = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation, legacy_wording_checks=False,
+        review_precondition_coverage=True, require_restore_plan_links=True, require_assertion_target_identity=True)
+    if mutation == 'expected_value':
+        # Finite UI enum meaning is deliberately model reviewed; internal value mismatch remains separate.
+        import qa_pipeline_grounding as grounding
+        payload = grounding.build_grounding_input('AGENT3', None, {}, plan, test_case=case, observation=controller_observation,
+            include_execution_contract=True, include_review_responsibilities=True)
+        record = fake_grounding_record(payload, verdict='UNSUPPORTED')
+        assert grounding.attach_grounding_check(result, grounding.check_review_record(payload, record)).status == CheckStatus.FAIL
+    else:
+        assert result.status == CheckStatus.FAIL, result.model_dump_json(indent=2)
+
+
+@pytest.mark.parametrize('field,initial,requested', [
+    ('status', 'OPERATION', 'STOP'), ('mode', 'AUTO', 'DRY'),
+    ('fanSpeed', 'HIGH', 'AUTO'), ('setTemp', 24, 25), ('locked', False, True),
+])
+@pytest.mark.parametrize('ui_target', ['#device-card-1', '.detail-panel'])
+def test_detailed_controller_preconditions_and_target_readers(tmp_path, monkeypatch, capsys, controller_observation,
+                                                             field, initial, requested, ui_target):
+    case, plan = controller_lifecycle_fixture(field, initial, requested, prove_ui=True)
+    plan.assertions[0].selector = ui_target
+    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation, legacy_wording_checks=False,
+        require_precondition_proof=True, require_restore_plan_links=True, require_plan_fidelity=True,
+        require_assertion_target_identity=True)
+    assert checkpoint.status == CheckStatus.PASS, checkpoint.model_dump_json(indent=2)
+    code = compile_automation_candidate('DETAILED-CONTROLLER', case, plan)
+    assert all(c.status == CheckStatus.PASS for c in pipeline.evaluate_compiled_candidate(case, code))
+    target = Path(__file__).resolve().parents[1] / 'product_baseline/virtual-controller.html'
+    monkeypatch.setenv('QA_TARGET_URL', target.as_uri())
+    monkeypatch.setenv('QA_EVIDENCE_DIR', str(tmp_path / 'evidence'))
+    namespace = {}
+    exec(compile(code, 'controller_candidate', 'exec'), namespace)
+    namespace['test_tc_cand_090']()
+    output = capsys.readouterr().out
+    assert 'PRECONDITIONS_VERIFIED:' in output
+    assert 'RESTORE_STATUS: RESTORED' in output
+    assert 'RESTORE_CONFIRMATIONS_VERIFIED: ER-090,ER-091' in output
+
+
+@pytest.mark.parametrize('selector', ['card.fake', 'panel.selected', 'window.__vccs.devices', 'card.status;evil()', 'card.status.extra'])
+def test_controller_precondition_reader_rejects_unknown_targets(controller_observation, selector):
+    case, plan = controller_lifecycle_fixture('status', 'OPERATION', 'STOP', prove_ui=True)
+    plan.precondition_checks[-1].selector = selector
+    errors = pipeline._precondition_proof_errors(case, plan, controller_observation, legacy_wording_checks=False)
+    assert 'unsupported or unobserved controller precondition reader' in errors
+
+
+def test_detailed_controller_eligibility_includes_panel_observation():
+    case, _ = controller_lifecycle_fixture('mode', 'AUTO', 'DRY', prove_ui=True)
+    case.target_role = 'PRIMARY_TEST_DEVICE'
+    eligibility = pipeline.evaluate_agent3_eligibility(case)
+    assert '.detail-panel' in eligibility.required_selectors
+
+
+@pytest.mark.parametrize('field,value,label,expected', [
+    ('mode', 'DRY', '제습 상태', True), ('status', 'STOP', '정지 상태', True),
+    ('fanSpeed', 'AUTO', '자동 풍량', True), ('locked', True, '잠금 설정 상태', True),
+    ('mode', 'UNKNOWN', '제습 상태', False), ('setTemp', 99, '설정 온도 25°C', False),
+])
+def test_decoded_ui_values_use_adapter_types_and_semantic_review(field, value, label, expected):
+    assert pipeline._controller_ui_value_is_grounded(field, value, label, legacy_wording_checks=False) is expected
+    if field == 'mode' and value == 'DRY':
+        assert not pipeline._controller_ui_value_is_grounded(field, value, label, legacy_wording_checks=True)
+
+
+@pytest.mark.parametrize('field,value', [('status', 'OPERATION'), ('mode', 'HEAT'), ('fanSpeed', 'HIGH'), ('setTemp', 25), ('locked', True)])
+def test_panel_reader_does_not_substitute_card_or_internal(field, value):
+    from playwright.sync_api import sync_playwright
+    import re
+    namespace = {'re': re, '_CONTROLLER_BUTTONS': pipeline._CONTROLLER_BUTTONS}
+    exec(pipeline._CONTROLLER_RESTORE_HELPERS, namespace)
+    target = Path(__file__).resolve().parents[1] / 'product_baseline/virtual-controller.html'
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        try:
+            page = browser.new_page()
+            page.route('**/*', lambda route: route.continue_() if route.request.url.startswith(('file:', 'data:')) else route.abort())
+            page.goto(target.as_uri())
+            page.locator('#device-card-1 .card-body-split').click()
+            original = namespace['_controller_ui_fields'](page, 1)
+            internal = page.evaluate('() => window.__vccs.devices[0]')
+            if field == 'setTemp':
+                page.locator('#det-temp-up-btn').click()
+            else:
+                page.locator(pipeline._CONTROLLER_BUTTONS[field][value]).click()
+            assert namespace['_controller_ui_fields'](page, 1, 'panel')[field] == value
+            assert namespace['_controller_ui_fields'](page, 1, 'card') == original
+            assert page.evaluate('() => window.__vccs.devices[0]') == internal
+        finally:
+            browser.close()
+
+
+@pytest.mark.parametrize('field,initial,requested,blocked', _CONTROL_SCENARIOS)
+def test_controller_common_lifecycle_on_unmodified_product(tmp_path, monkeypatch, capsys, controller_observation,
+                                                         field, initial, requested, blocked):
+    case, plan = controller_lifecycle_fixture(field, initial, requested, blocked=blocked)
+    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation, legacy_wording_checks=False,
+        require_restore_plan_links=True, require_plan_fidelity=True, require_assertion_target_identity=True)
+    assert checkpoint.status == CheckStatus.PASS, checkpoint.model_dump_json(indent=2)
+    code = compile_automation_candidate('LOCAL-CONTROLLER-LIFECYCLE', case, plan)
+    assert all(c.status == CheckStatus.PASS for c in pipeline.evaluate_compiled_candidate(case, code))
+    target = Path(__file__).resolve().parents[1] / 'product_baseline/virtual-controller.html'
+    before = target.read_bytes()
+    monkeypatch.setenv('QA_TARGET_URL', target.as_uri())
+    monkeypatch.setenv('QA_EVIDENCE_DIR', str(tmp_path / 'evidence'))
+    namespace = {}
+    exec(compile(code, 'controller_candidate', 'exec'), namespace)
+    namespace['test_tc_cand_090']()
+    output = capsys.readouterr().out
+    (tmp_path / 'execution.txt').write_text(output, encoding='utf-8')
+    (tmp_path / 'candidate_tc.json').write_text(case.model_dump_json(indent=2), encoding='utf-8')
+    (tmp_path / 'plan.json').write_text(plan.model_dump_json(indent=2), encoding='utf-8')
+    (tmp_path / 'candidate.py').write_text(code, encoding='utf-8')
+    assert 'CONTROLLER_ORIGINAL:' in output and 'CONTROLLER_PREPARED:' in output
+    assert 'RESTORE_STATUS: RESTORED' in output
+    assert 'RESTORE_CONFIRMATIONS_VERIFIED: ER-090,ER-091' in output
+    assert 'RESTORE_MISMATCH' not in output and 'PRODUCT_MISMATCH' not in output
+    assert target.read_bytes() == before
+
+
+@pytest.mark.parametrize('field,initial,requested', [
+    ('status', 'STOP', 'OPERATION'), ('mode', 'COOL', 'HEAT'), ('fanSpeed', 'MED', 'LOW'),
+    ('setTemp', 18, 24), ('locked', False, True),
+])
+@pytest.mark.parametrize('fault', ['UI', 'INTERNAL'])
+@pytest.mark.parametrize('explicit', [False, True])
+def test_controller_restoration_detects_each_layer_failure(tmp_path, monkeypatch, capsys, controller_observation,
+                                                         field, initial, requested, fault, explicit):
+    case, plan = controller_lifecycle_fixture(field, initial, requested)
+    code = compile_automation_candidate('LOCAL-RESTORATION-FAULT', case, plan, explicit_expectations_only=explicit)
+    target = Path(__file__).resolve().parents[1] / 'product_baseline/virtual-controller.html'
+    monkeypatch.setenv('QA_TARGET_URL', target.as_uri())
+    monkeypatch.setenv('QA_EVIDENCE_DIR', str(tmp_path / 'evidence'))
+    namespace = {}
+    exec(compile(code, 'controller_fault', 'exec'), namespace)
+    restore = namespace['_restore_controller']
+    def broken_restore(page, device_id, original):
+        restore(page, device_id, original)
+        # Fault injection is test-only, AFTER a real UI restoration; never part
+        # of the emitted candidate or the baseline HTML.
+        if fault == 'INTERNAL':
+            changed = {'status': 'OPERATION', 'mode': 'HEAT', 'fanSpeed': 'HIGH', 'setTemp': 19, 'locked': True}[field]
+            assert original['state'][field] != changed
+            page.evaluate('({id, field, value}) => { window.__vccs.devices.find(d => d.id === id)[field] = value; }',
+                          {'id': device_id, 'field': field, 'value': changed})
+        else:
+            scripts = {
+                'status': "card.classList.remove('state-stop');card.classList.add('state-run');",
+                'mode': "card.classList.remove('mode-cool');card.classList.add('mode-heat');",
+                'fanSpeed': "card.querySelector('.fan-speed-indicator').textContent='강풍';",
+                'setTemp': "card.querySelector('.card-set-temp').textContent='19.0°C';",
+                'locked': "card.classList.add('locked');",
+            }
+            page.evaluate("() => { const card = document.querySelector('#device-card-1'); " + scripts[field] + ' }')
+    namespace['_restore_controller'] = broken_restore
+    with pytest.raises(AssertionError, match='RESTORE_MISMATCH'):
+        namespace['test_tc_cand_090']()
+    output = capsys.readouterr().out
+    (tmp_path / 'execution.txt').write_text(output, encoding='utf-8')
+    assert 'ENVIRONMENT_RETIRED' in output and 'RESTORE_STATUS: FAILED' in output
+    assert 'RESTORE_CONFIRMATIONS_VERIFIED' not in output
+    assert 'PRODUCT_MISMATCH:' not in output
+
+
+@pytest.mark.parametrize('field', ['status', 'mode', 'fanSpeed', 'setTemp', 'locked'])
+def test_controller_read_only_never_writes(tmp_path, monkeypatch, capsys, controller_observation, field):
+    initial = controller_observation.harness_values[f'window.__vccs.devices[0].{field}']
+    case, plan = controller_lifecycle_fixture(field, initial, initial, read_only=True)
+    check = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation, legacy_wording_checks=False)
+    assert check.status == CheckStatus.PASS, check.model_dump_json(indent=2)
+    code = compile_automation_candidate('LOCAL-READ-ONLY', case, plan)
+    # A helper definition may be emitted, but no write helper is called.
+    assert '_restore_controller(page, 1,' not in code
+    target = Path(__file__).resolve().parents[1] / 'product_baseline/virtual-controller.html'
+    monkeypatch.setenv('QA_TARGET_URL', target.as_uri())
+    monkeypatch.setenv('QA_EVIDENCE_DIR', str(tmp_path / 'evidence'))
+    namespace = {}
+    exec(compile(code, 'controller_read_only', 'exec'), namespace)
+    namespace['test_tc_cand_090']()
+    assert 'RESTORE_STATUS: NOT_REQUIRED' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('original_mode,original_locked', [('FAN', False), ('DRY', False), ('COOL', True), ('FAN', True)])
+def test_controller_restores_dependency_state_set_through_ui(tmp_path, monkeypatch, capsys, controller_observation,
+                                                           original_mode, original_locked):
+    case, plan = controller_lifecycle_fixture('setTemp', 18, 25, prepare={'locked': False})
+    code = compile_automation_candidate('LOCAL-DEPENDENCIES', case, plan)
+    target = Path(__file__).resolve().parents[1] / 'product_baseline/virtual-controller.html'
+    monkeypatch.setenv('QA_TARGET_URL', target.as_uri())
+    monkeypatch.setenv('QA_EVIDENCE_DIR', str(tmp_path / 'evidence'))
+    namespace = {}
+    exec(compile(code, 'dependency_candidate', 'exec'), namespace)
+    capture = namespace['_controller_baseline']
+    def environment_baseline(page, device_id):
+        # Simulate a different initial environment entirely through real UI,
+        # before the candidate records it. No HTML seed or internal setter.
+        page.locator(pipeline._MODE_SELECTOR[original_mode]).click()
+        page.locator(pipeline._CONTROLLER_BUTTONS['locked'][original_locked]).click()
+        page.locator('.btn-apply-cmd').click()
+        return capture(page, device_id)
+    namespace['_controller_baseline'] = environment_baseline
+    namespace['test_tc_cand_090']()
+    output = capsys.readouterr().out
+    (tmp_path / 'execution.txt').write_text(output, encoding='utf-8')
+    assert 'RESTORE_STATUS: RESTORED' in output and 'RESTORE_MISMATCH' not in output
+
+
+@pytest.mark.parametrize('fault', ['precondition', 'partial_preparation'])
+def test_controller_recovers_before_test_starts(tmp_path, monkeypatch, capsys, controller_observation, fault):
+    from playwright.sync_api import Locator
+    case, plan = controller_lifecycle_fixture('fanSpeed', 'MED', 'HIGH')
+    code = compile_automation_candidate('LOCAL-PREPARATION-FAULT', case, plan)
+    target = Path(__file__).resolve().parents[1] / 'product_baseline/virtual-controller.html'
+    monkeypatch.setenv('QA_TARGET_URL', target.as_uri())
+    monkeypatch.setenv('QA_EVIDENCE_DIR', str(tmp_path / 'evidence'))
+    namespace = {}
+    exec(compile(code, 'preparation_fault', 'exec'), namespace)
+    if fault == 'precondition':
+        wait = namespace['_wait_for_observations']
+        namespace['_wait_for_observations'] = lambda page, observe: ['injected failed preparation proof'] if observe.__name__ == 'observe_preconditions' else wait(page, observe)
+        error = AssertionError
+    else:
+        click = Locator.click
+        injected = []
+        def broken_click(locator, *args, **kwargs):
+            result = click(locator, *args, **kwargs)
+            if not injected and locator.get_attribute('id') == 'det-fan-med':
+                injected.append(True)
+                raise RuntimeError('injected interruption after pending preparation write')
+            return result
+        monkeypatch.setattr(Locator, 'click', broken_click)
+        error = RuntimeError
+    with pytest.raises(error):
+        namespace['test_tc_cand_090']()
+    output = capsys.readouterr().out
+    assert 'RESTORE_STATUS: RESTORED' in output
+    assert 'RESTORE_MISMATCH' not in output and 'RESTORE_CONFIRMATIONS_VERIFIED' not in output
+
+
+@pytest.mark.parametrize('initial,requested,product_mismatch', [(30, 31, False), (16, 15, True)])
+def test_controller_temperature_boundary_preserves_product_failure(tmp_path, monkeypatch, capsys, controller_observation,
+                                                                 initial, requested, product_mismatch):
+    case, plan = controller_lifecycle_fixture('setTemp', initial, requested, blocked=True, blocked_by_lock=False)
+    check = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation, legacy_wording_checks=False,
+                                             require_plan_fidelity=True)
+    assert check.status == CheckStatus.PASS, check.model_dump_json(indent=2)
+    code = compile_automation_candidate('LOCAL-TEMPERATURE-BOUNDARY', case, plan)
+    target = Path(__file__).resolve().parents[1] / 'product_baseline/virtual-controller.html'
+    monkeypatch.setenv('QA_TARGET_URL', target.as_uri())
+    monkeypatch.setenv('QA_EVIDENCE_DIR', str(tmp_path / 'evidence'))
+    namespace = {}
+    exec(compile(code, 'temperature_boundary', 'exec'), namespace)
+    if product_mismatch:
+        with pytest.raises(AssertionError, match='PRODUCT_MISMATCH'):
+            namespace['test_tc_cand_090']()
+    else:
+        namespace['test_tc_cand_090']()
+    output = capsys.readouterr().out
+    (tmp_path / 'execution.txt').write_text(output, encoding='utf-8')
+    assert 'RESTORE_STATUS: RESTORED' in output and 'RESTORE_MISMATCH' not in output
+
+
+@pytest.mark.parametrize('unexpected_write', [False, True])
+@pytest.mark.parametrize('explicit', [False, True])
+def test_controller_blocked_without_preparation_cleans_pending_only(tmp_path, monkeypatch, capsys, controller_observation,
+                                                                   unexpected_write, explicit):
+    from playwright.sync_api import Locator
+    case, plan = controller_lifecycle_fixture('fanSpeed', 'LOW', 'HIGH', blocked=True)
+    plan.actions = [a for a in plan.actions if a.phase != AutomationPhase.PRECONDITION or a.action_type == AutomationActionType.SELECT_DEVICE]
+    code = compile_automation_candidate('LOCAL-BLOCKED-ORIGINAL', case, plan, explicit_expectations_only=explicit)
+    target = Path(__file__).resolve().parents[1] / 'product_baseline/virtual-controller.html'
+    monkeypatch.setenv('QA_TARGET_URL', target.as_uri())
+    monkeypatch.setenv('QA_EVIDENCE_DIR', str(tmp_path / 'evidence'))
+    namespace = {}
+    exec(compile(code, 'blocked_original', 'exec'), namespace)
+    capture, restore = namespace['_controller_baseline'], namespace['_restore_controller']
+    def locked_environment(page, device_id):
+        page.locator('#det-lock-on-btn').click()
+        page.locator('.btn-apply-cmd').click()
+        if unexpected_write:
+            click = Locator.click
+            injected = []
+            def apply_with_fault(locator, *args, **kwargs):
+                result = click(locator, *args, **kwargs)
+                if not injected and 'btn-apply-cmd' in (locator.get_attribute('class') or ''):
+                    injected.append(True)
+                    page.evaluate("() => { window.__vccs.devices[0].fanSpeed = 'HIGH'; window.__vccs.renderGrid(); }")
+                return result
+            monkeypatch.setattr(Locator, 'click', apply_with_fault)
+        return capture(page, device_id)
+    restored = []
+    def counted_restore(*args):
+        restored.append(True)
+        return restore(*args)
+    namespace['_controller_baseline'], namespace['_restore_controller'] = locked_environment, counted_restore
+    if unexpected_write:
+        with pytest.raises(AssertionError, match='PRODUCT_MISMATCH'):
+            namespace['test_tc_cand_090']()
+    else:
+        namespace['test_tc_cand_090']()
+    output = capsys.readouterr().out
+    assert bool(restored) == unexpected_write
+    assert ('RESTORE_STATUS: RESTORED' if unexpected_write else 'RESTORE_STATUS: UNCHANGED') in output
+    assert 'RESTORE_MISMATCH' not in output
+
+
+@pytest.mark.parametrize('mutation', ['unknown_button', 'mixed_restore', 'missing_structure', 'legacy', 'missing_selection', 'wrong_phase', 'wrong_basis', 'missing_interface', 'extra_ui_field', 'duplicate_restore_control', 'duplicate_ui_target'])
+def test_controller_common_contract_rejects_unsafe_plans(controller_observation, mutation):
+    case, plan = controller_lifecycle_fixture('fanSpeed', 'MED', 'LOW')
+    observation = controller_observation.model_copy(deep=True)
+    if mutation == 'unknown_button':
+        plan.actions[1].selector = '#det-purify-on-btn'
+    elif mutation == 'mixed_restore':
+        plan.actions.append(plan.actions[-1].model_copy(update={'action_id': 'ACT-099'}))
+    elif mutation == 'missing_structure':
+        case.restoration = None
+    elif mutation == 'legacy':
+        case.state_effect = None
+    elif mutation == 'missing_selection':
+        plan.actions.pop(0)
+    elif mutation == 'wrong_phase':
+        plan.actions[-1].phase = AutomationPhase.TEST
+    elif mutation == 'wrong_basis':
+        plan.restore_confirmations[0].comparisons[0].basis = pipeline.RestoreComparisonBasis.PROVED_INITIAL
+    elif mutation == 'missing_interface':
+        observation.elements = [e for e in observation.elements if e.selector != '#det-lock-off-btn']
+    elif mutation in {'duplicate_restore_control', 'duplicate_ui_target'}:
+        selector = '#det-lock-off-btn' if mutation == 'duplicate_restore_control' else '#device-card-1'
+        next(e for e in observation.elements if e.selector == selector).match_count = 2
+    else:
+        plan.assertions[0].expected_fields[0].field_name = 'purify'
+    result = pipeline.evaluate_checkpoint3_plan(case, plan, observation, legacy_wording_checks=False)
+    assert result.status == CheckStatus.FAIL
+
+
+@pytest.mark.parametrize("output,exit_code,expected", [
+    ("    assert not mismatches, 'PRODUCT_MISMATCH: ' + details\nE   AssertionError: RESTORE_MISMATCH: internal value differs", 1, TrialOutcome.AUTOMATION_ERROR),
+    ('>   assert not mismatches, "PRODUCT_MISMATCH: " + details\nE   RuntimeError: failed', 1, TrialOutcome.AUTOMATION_ERROR),
+    ("    # PRODUCT_MISMATCH: sample\nE   AssertionError: RESTORE_MISMATCH: UI differs", 1, TrialOutcome.AUTOMATION_ERROR),
+    ("RuntimeError: failed while formatting PRODUCT_MISMATCH: details", 1, TrialOutcome.AUTOMATION_ERROR),
+    ("E   AssertionError: PRODUCT_MISMATCH: ER-001 differs", 1, TrialOutcome.PRODUCT_MISMATCH_CANDIDATE),
+    ("AssertionError: PRODUCT_MISMATCH: ER-002 differs", 1, TrialOutcome.PRODUCT_MISMATCH_CANDIDATE),
+    ("PRODUCT_MISMATCH: blocked operation changed observed state", 1, TrialOutcome.PRODUCT_MISMATCH_CANDIDATE),
+    ("E   AssertionError: PRODUCT_MISMATCH: ER-001 differs\nRESTORE_MISMATCH: internal value differs", 1, TrialOutcome.PRODUCT_MISMATCH_CANDIDATE),
+    ("E   AssertionError: PRECONDITION_NOT_MET: LOW required\n    assert not mismatches, 'PRODUCT_MISMATCH: ' + details", 1, TrialOutcome.AUTOMATION_ERROR),
+    ("PRODUCT_MISMATCH: unused diagnostic", 0, TrialOutcome.PASS),
+])
+def test_candidate_trial_classifies_runtime_markers_not_source(tmp_path, monkeypatch, output, exit_code, expected):
+    candidate = tmp_path / "candidate.py"
+    candidate.write_text("def test_candidate():\n    pass\n", encoding="utf-8")
+    target = tmp_path / "product.html"
+    target.write_text("<!doctype html>", encoding="utf-8")
+    monkeypatch.setattr(pipeline_execution, "_run_trial_subprocess",
+        lambda *args, **kwargs: SimpleNamespace(returncode=exit_code, stdout=output, stderr=""))
+    result = run_candidate_trial(candidate, target, tmp_path / "evidence", timeout_seconds=10)
+    assert result.outcome == expected
+    # Classification does not discard restoration or product observations.
+    assert (tmp_path / "evidence" / result.stdout_file).read_text(encoding="utf-8") == output
+
+
 @pytest.mark.parametrize("identity", [1, 2, None])
 @pytest.mark.parametrize("index", [0, 4])
 def test_assertion_device_path_must_identify_plan_target(identity, index):
@@ -680,6 +2506,66 @@ def test_restore_linked_browser_comparisons_across_control_values(tmp_path, monk
         assert "RESTORE_CONFIRMATIONS_VERIFIED: ER-090,ER-091" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("initial,changed", [(a, b) for a in ("LOW", "MED", "HIGH")
+                                           for b in ("LOW", "MED", "HIGH") if a != b])
+@pytest.mark.parametrize("fault", [None, "UI", "INTERNAL_STATE"])
+def test_product_fan_transitions_share_dual_restoration(tmp_path, monkeypatch, capsys, initial, changed, fault):
+    case, plan, observation = fan_transition_restoration_fixture(initial, changed)
+    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, observation,
+        require_restore_plan_links=True, legacy_wording_checks=False)
+    assert checkpoint.status == CheckStatus.PASS, [c.message for c in checkpoint.checks if c.status == CheckStatus.FAIL]
+    code = compile_automation_candidate("RUN-20260925-130000-ABCDEF", case, plan)
+    # Only the temporary product's initial data changes; the actual test and
+    # restoration still use the real UI and the unmodified shared compiler.
+    html = (REPO_ROOT / "product_baseline" / "virtual-controller.html").read_text(encoding="utf-8")
+    seed = "{ id: 1, name: 'IDU-00', status: 'STOP', currentTemp: 25.0, setTemp: 24, mode: 'COOL', fanSpeed: 'LOW'"
+    assert html.count(seed) == 1
+    html = html.replace(seed, seed.replace("fanSpeed: 'LOW'", f"fanSpeed: '{initial}'"), 1)
+    if fault:
+        # Introduce a restoration-only defect, independently in each layer.
+        # The first apply must still pass both product assertions.
+        html += f'''<script>
+        const originalApply = applyPanelCommands;
+        let testApplyCount = 0;
+        applyPanelCommands = function() {{
+            const label = document.querySelector('#device-card-1 .fan-speed-indicator > span');
+            const previousLabel = label.textContent;
+            const previousValue = window.__vccs.devices[0].fanSpeed;
+            originalApply();
+            if (++testApplyCount === 2) {{
+                if ({json.dumps(fault)} === 'UI') {{
+                    document.querySelector('#device-card-1 .fan-speed-indicator > span').textContent = previousLabel;
+                }} else {{ window.__vccs.devices[0].fanSpeed = previousValue; }}
+            }}
+        }};
+        </script>'''
+    target = tmp_path / "virtual-controller.html"
+    target.write_text(html, encoding="utf-8")
+    (tmp_path / "candidate_tc.json").write_text(case.model_dump_json(indent=2), encoding="utf-8")
+    (tmp_path / "automation_plan.json").write_text(plan.model_dump_json(indent=2), encoding="utf-8")
+    (tmp_path / "candidate.py").write_text(code, encoding="utf-8")
+    monkeypatch.setenv("QA_TARGET_URL", target.as_uri())
+    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
+    namespace = {}
+    exec(compile(code, "fan_transition_candidate", "exec"), namespace)
+    if fault:
+        with pytest.raises(AssertionError, match="RESTORE_MISMATCH"):
+            namespace["test_tc_cand_090"]()
+    else:
+        namespace["test_tc_cand_090"]()
+    output = capsys.readouterr().out
+    (tmp_path / "execution.txt").write_text(output, encoding="utf-8")
+    assert "PRECONDITIONS_VERIFIED: 5" in output
+    if fault:
+        assert "RESTORE_STATUS: FAILED" in output
+        assert "ENVIRONMENT_RETIRED" in output
+        assert "RESTORE_CONFIRMATIONS_VERIFIED" not in output
+        assert "PRODUCT_MISMATCH:" not in output
+    else:
+        assert "RESTORE_STATUS: RESTORED" in output
+        assert "RESTORE_CONFIRMATIONS_VERIFIED: ER-090,ER-091" in output
+
+
 def test_restore_confirmation_uses_existing_baselines_without_extra_actions(tmp_path, monkeypatch):
     case, plan, observation = _restoration_detail_fixture()
     previous = compile_automation_candidate("RUN-20260916-120000-ABCDEF", case, plan)
@@ -1142,7 +3028,7 @@ def test_agent3_uses_structured_plan_api() -> None:
     assert result.plan.tc_id == "TC-CAND-003"
     assert responses.kwargs["text_format"] is Agent3AutomationPlan
     assert responses.kwargs["store"] is False
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent3-3-33"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent3-3-42"
     instructions = responses.kwargs["input"][0]["content"]
     assert "Check only conditions stated in the approved TC preconditions" in instructions
     assert "not every available context field" in instructions

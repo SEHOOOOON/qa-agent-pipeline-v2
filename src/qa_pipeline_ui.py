@@ -221,7 +221,8 @@ def _candidate_validation(run_dir: Path, tc_id: str) -> dict[str, Any]:
 
 def _verify_candidate_sources(run_dir: Path, tc_id: str) -> None:
     from qa_pipeline_execution import (_load_verified_agent2_run, _read_json_model, _verify_sha256,
-                                       _legacy_wording_policy, _load_grounding_review)
+                                       _legacy_wording_policy, _load_grounding_review, _review_responsibility_policy,
+                                       _output_tolerance_policy, _task_boundary_policy, _agent3_review_options)
     from qa_pipeline_grounding import build_grounding_input
     from qa_pipeline_reporting import _verify_final_report_sources
     from qa_pipeline_agent3 import evaluate_checkpoint3_plan
@@ -229,14 +230,17 @@ def _verify_candidate_sources(run_dir: Path, tc_id: str) -> None:
     from qa_pipeline_contracts import Agent3AutomationPlan, UiObservation, CheckStatus
 
     _verify_final_report_sources(run_dir, run_dir.name)
+    # New runs use the loader's complete CP2 + grounding policy. Retain the
+    # historical extra approval gate only for pre-responsibility-contract runs.
     request, requirements, analysis, design, _, source = _load_verified_agent2_run(run_dir, run_dir.name)
-    current_cp2 = evaluate_checkpoint2(request, analysis, design, requirements,
-                                     legacy_wording_checks=_legacy_wording_policy(source, {"3.8", "3.9", "3.10", "3.11", "3.12", "3.13"}),
-                                     allow_multiple_trace_sources=source.get("contract_version") == "3.13",
-                                     allow_split_procedure_notes=source.get("procedure_preservation_contract") == "1.0",
-                                     use_structured_scope_restoration=source.get("scope_restoration_policy") == "STRUCTURED_V1")
-    if any(check.rule_id == "CP2-017" and check.status != CheckStatus.PASS for check in current_cp2.checks):
-        raise ValueError("신규 TC 기대 결과가 현재 요구사항 대조 규칙을 통과하지 못했습니다.")
+    if not _review_responsibility_policy(source, "AGENT2"):
+        current_cp2 = evaluate_checkpoint2(request, analysis, design, requirements,
+            legacy_wording_checks=_legacy_wording_policy(source, {"3.8", "3.9", "3.10", "3.11", "3.12", "3.13"}),
+            allow_multiple_trace_sources=source.get("contract_version") == "3.13",
+            allow_split_procedure_notes=source.get("procedure_preservation_contract") == "1.0",
+            use_structured_scope_restoration=source.get("scope_restoration_policy") == "STRUCTURED_V1")
+        if any(check.rule_id == "CP2-017" and check.status != CheckStatus.PASS for check in current_cp2.checks):
+            raise ValueError("신규 TC 기대 결과가 현재 요구사항 대조 규칙을 통과하지 못했습니다.")
     test_case = next(item for item in design.test_cases if item.tc_id == tc_id)
     candidate_dir = run_dir / "agent3_candidates" / tc_id
     manifest = _read_json(candidate_dir / "agent3_manifest.json")
@@ -249,12 +253,23 @@ def _verify_candidate_sources(run_dir: Path, tc_id: str) -> None:
         _verify_sha256(candidate_dir / filename, manifest.get(key), filename)
     plan = _read_json_model(candidate_dir / "agent3_automation_plan.json", Agent3AutomationPlan)
     observation = _read_json_model(candidate_dir / "agent3_ui_observation.json", UiObservation)
+    review_options = _agent3_review_options(manifest)
     current_cp3 = evaluate_checkpoint3_plan(test_case, plan, observation, require_precondition_proof=True, require_restore_plan_links=True, require_restore_comparison_basis=True,
                                           legacy_wording_checks=_legacy_wording_policy(manifest, {"4.6", "4.7", "4.8", "4.9", "4.10"}),
                                           allow_terminal_observation_anchor=manifest.get("plan_fidelity_contract") in {"1.1", "1.2"},
-                                          require_assertion_target_identity=manifest.get("plan_fidelity_contract") == "1.2")
+                                          allow_state_change_terminal_observation=review_options["allow_state_change_terminal_observation"],
+                                          require_assertion_target_identity=manifest.get("plan_fidelity_contract") == "1.2",
+                                          review_precondition_coverage=_review_responsibility_policy(manifest, "AGENT3"),
+                                          review_value_roles=review_options["review_value_roles"],
+                                          shared_evidence=review_options["shared_evidence"])
     current_cp3 = _load_grounding_review(candidate_dir, manifest, "AGENT3", ("4.9", "4.10"),
-        build_grounding_input("AGENT3", None, {}, plan, test_case=test_case, observation=observation), current_cp3)
+        build_grounding_input("AGENT3", None, {}, plan, test_case=test_case, observation=observation,
+                              include_execution_contract=review_options["include_execution_contract"],
+                              include_review_responsibilities=_review_responsibility_policy(manifest, "AGENT3"),
+                              allow_output_tolerance=_output_tolerance_policy(manifest),
+                              include_task_boundaries=_task_boundary_policy(manifest),
+                              allow_state_change_terminal_observation=review_options["allow_state_change_terminal_observation"],
+                              explicit_expectations_only=review_options["explicit_expectations_only"]), current_cp3)
     if current_cp3.status != CheckStatus.PASS:
         # This is a freshly recomputed checkpoint, not a historical saved one.
         proof_failed = any(check.rule_id == "CP3-006D" and check.status == CheckStatus.FAIL for check in current_cp3.checks)

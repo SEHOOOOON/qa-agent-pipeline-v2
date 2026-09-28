@@ -283,7 +283,7 @@ def _automation_exclusion_from_run_entry(entry: dict[str, Any]) -> dict[str, Any
 
 
 def run_pipeline(args: argparse.Namespace) -> int:
-    """Run Agent 1→2 and continue every eligible Agent 3 candidate."""
+    """Run eligible candidates; stop further calls after an internal error."""
     run_id = getattr(args, "run_id", None) or _new_run_id()
     if not re.fullmatch(r"RUN-\d{8}-\d{6}-[A-F0-9]{6}", run_id):
         raise ValueError("허용된 Run ID가 아닙니다.")
@@ -443,6 +443,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
         candidates_root = run_dir / "agent3_candidates"
         run_entries: list[dict[str, Any]] = []
         internal_errors: list[str] = []
+        unattempted_tc_ids: list[str] = []
         for tc_id in selected_tc_ids:
             artifact_dir = candidates_root / tc_id
             candidate_error: Exception | None = None
@@ -470,10 +471,25 @@ def run_pipeline(args: argparse.Namespace) -> int:
                     run_dir, tc_id, artifact_dir, candidate_exit, candidate_error
                 )
             )
+            if internal_errors:
+                # An API/host error is not a TC rejection. Do not spend further
+                # calls assuming the same environment is healthy. Keep pending
+                # TCs explicit, without inventing trial or review artifacts.
+                unattempted_tc_ids = selected_tc_ids[len(run_entries):]
+                break
 
         successful_entries = [item for item in run_entries if item["exit_code"] == 0]
         automation_exclusions = [
             *prefiltered_exclusions,
+            *[
+                AutomationExclusion(
+                    tc_id=tc_id,
+                    candidate_status=AutomationCandidateStatus.BLOCKED,
+                    reason="앞선 Agent 3 내부 오류로 추가 호출을 중단했습니다. 이 TC는 미실행이며 품질을 판정하지 않았습니다.",
+                    artifact_dir=None,
+                ).model_dump(mode="json")
+                for tc_id in unattempted_tc_ids
+            ],
             *[
                 _automation_exclusion_from_run_entry(item)
                 for item in run_entries
@@ -498,6 +514,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
                 "stage": "AGENT_3_RUN_SUMMARY",
                 "status": run_status,
                 "internal_error_tc_ids": internal_errors,
+                "unattempted_tc_ids": unattempted_tc_ids,
                 "planned_tc_ids": planned_tc_ids,
                 "unselected_tc_ids": unselected_tc_ids,
                 "selected_tc_ids": selected_tc_ids,
@@ -519,7 +536,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
             selected_tc_id=selected_tc_id,
             target_html=target_html,
             stage_exit_codes=stage_exit_codes,
-            stopped_at=None,
+            stopped_at="agent3" if internal_errors else None,
         )
         print(f"Orchestrator status: {status}")
         print(f"Agent 3 completed candidates: {len(successful_entries)}")
