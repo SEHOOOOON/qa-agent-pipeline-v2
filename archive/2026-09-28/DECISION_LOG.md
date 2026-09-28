@@ -1,6 +1,8 @@
 # 과거 의사결정·V1 감사 보존본 · 2026-09-28 정리 전
 
-이 파일은 b3db58a까지의 판단과 시행착오를 보존합니다. 과거의 계획·설명은 현재 구현 보장이 아닙니다. 현재 결정은 [의사결정 기록](DECISION_LOG.md), 기술 기준은 [프로젝트 안내](docs/PROJECT_GUIDE.md)를 확인하세요.
+보관 위치 변경에 따라 문서 링크만 조정했습니다. 로컬 전용 실행 경로는 파일 링크가 아닌 기록으로 표시합니다.
+
+이 파일은 b3db58a까지의 판단과 시행착오를 보존합니다. 과거의 계획·설명은 현재 구현 보장이 아닙니다. 현재 결정은 [의사결정 기록](../../DECISION_LOG.md), 기술 기준은 [프로젝트 안내](../../docs/PROJECT_GUIDE.md)를 확인하세요.
 
 최종 갱신: 2026-09-28
 사용자: 오세훈
@@ -855,7 +857,7 @@ Agent 4는 중립 실행 결과와 Manifest SHA-256을 다시 확인하고, 시�
 
 ## 13. V1 기준 자산 감사 보존본
 
-기준일 2026-08-12. 이전 docs/05_PROJECT1_BASELINE_AUDIT.md의 제품·TC 대응·Coverage·GAP·표현 감사표를 보존합니다. 대상은 V1 portfolio_export의 virtual-controller.html, tests/test_controller.py, tests/conftest.py, scripts/agent4_reporting.py입니다. 아래 LOCAL·현장·미구현 표현은 당시 V1 상태이며 현재 V2 지원 범위가 아닙니다. 현재 V2 계약은 [프로젝트 안내](docs/PROJECT_GUIDE.md)를 따릅니다.
+기준일 2026-08-12. 이전 docs/05_PROJECT1_BASELINE_AUDIT.md의 제품·TC 대응·Coverage·GAP·표현 감사표를 보존합니다. 대상은 V1 portfolio_export의 virtual-controller.html, tests/test_controller.py, tests/conftest.py, scripts/agent4_reporting.py입니다. 아래 LOCAL·현장·미구현 표현은 당시 V1 상태이며 현재 V2 지원 범위가 아닙니다. 현재 V2 계약은 [프로젝트 안내](../../docs/PROJECT_GUIDE.md)를 따릅니다.
 
 ### 3. 제품 구현 확인
 

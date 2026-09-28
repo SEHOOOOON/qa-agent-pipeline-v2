@@ -42,7 +42,22 @@ V1은 고정 산출물로 흐름을 보여준 **Fixture 기반 Workflow Prototyp
 - [의사결정 기록](DECISION_LOG.md): 보완 이유와 과거 변경 이력
 - [제품 SRS](docs/01_PRODUCT_SRS.md) · [자동 테스트 목록](docs/07_TEST_CATALOG.md): 제품 기준과 내부 코드 검증
 
-날짜가 붙은 `*.history-20260928.md` 파일은 정리 전 보존본입니다. 현재 설명을 찾을 때는 위 문서를 먼저 읽고, 과거 판단·실패 경과가 필요할 때만 보존본을 참고하세요.
+과거 설명·실행 이력은 [archive/](archive/README.md)에 모았습니다. 현재 설명은 위 문서를 먼저 읽고, 과거 판단·실패 경과가 필요할 때만 보관 자료를 참고하세요.
+
+## 저장소 구성
+
+| 위치 | 내용 |
+|---|---|
+| 루트 README·PROJECT_HANDOFF·DECISION_LOG | 소개·현재 상태·유지하는 결정 |
+| docs/ | 현재 기술 안내·제품 SRS·테스트 목록·검사 색인 |
+| archive/ | 날짜별 과거 문서·실행 이력 |
+| src/ · tests/ · scripts/ | 구현·회귀검사·실행 보조 도구 |
+| product_baseline/ | V2 시험 대상과 기준 테스트 |
+| approved_assets/ | 사람이 승인한 공식 TC·코드·SRS 기록 |
+| examples/ | 요청 예시와 공개 실행 증거 |
+| runs/ | 로컬 실행 산출물. 원칙적으로 Git에서 제외 |
+
+공개 소개 페이지 project.html은 기존 위치를 유지합니다. 폴더 정리를 위해 실행 코드나 승인·공개 증거의 경로를 바꾸지 않습니다.
 
 인계 문서의 `runs/` 경로는 로컬 진단 기록이며 GitHub에 모두 포함되지는 않습니다. 공개 증거는 아래 링크를 사용하세요.
 

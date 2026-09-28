@@ -1,8 +1,10 @@
 # 과거 프로젝트 안내 보존본 · 2026-09-28 정리 전
 
-이 파일은 b3db58a 시점의 설명을 보존한 역사 자료입니다. 아래 '현재·최신·미검증·대기'는 작성 당시 표현이며 지금의 기준이 아닙니다. 현재 기준은 [프로젝트 안내](PROJECT_GUIDE.md)를 사용하세요.
+보관 위치 변경에 따라 문서 링크만 조정했습니다. 로컬 전용 실행 경로는 파일 링크가 아닌 기록으로 표시합니다.
 
-현재 계약 기준: 2026-09-28. 최신 실행 결과·남은 과제는 [인계 문서](../PROJECT_HANDOFF.md), 설치·실행은 [README](../README.md)에 있습니다.
+이 파일은 b3db58a 시점의 설명을 보존한 역사 자료입니다. 아래 '현재·최신·미검증·대기'는 작성 당시 표현이며 지금의 기준이 아닙니다. 현재 기준은 [프로젝트 안내](../../docs/PROJECT_GUIDE.md)를 사용하세요.
+
+현재 계약 기준: 2026-09-28. 최신 실행 결과·남은 과제는 [인계 문서](../../PROJECT_HANDOFF.md), 설치·실행은 [README](../../README.md)에 있습니다.
 
 ## 먼저 보는 현재 구조
 
@@ -104,7 +106,7 @@ Agent 3 실행 인계와 승인 직전 재검사의 값 역할·공통 근거·�
 
 ## 먼저 보기: 어떤 판단을 왜 하는가
 
-이 절은 **현재 구현을 읽는 지도**입니다. 검사를 추가하거나 제거한 계획이 아닙니다. 세부 업무 규칙은 아래 단계별 목록에서, 실제 조건문·예외·종료 지점·스키마·상태값은 [코드 위치별 색인](logic_inventory.json)에서 확인합니다. `CP` 번호는 자동 검사의 이름이며 모델 호출 횟수나 사람 승인 단계를 뜻하지 않습니다.
+이 절은 **현재 구현을 읽는 지도**입니다. 검사를 추가하거나 제거한 계획이 아닙니다. 세부 업무 규칙은 아래 단계별 목록에서, 실제 조건문·예외·종료 지점·스키마·상태값은 [코드 위치별 색인](../../docs/logic_inventory.json)에서 확인합니다. `CP` 번호는 자동 검사의 이름이며 모델 호출 횟수나 사람 승인 단계를 뜻하지 않습니다.
 
 ### 가장 중요한 보호 6가지
 
@@ -216,7 +218,7 @@ CP2의 기대결과 문장 전체 값 추출과 CP3의 문장마다 검사 1개 
 <details>
 <summary>Agent 1 · 요청을 어떤 시험 조건으로 넘기는가</summary>
 
-구현: [qa_pipeline_agent1.py](../src/qa_pipeline_agent1.py), 실행·인계: [qa_pipeline_execution.py](../src/qa_pipeline_execution.py).
+구현: [qa_pipeline_agent1.py](../../src/qa_pipeline_agent1.py), 실행·인계: [qa_pipeline_execution.py](../../src/qa_pipeline_execution.py).
 
 | 번호 | 확인하는 것 | 문제가 있으면 |
 |---|---|---|
@@ -240,7 +242,7 @@ CP2의 기대결과 문장 전체 값 추출과 CP3의 문장마다 검사 1개 
 <details>
 <summary>Agent 2 · 기존 TC를 재사용할지, 무엇을 새로 설계할지</summary>
 
-구현: [qa_pipeline_agent2.py](../src/qa_pipeline_agent2.py). 기본 불일치는 FAIL이며 CP2-011은 검토/진행 여부를 별도로 판단합니다.
+구현: [qa_pipeline_agent2.py](../../src/qa_pipeline_agent2.py). 기본 불일치는 FAIL이며 CP2-011은 검토/진행 여부를 별도로 판단합니다.
 
 | 번호 | 확인하는 것 |
 |---|---|
@@ -276,7 +278,7 @@ CP2의 기대결과 문장 전체 값 추출과 CP3의 문장마다 검사 1개 
 <details>
 <summary>Agent 3 · TC를 실제로 실행할 수 있고, 같은 것을 검사하는가</summary>
 
-구현: [qa_pipeline_agent3.py](../src/qa_pipeline_agent3.py), 시험 실행: [qa_pipeline_execution.py](../src/qa_pipeline_execution.py).
+구현: [qa_pipeline_agent3.py](../../src/qa_pipeline_agent3.py), 시험 실행: [qa_pipeline_execution.py](../../src/qa_pipeline_execution.py).
 
 | 번호 | 확인하는 것 | 범위/처리 |
 |---|---|---|
@@ -304,7 +306,7 @@ CP2의 기대결과 문장 전체 값 추출과 CP3의 문장마다 검사 1개 
 <details>
 <summary>공통 모델 검토 · 단어가 아니라 근거와 의미를 대조</summary>
 
-구현: [qa_pipeline_grounding.py](../src/qa_pipeline_grounding.py). `AGENT1-GROUNDING`, `AGENT2-GROUNDING`, `AGENT3-GROUNDING`이 각 단계 CP 결과에 추가됩니다.
+구현: [qa_pipeline_grounding.py](../../src/qa_pipeline_grounding.py). `AGENT1-GROUNDING`, `AGENT2-GROUNDING`, `AGENT3-GROUNDING`이 각 단계 CP 결과에 추가됩니다.
 
 | 구분 | 검사/판단 | 결과 |
 |---|---|---|
@@ -329,7 +331,7 @@ READY 계획의 검토 입력·기존 해시 계약은 유지합니다. 실행 �
 <details>
 <summary>실행·복원·Agent 4 · 무슨 일이 실제로 일어났는가</summary>
 
-구현: [qa_pipeline_execution.py](../src/qa_pipeline_execution.py), [qa_pipeline_reporting.py](../src/qa_pipeline_reporting.py), [qa_pipeline_orchestrator.py](../src/qa_pipeline_orchestrator.py).
+구현: [qa_pipeline_execution.py](../../src/qa_pipeline_execution.py), [qa_pipeline_reporting.py](../../src/qa_pipeline_reporting.py), [qa_pipeline_orchestrator.py](../../src/qa_pipeline_orchestrator.py).
 
 | 결정 | 조건과 처리 |
 |---|---|
@@ -399,7 +401,7 @@ CP4는 저장 결과를 검사하며 새 모델 호출/제품 재시험은 하�
 
 ### 누락과 문서 노후화를 확인하는 방법
 
-1. [정적 색인](logic_inventory.json)은 전체 `src/*.py`의 함수/클래스, if/삼항식/불리언 단락 평가, 반복/내포식 필터, try/except, raise/return/break/continue, with, match, assert를 자동 추출합니다. 각 항목에 원본 행·함수·조건식·상위 if/else를 남깁니다. 스키마 선언·상태값·Checkpoint 호출·프롬프트/생성 코드 문자열 위치도 함께 찾을 수 있습니다.
+1. [정적 색인](../../docs/logic_inventory.json)은 전체 `src/*.py`의 함수/클래스, if/삼항식/불리언 단락 평가, 반복/내포식 필터, try/except, raise/return/break/continue, with, match, assert를 자동 추출합니다. 각 항목에 원본 행·함수·조건식·상위 if/else를 남깁니다. 스키마 선언·상태값·Checkpoint 호출·프롬프트/생성 코드 문자열 위치도 함께 찾을 수 있습니다.
 2. baseline 테스트·승인 자동화·촬영 보조는 별도 파일 항목으로 포함합니다. 제품/포폴 HTML의 인라인 JavaScript와 이벤트 핸들러도 Acorn으로 파싱해 조건·반복·예외·종료·단락 평가·선택적 접근을 색인화합니다. 외부 script 라이브러리 내부는 포함하지 않습니다. 동적 생성 Python/JavaScript는 builder/문자열 위치를 연결한 것이지 모든 생성 변형을 실행한 결과가 아닙니다.
 3. 색인 생성기는 소스를 파싱할 뿐 import·모델 호출·브라우저 시험·공식 승인을 하지 않습니다. 파일 해시와 색인을 다시 대조하면 코드 변경 후 목록이 낡았는지 알 수 있습니다.
 4. 이 목록은 **정해진 범위의 정적 누락 방지 장치이지, 전체 경로 테스트 완료나 모든 의미 규칙의 수작업 검수 완료 주장이 아닙니다.** 테스트와 실제 API 검증 상태는 인계 문서에서 별도로 관리합니다. 외부 라이브러리 내부·프로젝트 2·과거 Run·ignored 임시 스크립트는 대상 밖입니다.
@@ -414,7 +416,7 @@ python scripts/audit_logic_inventory.py --check  # 변경 없이 현재 소스�
 
 ### 미실행·미사용·중복 코드를 구분하는 기준
 
-[분기 감사 색인](branch_audit.json)은 이전 미실행 목록의 각 분기를 기준 커밋·함수·조건·목적·유지 사유·재검증 상태에 연결합니다. `scripts/audit_branch_coverage.py`가 기준 커밋 소스와 현재 소스의 변하지 않은 행을 대조합니다. 이는 보수적인 정적 분류이며, `STILL_NOT_OBSERVED`는 삭제 판정이 아닙니다. 줄이 바뀐 항목은 `SOURCE_CHANGED_REQUIRES_REVIEW`로 남기고 커버리지 개선으로 자동 계산하지 않습니다. 관련 테스트 이름도 해당 분기를 통과했다는 증거와 구분합니다.
+[분기 감사 색인](../../docs/branch_audit.json)은 이전 미실행 목록의 각 분기를 기준 커밋·함수·조건·목적·유지 사유·재검증 상태에 연결합니다. `scripts/audit_branch_coverage.py`가 기준 커밋 소스와 현재 소스의 변하지 않은 행을 대조합니다. 이는 보수적인 정적 분류이며, `STILL_NOT_OBSERVED`는 삭제 판정이 아닙니다. 줄이 바뀐 항목은 `SOURCE_CHANGED_REQUIRES_REVIEW`로 남기고 커버리지 개선으로 자동 계산하지 않습니다. 관련 테스트 이름도 해당 분기를 통과했다는 증거와 구분합니다.
 
 | 구분 | 사용되는 상황 | 정리 원칙 |
 |---|---|---|
@@ -529,7 +531,7 @@ Agent 1·2는 모델이 구조화 JSON을 작성합니다. 새 Agent 2는 상세
 
 ### 90초 촬영 대본과 편집 순서
 
-목표는 **정상 결과만 나열하는 것이 아니라, 등록 가능한 결과·실패·미확인 범위를 구분하는 QA 흐름**을 보여주는 것입니다. 전체를 실시간으로 90초 안에 실행한다는 뜻이 아닙니다. 아래 타임라인은 저장된 실제 실행 증거 조회와 촬영 시점의 실제 사람 승인을 편집하는 구성입니다. 원본 녹화는 각 장면 앞뒤 여유를 두고 길게 남깁니다. 내레이션 자막은 [90초 한국어 SRT](demo/demo-90s.ko.srt)에 있습니다. 아직 녹화·편집한 영상은 아닙니다.
+목표는 **정상 결과만 나열하는 것이 아니라, 등록 가능한 결과·실패·미확인 범위를 구분하는 QA 흐름**을 보여주는 것입니다. 전체를 실시간으로 90초 안에 실행한다는 뜻이 아닙니다. 아래 타임라인은 저장된 실제 실행 증거 조회와 촬영 시점의 실제 사람 승인을 편집하는 구성입니다. 원본 녹화는 각 장면 앞뒤 여유를 두고 길게 남깁니다. 내레이션 자막은 [90초 한국어 SRT](../../docs/demo/demo-90s.ko.srt)에 있습니다. 아직 녹화·편집한 영상은 아닙니다.
 
 | 시간 | 화면·조작 | 내레이션 |
 |---|---|---|
@@ -966,9 +968,9 @@ UI의 JSON 저장도 `qa_pipeline_io`의 공통 원자적 저장 함수를 재�
 
 V1 커밋 ba62b611251180cbd0426eae0f9ab43a67a12abf에서 HTML·pytest.ini·tests/conftest.py·tests/test_controller.py 네 파일만 product_baseline에 가져왔습니다. 기존 TC는 변경분 생성 재료가 아니라 관련 회귀 실행용 기준 코드입니다. V2 HTML은 제품 보완과 Run·데모 패널 추가로 V1 원본과 전체 해시가 다릅니다.
 
-V1의 13건은 환경 점검 1건, 제품 기능 후보 7건, 제품 불일치 분류 고정 사례 1건, 파이프라인 분류 고정 사례 4건이 섞인 자료입니다. 제품 회귀 성공률로 합산하지 않습니다. 당시 TC/요구사항 대응과 GAP 감사표는 [결정 기록의 V1 감사 부록](../DECISION_LOG.md#v1-baseline-audit)에 보존합니다.
+V1의 13건은 환경 점검 1건, 제품 기능 후보 7건, 제품 불일치 분류 고정 사례 1건, 파이프라인 분류 고정 사례 4건이 섞인 자료입니다. 제품 회귀 성공률로 합산하지 않습니다. 당시 TC/요구사항 대응과 GAP 감사표는 [결정 기록의 V1 감사 부록](../../DECISION_LOG.md#v1-baseline-audit)에 보존합니다.
 
-현재 제품 범위는 중앙 관제 패널입니다. 실제 Modbus/MQTT, 역할 전환 UI, 연결되지 않은 필터·장치정보·도움말, 벽면 리모컨은 구현 범위로 소개하지 않습니다. 제품 기대값은 [SRS](01_PRODUCT_SRS.md)를 따르며 구현과의 차이를 자동으로 정상 기준으로 바꾸지 않습니다.
+현재 제품 범위는 중앙 관제 패널입니다. 실제 Modbus/MQTT, 역할 전환 UI, 연결되지 않은 필터·장치정보·도움말, 벽면 리모컨은 구현 범위로 소개하지 않습니다. 제품 기대값은 [SRS](../../docs/01_PRODUCT_SRS.md)를 따르며 구현과의 차이를 자동으로 정상 기준으로 바꾸지 않습니다.
 
 검증에서는 요청→조건→TC→Action/Assertion→코드→증거→보고 추적, 후보/회귀/환경 집계, 원본 불변, 승인 동의·원상복구, 공개 데모 무통신·비반영을 확인합니다. 자동 테스트 수와 제품 Run TC 수는 합산하지 않습니다. 현재 통과 이력·간헐적 오류·실제 API 검증 범위는 인계 문서에서 확인합니다.
 
@@ -976,7 +978,7 @@ V1의 13건은 환경 점검 1건, 제품 기능 후보 7건, 제품 불일치 �
 
 ## 12. 포트폴리오에서 먼저 전달할 판단 기준
 
-이 절은 작업 브랜치에 보존한 설명형 시안(`project-story.html`)의 설계 기록입니다. 시안·백업·새 영상은 `main` 공개에서 제외하며 기존 [상세 페이지](../project.html)는 `db305647`의 공개본을 유지합니다. 아래 비교와 배치가 현재 공개 페이지에 적용됐다는 뜻은 아닙니다. 참고 글 [AI로 QA 테스트케이스 자동 생성하기](https://rae-gi.tistory.com/160)의 문제 제시 → 입력 역할 → 설계 이유 → 증거·한계 순서를 참고했습니다. 글의 문장·그림을 복제하지 않았습니다. 참고 글의 PR diff 기반 분석·평가 실험·수치를 이 프로젝트의 구현이나 성과로 가져오지 않습니다. 우리 입력은 변경 요청·기존 SRS·TC이며, 실제 시험·복원·규칙 기반 Agent 4·사람 승인이 추가로 연결됩니다.
+이 절은 작업 브랜치에 보존한 설명형 시안(`project-story.html`)의 설계 기록입니다. 시안·백업·새 영상은 `main` 공개에서 제외하며 기존 [상세 페이지](../../project.html)는 `db305647`의 공개본을 유지합니다. 아래 비교와 배치가 현재 공개 페이지에 적용됐다는 뜻은 아닙니다. 참고 글 [AI로 QA 테스트케이스 자동 생성하기](https://rae-gi.tistory.com/160)의 문제 제시 → 입력 역할 → 설계 이유 → 증거·한계 순서를 참고했습니다. 글의 문장·그림을 복제하지 않았습니다. 참고 글의 PR diff 기반 분석·평가 실험·수치를 이 프로젝트의 구현이나 성과로 가져오지 않습니다. 우리 입력은 변경 요청·기존 SRS·TC이며, 실제 시험·복원·규칙 기반 Agent 4·사람 승인이 추가로 연결됩니다.
 
 ### 중요도와 배치
 

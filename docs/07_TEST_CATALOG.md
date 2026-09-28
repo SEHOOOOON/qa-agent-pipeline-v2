@@ -58,4 +58,4 @@ git diff --check
 
 V1 기준 제품 테스트는 [test_controller.py](../product_baseline/tests/test_controller.py), 공식 승인 TC는 [registry.json](../approved_assets/registry.json)에서 확인합니다. 환경 점검·제품 TC·고정 분류 시연은 별도 집계하며 자동 테스트 목록과 합산하지 않습니다.
 
-[정리 전 테스트 추가 이력](07_TEST_CATALOG.history-20260928.md)은 과거 변경 근거입니다. 추가 N건을 모두 더해 현재 수량으로 사용하지 않습니다. 테스트 추가/삭제 시 이 문서의 역할·반례 범위와 인계 문서의 수집 상태를 함께 갱신합니다.
+[정리 전 테스트 추가 이력](../archive/2026-09-28/07_TEST_CATALOG.md)은 과거 변경 근거입니다. 추가 N건을 모두 더해 현재 수량으로 사용하지 않습니다. 테스트 추가/삭제 시 이 문서의 역할·반례 범위와 인계 문서의 수집 상태를 함께 갱신합니다.
