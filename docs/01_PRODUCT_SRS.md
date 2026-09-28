@@ -32,7 +32,7 @@
 - 동작이 연결되지 않은 장치 필터·장치정보 탭·도움말 UI
 - 개별 장비의 벽면 리모컨·현장 조작 경로
 
-제외한 검증 기능은 [QA 하네스 가이드](PROJECT_GUIDE.md#6-agent-3-자동화-계획컴파일시험과-cp3), 구현 상태와 알려진 차이는 [Project1 기준 자산 감사](../DECISION_LOG.md#v1-baseline-audit)에서 다룹니다.
+제외한 검증 기능은 [자동화·실행 가이드](PROJECT_GUIDE.md#6-agent-3-자동화-계획컴파일시험과-cp3), 구현 상태와 알려진 차이는 [Project1 기준 자산 감사](../DECISION_LOG.md#v1-baseline-audit)에서 다룹니다. 이 안내 문구 정리는 제품 인수 기준이나 공식 승인 이력을 변경하지 않습니다.
 
 ## 2. 시스템 개요
 
