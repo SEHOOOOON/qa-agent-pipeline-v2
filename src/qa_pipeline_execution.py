@@ -607,7 +607,9 @@ def run_agent2(args: argparse.Namespace) -> int:
     approved_catalog, approved_snapshot = load_approved_regression_catalog(
         approved_assets_root
     )
-    existing_catalog = (*EXISTING_REGRESSION_CATALOG, *approved_catalog)
+    retired = _retired_tc_ids(approved_snapshot)
+    existing_catalog = tuple(item for item in (*EXISTING_REGRESSION_CATALOG, *approved_catalog)
+                             if item.tc_id not in retired)
     try:
         with reservation_file.open("x", encoding="utf-8") as handle:
             json.dump(
@@ -2241,6 +2243,10 @@ def run_validation_execution(args: argparse.Namespace) -> int:
                 for requirement_id in test_case.requirement_ids
             }
             selected = select_existing_regressions(requirement_ids, existing_catalog)
+        registry_file = approved_assets_root / "registry.json"
+        retired = _retired_tc_ids(_read_json_payload(registry_file)) if registry_file.is_file() else set()
+        if any(spec.tc_id in retired for spec in selected):
+            raise ValueError("선택한 기존 TC가 사람 승인으로 대체됐습니다. 새 Run에서 TC를 다시 선택하세요.")
         evidence_root = run_dir / "validation_evidence"
         precheck = run_existing_regression(
             ENVIRONMENT_PRECHECK,

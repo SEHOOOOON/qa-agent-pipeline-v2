@@ -22,6 +22,43 @@ def test_observed_action_capability(tag, role, input_type, expected):
     assert _observed_action_hint(tag, role, input_type) == expected
 
 
+@pytest.mark.parametrize("tag,input_type,expected", [
+    ("div", None, "CLICK"), ("span", None, "CLICK"),
+    ("input", "number", "FILL"), ("input", "checkbox", "CHECK_OR_UNCHECK"),
+    ("input", "hidden", "READ_STATE"), ("input", "file", "READ_STATE"),
+    ("input", "radio", "READ_STATE"), ("select", None, "SELECT_OPTION"),
+])
+def test_observed_direct_handler_preserves_specialized_controls(tag, input_type, expected):
+    from qa_pipeline_agent3 import _observed_action_hint
+    assert _observed_action_hint(tag, None, input_type, has_click_handler=True) == expected
+
+
+@pytest.mark.parametrize("generic", [False, True])
+@pytest.mark.parametrize("handler", ["inline", "property", "none", "delegated"])
+def test_observed_card_and_generic_direct_handler(tmp_path, generic, handler):
+    target = tmp_path / "handlers.html"
+    inline = ' onclick="window.HANDLER_BODY_MUST_STAY_LOCAL=1"' if handler == "inline" else ""
+    script = {
+        "property": "el.onclick = () => { window.HANDLER_BODY_MUST_STAY_LOCAL=1; };",
+        "delegated": "document.addEventListener('click', () => {});",
+    }.get(handler, "")
+    target.write_text(f'''<!doctype html><title>Handler observation</title>
+        <div id="device-card-1"><div class="card-body-split"{inline}>장비 선택</div></div>
+        <span id="other"{inline}>동작 영역</span>
+        <div id="read-only" tabindex="0" style="cursor:pointer">클릭이라는 설명만 있음</div>
+        <script>for (const el of document.querySelectorAll('.card-body-split,#other')) {{ {script} }}</script>
+        ''', encoding="utf-8")
+    obs = inspect_target_ui(target, required_selectors={"#device-card-1 .card-body-split"},
+                            required_harness_keys=set(), discover_generic=generic)
+    items = {item.selector: item for item in obs.elements}
+    expected = "CLICK" if handler in {"inline", "property"} else "READ_STATE"
+    assert items["#device-card-1 .card-body-split"].action_hint == expected
+    if generic:
+        assert items["#other"].action_hint == expected
+        assert items["#read-only"].action_hint == "READ_STATE"
+    assert "HANDLER_BODY_MUST_STAY_LOCAL" not in obs.model_dump_json()
+
+
 @pytest.mark.parametrize("generic", [False, True])
 def test_observed_action_capability_known_and_generic(tmp_path, generic):
     target = tmp_path / "capabilities.html"
@@ -206,6 +243,48 @@ def mapped_controller_observation():
     return inspect_target_ui(REPO_ROOT / "product_baseline/virtual-controller.html",
                              required_selectors=set(pipeline._UI_SELECTOR_INVENTORY),
                              discover_generic=False)
+
+
+def test_controller_device_select_hint_reaches_semantic_review(mapped_controller_observation):
+    import qa_pipeline_grounding as g
+    from qa_pipeline_agent3 import ControllerMapAgent3
+    case, _ = mapped_tc_fixture("status", "OPERATION", "STOP")
+    obs = mapped_controller_observation
+    plan = ControllerMapAgent3().plan(case, obs, {}).plan
+    selector = next(a.selector for a in plan.actions if a.action_type.value == "SELECT_DEVICE")
+    index = next(i for i, e in enumerate(obs.elements) if e.selector == selector)
+    assert obs.elements[index].tag == "div" and obs.elements[index].action_hint == "CLICK"
+    review = g.build_grounding_input("AGENT3", None, {}, plan, test_case=case, observation=obs,
+        include_execution_contract=True, include_review_responsibilities=True, include_task_boundaries="1.3")
+    docs = {d["source_id"]: d["text"] for d in review["source_documents"]}
+    assert docs[f"UI_INVENTORY/elements/{index}/selector"] == selector
+    assert docs[f"UI_INVENTORY/elements/{index}/action_hint"] == "CLICK"
+
+
+@pytest.mark.parametrize("effect", ["correct", "wrong_device", "no_effect"])
+def test_compiled_device_selection_checks_effect_not_just_handler(effect, panel_readback_browser):
+    from playwright.sync_api import TimeoutError as BrowserTimeout
+    case, plan = mapped_tc_fixture("status", "OPERATION", "STOP")
+    code = compile_automation_candidate("SELECT-GUARD", case, plan, explicit_expectations_only=True)
+    lines = code.splitlines()
+    click = next(i for i, line in enumerate(lines) if "page.locator('#device-card-1 .card-body-split').click()" in line)
+    block = "\n".join(line.strip() for line in lines[click:click + 2])
+    assert "window.__vccs.selectedUnitId === 1" in block
+    context = panel_readback_browser.new_context()
+    try:
+        page = context.new_page()
+        page.set_default_timeout(300)
+        selected = {"correct": "1", "wrong_device": "2", "no_effect": "null"}[effect]
+        page.set_content(f'''<div id="device-card-1"><div class="card-body-split"
+            onclick="window.__vccs.selectedUnitId={selected}">선택</div></div>
+            <script>window.__vccs={{selectedUnitId:null}}</script>''')
+        if effect == "correct":
+            exec(block, {"page": page})
+        else:
+            with pytest.raises(BrowserTimeout):
+                exec(block, {"page": page})
+    finally:
+        context.close()
 
 
 def test_controller_map_collects_all_declared_internal_values(mapped_controller_observation):
@@ -1586,6 +1665,12 @@ def test_controller_common_lifecycle_on_unmodified_product(tmp_path, monkeypatch
     assert 'RESTORE_STATUS: RESTORED' in output
     assert 'RESTORE_CONFIRMATIONS_VERIFIED: ER-090,ER-091' in output
     assert 'RESTORE_MISMATCH' not in output and 'PRODUCT_MISMATCH' not in output
+    observations = [json.loads(line.split(': ', 1)[1]) for line in output.splitlines()
+                    if line.startswith('QA_ASSERTION_OBSERVED: ')]
+    assert [row['assertion'] for row in observations] == [a.model_dump(mode='json') for a in plan.assertions]
+    assert all(row['matched'] is True and 'actual' in row for row in observations)
+    assert all(row['tc_id'] == case.tc_id and row['target_device_id'] == plan.target_device_id for row in observations)
+    assert output.count('QA_ASSERTIONS_COMPLETE: ') == 1
     assert target.read_bytes() == before
 
 

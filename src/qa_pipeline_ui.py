@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -646,6 +647,68 @@ def _next_official_tc_id(registry: list[dict[str, Any]]) -> str:
     return f"TC-V2-{number:03d}"
 
 
+def candidate_asset_comparison(test_case: dict, approved_assets_root: Path) -> dict[str, Any]:
+    """Read-only comparison, never infer semantic equivalence or auto-select replacements."""
+    from qa_pipeline_contracts import EXISTING_REGRESSION_CATALOG, _retired_tc_ids
+    root = approved_assets_root.resolve()
+    registry = _read_json(root / "registry.json")
+    retired = _retired_tc_ids(registry)
+    candidates = []
+    for spec in EXISTING_REGRESSION_CATALOG:
+        candidates.append({
+            "tc_id": spec.tc_id, "title": spec.covered_behaviors[0], "source": "BASELINE",
+            "requirement_ids": list(spec.requirement_ids),
+            "preconditions": [], "steps": [],
+            "expected_results": list(spec.covered_behaviors),
+            "detail_note": "기본 TC의 검증 범위 요약입니다. 상세 절차는 기존 자동화 원본을 확인하세요.",
+        })
+    for asset in registry.get("assets", []):
+        if not isinstance(asset, dict):
+            raise ValueError("공식 TC 목록 형식이 올바르지 않습니다.")
+        files = {}
+        for kind in ("test_case", "automation"):
+            path = (root / str(asset.get(kind + "_file") or "")).resolve()
+            if (not path.is_relative_to(root) or not path.is_file()
+                    or _sha256_file(path) != asset.get(kind + "_sha256")):
+                raise ValueError("비교할 공식 TC 원본이 변경되었거나 없습니다.")
+            files[kind] = path
+        saved = _read_json(files["test_case"])
+        if saved.get("official_tc_id") != asset.get("official_tc_id"):
+            raise ValueError("비교할 공식 TC의 번호가 다릅니다.")
+        case = saved.get("test_case") or {}
+        candidates.append({
+            **_comparison_case(case),
+            "tc_id": asset["official_tc_id"], "source": "APPROVED",
+            "detail_note": "승인된 TC 원문입니다.",
+        })
+    known = {row["tc_id"] for row in candidates}
+    if len(known) != len(candidates):
+        raise ValueError("비교할 TC 번호가 중복됩니다.")
+    for row in registry.get("supersessions", []):
+        if row["tc_id"] not in known or row["replaced_by"] not in known:
+            raise ValueError("TC 대체 기록의 대상이 없습니다.")
+    requested = set(test_case.get("requirement_ids") or [])
+    # Requirement links rank the list only. All remaining TCs remain visible.
+    for row in candidates:
+        row["shared_requirement_ids"] = sorted(requested & set(row["requirement_ids"]))
+        row["active"] = row["tc_id"] not in retired
+    candidates.sort(key=lambda row: (not row["active"], not bool(row["shared_requirement_ids"]), row["tc_id"]))
+    content = {"registry": registry, "candidate": _comparison_case(test_case), "catalog": candidates}
+    fingerprint = hashlib.sha256(json.dumps(content, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+    return {"fingerprint": fingerprint, "candidate": _comparison_case(test_case), "existing": candidates}
+
+
+def _comparison_case(case: dict) -> dict[str, Any]:
+    return {
+        "tc_id": case.get("tc_id"), "title": case.get("title", ""),
+        "requirement_ids": case.get("requirement_ids") or [],
+        "preconditions": case.get("preconditions") or [],
+        "steps": case.get("steps") or [],
+        "expected_results": [item.get("statement", "") for item in case.get("expected_results") or []],
+        "restore_steps": case.get("restore_steps") or [],
+    }
+
+
 def _decide_candidate_asset_impl(
     runs_root: Path,
     approved_assets_root: Path,
@@ -658,6 +721,9 @@ def _decide_candidate_asset_impl(
     reviewer: str,
     note: str,
     approve_srs_revisions: bool = False,
+    registration_mode: str = "ADD",
+    replace_tc_ids: list[str] | None = None,
+    comparison_sha256: str | None = None,
 ) -> dict[str, Any]:
     """사람의 후보 승인·보류를 기록하고 승인 시 불변 공식 자산으로 복사합니다."""
 
@@ -665,13 +731,23 @@ def _decide_candidate_asset_impl(
     if not TC_ID_PATTERN.fullmatch(tc_id):
         raise ValueError("올바르지 않은 후보 TC ID입니다.")
     normalized_decision = str(decision).upper()
-    if normalized_decision not in {"APPROVE", "HOLD"}:
-        raise ValueError("승인 또는 보류만 선택할 수 있습니다.")
+    if normalized_decision not in {"APPROVE", "HOLD", "DECLINE"}:
+        raise ValueError("승인·보류·등록하지 않음 중 선택하세요.")
+    if not isinstance(registration_mode, str) or registration_mode not in {"ADD", "REPLACE"}:
+        raise ValueError("추가 또는 대체를 선택하세요.")
+    replacements = [] if replace_tc_ids is None else replace_tc_ids
+    if (not isinstance(replacements, list) or any(not isinstance(item, str) for item in replacements)
+            or len(replacements) != len(set(replacements))):
+        raise ValueError("대체할 TC 목록이 올바르지 않습니다.")
+    if registration_mode == "ADD" and replacements:
+        raise ValueError("추가 등록에서는 대체 대상을 선택할 수 없습니다.")
+    if normalized_decision != "APPROVE" and replacements:
+        raise ValueError("미등록·보류에서는 기존 TC를 대체할 수 없습니다.")
     reviewer_text = _safe_text(reviewer, field_name="검토자", required=True, limit=80)
     note_text = _safe_text(
         note,
         field_name="판단 메모",
-        required=normalized_decision == "HOLD",
+        required=normalized_decision in {"HOLD", "DECLINE"} or registration_mode == "REPLACE",
         limit=500,
     )
     test_case = _candidate_test_case(run_dir, tc_id)
@@ -708,16 +784,42 @@ def _decide_candidate_asset_impl(
 
     decisions = _read_asset_decisions(run_dir)
     existing = next((item for item in decisions if item.get("tc_id") == tc_id), None)
+    registry_payload = _read_json(approved_assets_root / "registry.json")
+    source_key = f"{run_id}:{tc_id}"
+    registered_source = any(
+        isinstance(item, dict) and item.get("source_key") == source_key
+        for item in registry_payload.get("assets") or []
+    )
+    if registered_source and (not existing or existing.get("decision") != "APPROVED"):
+        raise ValueError(
+            "이미 공식 등록된 후보인데 실행의 승인 판단 기록이 없거나 다릅니다. "
+            "공식 목록과 기존 판단 기록을 확인하세요. 새 승인·대체·미등록·보류를 기록하지 않습니다."
+        )
     if existing and existing.get("decision") == "APPROVED":
-        if normalized_decision == "HOLD":
+        if normalized_decision != "APPROVE":
             raise ValueError("이미 공식 등록된 자산은 화면에서 보류로 되돌릴 수 없습니다.")
         return existing
+
+    comparison = None
+    if normalized_decision == "APPROVE":
+        # Keep old ADD callers compatible; the browser always supplies its viewed fingerprint.
+        if comparison_sha256 is not None or registration_mode == "REPLACE":
+            comparison = candidate_asset_comparison(test_case, approved_assets_root)
+            if comparison_sha256 != comparison["fingerprint"]:
+                raise ValueError("검토 후 TC 목록이 변경됐습니다. 목록을 새로 열어 다시 비교하세요.")
+        if registration_mode == "REPLACE":
+            active = {item["tc_id"] for item in comparison["existing"] if item["active"]}
+            if not replacements or not set(replacements).issubset(active):
+                raise ValueError("현재 사용 중인 TC를 하나 이상 직접 선택해야 합니다.")
 
     created_at = datetime.now(timezone.utc).isoformat()
     record: dict[str, Any] = {
         "run_id": run_id,
         "tc_id": tc_id,
-        "decision": "HELD" if normalized_decision == "HOLD" else "APPROVED",
+        "decision": {"HOLD": "HELD", "DECLINE": "DECLINED", "APPROVE": "APPROVED"}[normalized_decision],
+        "registration_mode": registration_mode if normalized_decision == "APPROVE" else None,
+        "replaced_tc_ids": replacements,
+        "comparison_sha256": comparison_sha256,
         "reviewer": reviewer_text,
         "note": note_text,
         "created_at": created_at,
@@ -931,9 +1033,17 @@ def _decide_candidate_asset_impl(
                 ),
             }
             registry.append(asset)
+            supersessions = list(registry_payload.get("supersessions", []))
+            supersessions.extend({
+                "tc_id": old_id, "replaced_by": official_tc_id,
+                "source_key": source_key, "reviewer": reviewer_text,
+                "note": note_text, "created_at": created_at,
+                "comparison_sha256": comparison_sha256,
+            } for old_id in replacements)
             _write_json_atomic(
                 registry_file,
-                {"contract_version": "1.0", "assets": registry},
+                {**registry_payload, "contract_version": "1.0", "assets": registry,
+                 "supersessions": supersessions},
             )
             record.update(
                 {
@@ -969,6 +1079,9 @@ def decide_candidate_asset(
     reviewer: str,
     note: str,
     approve_srs_revisions: bool = False,
+    registration_mode: str = "ADD",
+    replace_tc_ids: list[str] | None = None,
+    comparison_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Apply one approval as a compensating multi-file transaction."""
 
@@ -1023,6 +1136,9 @@ def decide_candidate_asset(
             reviewer=reviewer,
             note=note,
             approve_srs_revisions=approve_srs_revisions,
+            registration_mode=registration_mode,
+            replace_tc_ids=replace_tc_ids,
+            comparison_sha256=comparison_sha256,
         )
     except BaseException as original_error:
         # The transaction must unwind on Ctrl+C/SystemExit as well as I/O errors.
@@ -1231,6 +1347,13 @@ def summarize_run(
         except (ValueError, OSError, json.JSONDecodeError) as exc:
             reasons = [str(exc)]
         decision = decisions.get(tc_id)
+        try:
+            comparison = candidate_asset_comparison(test_case, approved_assets_root)
+            comparison_error = None
+        except (ValueError, OSError) as exc:
+            comparison = None
+            comparison_error = str(exc)
+            reasons.append("기존 TC 비교 자료 확인 실패: " + str(exc))
         candidate_assets.append(
             {
                 "tc_id": tc_id,
@@ -1240,6 +1363,8 @@ def summarize_run(
                 "revalidation_required": any("재검증이 필요" in item for item in reasons),
                 "srs_revision_proposals": srs_proposals,
                 "decision": decision,
+                "comparison": comparison,
+                "comparison_error": comparison_error,
             }
         )
 
@@ -1384,6 +1509,9 @@ class PipelineUiBridge:
         reviewer: str,
         note: str,
         approve_srs_revisions: bool = False,
+        registration_mode: str = "ADD",
+        replace_tc_ids: list[str] | None = None,
+        comparison_sha256: str | None = None,
     ) -> dict[str, Any]:
         if not self.state.allow_asset_approval:
             raise PermissionError(
@@ -1409,6 +1537,9 @@ class PipelineUiBridge:
                 reviewer=reviewer,
                 note=note,
                 approve_srs_revisions=approve_srs_revisions,
+                registration_mode=registration_mode,
+                replace_tc_ids=replace_tc_ids,
+                comparison_sha256=comparison_sha256,
             )
         finally:
             self.asset_approval_lock.release()
@@ -1687,6 +1818,9 @@ def make_handler(bridge: PipelineUiBridge) -> type[BaseHTTPRequestHandler]:
                     approve_srs_revisions=(
                         payload.get("approve_srs_revisions") is True
                     ),
+                    registration_mode=payload.get("registration_mode", "ADD"),
+                    replace_tc_ids=payload.get("replace_tc_ids"),
+                    comparison_sha256=payload.get("comparison_sha256"),
                 )
                 self._send_json(
                     {

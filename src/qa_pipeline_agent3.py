@@ -500,7 +500,9 @@ _REQUIRED_HARNESS_KEYS = {
 }
 
 
-def _observed_action_hint(tag: str, role: str | None, input_type: str | None) -> str:
+def _observed_action_hint(
+    tag: str, role: str | None, input_type: str | None, *, has_click_handler: bool = False
+) -> str:
     """Describe the observed control capability, never its prose label."""
     if tag == "select":
         return "SELECT_OPTION"
@@ -513,6 +515,10 @@ def _observed_action_hint(tag: str, role: str | None, input_type: str | None) ->
     if tag == "button" or role == "button" or (
         tag == "input" and input_type in {"button", "submit", "reset"}
     ):
+        return "CLICK"
+    # An observed handler is a capability hint, not proof of its effect. Keep
+    # specialized/unsupported input types intact; execution verifies the result.
+    if has_click_handler and tag not in {"input", "select", "textarea"}:
         return "CLICK"
     return "READ_STATE"
 
@@ -661,7 +667,8 @@ def inspect_target_ui(
             metadata = locator.evaluate("""el => ({
                 tag: el.tagName.toLowerCase(),
                 role: el.getAttribute('role'),
-                input_type: el.tagName.toLowerCase() === 'input' ? el.type : null
+                input_type: el.tagName.toLowerCase() === 'input' ? el.type : null,
+                has_click_handler: typeof el.onclick === 'function'
             })""")
             elements.append(
                 ObservedUiElement(
@@ -719,6 +726,7 @@ def inspect_target_ui(
                             enabled: !element.disabled && element.getAttribute('aria-disabled') !== 'true',
                             role,
                             input_type: inputType,
+                            has_click_handler: typeof element.onclick === 'function',
                             accessible_name: (element.getAttribute('aria-label')
                                 || (element.labels ? Array.from(element.labels).map(label => label.innerText).join(' ') : '')
                                 || element.innerText || element.getAttribute('name') || '').trim().slice(0, 200) || null,
@@ -734,7 +742,8 @@ def inspect_target_ui(
             for item in generic_items:
                 if item["selector"] not in known:
                     item["action_hint"] = _observed_action_hint(
-                        item["tag"], item["role"], item["input_type"]
+                        item["tag"], item["role"], item["input_type"],
+                        has_click_handler=item.pop("has_click_handler", False),
                     )
                     elements.append(ObservedUiElement.model_validate(item))
                     known.add(item["selector"])
@@ -2875,6 +2884,7 @@ def compile_automation_candidate(
         "from __future__ import annotations",
         "",
         "import os",
+        "import json",
         "from time import monotonic",
     ]
     if needs_legacy_temperature_helpers:
@@ -3081,6 +3091,7 @@ def compile_automation_candidate(
         block_start = len(lines)
         marker = f"{indent}# EXPECTED_RESULT: {assertion.result_id}"
         lines.append(marker)
+        lines.append(f"{indent}mismatch_count_before = len(mismatches)")
         if assertion.strategy == AssertionStrategy.CONTROLLER_UI_FIELDS_EQUALS:
             expected = {f.field_name: f.expected_value for f in assertion.expected_fields}
             lines.extend([
@@ -3128,7 +3139,8 @@ def compile_automation_candidate(
                 [
                     f"{indent}toast = page.locator('#global-toast')",
                     f"{indent}toast_text = toast.inner_text().strip().lower()",
-                    f"{indent}if 'show' not in (toast.get_attribute('class') or '').split():",
+                    f"{indent}actual = {{'visible': 'show' in (toast.get_attribute('class') or '').split(), 'text': toast_text}}",
+                    f"{indent}if not actual['visible']:",
                     f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + ': toast not visible')",
                     f"{indent}elif not any(term in toast_text for term in {_py_literal(_BLOCKING_TOAST_ACTUAL_TERMS)}):",
                     f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + f': toast does not indicate blocking: {{toast_text}}')",
@@ -3138,21 +3150,24 @@ def compile_automation_candidate(
             lines.extend(
                 [
                     f"{indent}toast = page.locator('#global-toast')",
-                    f"{indent}if 'show' not in (toast.get_attribute('class') or '').split():",
+                    f"{indent}actual = 'show' in (toast.get_attribute('class') or '').split()",
+                    f"{indent}if not actual:",
                     f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + ': toast not visible')",
                 ]
             )
         elif assertion.strategy == AssertionStrategy.CONTROLS_DISABLED:
             lines.extend(
                 [
-                    f"{indent}if page.locator('#det-temp-down-btn').is_enabled() or page.locator('#det-temp-up-btn').is_enabled():",
+                    f"{indent}actual = [page.locator('#det-temp-down-btn').is_enabled(), page.locator('#det-temp-up-btn').is_enabled()]",
+                    f"{indent}if any(actual):",
                     f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + ': temperature controls enabled')",
                 ]
             )
         elif assertion.strategy == AssertionStrategy.DISABLED_TEMPERATURE_TEXT:
             lines.extend(
                 [
-                    f"{indent}if '---' not in page.locator('#det-temp-display').inner_text():",
+                    f"{indent}actual = page.locator('#det-temp-display').inner_text()",
+                    f"{indent}if '---' not in actual:",
                     f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + ': disabled text missing')",
                 ]
             )
@@ -3196,18 +3211,33 @@ def compile_automation_candidate(
                     f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + f': internal value={{actual}}')",
                 ]
             )
+        observation = dict(version="assertion-observations-1.0", run_id=run_id, tc_id=test_case.tc_id,
+                           target_device_id=plan.target_device_id, assertion=assertion.model_dump(mode="json"))
+        lines.extend([
+            f"{indent}observation = {observation!r}",
+            f"{indent}observation.update(actual=actual, matched=len(mismatches) == mismatch_count_before)",
+            f"{indent}observations[{assertion.result_id!r}] = observation",
+        ])
         assertion_blocks.append((assertion.after_action_id, lines[block_start:]))
         del lines[block_start:]
 
     def append_observation_group(blocks: list[list[str]], prefix: str, errors: str) -> None:
         if not blocks:
             return
+        lines.append(f"{prefix}observations = {{}}")
         lines.append(f"{prefix}def observe():")
+        lines.append(f"{prefix}    observations.clear()")
         lines.append(f"{prefix}    {errors} = []")
         for block in blocks:
             lines.extend("    " + line for line in block)
         lines.append(f"{prefix}    return {errors}")
-        lines.append(f"{prefix}{errors}.extend(_wait_for_observations(page, observe))")
+        lines.extend([
+            f"{prefix}try:",
+            f"{prefix}    {errors}.extend(_wait_for_observations(page, observe))",
+            f"{prefix}finally:",
+            f"{prefix}    for observation in observations.values():",
+            f"{prefix}        print('QA_ASSERTION_OBSERVED: ' + json.dumps(observation, ensure_ascii=True, allow_nan=False))",
+        ])
 
     prepared_baseline_captured = False
     original_baseline_captured = False
@@ -3286,6 +3316,7 @@ def compile_automation_candidate(
     lines.extend(
         [
             f"{indent}page.screenshot(path=str(EVIDENCE_DIR / 'trial-final.png'), full_page=True)",
+            f"{indent}print('QA_ASSERTIONS_COMPLETE: ' + json.dumps({dict(version='assertion-observations-1.0', run_id=run_id, tc_id=test_case.tc_id)!r}))",
             f"{indent}assert not mismatches, 'PRODUCT_MISMATCH: ' + ' | '.join(mismatches)",
             f"{indent}test_completed = True",
             "        finally:",
@@ -3555,7 +3586,7 @@ def evaluate_compiled_candidate(
     for node in ast.walk(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             modules = [item.name.split('.')[0] for item in node.names] if isinstance(node, ast.Import) else [(node.module or '').split('.')[0]]
-            if any(module not in {"__future__", "os", "re", "pathlib", "playwright", "time"} for module in modules):
+            if any(module not in {"__future__", "os", "json", "re", "pathlib", "playwright", "time"} for module in modules):
                 unsafe.append("disallowed import: " + ", ".join(modules))
         if isinstance(node, ast.Call):
             name = node.func.id if isinstance(node.func, ast.Name) else node.func.attr if isinstance(node.func, ast.Attribute) else ""

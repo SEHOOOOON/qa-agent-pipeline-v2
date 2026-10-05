@@ -807,72 +807,82 @@ def run_human_review_document(args: argparse.Namespace) -> int:
     return 0
 
 
-def _slack_report_payload(report: FinalReport) -> dict[str, Any]:
-    status_lines = [
-        f"{status.value}: {report.status_counts.get(status, 0)}"
-        for status in NeutralExecutionStatus
-    ]
-    finding_lines = [
-        f"• {item.finding_id} | {item.category.value} | {item.test_id or '-'}"
-        for item in report.findings
-    ] or ["• 검토 항목 없음"]
-    exclusion_lines = [
-        f"• {item.tc_id} | {item.candidate_status.value}"
-        for item in report.automation_exclusions
-    ] or ["• 자동화 제외 없음"]
-    return {
-        "blocks": [
-            {
-                "type": "header",
-                "text": {
-                    "type": "plain_text",
-                    "text": f"QA 변경 검증 결과 · {report.recommendation.value}",
-                },
-            },
-            {
-                "type": "section",
-                "fields": [
-                    {"type": "mrkdwn", "text": f"*Run ID*\n{report.run_id}"},
-                    {
-                        "type": "mrkdwn",
-                        "text": f"*Checkpoint 4*\n{report.checkpoint_status.value}",
-                    },
-                    {
-                        "type": "mrkdwn",
-                        "text": f"*제품 결과*\n{report.product_result_count}",
-                    },
-                    {
-                        "type": "mrkdwn",
-                        "text": f"*환경 점검*\n{report.environment_result_count}",
-                    },
-                    {"type": "mrkdwn", "text": "*검증 범위*\n" + verification_scope_summary(report.model_dump(mode="json", by_alias=True))},
-                ],
-            },
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": "*상태 집계*\n" + "\n".join(status_lines),
-                },
-            },
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": "*검토 항목*\n" + "\n".join(finding_lines),
-                },
-            },
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": "*자동화 제외 TC*\n" + "\n".join(exclusion_lines),
-                },
-            },
-        ]
-    }
+def _slack_report_payload(report: FinalReport, run_dir: Path | None = None) -> dict[str, Any]:
+    """Readable summary; TC expectations are not fabricated observation values."""
+    def safe(value):
+        return str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
+    def readable(value):
+        # Display only: preserve negation, numbers, timing and unknown terms.
+        labels = {"OPERATION": "운전", "STOP": "정지"}
+        text = re.sub(r"(?<![A-Za-z0-9_-])(OPERATION|STOP)(?![A-Za-z0-9_-])",
+                      lambda match: labels[match.group()], str(value))
+        return safe(text.replace("내부 status", "내부 전원 상태").replace("정지으로", "정지로"))
 
+    verdict = {"PASS": "✅ 이번 시험 통과", "HUMAN_REVIEW": "⚠️ 결과 검토 필요",
+               "HOLD": "⏸️ 시험 보류", "BLOCKED": "⛔ 진행 중단"}.get(report.recommendation.value, "결과 확인 필요")
+    blocks = [{"type": "header", "text": {"type": "plain_text", "text": verdict}}]
+    def section(title, body):
+        text = "*" + title + "*\n" + body
+        if len(text) > 2900:
+            text = text[:2800] + "\n… 상세 내용은 최종 보고서에서 확인하세요."
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": text}})
+
+    rows = build_run_test_rows(run_dir) if run_dir else []
+    products = [r for r in rows if r["source"] != "환경 점검" and not r["tc_id"].startswith("TC-PIPE-")]
+    section("시험 내용", "\n".join("• " + readable(r["title"]) for r in products) or "제품 시험 상세는 최종 보고서를 확인하세요.")
+    labels = {"PASSED": "✅ 통과", "ASSERTION_FAILED": "❌ 기대결과 불일치",
+              "EXECUTION_ERROR": "🔧 실행 오류", "TIMEOUT": "⏱️ 시간 초과",
+              "SKIPPED": "⏭️ 건너뜀", "NOT_EXECUTED": "⏸️ 미실행", "MANUAL_REVIEW": "👤 수동 확인"}
+    lines = []
+    for row in products[:8]:
+        lines.append(safe(row["tc_id"]) + " · " + labels.get(row["status"], "확인 필요"))
+        if row["expected_results"]:
+            lines.append("확인한 기준:" if row["status"] == "PASSED" else "확인할 기준:")
+            lines.extend("  • " + readable(s) for s in row["expected_results"])
+        if row["status"] != "PASSED":
+            # Raw exception text may contain local paths; keep it in local evidence.
+            reason = next((f.rationale for f in report.findings if f.test_id == row["tc_id"]), None)
+            reason = reason or next((e.reason for e in report.automation_exclusions if e.tc_id == row["tc_id"]), None)
+            lines.append("  • 사유: " + safe(reason or "최종 보고서의 실행 증거 확인 필요"))
+        else:
+            lines.append("  • 위 기준 모두 통과 · 상세 관찰값은 실행 기록 참고")
+        # Only claim restoration when the saved execution log explicitly records it.
+        logs = []
+        if run_dir:
+            for name in row["evidence_files"]:
+                path = _safe_run_file(run_dir, name)
+                if path and name.endswith("stdout.txt"):
+                    logs.extend((run_dir / name).read_text(encoding="utf-8", errors="replace").splitlines())
+        if "RESTORE_STATUS: FAILED" in logs:
+            lines.append("  • ⚠️ 복원 실패 기록 — 후속 시험 전 확인 필요")
+        elif "RESTORE_STATUS: RESTORED" in logs and any(s.startswith("RESTORE_CONFIRMATIONS_VERIFIED:") for s in logs):
+            lines.append("  • ✅ 원래 상태 복원·확인 기록 있음")
+    if len(products) > 8:
+        lines.append("추가 TC는 최종 보고서를 확인하세요.")
+    section("확인 결과", "\n".join(lines) or "제품 시험 결과 없음 — 환경 점검 통과와 구분합니다.")
+    blocks.append({"type": "divider"})
+    counts = report.status_counts
+    section("실행 요약", f"제품 시험 결과 {report.product_result_count}건 · 환경 점검 {report.environment_result_count}건\n"
+            + "전체 집계: " + " · ".join(f"{label} {counts.get(status, 0)}건" for status, label in
+              [(NeutralExecutionStatus.PASSED, "통과"), (NeutralExecutionStatus.ASSERTION_FAILED, "불일치"),
+               (NeutralExecutionStatus.EXECUTION_ERROR, "오류"), (NeutralExecutionStatus.TIMEOUT, "시간 초과"),
+               (NeutralExecutionStatus.SKIPPED, "건너뜀")])
+            + "\n" + safe(verification_scope_summary(report.model_dump(mode="json", by_alias=True))))
+    issues = [f"• {safe(f.test_id or '실행 전체')}: {safe(f.rationale)}" for f in report.findings]
+    issues += [f"• {safe(e.tc_id)} 미실행: {safe(e.reason)}" for e in report.automation_exclusions]
+    data = report.model_dump(mode="json", by_alias=True)
+    issues += ["• 정보 부족: " + safe(x) for x in data.get("제외된_정보_부족", [])]
+    issues += ["• 추가 확인: " + safe(x) for x in data.get("최종_확인_사항", [])]
+    if issues:
+        section("확인이 필요한 내용", "\n".join(issues))
+    next_step = ("결과를 검토하고 공식 TC 등록 여부를 결정하세요." if report.recommendation.value == "PASS"
+                 else "위 사유와 실행 증거를 검토하고, 필요한 보완 또는 재시험을 결정하세요.")
+    proposals = data.get("SRS_개정_제안", [])
+    next_step += f"\nSRS 개정 제안 {len(proposals)}건 — 원문과 비교 후 별도로 승인하세요." if proposals else "\n이번 보고의 SRS 개정 제안은 없습니다."
+    section("다음 단계", next_step + "\n자동 시험 결과는 공식 승인이나 제품 전체 출시 판정이 아닙니다.")
+    blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "Run ID: " + safe(report.run_id)}]})
+    return {"text": verdict + " · " + report.run_id, "blocks": blocks}
 def _run_test_case_catalog(run_dir: Path, design: dict, *, approved_assets_root: Path = DEFAULT_APPROVED_ASSETS_ROOT):
     """Shared TC detail source for UI, Notion and the human review document."""
     cases = {item["tc_id"]: item for item in design.get("test_cases", [])}
@@ -1347,7 +1357,7 @@ def run_external_reporting(args: argparse.Namespace) -> int:
             detail="Checkpoint 4 또는 최종 보고 무결성이 통과하지 않아 전송을 차단했습니다.",
         )
     else:
-        slack_payload = _slack_report_payload(report)
+        slack_payload = _slack_report_payload(report, run_dir)
         notion_records = _notion_report_records(bundle, report, run_dir)
         _write_json(slack_payload_file, slack_payload)
         _write_json(notion_payload_file, {"records": notion_records})

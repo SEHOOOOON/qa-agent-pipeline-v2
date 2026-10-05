@@ -1285,9 +1285,27 @@ def _catalog_from_snapshot(payload: dict[str, Any]) -> tuple[ExistingRegressionS
                 reuse_context_json=item.get("reuse_context_json"),
             )
         )
-    catalog = (*EXISTING_REGRESSION_CATALOG, *approved)
+    retired = _retired_tc_ids(payload)
+    catalog = tuple(item for item in (*EXISTING_REGRESSION_CATALOG, *approved)
+                    if item.tc_id not in retired)
     _existing_regression_by_id(catalog)
     return catalog
+
+
+def _retired_tc_ids(payload: dict[str, Any]) -> set[str]:
+    """Explicit human replacement records; old snapshots without them stay unchanged."""
+    rows = payload.get("supersessions", [])
+    if not isinstance(rows, list):
+        raise ValueError("TC 대체 기록 형식이 올바르지 않습니다.")
+    ids: set[str] = set()
+    for row in rows:
+        if (not isinstance(row, dict) or not isinstance(row.get("tc_id"), str)
+                or not isinstance(row.get("replaced_by"), str)
+                or not row.get("reviewer") or not row.get("note")
+                or row["tc_id"] == row["replaced_by"] or row["tc_id"] in ids):
+            raise ValueError("TC 대체 기록이 불완전하거나 중복됩니다.")
+        ids.add(row["tc_id"])
+    return ids
 
 
 def load_approved_regression_catalog(
@@ -1303,6 +1321,12 @@ def load_approved_regression_catalog(
     assets = registry.get("assets")
     if not isinstance(assets, list):
         raise ValueError("공식 자산 Registry의 assets 목록이 올바르지 않습니다.")
+    retired = _retired_tc_ids(registry)
+    known = {item.tc_id for item in EXISTING_REGRESSION_CATALOG} | {
+        str(item.get("official_tc_id")) for item in assets if isinstance(item, dict)}
+    for row in registry.get("supersessions", []):
+        if row["tc_id"] not in known or row["replaced_by"] not in known:
+            raise ValueError("TC 대체 기록의 대상이 등록 목록에 없습니다.")
     approved: list[ExistingRegressionSpec] = []
     snapshot_entries: list[dict[str, Any]] = []
     for asset in assets:
@@ -1404,17 +1428,19 @@ def load_approved_regression_catalog(
                 ensure_ascii=False,
             ),
         )
-        approved.append(spec)
-        snapshot_entries.append({
-            **_catalog_snapshot_entry(spec),
-            # Preserve the verified source bytes as UTF-8 text for later reports.
-            "test_case_json": resolved_files["test_case_file"].read_bytes().decode("utf-8"),
-        })
+        if tc_id not in retired:
+            approved.append(spec)
+            snapshot_entries.append({
+                **_catalog_snapshot_entry(spec),
+                # Preserve the verified source bytes as UTF-8 text for later reports.
+                "test_case_json": resolved_files["test_case_file"].read_bytes().decode("utf-8"),
+            })
     _existing_regression_by_id((*EXISTING_REGRESSION_CATALOG, *approved))
     return tuple(approved), {
         "contract_version": "1.0",
         "registry_sha256": _sha256_file(registry_file),
         "approved_assets": snapshot_entries,
+        "supersessions": registry.get("supersessions", []),
     }
 
 

@@ -29,6 +29,7 @@ def main():
     for key in tuple(os.environ):
         if key.startswith(('OPENAI_', 'NOTION_', 'SLACK_')):
             os.environ.pop(key, None)
+    os.environ["PYTHON_DOTENV_DISABLED"] = "1"
     output = ROOT / 'runs/offline' / (datetime.now().strftime('%Y%m%d-%H%M%S-') + uuid.uuid4().hex[:6])
     output.mkdir(parents=True, exist_ok=False)
     before = protected_hashes()

@@ -1,5 +1,11 @@
 # 자동 테스트 카탈로그
 
+본시험 구조화 관찰 기록: `test_controller_common_lifecycle_on_unmodified_product`는 기존 다섯 관제점 조작·복원 검사에 더해 각 검사 정의·실제 값·일치 여부·완료 기록을 확인합니다. P2의 별도 로컬 대조 및 변조·누락·제품 불일치 반례는 P2 `test_execution_observations.py`에서 관리합니다. 실제 모델 채점 정확도와 구분합니다.
+
+Slack 표시 회귀: test_readable_slack_report_preserves_verdict_and_does_not_invent_restore는 정상/불일치 제목, 네 요약 구역, 근거 없는 복원 성공 금지, 승인 경계와 메시지 길이를 확인합니다. 실제 외부 전송 시험은 아닙니다.
+
+test_slack_readable_terms_only_change_display는 한글 표시 변환 시 TC 원문·부정 표현·수치·알 수 없는 코드 보존과 실패/미실행의 통과 표시 방지를 확인합니다.
+
 이 문서는 파이프라인 코드의 회귀검사 목록입니다. **제품 TC 목록이나 실제 AI의 정확도·성공률이 아닙니다.** 현재 실행 수치와 성공/실패 증거는 [인계 문서](../PROJECT_HANDOFF.md)에 기록합니다.
 
 ## 1. 역할별 검사 위치
@@ -17,7 +23,13 @@
 
 공유 데이터와 대역은 [pipeline_test_support.py](../tests/pipeline_test_support.py)에서 관리합니다. 같은 테스트 함수도 입력 조합에 따라 여러 건으로 수집되므로 함수 수와 실행 건수를 혼동하지 않습니다.
 
+Agent 3의 클릭 관찰 회귀는 `test_observed_card_and_generic_direct_handler`(지정/일반 요소의 inline·property handler와 조회·위임 이벤트 구분), `test_observed_direct_handler_preserves_specialized_controls`(입력 종류 보존), `test_controller_device_select_hint_reaches_semantic_review`(검토 입력까지 동일 힌트 전달), `test_compiled_device_selection_checks_effect_not_just_handler`(기존 실행 코드의 대상 ID 확인)을 포함합니다. 핸들러 존재만으로 시험 성공을 인정하지 않으며 실제 AI의 재검토 결과는 이 검사에서 확인하지 않습니다.
+
 ## 2. 유지해야 하는 반례
+
+TC 자산 비교 회귀는 `tests/test_pipeline_ui.py`의 `test_tc_comparison_*`에서 다섯 관제점에 같은 추가/대체 처리가 적용되는지, 기본 TC와 승인 TC 제외·과거 Snapshot/원본 보존, 잘못된 선택·중복 선택·사유 누락·오래된 비교 해시·파일 변조 차단, 미등록/보류 불변, 저장 실패 복구와 실제 브라우저→HTTP 전달을 검사한다. 대체 전 선택을 저장한 Run의 회귀 실행 차단도 포함한다. 시험용 후보와 일부 출처 검증 대역을 쓰므로 실제 모델의 의미 판단·공식 자산 승인 결과로 세지 않는다.
+
+추가 반례: `test_registered_source_without_local_decision_cannot_record_new_intent`는 공식 등록은 남았지만 실행별 승인 기록이 누락되거나 보류인 경우 새 승인·대체·미등록·보류 기록을 차단한다. `test_multiple_replacements_preserve_existing_assets_and_rollback`은 복수 TC 대체의 목록 반영·원본 보존과 기존 자산이 있는 상태의 저장 실패 복구를 확인한다. 복수 선택 처리 시험이지 서로 다른 시험의 의미적 대체 가능성을 판정하는 검사는 아니다.
 
 | 검사 묶음 | 정상 허용 | 계속 막아야 할 경우 |
 |---|---|---|
@@ -55,6 +67,8 @@ git diff --check
 실패·오류·skip·중복·수집 수를 구분해 기록합니다. 여러 부분 실행의 합을 전체 검증률로 표시하지 않습니다. 오래된 [분기 감사](../archive/2026-09-28/branch_audit.json)의 미실행 목록을 안 쓰는 코드라는 이유로 삭제하지 않습니다.
 
 ## 5. 제품 TC와 공개 자산
+
+보고 CLI 설정 회귀는 test_integrity_cli.py에서 전송 명령만 .env 로딩, 기존 환경변수 우선, UTF-8 BOM, 명시 경로 누락, 작업 디렉터리 독립성, 오프라인 로딩 차단을 확인합니다. 실제 서비스 인증·수신 검증은 별도입니다.
 
 V1 기준 제품 테스트는 [test_controller.py](../product_baseline/tests/test_controller.py), 공식 승인 TC는 [registry.json](../approved_assets/registry.json)에서 확인합니다. 환경 점검·제품 TC·고정 분류 시연은 별도 집계하며 자동 테스트 목록과 합산하지 않습니다.
 

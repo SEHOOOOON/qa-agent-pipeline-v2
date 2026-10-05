@@ -3,6 +3,56 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("command", ["report", "agent4"])
+@pytest.mark.parametrize("send", [False, True])
+def test_reporting_cli_loads_env_only_for_explicit_send(tmp_path, monkeypatch, command, send):
+    import qa_pipeline_orchestrator as orchestrator
+    env_file = tmp_path / ".env"
+    env_file.write_text("\ufeffSLACK_WEBHOOK_URL=fixture-slack\nNOTION_API_KEY=fixture-notion\n", encoding="utf-8")
+    monkeypatch.delenv("PYTHON_DOTENV_DISABLED", raising=False)
+    monkeypatch.delenv("SLACK_WEBHOOK_URL", raising=False)
+    monkeypatch.setenv("NOTION_API_KEY", "existing-setting")
+    observed = {}
+    def handler(args):
+        observed["slack"] = os.getenv("SLACK_WEBHOOK_URL")
+        observed["notion"] = os.getenv("NOTION_API_KEY")
+        return 0
+    monkeypatch.setattr(orchestrator, "run_external_reporting", handler)
+    monkeypatch.setattr(orchestrator, "run_agent4", handler)
+    argv = [command, "--run-id", "RUN-TEST", "--env-file", str(env_file)]
+    assert orchestrator.main(argv + (["--send"] if send else [])) == 0
+    assert observed == {"slack": "fixture-slack" if send else None, "notion": "existing-setting"}
+
+
+def test_reporting_cli_offline_does_not_reload_credentials(tmp_path, monkeypatch):
+    import qa_pipeline_orchestrator as orchestrator
+    import dotenv
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
+    monkeypatch.setattr(dotenv, "load_dotenv", lambda *a, **k: pytest.fail("dotenv must remain disabled"))
+    monkeypatch.setattr(orchestrator, "run_external_reporting", lambda args: 0)
+    assert orchestrator.main(["report", "--run-id", "RUN-TEST", "--send"]) == 0
+
+
+def test_reporting_cli_default_env_is_source_root_not_cwd(tmp_path, monkeypatch):
+    import qa_pipeline_orchestrator as orchestrator
+    import dotenv
+    monkeypatch.delenv("PYTHON_DOTENV_DISABLED", raising=False)
+    monkeypatch.chdir(tmp_path)
+    observed = []
+    monkeypatch.setattr(dotenv, "load_dotenv", lambda path, **kw: observed.append((path, kw)))
+    monkeypatch.setattr(orchestrator, "run_external_reporting", lambda args: 0)
+    assert orchestrator.main(["report", "--run-id", "RUN-TEST", "--send"]) == 0
+    assert observed == [(REPO_ROOT / ".env", {"override": False, "encoding": "utf-8-sig"})]
+
+
+def test_reporting_cli_missing_explicit_env_stops_before_handler(tmp_path, monkeypatch):
+    import qa_pipeline_orchestrator as orchestrator
+    monkeypatch.delenv("PYTHON_DOTENV_DISABLED", raising=False)
+    monkeypatch.setattr(orchestrator, "run_external_reporting", lambda args: pytest.fail("must not send"))
+    with pytest.raises(SystemExit):
+        orchestrator.main(["report", "--run-id", "RUN-TEST", "--send", "--env-file", str(tmp_path / "missing.env")])
+
+
 def test_editable_execution_instructions_match_workspace_runtime():
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     guide = (REPO_ROOT / "docs/PROJECT_GUIDE.md").read_text(encoding="utf-8")

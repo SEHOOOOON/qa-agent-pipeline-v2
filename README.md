@@ -10,7 +10,7 @@
 | Agent 2 · 테스트 설계 | 기존 TC로 확인할 수 있는지 비교하고 부족한 시험을 설계 | 사용할 기존 TC와 새 상세 TC |
 | Agent 3 · 자동화·실행 | TC를 바탕으로 자동화 코드를 만들고 실제 화면에서 시험·복원 | 코드와 실행 증거 |
 | Agent 4 · 결과 분석 | 실행 결과와 미실행 사유를 분류해 보고 | 최종 보고서와 사람 검토 자료 |
-| 사람 · 최종 판단 | 결과를 검토하고 SRS 개정·공식 TC 등록 여부를 결정 | 승인 또는 보류 기록 |
+| 사람 · 최종 판단 | 결과와 기존 TC를 비교하고 SRS 개정·TC 추가/대체 여부를 결정 | 승인·미등록·보류 기록 |
 
 관련 기존 TC는 이름이 비슷해서가 아니라 **요청과 실제 검증 범위가 관련될 때** 선택합니다. 기존 TC로 충분하면 새 TC를 중복 생성하지 않습니다. PASS는 실행 결과이며 공식 등록 승인이 아닙니다.
 
@@ -21,6 +21,8 @@
 - 별도 모델 검토와 코드 검사는 원문 근거·필수 확인·단계 간 전달을 점검합니다. 모델의 오판 가능성은 남습니다.
 - Agent 4는 생성형 AI가 아닌 규칙 기반 분석기입니다. 사람의 최종 승인도 자동화하지 않습니다.
 
+새로 생성한 자동화는 본시험에서 실제 읽은 값과 검사 번호·계획상 대상·기대값·연결 시점을 stdout에 구조화해 남깁니다. P2는 이 기록을 계획과 로컬 대조하며, 코드 생성기의 정확성은 별도 회귀검사로 확인합니다. 이 기록은 독립 센서나 모델 정확도 증명이 아니며 과거 코드를 소급 변경하지 않습니다.
+
 V1은 고정 산출물로 흐름을 보여준 **Fixture 기반 Workflow Prototype**입니다. V2는 실제 모델 생성과 제품 시험을 연결합니다. 내부 구현과 과거 TC 호환 방식은 [프로젝트 안내](docs/PROJECT_GUIDE.md)에 설명합니다.
 
 ## 진행·중단·승인 기준
@@ -30,6 +32,7 @@ V1은 고정 산출물로 흐름을 보여준 **Fixture 기반 Workflow Prototyp
 - 내부 오류는 이후 후보의 추가 호출을 중단합니다. 복원 실패 시 같은 환경에서 후속 시험을 계속하지 않습니다. 자동화 지원 부족과 실제 제품의 기대결과 불일치는 구분합니다.
 - 값을 변경하는 시험은 준비 전 상태를 기록하고 복원·확인합니다. 조회만 하는 시험에는 불필요한 복원을 요구하지 않습니다.
 - SRS 개정과 공식 TC 등록은 사람의 동의를 받아 반영합니다. 보고서를 작성하거나 PASS가 나온 것만으로 기존 자산이 바뀌지는 않습니다.
+- 후보 승인 화면에서 이번 TC와 기존 기본·승인 TC를 비교하고 추가·선택한 TC 대체·미등록·보류를 결정합니다. 요구사항 연결은 목록 정렬 근거이지 중복 판정이 아닙니다. 대체 기록을 남기고 이후 실행 목록에서 제외하며 원본 파일·과거 실행 기록은 보존합니다.
 
 ## 구현 범위와 증거 읽는 법
 
@@ -73,23 +76,25 @@ Python 3.10 이상이 필요합니다. OpenAI API 키는 실행 환경의 `OPENA
 python -m pip install -e ".[agent3,test]"
 python -m playwright install chromium
 
-# 저장된 실제 Run 조회
-python -m qa_pipeline_ui
+# 현재 저장소의 코드로 저장된 실제 Run 조회
+python src/qa_pipeline_ui.py
 
 # 새 API 실행과 사람 승인 기능 활성화
-python -m qa_pipeline_ui --allow-live-run --allow-asset-approval
+python src/qa_pipeline_ui.py --allow-live-run --allow-asset-approval
 ```
 
 브라우저에서 `http://127.0.0.1:8765/`에 접속합니다. 새로 복제한 저장소에는 로컬 실행 기록이 없어 조회 목록이 비어 있을 수 있습니다. `pytest-playwright`는 agent3 설치 옵션에 포함됩니다. 실제 실행·승인 요청은 같은 로컬 페이지의 JSON 요청만 허용합니다.
+
+여러 작업 폴더가 있다면 반드시 실행할 저장소 루트에서 위 명령을 사용하세요. `python -m qa_pipeline_ui`는 Python에 설치 연결된 다른 폴더를 읽을 수 있습니다. 위의 소스 파일 직접 실행은 현재 폴더의 코드를 사용하며, 실제 API 호출이나 승인 권한을 추가로 부여하지 않습니다. 설치형 명령을 사용하려면 `python -c "import qa_pipeline_v2; print(qa_pipeline_v2.__file__)"`로 현재 저장소의 `src`인지 먼저 확인하세요.
 
 HTML을 직접 열거나 공개 웹 주소에 접속하면 MED 풍량 정상 변경의 저장된 데모가 표시됩니다. 데모 승인은 화면 시연이며 파일에 반영되지 않습니다. 실제 시험은 로컬 서버가 별도 브라우저에서 수행하고, 관제 화면에는 실행 상태와 결과가 표시됩니다.
 
 CLI에서는 현재 SRS와 비교할 변경 요청 JSON을 준비한 뒤 다음 순서로 실행합니다. 아래 `변경요청.json`은 실제 파일 경로로 바꿉니다. [요청·실행 증거 목록](examples/README.md)의 HIGH·MED 요청은 과거 시연 자료이며, 이미 등록된 내용을 신규 등록하는 예시로 사용하지 않습니다.
 
 ```powershell
-python -m qa_pipeline_v2 pipeline --request "변경요청.json" --target-html "product_baseline/virtual-controller.html"
-python -m qa_pipeline_v2 execute --run-id "RUN-..." --target-html "product_baseline/virtual-controller.html"
-python -m qa_pipeline_v2 agent4 --run-id "RUN-..."
+python src/qa_pipeline_v2.py pipeline --request "변경요청.json" --target-html "product_baseline/virtual-controller.html"
+python src/qa_pipeline_v2.py execute --run-id "RUN-..." --target-html "product_baseline/virtual-controller.html"
+python src/qa_pipeline_v2.py agent4 --run-id "RUN-..."
 ```
 
 `pipeline`은 Agent 1~3, `execute`는 완료 후보 확인·관련 기존 회귀, `agent4`는 분류·최종 보고를 담당합니다. 후자의 두 명령은 모델을 호출하지 않습니다. Slack·Notion은 기본 미리보기이며 CLI에서 `--send`를 명시할 때 실제 전송합니다. 화면에서 시작한 실행은 외부 보고 미리보기까지 진행합니다.
@@ -97,6 +102,10 @@ python -m qa_pipeline_v2 agent4 --run-id "RUN-..."
 Notion은 실행 후 TC 제목·결과·분류 요약과 함께, 검증된 설계의 사전조건·단계별 조작과 기대결과·복원을 해당 실행 페이지 본문에 연결합니다. 같은 내용의 재전송은 중복 추가하지 않고 수동 메모는 보존합니다. 과거 TC에 단계 연결 정보가 없으면 임의로 보충하지 않습니다. Agent 2 초안만 별도 게시하는 기능은 없으며, 로컬 미리보기·자동 테스트와 실제 Notion 게시 확인은 구분합니다.
 
 ## 로컬 검증
+
+CLI의 `agent4 --send` 또는 `report --send`는 V2 소스 저장소 루트의 `.env`를 읽습니다. 필요한 설정은 `SLACK_WEBHOOK_URL`, `NOTION_API_KEY`, `NOTION_DATA_SOURCE_ID`이며 기존 환경변수를 덮어쓰지 않습니다. 다른 작업 폴더의 파일은 `--env-file "설정파일경로"`로 지정합니다. V1 파일을 자동 검색하거나 복사하지 않습니다.
+
+미리보기·일반 import·UI 기본 실행은 이 파일을 자동 로드하거나 전송하지 않습니다. OpenAI 호출 설정은 기존대로입니다. 오프라인 도구는 `PYTHON_DOTENV_DISABLED=1`로 로딩을 막습니다. 함수 직접 호출은 호출자가 환경변수를 준비합니다. 실제 전송은 별도 승인 후 수행하며 `.env`는 Git에 추가하지 않습니다.
 
 ```powershell
 python scripts/verify_offline.py

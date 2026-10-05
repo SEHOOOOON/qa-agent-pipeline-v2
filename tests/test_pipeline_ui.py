@@ -3,6 +3,269 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("requirement", ["REQ-CONTROL-001", "REQ-MODE-001", "REQ-TEMP-001", "REQ-FAN-001", "REQ-LOCK-001"])
+def test_tc_comparison_replacement_all_controls(tmp_path, monkeypatch, requirement):
+    roots = build_approvable_ui_run(tmp_path, monkeypatch)
+    runs, assets, target, run_id, tc_id, _ = roots
+    run = runs / run_id
+    case = cp2_valid_design().test_cases[0].model_dump(mode="json")
+    case.update(tc_id=tc_id, requirement_ids=[requirement])
+    _write_json(run / "agent2_test_design.json", {"test_cases": [case]})
+    first = pipeline_ui.decide_candidate_asset(runs, assets, target, run_id, tc_id,
+        decision="APPROVE", reviewer="검토자", note="첫 기준")
+    original = (assets / "test_cases/TC-V2-001.json").read_bytes()
+    import shutil
+    next_id = "RUN-20261004-120000-ABCDEF"
+    shutil.copytree(run, runs / next_id)
+    (runs / next_id / "asset_decisions.json").unlink()
+    comparison = pipeline_ui.candidate_asset_comparison(case, assets)
+    related = [item for item in comparison["existing"] if item["shared_requirement_ids"]]
+    assert any(item["tc_id"] == first["official_tc_id"] for item in related)
+    record = pipeline_ui.decide_candidate_asset(runs, assets, target, next_id, tc_id,
+        decision="APPROVE", reviewer="검토자", note="변경 기준으로 대체",
+        registration_mode="REPLACE", replace_tc_ids=["TC-V2-001"],
+        comparison_sha256=comparison["fingerprint"])
+    assert record["official_tc_id"] == "TC-V2-002"
+    assert record["replaced_tc_ids"] == ["TC-V2-001"]
+    assert (assets / "test_cases/TC-V2-001.json").read_bytes() == original
+    catalog, snapshot = pipeline.load_approved_regression_catalog(assets)
+    assert [item.tc_id for item in catalog] == ["TC-V2-002"]
+    assert "TC-V2-001" not in {item.tc_id for item in pipeline._catalog_from_snapshot(snapshot)}
+    # Historical snapshots are not rewritten, and the old source files remain readable.
+    repeated = pipeline_ui.decide_candidate_asset(runs, assets, target, next_id, tc_id,
+        decision="APPROVE", reviewer="검토자", note="반복",
+        registration_mode="REPLACE", replace_tc_ids=["TC-V2-001"],
+        comparison_sha256=comparison["fingerprint"])
+    assert repeated == record
+    shown = pipeline_ui.candidate_asset_comparison(case, assets)
+    assert not next(item for item in shown["existing"] if item["tc_id"] == "TC-V2-001")["active"]
+
+
+@pytest.mark.parametrize("decision", ["APPROVE", "HOLD", "DECLINE"])
+@pytest.mark.parametrize("stored_decision", [None, "HELD"])
+def test_registered_source_without_local_decision_cannot_record_new_intent(tmp_path, monkeypatch, decision, stored_decision):
+    runs, assets, target, run_id, tc_id, _ = build_approvable_ui_run(tmp_path, monkeypatch)
+    pipeline_ui.decide_candidate_asset(runs, assets, target, run_id, tc_id,
+        decision="APPROVE", reviewer="첫 검토자", note="기존 승인")
+    # Only this isolated test copy loses its local decision; registry remains authoritative.
+    decision_file = runs / run_id / "asset_decisions.json"
+    decision_file.unlink()
+    if stored_decision:
+        _write_json(decision_file, {"decisions": [{"tc_id": tc_id, "decision": stored_decision}]})
+    decision_before = decision_file.read_bytes() if decision_file.exists() else None
+    before = {p.relative_to(assets): p.read_bytes() for p in assets.rglob("*") if p.is_file()}
+    case = pipeline_ui._candidate_test_case(runs / run_id, tc_id)
+    comparison = pipeline_ui.candidate_asset_comparison(case, assets)
+    kwargs = dict(decision=decision, reviewer="새 검토자", note="다른 판단")
+    if decision == "APPROVE":
+        kwargs.update(registration_mode="REPLACE", replace_tc_ids=["TC-TEMP-001"],
+            comparison_sha256=comparison["fingerprint"])
+    with pytest.raises(ValueError, match="이미 공식 등록"):
+        pipeline_ui.decide_candidate_asset(runs, assets, target, run_id, tc_id, **kwargs)
+    assert (decision_file.read_bytes() if decision_file.exists() else None) == decision_before
+    assert before == {p.relative_to(assets): p.read_bytes() for p in assets.rglob("*") if p.is_file()}
+
+
+@pytest.mark.parametrize("fail_write", [False, True])
+def test_multiple_replacements_preserve_existing_assets_and_rollback(tmp_path, monkeypatch, fail_write):
+    import shutil
+    runs, assets, target, run_id, tc_id, _ = build_approvable_ui_run(tmp_path, monkeypatch)
+    case = cp2_valid_design().test_cases[0].model_dump(mode="json")
+    case["tc_id"] = tc_id
+    _write_json(runs / run_id / "agent2_test_design.json", {"test_cases": [case]})
+    pipeline_ui.decide_candidate_asset(runs, assets, target, run_id, tc_id,
+        decision="APPROVE", reviewer="검토자", note="첫 자산")
+    next_id = "RUN-20261004-140000-ABCDEF"
+    shutil.copytree(runs / run_id, runs / next_id)
+    (runs / next_id / "asset_decisions.json").unlink()
+    case = pipeline_ui._candidate_test_case(runs / next_id, tc_id)
+    comparison = pipeline_ui.candidate_asset_comparison(case, assets)
+    before = {p.relative_to(assets): p.read_bytes() for p in assets.rglob("*") if p.is_file()}
+    kwargs = dict(decision="APPROVE", reviewer="검토자", note="복수 선택 처리 검증",
+        registration_mode="REPLACE", replace_tc_ids=["TC-V2-001", "TC-TEMP-001"],
+        comparison_sha256=comparison["fingerprint"])
+    if fail_write:
+        write = pipeline_ui._write_json_atomic
+        def fail(path, payload):
+            if path.name == "asset_decisions.json":
+                raise OSError("after registry update")
+            return write(path, payload)
+        monkeypatch.setattr(pipeline_ui, "_write_json_atomic", fail)
+        with pytest.raises(OSError):
+            pipeline_ui.decide_candidate_asset(runs, assets, target, next_id, tc_id, **kwargs)
+        assert not (runs / next_id / "asset_decisions.json").exists()
+        assert before == {p.relative_to(assets): p.read_bytes() for p in assets.rglob("*") if p.is_file()}
+    else:
+        record = pipeline_ui.decide_candidate_asset(runs, assets, target, next_id, tc_id, **kwargs)
+        assert record["replaced_tc_ids"] == kwargs["replace_tc_ids"]
+        catalog, snapshot = pipeline.load_approved_regression_catalog(assets)
+        assert [tc.tc_id for tc in catalog] == ["TC-V2-002"]
+        active = {tc.tc_id for tc in pipeline._catalog_from_snapshot(snapshot)}
+        assert not active.intersection(kwargs["replace_tc_ids"])
+        assert "TC-MODE-001" in active
+        assert all((assets / p).read_bytes() == value for p, value in before.items() if p.name != "registry.json")
+
+
+def test_tc_comparison_baseline_replacement_and_snapshot_history(tmp_path, monkeypatch):
+    runs, assets, target, run_id, tc_id, _ = build_approvable_ui_run(tmp_path, monkeypatch)
+    case = cp2_valid_design().test_cases[0].model_dump(mode="json")
+    case.update(tc_id=tc_id, requirement_ids=["REQ-TEMP-001"])
+    _write_json(runs / run_id / "agent2_test_design.json", {"test_cases": [case]})
+    before = pipeline._catalog_from_snapshot({})
+    comparison = pipeline_ui.candidate_asset_comparison(case, assets)
+    pipeline_ui.decide_candidate_asset(runs, assets, target, run_id, tc_id,
+        decision="APPROVE", reviewer="검토자", note="상한 시험 대체",
+        registration_mode="REPLACE", replace_tc_ids=["TC-TEMP-001"],
+        comparison_sha256=comparison["fingerprint"])
+    _, snapshot = pipeline.load_approved_regression_catalog(assets)
+    current = pipeline._catalog_from_snapshot(snapshot)
+    assert "TC-TEMP-001" not in {item.tc_id for item in current}
+    assert "TC-MODE-001" in {item.tc_id for item in current}
+    assert "TC-TEMP-001" in {item.tc_id for item in before}
+    # A saved old design must not execute a TC retired after its selection.
+    old_run_id = "RUN-20261004-130000-ABCDEF"
+    old_run = runs / old_run_id
+    design = cp2_valid_design().model_copy(update={
+        "existing_tc_comparison_completed": True,
+        "related_existing_tests": [pipeline.ExistingTestSelection(
+            tc_id="TC-TEMP-001", source_condition_ids=["COND-001"], selection_reason="과거 선택")],
+    })
+    _write_json(old_run / "agent2_test_design.json", design.model_dump(mode="json"))
+    monkeypatch.setattr(pipeline_execution, "_candidate_execution_records", lambda *_: ([], [], {}))
+    def unexpected(*a, **k):
+        raise AssertionError("대체된 TC 실행 전 중단해야 합니다")
+    monkeypatch.setattr(pipeline_execution, "run_existing_regression", unexpected)
+    baseline = tmp_path / "test_baseline.py"
+    baseline.write_text("def test_example(): pass", encoding="utf-8")
+    with pytest.raises(ValueError, match="사람 승인으로 대체"):
+        pipeline_execution.run_validation_execution(SimpleNamespace(
+            runs_root=str(runs), run_id=old_run_id, target_html=str(target),
+            baseline_tests=str(baseline), approved_assets_root=str(assets), timeout=5))
+
+
+def test_tc_comparison_changed_registry_or_source_requires_refresh(tmp_path, monkeypatch):
+    runs, assets, target, run_id, tc_id, _ = build_approvable_ui_run(tmp_path, monkeypatch)
+    case = pipeline_ui._candidate_test_case(runs / run_id, tc_id)
+    view = pipeline_ui.candidate_asset_comparison(case, assets)
+    _write_json(assets / "registry.json", {"assets": [], "review_note": "another change"})
+    before = (assets / "registry.json").read_bytes()
+    with pytest.raises(ValueError, match="다시 비교"):
+        pipeline_ui.decide_candidate_asset(runs, assets, target, run_id, tc_id,
+            decision="APPROVE", reviewer="검토자", note="새 TC",
+            comparison_sha256=view["fingerprint"])
+    assert (assets / "registry.json").read_bytes() == before
+    assert not (runs / run_id / "asset_decisions.json").exists()
+    pipeline_ui.decide_candidate_asset(runs, assets, target, run_id, tc_id,
+        decision="APPROVE", reviewer="검토자", note="등록")
+    (assets / "test_cases/TC-V2-001.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="원본이 변경"):
+        pipeline_ui.candidate_asset_comparison(case, assets)
+
+
+@pytest.mark.parametrize("damage", ["missing", "unknown", "duplicate", "stale", "no_note", "add_with_targets"])
+def test_tc_comparison_rejects_invalid_replacement_without_writes(tmp_path, monkeypatch, damage):
+    runs, assets, target, run_id, tc_id, _ = build_approvable_ui_run(tmp_path, monkeypatch)
+    case = pipeline_ui._candidate_test_case(runs / run_id, tc_id)
+    comparison = pipeline_ui.candidate_asset_comparison(case, assets)
+    kwargs = dict(decision="APPROVE", reviewer="검토자", note="대체",
+        registration_mode="REPLACE", replace_tc_ids=["TC-TEMP-001"],
+        comparison_sha256=comparison["fingerprint"])
+    if damage == "missing": kwargs["replace_tc_ids"] = []
+    if damage == "unknown": kwargs["replace_tc_ids"] = ["TC-NOT-001"]
+    if damage == "duplicate": kwargs["replace_tc_ids"] *= 2
+    if damage == "stale": kwargs["comparison_sha256"] = "old"
+    if damage == "no_note": kwargs["note"] = ""
+    if damage == "add_with_targets": kwargs["registration_mode"] = "ADD"
+    with pytest.raises(ValueError):
+        pipeline_ui.decide_candidate_asset(runs, assets, target, run_id, tc_id, **kwargs)
+    assert not (assets / "registry.json").exists()
+    assert not (runs / run_id / "asset_decisions.json").exists()
+
+
+@pytest.mark.parametrize("decision", ["HOLD", "DECLINE"])
+def test_tc_comparison_no_registration_preserves_assets(tmp_path, monkeypatch, decision):
+    runs, assets, target, run_id, tc_id, _ = build_approvable_ui_run(tmp_path, monkeypatch)
+    result = pipeline_ui.decide_candidate_asset(runs, assets, target, run_id, tc_id,
+        decision=decision, reviewer="검토자", note="기존 시험으로 충분")
+    assert result["decision"] == {"HOLD": "HELD", "DECLINE": "DECLINED"}[decision]
+    assert not (assets / "registry.json").exists()
+
+
+def test_tc_comparison_replacement_rolls_back_registry(tmp_path, monkeypatch):
+    runs, assets, target, run_id, tc_id, _ = build_approvable_ui_run(tmp_path, monkeypatch)
+    case = pipeline_ui._candidate_test_case(runs / run_id, tc_id)
+    comparison = pipeline_ui.candidate_asset_comparison(case, assets)
+    write = pipeline_ui._write_json_atomic
+    def fail_after_registry(path, payload):
+        if path.name == "asset_decisions.json":
+            raise OSError("decision write failed")
+        return write(path, payload)
+    monkeypatch.setattr(pipeline_ui, "_write_json_atomic", fail_after_registry)
+    with pytest.raises(OSError):
+        pipeline_ui.decide_candidate_asset(runs, assets, target, run_id, tc_id,
+            decision="APPROVE", reviewer="검토자", note="대체",
+            registration_mode="REPLACE", replace_tc_ids=["TC-TEMP-001"],
+            comparison_sha256=comparison["fingerprint"])
+    assert not (assets / "registry.json").exists()
+    assert not list(assets.rglob("*.json"))
+
+
+def test_tc_comparison_browser_http_replace_and_decline(tmp_path, monkeypatch):
+    import threading
+    from http.server import ThreadingHTTPServer
+    from playwright.sync_api import sync_playwright, expect
+    runs, assets, target, run_id, tc_id, _ = build_approvable_ui_run(tmp_path, monkeypatch)
+    target.write_bytes((REPO_ROOT / "product_baseline/virtual-controller.html").read_bytes())
+    result_file = runs / run_id / "validation_execution.json"
+    validation = json.loads(result_file.read_text(encoding="utf-8"))
+    validation["candidate_results"][0]["target_sha256"] = _sha256_file(target)
+    _write_json(result_file, validation)
+    bridge = pipeline_ui.PipelineUiBridge(runs_root=runs, requests_root=tmp_path,
+        target_html=target, allow_live_run=False, allow_asset_approval=True,
+        approved_assets_root=assets, srs_path=tmp_path / "srs.md")
+    server = ThreadingHTTPServer(("127.0.0.1", 0), pipeline_ui.make_handler(bridge))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    origin = f"http://127.0.0.1:{server.server_port}"
+    try:
+        with sync_playwright() as api:
+            browser = api.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1440, "height": 1100})
+            page.goto(origin, wait_until="domcontentloaded")
+            page.wait_for_function("qaLiveState.run !== null")
+            page.evaluate("openQaLiveModal('agent4')")
+            expect(page.locator("#qa-live-tc-comparison")).to_be_visible()
+            page.locator("#qa-live-reviewer").fill("시험 검토자")
+            page.locator("#qa-live-approval-note").fill("기존 TC와 비교한 사람 판단")
+            page.locator("#qa-live-decline-btn").click()
+            expect(page.locator("#qa-live-approval-status")).to_contain_text("등록하지 않음")
+            assert not (assets / "registry.json").exists()
+            page.locator("#qa-live-registration-mode").select_option("REPLACE")
+            page.locator("#qa-live-approve-btn").click()
+            expect(page.locator("#qa-live-approval-status")).to_contain_text("직접 선택")
+            page.get_by_text("다른 TC·대체 이력도 보기", exact=True).click()
+            # All controls are available; relatedness is not an automatic deletion decision.
+            page.locator("summary").filter(has_text="TC-TEMP-001 ·").click()
+            page.locator('.qa-tc-replacement[value="TC-TEMP-001"]').check()
+            page.locator("#qa-live-approve-btn").click()
+            expect(page.locator("#qa-live-approval-status")).to_contain_text("대체 대상: TC-TEMP-001")
+            assert not (assets / "registry.json").exists()
+            evidence = REPO_ROOT / "runs/asset-comparison-20261004"
+            evidence.mkdir(parents=True, exist_ok=True)
+            page.locator("#qa-live-tc-comparison").screenshot(path=str(evidence / "comparison.png"))
+            page.locator("#qa-live-approve-btn").click()
+            expect(page.locator("#qa-live-approval-status")).to_contain_text("등록 완료")
+            registry = json.loads((assets / "registry.json").read_text(encoding="utf-8"))
+            assert registry["supersessions"][0]["tc_id"] == "TC-TEMP-001"
+            assert registry["supersessions"][0]["replaced_by"] == "TC-V2-001"
+            expect(page.locator("#qa-live-decline-btn")).to_be_disabled()
+            browser.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 @pytest.mark.parametrize('mutation,expected', [('none', None), ('precondition', '사전조건'), ('sequence', '조작·복원 순서')])
 def test_approval_recheck_distinguishes_sequence_from_precondition(tmp_path, monkeypatch, mutation, expected):
     # Isolate diagnostic routing; source/hash checks are tested independently.

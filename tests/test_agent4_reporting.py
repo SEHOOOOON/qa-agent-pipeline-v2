@@ -3,6 +3,45 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("status", ["PASSED", "ASSERTION_FAILED", "NOT_EXECUTED"])
+def test_slack_readable_terms_only_change_display(tmp_path, monkeypatch, status):
+    import qa_pipeline_reporting as reporting
+    run, run_id = _write_agent4_inputs(tmp_path)
+    assert pipeline.run_agent4(SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))) == 0
+    report = pipeline.FinalReport.model_validate_json((run / "final_report.json").read_text(encoding="utf-8"))
+    row = {"source": "신규·수정 후보", "tc_id": "TC-CAND-001",
+           "title": "OPERATION에서 STOP으로 변경", "status": status,
+           "expected_results": ["적용 직후 내부 status는 STOP이다.",
+                                "STOP으로 변경되지 않아야 한다. 24°C 유지.",
+                                "CUSTOM_STOP 및 STOPPED는 원문 유지"],
+           "evidence_files": []}
+    before = json.dumps(row, ensure_ascii=False)
+    monkeypatch.setattr(reporting, "build_run_test_rows", lambda _: [row])
+    text = json.dumps(reporting._slack_report_payload(report, run), ensure_ascii=False)
+    assert "운전에서 정지로 변경" in text
+    assert "내부 전원 상태는 정지이다." in text
+    assert "정지로 변경되지 않아야 한다. 24°C 유지." in text
+    assert "CUSTOM_STOP 및 STOPPED는 원문 유지" in text
+    assert ("위 기준 모두 통과" in text) == (status == "PASSED")
+    assert "복원·확인 기록 있음" not in text
+    assert json.dumps(row, ensure_ascii=False) == before
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_readable_slack_report_preserves_verdict_and_does_not_invent_restore(tmp_path, failed):
+    run, run_id = _write_agent4_inputs(tmp_path, candidate_status=(
+        pipeline.NeutralExecutionStatus.ASSERTION_FAILED if failed else pipeline.NeutralExecutionStatus.PASSED))
+    assert pipeline.run_agent4(SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))) == 0
+    payload = pipeline._read_json_payload(run / "slack_payload.json")
+    text = json.dumps(payload, ensure_ascii=False)
+    assert all(label in text for label in ("시험 내용", "확인 결과", "실행 요약", "다음 단계"))
+    assert "원래 상태 복원·확인 기록 있음" not in text
+    assert ("결과 검토 필요" if failed else "이번 시험 통과") in text
+    assert "공식 승인이나 제품 전체 출시 판정이 아닙니다" in text
+    assert len(payload["blocks"]) < 50
+    assert all(len(b.get("text", {}).get("text", "")) <= 3000 for b in payload["blocks"])
+
+
 @pytest.mark.parametrize("damaged", [False, True])
 def test_human_review_uses_same_approved_snapshot_details_as_ui(tmp_path, damaged):
     run, run_id = _write_agent4_inputs(tmp_path, candidate_status=pipeline.NeutralExecutionStatus.ASSERTION_FAILED)

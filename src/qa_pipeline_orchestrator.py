@@ -686,6 +686,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Slack·Notion에 실제 전송. 기본값은 Dry-run",
     )
     reporting.set_defaults(handler=run_external_reporting)
+    for command in (agent4, reporting):
+        command.add_argument(
+            "--env-file",
+            default=None,
+            help="--send 시 읽을 .env 파일. 생략하면 V2 소스 저장소 루트 사용; 기존 환경변수 우선",
+        )
     human_review = subparsers.add_parser(
         "human-review",
         help="완료된 Agent 4 결과에서 사람이 작성할 최종 검토 Markdown 생성",
@@ -710,6 +716,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        if getattr(args, "send", False) and os.getenv("PYTHON_DOTENV_DISABLED") != "1":
+            from dotenv import load_dotenv
+
+            env_file = getattr(args, "env_file", None)
+            env_path = Path(env_file) if env_file else Path(__file__).resolve().parents[1] / ".env"
+            if env_file and not env_path.is_file():
+                raise ValueError("지정한 환경 설정 파일을 찾을 수 없습니다.")
+            load_dotenv(env_path, override=False, encoding="utf-8-sig")
         return args.handler(args)
     except (OSError, ValueError, Agent1Error, Agent2Error, Agent3Error) as exc:
         parser.error(str(exc))
