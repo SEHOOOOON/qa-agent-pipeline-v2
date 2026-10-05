@@ -2,6 +2,121 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("prompt,marker,valid", [
+    ("agent3-3.43", None, True), ("agent3-3.43", "1.0", False),
+    ("agent3-3.44", "1.0", True), ("agent3-3.45", "1.0", True),
+    ("agent3-3.44", None, False), ("agent3-3.45", "unknown", False)])
+def test_execution_interface_policy_is_version_bound(prompt, marker, valid):
+    from qa_pipeline_execution import _agent3_review_options
+    manifest = dict(contract_version="4.10", prompt_version=prompt, grounding_contract="1.0",
+        task_boundary_contract="1.3", output_tolerance_contract="1.0", wording_policy="STRUCTURAL_ONLY_V1",
+        terminal_observation_contract="1.0", product_verdict_contract="1.0")
+    if marker is not None:
+        manifest["execution_interface_contract"] = marker
+    if valid:
+        assert _agent3_review_options(manifest)["execution_interface"] == (marker == "1.0")
+    else:
+        with pytest.raises(ValueError, match="실행 인터페이스"):
+            _agent3_review_options(manifest)
+
+
+@pytest.mark.parametrize("field,initial,target", [("setTemp", 27, 21), ("fanSpeed", "AUTO", "HIGH"),
+    ("status", "OPERATION", "STOP"), ("mode", "COOL", "HEAT"), ("locked", False, True)])
+def test_execution_interface_preserves_tc_review_and_old_payload(field, initial, target):
+    from qa_pipeline_agent3 import execution_interface_facts
+    case, plan = mapped_tc_fixture(field, initial, target)
+    observation = generic_control_guard_fixture()[2]
+    args = ("AGENT3", None, {}, plan)
+    options = dict(test_case=case, observation=observation, include_execution_contract=True,
+        include_review_responsibilities=True, include_task_boundaries="1.3", explicit_expectations_only=True)
+    old = grounding.build_grounding_input(*args, **options)
+    new = grounding.build_grounding_input(*args, **options, execution_interface=True)
+    assert "execution_interface" not in old["context"]
+    assert old == grounding.build_grounding_input(*args, **options, execution_interface=False)
+    assert old["items"] == new["items"] and old["artifact_sha256"] == new["artifact_sha256"]
+    facts = new["context"]["execution_interface"]
+    assert facts == execution_interface_facts(plan, observation)
+    assert facts["trial_success_proved"] is False
+    if field == "setTemp":
+        adapter = facts["adapters"][0]
+        assert adapter["read_selector"] == "#det-temp-display"
+        assert adapter["click_selectors"] == ["#det-temp-up-btn", "#det-temp-down-btn"]
+        # This fixture does not invent observations for missing dependencies.
+        observed = {e.selector: e for e in observation.elements}
+        for dependency in adapter["dependencies"]:
+            assert dependency["match_count"] == (observed[dependency["selector"]].match_count
+                if dependency["selector"] in observed else 0)
+        code = compile_automation_candidate("INTERFACE", case, plan, explicit_expectations_only=True)
+        assert "return _displayed_temperature(page, '#det-temp-display')" in code
+        assert "selector = '#det-temp-up-btn' if current < target else '#det-temp-down-btn'" in code
+    with pytest.raises(ValueError, match="해시"):
+        grounding.check_review_record(new, fake_grounding_record(old))
+    record = fake_grounding_record(new)
+    assert grounding.check_review_record(new, record).status == CheckStatus.PASS
+    record["review"]["items"][0]["verdict"] = "UNSUPPORTED"
+    assert grounding.check_review_record(new, record).status == CheckStatus.FAIL
+
+@pytest.mark.parametrize("field,initial,target", [
+    ("setTemp", 27, 21), ("fanSpeed", "AUTO", "HIGH"), ("mode", "COOL", "HEAT"),
+    ("status", "OPERATION", "STOP"), ("locked", False, True)])
+def test_agent2_receives_same_compiler_recovery_facts_without_claiming_success(field, initial, target):
+    from qa_pipeline_agent3 import (controller_recovery_tc_facts, controller_recovery_plan_facts,
+                                   resolve_controller_bindings, assemble_tc_bindings)
+    case, _ = mapped_tc_fixture(field, initial, target)
+    before = case.model_dump()
+    design = cp2_valid_design().model_copy(update={"test_cases": [case]})
+    args = ("AGENT2", cp1_request(), cp2_requirements(), design)
+    old = grounding.build_grounding_input(*args, analysis=cp2_analysis())
+    new = grounding.build_grounding_input(*args, analysis=cp2_analysis(), include_tc_execution_alignment=True)
+    assert "compiler_recovery_facts" not in old["context"]
+    facts = new["context"]["compiler_recovery_facts"]["TC/0"]["controller_recovery"]
+    plan = assemble_tc_bindings(case, resolve_controller_bindings(case))
+    assert facts == controller_recovery_tc_facts(case) == controller_recovery_plan_facts(case, plan)
+    assert set(facts["internal_fields"]) == {"status", "mode", "setTemp", "fanSpeed", "locked"}
+    assert facts["includes_preparation_changes"] and not facts["trial_success_proved"]
+    assert facts["capture_timing"] == "BEFORE_SETUP"
+    assert facts["comparison_timing"] == "AFTER_RESTORE"
+    assert old["artifact_sha256"] == new["artifact_sha256"]
+    assert case.model_dump() == before
+    assert {i["item_id"] for i in old["items"]} == {i["item_id"] for i in new["items"]}
+    assert any(d["source_id"].startswith("COMPILER_RECOVERY/") for d in new["source_documents"])
+    with pytest.raises(ValueError, match="해시"):
+        grounding.check_review_record(new, fake_grounding_record(old))
+
+
+@pytest.mark.parametrize("fault", ["missing_restore", "wrong_value", "unsupported", "read_only", "wrong_source", "no_spec"])
+def test_agent2_recovery_facts_are_not_fabricated(fault):
+    from qa_pipeline_agent3 import controller_recovery_tc_facts
+    case, _ = mapped_tc_fixture("fanSpeed", "MED", "LOW")
+    restore = case.execution_spec.operations[-1]
+    if fault == "missing_restore": case.execution_spec.operations.pop()
+    elif fault == "wrong_value": restore.value = 16
+    elif fault == "unsupported": restore.target = "unsupported.automatic_switch"
+    elif fault == "read_only": case.state_effect = pipeline.TcStateEffect.READ_ONLY
+    elif fault == "wrong_source": restore.source_text = "원문에 없는 복원"
+    else: case.execution_spec = None
+    assert controller_recovery_tc_facts(case) is None
+
+
+def test_alignment_does_not_bypass_meaning_review_or_reuse_old_judgment():
+    request, analysis, design, catalog = compound_reuse_fixture()
+    analysis.confirmed_conditions[0].change_role = ConditionChangeRole.UNCHANGED
+    args = ("AGENT2", request, cp2_requirements(), design)
+    options = dict(analysis=analysis, catalog=catalog, include_condition_coverage=True)
+    old = grounding.build_grounding_input(*args, **options)
+    new = grounding.build_grounding_input(*args, **options, include_tc_execution_alignment=True)
+    assert any(i["kind"] == "CONDITION_COVERAGE" for i in new["items"])
+    with pytest.raises(ValueError, match="해시"):
+        grounding.check_review_record(new, fake_grounding_record(old))
+    record = fake_grounding_record(new)
+    record["review"]["items"][0]["verdict"] = "UNSUPPORTED"
+    assert grounding.check_review_record(new, record).status == CheckStatus.FAIL
+    record["review"]["items"].pop()
+    assert grounding.check_review_record(new, record).status == CheckStatus.FAIL
+
+
+
+
 @pytest.mark.parametrize("stage", ["AGENT1", "AGENT2", "AGENT3"])
 @pytest.mark.parametrize("selection", ["exact", "multiple", "parent", "joined", "unknown"])
 def test_live_source_schema_only_accepts_exact_original_ids(stage, selection):
@@ -289,6 +404,8 @@ def test_new_scope_and_terminal_policies_cannot_silently_downgrade(stage, mutati
     if mutation in {"missing", "historical"}: manifest.pop(marker)
     if mutation == "unknown": manifest[marker] = "unknown"
     if mutation.startswith("historical"): manifest["prompt_version"] = historical_prompt
+    if mutation.startswith("historical") and stage == "AGENT2":
+        manifest.pop("tc_execution_alignment_contract")
     if mutation in {"none", "historical"}:
         assert reader(manifest)[option] == (mutation == "none")
     else:

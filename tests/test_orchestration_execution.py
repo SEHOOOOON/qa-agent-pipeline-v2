@@ -84,7 +84,8 @@ def test_agent3_precondition_feedback_repairs_only_unstated_context(tmp_path, mo
         target_html=str(target), model="fixture", timeout=60)) == 0
     assert calls == ["model", "model", "trial"]
     assert (case.model_dump_json(), invalid.model_dump_json()) == preserved
-    assert pipeline._read_json_payload(run / "agent3_manifest.json")["prompt_version"] == "agent3-3.42"
+    assert pipeline._read_json_payload(run / "agent3_manifest.json")["prompt_version"] == "agent3-3.45"
+    assert pipeline._read_json_payload(run / "agent3_manifest.json")["execution_interface_contract"] == "1.0"
     assert pipeline._read_json_payload(run / "agent3_manifest.json")["terminal_observation_contract"] == "1.0"
     assert pipeline._read_json_payload(run / "agent3_manifest.json")["task_boundary_contract"] == "1.3"
     assert pipeline._read_json_payload(run / "agent3_automation_plan_attempt_1.json") == invalid.model_dump(mode="json")

@@ -196,7 +196,8 @@ def build_grounding_input(stage, request, requirements, artifact, *, analysis=No
                           include_procedure_coverage=False, include_execution_contract=False,
                           include_review_responsibilities=False, allow_output_tolerance=False,
                           include_task_boundaries=False, review_scope_semantics=False,
-                          allow_state_change_terminal_observation=False, explicit_expectations_only=False):
+                          allow_state_change_terminal_observation=False, explicit_expectations_only=False,
+                          include_tc_execution_alignment=False, execution_interface=False):
     """Host enumerates review targets; the reviewer cannot choose a smaller scope."""
     documents, items = [], []
     def doc(source_id, value):
@@ -256,6 +257,16 @@ def build_grounding_input(stage, request, requirements, artifact, *, analysis=No
         for index, tc in enumerate(artifact.test_cases):
             prefix = f"TC/{index}"
             context[prefix] = tc.model_dump(mode="json")
+            if include_tc_execution_alignment:
+                from qa_pipeline_agent3 import controller_recovery_tc_facts
+                recovery = controller_recovery_tc_facts(tc)
+                if recovery is not None:
+                    fact = {"tc_id": tc.tc_id, "controller_recovery": recovery,
+                            "review_rule": "프로그램이 해당 TC 정의를 연결·검사해 확인한 복원 동작입니다. "
+                            "준비로 바꾼 관제점도 준비 전 상태와 비교하므로 제품 기대결과에 복원 검사를 추가하지 않습니다. "
+                            "요청·SRS의 제품 기대값 근거, 실제 화면 가용성 또는 실행 성공 증거는 아닙니다."}
+                    context.setdefault("compiler_recovery_facts", {})[prefix] = fact
+                    doc(f"COMPILER_RECOVERY/{index}", fact)
             if tc.execution_spec is not None:
                 item(f"{prefix}/execution_spec", {
                     "definition": tc.execution_spec.model_dump(mode="json"),
@@ -349,6 +360,10 @@ def build_grounding_input(stage, request, requirements, artifact, *, analysis=No
         doc("UI_INVENTORY", {k: v for k, v in observed.items()
                              if k not in {"target_file", "target_sha256", "target_path"}})
         context["plan"] = artifact.model_dump(mode="json")
+        if execution_interface:
+            from qa_pipeline_agent3 import execution_interface_facts
+            context["execution_interface"] = execution_interface_facts(artifact, observation)
+            doc("EXECUTION_INTERFACE", context["execution_interface"])
         if include_review_responsibilities and artifact.planning_status == Agent3PlanningStatus.READY:
             from qa_pipeline_agent3 import _restoration_read_expression
             # Facts about emitted code, not proof that the trial has succeeded.
@@ -404,11 +419,24 @@ def build_grounding_input(stage, request, requirements, artifact, *, analysis=No
     payload = {"contract": "grounding-1.0", "stage": stage,
             "artifact_sha256": _review_digest(artifact.model_dump(mode="json")),
             "source_documents": documents, "context": context, "items": items}
+    if execution_interface:
+        if stage != "AGENT3" or not explicit_expectations_only:
+            raise ValueError("실행 인터페이스 계약은 명시적 제품 판정 계약의 Agent 3에만 적용합니다.")
+        payload["execution_interface_contract"] = "1.0"
     if explicit_expectations_only:
         if stage != "AGENT3":
             raise ValueError("제품 판정 실행 계약은 Agent 3에만 적용합니다.")
         payload["product_verdict_contract"] = "1.0"
         doc("PRODUCT_VERDICT_CONTRACT", QA_PRODUCT_VERDICT_CONTRACT)
+    if include_tc_execution_alignment:
+        if stage != "AGENT2":
+            raise ValueError("TC 실행 정합 계약은 Agent 2에만 적용합니다.")
+        payload["tc_execution_alignment_contract"] = "1.0"
+        doc("TC_EXECUTION_ALIGNMENT", "기존 TC의 대상 조건은 변경·유지 모두 재사용 검토 대상입니다. "
+            "보조 근거만 연결해서는 충분하지 않으며 실제 조작·값·필수 검사 범위를 대조해야 합니다. "
+            "execution_spec에 상대 버튼 조작이 있으면 명시적인 입력 모드·온도가 없는 requested 필드는 비어 있어도 됩니다. "
+            "유지될 기대값을 요청 입력으로 바꾸지 않습니다. compiler_recovery_facts는 프로그램 복원 동작의 "
+            "근거이며 요청·SRS의 제품 기대값이나 실제 시험 성공의 근거가 아닙니다.")
     if allow_output_tolerance:
         payload["output_tolerance_contract"] = "1.0"
     if include_task_boundaries:
@@ -427,6 +455,13 @@ def build_grounding_input(stage, request, requirements, artifact, *, analysis=No
 def evaluate_grounding_review(payload, review):
     """Check structural evidence, not semantic entailment of cited prose."""
     expected = [i["item_id"] for i in payload["items"]]
+    interface = payload.get("execution_interface_contract")
+    if (interface not in {None, "1.0"} or (interface is not None
+            and (payload["stage"] != "AGENT3" or payload.get("product_verdict_contract") != "1.0"))):
+        raise ValueError("지원하지 않는 실행 인터페이스 계약입니다.")
+    alignment = payload.get("tc_execution_alignment_contract")
+    if alignment not in {None, "1.0"} or (alignment is not None and payload["stage"] != "AGENT2"):
+        raise ValueError("지원하지 않는 TC 실행 정합 계약입니다.")
     if payload.get("task_boundary_contract") not in {None, "1.0", "1.1", "1.2", "1.3"}:
         raise ValueError("지원하지 않는 작업 경계 계약입니다.")
     actual = [i.item_id for i in review.items]

@@ -262,7 +262,8 @@ def _verify_candidate_sources(run_dir: Path, tc_id: str) -> None:
                                           require_assertion_target_identity=manifest.get("plan_fidelity_contract") == "1.2",
                                           review_precondition_coverage=_review_responsibility_policy(manifest, "AGENT3"),
                                           review_value_roles=review_options["review_value_roles"],
-                                          shared_evidence=review_options["shared_evidence"])
+                                          shared_evidence=review_options["shared_evidence"],
+                                          execution_interface=review_options["execution_interface"])
     current_cp3 = _load_grounding_review(candidate_dir, manifest, "AGENT3", ("4.9", "4.10"),
         build_grounding_input("AGENT3", None, {}, plan, test_case=test_case, observation=observation,
                               include_execution_contract=review_options["include_execution_contract"],
@@ -270,7 +271,8 @@ def _verify_candidate_sources(run_dir: Path, tc_id: str) -> None:
                               allow_output_tolerance=_output_tolerance_policy(manifest),
                               include_task_boundaries=_task_boundary_policy(manifest),
                               allow_state_change_terminal_observation=review_options["allow_state_change_terminal_observation"],
-                              explicit_expectations_only=review_options["explicit_expectations_only"]), current_cp3)
+                              explicit_expectations_only=review_options["explicit_expectations_only"],
+                              execution_interface=review_options["execution_interface"]), current_cp3)
     if current_cp3.status != CheckStatus.PASS:
         # This is a freshly recomputed checkpoint, not a historical saved one.
         proof_failed = any(check.rule_id == "CP3-006D" and check.status == CheckStatus.FAIL for check in current_cp3.checks)
@@ -1207,6 +1209,7 @@ def summarize_run(
     ]
     reporting = reporting_history[-1] if reporting_history else {}
     manifest = _read_json(run_dir / "orchestrator_manifest.json")
+    waiting_notice = _waiting_user_notice(run_dir, run_id)
     decisions = {
         item.get("tc_id"): item
         for item in _read_asset_decisions(run_dir)
@@ -1234,6 +1237,7 @@ def summarize_run(
             f"확정 조건: {len(analysis.get('confirmed_conditions') or [])}건",
             f"영향 요구사항: {len(analysis.get('requirement_effects') or [])}건",
             *[f"최종 확인: {item}" for item in checkpoint1.get("final_review_notes") or []],
+            *([waiting_notice] if waiting_notice else []),
         ],
     )
     stage2 = _checkpoint_stage(
@@ -1370,6 +1374,8 @@ def summarize_run(
 
     if report:
         overall = recommendation
+    elif waiting_notice:
+        overall = "확인 대기"
     elif manifest.get("status") in {"STOPPED", "ERROR", "FAIL", "BLOCKED"}:
         overall = str(manifest["status"])
     else:
@@ -1436,6 +1442,37 @@ class LiveRunState:
         with self.lock:
             for key, value in changes.items():
                 setattr(self, key, value)
+
+
+def _waiting_user_notice(run_dir: Path, run_id: str) -> str | None:
+    """Display a recorded pause, never grant handoff or approve its meaning."""
+    try:
+        orchestrator = _read_json(run_dir / "orchestrator_manifest.json")
+        manifest = _read_json(run_dir / "run_manifest.json")
+        checkpoint = _read_json(run_dir / "checkpoint1.json")
+        analysis = _read_json(run_dir / "agent1_change_analysis.json")
+        if not (
+            orchestrator.get("run_id") == manifest.get("run_id") == run_id
+            and orchestrator.get("status") == "STOPPED"
+            and orchestrator.get("stopped_at") == "agent1"
+            and orchestrator.get("stage_exit_codes") == {"agent1": 2}
+            and manifest.get("stage") == "AGENT_1_CP1"
+            and manifest.get("status") == checkpoint.get("status") == "PASS"
+            and manifest.get("handoff_status") == checkpoint.get("handoff_status") == "PAUSE"
+            and analysis.get("decision") == "WAITING_FOR_USER"
+            and orchestrator.get("agent1_manifest_sha256") == _sha256_file(run_dir / "run_manifest.json")
+            and manifest.get("checkpoint1_sha256") == _sha256_file(run_dir / "checkpoint1.json")
+            and manifest.get("agent1_analysis_sha256") == _sha256_file(run_dir / "agent1_change_analysis.json")
+        ):
+            return None
+        questions = analysis.get("user_questions")
+        if not isinstance(questions, list) or not questions or any(
+            not isinstance(q, str) or not q.strip() for q in questions
+        ):
+            return None
+        return "사용자 확인이 필요해 시험을 시작하지 않았습니다. 확인 질문: " + "\n".join(questions)
+    except (ValueError, OSError):
+        return None
 
 
 def _has_reportable_environment_failure(run_dir: Path, run_id: str) -> bool:
@@ -1626,6 +1663,13 @@ class PipelineUiBridge:
                 "--timeout",
                 str(UI_CANDIDATE_TIMEOUT_SECONDS),
             )
+            waiting_notice = (
+                _waiting_user_notice(self.runs_root / run_id, run_id)
+                if pipeline_result.returncode == 2 else None
+            )
+            if waiting_notice:
+                self.state.update(running=False, phase="WAITING_FOR_USER", message=waiting_notice)
+                return
             if pipeline_result.returncode != 0 or not (self.runs_root / run_id).is_dir():
                 detail = (
                     _safe_run_error(self.runs_root / run_id)

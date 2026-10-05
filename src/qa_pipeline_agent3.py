@@ -851,6 +851,9 @@ _CONTROLLER_BUTTONS = {
     "fanSpeed": {value: f"#det-fan-{value.lower()}" for value in ("LOW", "MED", "HIGH", "AUTO")},
     "locked": {True: "#det-lock-on-btn", False: "#det-lock-off-btn"},
 }
+_TEMPERATURE_CONTROLS = {
+    "display": "#det-temp-display", "increase": "#det-temp-up-btn", "decrease": "#det-temp-down-btn",
+}
 _CONTROLLER_WRITE_SELECTORS = {s for values in _CONTROLLER_BUTTONS.values() for s in values.values()} | {
     ".btn-apply-cmd", "#det-temp-up-btn", "#det-temp-down-btn",
 }
@@ -877,9 +880,9 @@ def controller_connection_catalog():
     """Product locations/capabilities only. Never stores scenario expected values."""
     actions = {
         "device.select": ("SELECT_DEVICE", "#device-card-1 .card-body-split"),
-        "temperature.set": ("SET_TEMPERATURE", "#det-temp-display"),
-        "temperature.increase": ("CLICK", "#det-temp-up-btn"),
-        "temperature.decrease": ("CLICK", "#det-temp-down-btn"),
+        "temperature.set": ("SET_TEMPERATURE", _TEMPERATURE_CONTROLS["display"]),
+        "temperature.increase": ("CLICK", _TEMPERATURE_CONTROLS["increase"]),
+        "temperature.decrease": ("CLICK", _TEMPERATURE_CONTROLS["decrease"]),
         "command.apply": ("APPLY_COMMANDS", ".btn-apply-cmd"),
         "controller.restore": ("RESTORE_OBSERVED_CONTROLLER", ".btn-apply-cmd"),
     }
@@ -1084,6 +1087,18 @@ def controller_recovery_plan_facts(test_case, plan):
         "includes_preparation_changes": True, "depends_on_product_result_ids": False,
         "trial_success_proved": False,
     }
+
+
+def controller_recovery_tc_facts(test_case):
+    """Use the same binding/restoration validators as execution; no UI/run claim."""
+    try:
+        bindings = resolve_controller_bindings(test_case)
+        plan = assemble_tc_bindings(test_case, bindings)
+        if _state_restoration_plan_errors(test_case, plan):
+            return None
+        return controller_recovery_plan_facts(test_case, plan)
+    except (Agent3Error, ValueError):
+        return None
 
 
 # Emitted into standalone candidates; no runtime dependency on this repository.
@@ -1876,6 +1891,41 @@ def _trailing_observation_steps(
     }
 
 
+def execution_interface_facts(plan: Agent3AutomationPlan, observation: UiObservation) -> dict:
+    """Describe emitted adapters, not successful execution or product expectations."""
+    elements = {e.selector: e for e in observation.elements}
+    adapters = []
+    for action in plan.actions:
+        if action.action_type == AutomationActionType.SET_TEMPERATURE:
+            adapters.append({"action_id": action.action_id, "plan_anchor": action.selector,
+                "read_selector": _TEMPERATURE_CONTROLS["display"],
+                "click_selectors": [_TEMPERATURE_CONTROLS["increase"], _TEMPERATURE_CONTROLS["decrease"]],
+                "behavior": "온도 표시를 읽고 목표 방향의 버튼을 반복 클릭합니다. 표시창을 클릭하거나 입력하지 않습니다. "
+                    "TEST의 범위 제한 관찰은 목표 도달 또는 표시값 정지 후 TC의 기대결과로 판정합니다. "
+                    "준비·복원은 목표값 도달을 요구합니다.",
+                "dependencies": [{"selector": selector,
+                    "match_count": elements[selector].match_count if selector in elements else 0,
+                    "action_hint": elements[selector].action_hint if selector in elements else None}
+                    for selector in _TEMPERATURE_CONTROLS.values()]})
+    readers = []
+    for assertion in plan.assertions:
+        if assertion.strategy == AssertionStrategy.CONTROLS_DISABLED:
+            readers.append({"result_id": assertion.result_id, "plan_anchor": assertion.selector,
+                "read_selectors": [_TEMPERATURE_CONTROLS["decrease"], _TEMPERATURE_CONTROLS["increase"]],
+                "behavior": "두 온도 버튼의 is_enabled 값을 읽어 모두 비활성인지 확인합니다. 클릭하지 않습니다."})
+        elif assertion.strategy == AssertionStrategy.CONTROLLER_UI_FIELDS_EQUALS:
+            readers.append({"result_id": assertion.result_id, "plan_anchor": assertion.selector,
+                "fields": [f.field_name for f in assertion.expected_fields],
+                "behavior": "패널은 각 버튼의 선택 상태와 온도 표시를, 장비 카드는 상태 클래스·모드/풍량/온도 표시·잠금 표시를 읽습니다. "
+                    "컨테이너 전체 문장이나 고정된 버튼 이름과 비교하지 않으며 내부값을 화면값으로 대체하지 않습니다."})
+    return {"contract": "1.0", "trial_success_proved": False,
+        "actionability": "UI 목록의 visible/enabled는 수집 당시 상태입니다. 대상 선택·준비 후에는 달라질 수 있습니다. "
+            "존재·유일성·조작 종류는 사전에 검사하고, 실제 조작 가능 여부는 각 동작 시 Playwright가 확인합니다. "
+            "실행 불가 시 오류로 남기며 강제 클릭하거나 성공으로 건너뛰지 않습니다. "
+            "TC에서 요구한 활성·비활성 기대결과 검사는 별도로 유지합니다.",
+        "adapters": adapters, "readers": readers}
+
+
 def evaluate_checkpoint3_plan(
     test_case: ProductTestCaseCandidate,
     plan: Agent3AutomationPlan,
@@ -1892,6 +1942,7 @@ def evaluate_checkpoint3_plan(
     review_precondition_coverage: bool = False,
     review_value_roles: bool = False,
     shared_evidence: bool = False,
+    execution_interface: bool = False,
 ) -> Checkpoint3Result:
     frozen = test_case.execution_spec is not None
     handoff_errors = tc_plan_handoff_errors(test_case, plan)
@@ -2044,7 +2095,7 @@ def evaluate_checkpoint3_plan(
             observed = observed_by_selector.get(item.selector)
             if observed is None:
                 continue
-            if not observed.visible or not observed.enabled:
+            if not execution_interface and (not observed.visible or not observed.enabled):
                 action_errors.append(
                     f"{item.action_id}: generic action target is not visible and enabled"
                 )
@@ -2919,14 +2970,14 @@ def compile_automation_candidate(
                 "    return float(match.group(0)) if match else None",
                 "",
                 "def _temperature(page):",
-                "    return _displayed_temperature(page, '#det-temp-display')",
+                f"    return _displayed_temperature(page, {_TEMPERATURE_CONTROLS['display']!r})",
                 "",
                 "def _set_temperature(page, target):",
                 "    for _ in range(40):",
                 "        current = _temperature(page)",
                 "        if current == target:",
                 "            return",
-                "        selector = '#det-temp-up-btn' if current < target else '#det-temp-down-btn'",
+                f"        selector = {_TEMPERATURE_CONTROLS['increase']!r} if current < target else {_TEMPERATURE_CONTROLS['decrease']!r}",
                 "        page.locator(selector).click()",
                 "    raise RuntimeError(f'temperature setup failed: target={target}, actual={_temperature(page)}')",
                 "",
@@ -2935,7 +2986,7 @@ def compile_automation_candidate(
                 "        before = _temperature(page)",
                 "        if before == target:",
                 "            return",
-                "        selector = '#det-temp-up-btn' if before < target else '#det-temp-down-btn'",
+                f"        selector = {_TEMPERATURE_CONTROLS['increase']!r} if before < target else {_TEMPERATURE_CONTROLS['decrease']!r}",
                 "        page.locator(selector).click()",
                 "        after = _temperature(page)",
                 "        if after == before:",
@@ -3158,7 +3209,7 @@ def compile_automation_candidate(
         elif assertion.strategy == AssertionStrategy.CONTROLS_DISABLED:
             lines.extend(
                 [
-                    f"{indent}actual = [page.locator('#det-temp-down-btn').is_enabled(), page.locator('#det-temp-up-btn').is_enabled()]",
+                    f"{indent}actual = [page.locator({_TEMPERATURE_CONTROLS['decrease']!r}).is_enabled(), page.locator({_TEMPERATURE_CONTROLS['increase']!r}).is_enabled()]",
                     f"{indent}if any(actual):",
                     f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + ': temperature controls enabled')",
                 ]

@@ -3986,7 +3986,7 @@
           await loadQaLiveRun(initialRun);
         }
         if (overview.running) scheduleQaLivePoll();
-        else if (!['FAILED', 'COMPLETED'].includes(overview.phase)) setTowerStatus('실제 Run 연결', '#34d399');
+        else if (!['FAILED', 'COMPLETED', 'WAITING_FOR_USER'].includes(overview.phase)) setTowerStatus('실제 Run 연결', '#34d399');
       } catch (error) {
         showQaLiveConnectionError(error);
         if (qaLiveState.pollTimer) clearTimeout(qaLiveState.pollTimer);
@@ -4035,6 +4035,8 @@
         setTowerStatus(`실제 실행 중 · ${overview.phase}`, '#fbbf24');
       } else if (overview.phase === 'FAILED') {
         setTowerStatus('실제 실행 실패', '#f87171');
+      } else if (overview.phase === 'WAITING_FOR_USER') {
+        setTowerStatus('사용자 확인 대기', '#fbbf24');
       } else if (overview.phase === 'COMPLETED') {
         setTowerStatus('실제 실행 완료', '#34d399');
       }

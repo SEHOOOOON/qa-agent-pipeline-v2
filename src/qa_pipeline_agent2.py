@@ -96,6 +96,7 @@ SRS revision proposals must use grounded numbers and preserve the meaning of the
 7-3. 묶음 TC는 grouping_reason에 같은 TC로 처리하는 근거가 되는 공통 관제점·업무 규칙을 구체적으로 기록합니다. 서로 다른 Requirement 목적, 서로 다른 제어 경로, 실패 원인이 무관한 기능은 별도 TC로 분리합니다.
 7-4. 묶음 TC의 각 조건은 steps와 expected_results에서 구분되어야 합니다. 한 조건의 입력·행동·결과를 작성한 뒤 필요한 초기화 또는 전환을 거쳐 다음 조건을 작성합니다. 모든 결과를 TC 마지막 상태에서 한꺼번에 확인하도록 작성하지 않습니다.
 7-5. requested_modes와 requested_temperatures_c에는 묶음 TC가 실제로 요청하는 모든 모드·온도 값을 중복 없이 기록합니다. 단일 조건은 기존 requested_mode와 requested_temperature_c를 사용할 수 있습니다. test_data와 절차에 없는 값을 자동화 단계가 추정하게 하지 않습니다.
+7-5a. execution_spec이 있는 TC의 실제 입력·버튼 조작은 그 정의를 기준으로 연결합니다. 증가/감소 등 상대 조작은 버튼과 순서만 명시하며 결과로 유지돼야 할 값을 requested 값으로 만들지 않습니다. 별도 명시적 모드·온도 입력이 없으면 requested 필드는 null/빈 배열로 둡니다. 기대값은 expected_results와 verifications에 보존합니다.
 7-6. 초기 준비·중간 초기화·최종 복원에만 쓰는 값은 시험 조건의 requested 값에 섞지 않습니다. 해당 절차와 초기값으로 기록합니다. 복원값을 요청 목록에 넣어 생긴 검사 오류는 그 값을 분리해 고치며, 오류를 피하려고 반복 시험 조건을 새로 만들지 않습니다.
 8. REQ-CONTROL-001을 검증하면 CENTRAL 경로에서 관제 패널을 통한 적용을 다룹니다. 과거 산출물의 LOCAL 값이나 REQ-LOCAL-*를 현재 SRS 근거로 추정하거나 새 TC로 확장하지 않습니다.
 9. target_role은 고정 장치 ID를 추측하지 말고 PRIMARY_TEST_DEVICE처럼 역할로 지정합니다.
@@ -274,6 +275,8 @@ fanSpeed LOW/MED/HIGH/AUTO, locked boolean, setTemp number를 사용합니다.
 unsupported.<요청 항목명>으로 보존하세요. 기존 AUTO 모드 등으로 치환하지 않습니다.
 복원은 기존 restoration과 같은 조작만 연결합니다. 공통 관제점 복원은
 RESTORE_OBSERVED_CONTROLLER, value=null이며 별도 제품 기대결과를 추가하지 않습니다.
+이 공통 복원은 준비 전 전원·모드·풍량·온도·잠금과 화면 상태를 기록하고 복원 후 비교합니다.
+준비로 바꾼 관제점도 포함하며 실제 복원 성공은 실행 기록으로 별도 확인합니다.
 """
 
 
@@ -373,7 +376,7 @@ class OpenAIAgent2:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent2-2-54",
+                prompt_cache_key="qa-v2-agent2-2-55",
                 input=[
                     {"role": "system", "content": AGENT2_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
@@ -744,6 +747,7 @@ def evaluate_checkpoint2(
     use_structured_scope_restoration: bool = False,
     allow_multiple_trace_sources: bool = False,
     review_scope_semantics: bool = False,
+    align_tc_execution: bool = False,
 ) -> Checkpoint2Result:
     checks: list[CheckResult] = []
 
@@ -811,6 +815,13 @@ def evaluate_checkpoint2(
         for condition in analysis.confirmed_conditions
         if condition.change_role == ConditionChangeRole.CHANGED
     }
+    # A retained/VERIFY condition still needs a test. Supporting context alone
+    # cannot justify reuse; coverage meaning remains a mandatory model review.
+    target_test_condition_ids = ({
+        condition.condition_id for condition in analysis.confirmed_conditions
+        if request.target_requirement_id in condition.requirement_ids
+        and condition.change_role != ConditionChangeRole.SUPPORTING
+    } if align_tc_execution else changed_condition_ids)
     referenced_conditions = candidate_conditions | existing_conditions
     existing_by_id = _existing_regression_by_id(existing_catalog)
     selected_existing_specs = [
@@ -986,7 +997,7 @@ def evaluate_checkpoint2(
     existing_covers_target_change = any(
         request.target_requirement_id in spec.requirement_ids
         and bool(
-            set(selection.source_condition_ids).intersection(changed_condition_ids)
+            set(selection.source_condition_ids).intersection(target_test_condition_ids)
         )
         for selection, spec in (
             (selection, existing_by_id.get(selection.tc_id))
@@ -999,7 +1010,7 @@ def evaluate_checkpoint2(
         for tc in design.test_cases
     ) and not any(
         "REQ-CONTROL-001" in spec.requirement_ids
-        and bool(set(selection.source_condition_ids).intersection(changed_condition_ids))
+        and bool(set(selection.source_condition_ids).intersection(target_test_condition_ids))
         for selection, spec in (
             (selection, existing_by_id.get(selection.tc_id))
             for selection in design.related_existing_tests
@@ -1023,7 +1034,7 @@ def evaluate_checkpoint2(
             and requirement_id in spec.requirement_ids
             and bool(
                 set(selection.source_condition_ids).intersection(
-                    changed_condition_ids
+                    target_test_condition_ids
                 )
             )
             for selection, spec in (
@@ -1077,6 +1088,10 @@ def evaluate_checkpoint2(
         tc.tc_id
         for tc in design.test_cases
         if tc.test_type == TcType.BOUNDARY
+        and not (align_tc_execution and tc.execution_spec is not None
+                 and not tc_execution_spec_errors(tc)
+                 and any(op.phase.value == "TEST" and op.action_type.value != "SELECT_DEVICE"
+                         for op in tc.execution_spec.operations))
         and tc.test_data.requested_mode is None
         and not tc.test_data.requested_modes
         and tc.test_data.requested_temperature_c is None

@@ -3,6 +3,121 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("initial_mode,selected_device,initial,target,relative", [
+    ("FAN", 4, 19, 18, True), ("DRY", 4, 28, 27, True),
+    ("FAN", 1, 19, 18, True), ("DRY", 1, 28, 27, True),
+    ("FAN", 4, 27, 21, False), ("DRY", 1, 27, 21, False),
+    ("FAN", 1, 16, 16, True)])
+def test_execution_interface_preparation_changes_actionability(initial_mode, selected_device, initial, target,
+        relative, tmp_path, monkeypatch, capsys):
+    from playwright.sync_api import Page
+    case, _ = mapped_tc_fixture("setTemp", initial, target)
+    if relative:
+        operation = next(o for o in case.execution_spec.operations
+            if o.phase == AutomationPhase.TEST and o.action_type == AutomationActionType.SET_TEMPERATURE)
+        text = "온도 내림 버튼을 한 번 누른다."
+        case.steps[case.steps.index(operation.source_text)] = text
+        operation.source_text, operation.target = text, "temperature.decrease"
+        operation.action_type, operation.value = AutomationActionType.CLICK, None
+    before = case.model_dump_json()
+    original_reload = Page.reload
+    def prepared_reload(page, *args, **kwargs):
+        result = original_reload(page, *args, **kwargs)
+        page.locator(f"#device-card-{selected_device} .card-body-split").click()
+        page.locator(pipeline._MODE_SELECTOR[initial_mode]).click()
+        page.locator(".btn-apply-cmd").click()
+        assert not page.locator("#det-temp-down-btn").is_enabled()
+        return result
+    monkeypatch.setattr(Page, "reload", prepared_reload)
+    product = REPO_ROOT / "product_baseline/virtual-controller.html"
+    original_product = product.read_bytes()
+    eligibility = pipeline.evaluate_agent3_eligibility(case)
+    observation = inspect_target_ui(product, required_selectors=set(eligibility.required_selectors),
+        required_harness_keys=set(eligibility.required_harness_keys))
+    plan = pipeline.ControllerMapAgent3().plan(case, observation, {}).plan
+    old = pipeline.evaluate_checkpoint3_plan(case, plan, observation)
+    assert old.status == (CheckStatus.FAIL if relative else CheckStatus.PASS)
+    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, observation, execution_interface=True)
+    assert checkpoint.status == CheckStatus.PASS, checkpoint.model_dump_json(indent=2)
+    monkeypatch.setenv("QA_TARGET_URL", product.as_uri())
+    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
+    namespace = {}
+    exec(compile(compile_automation_candidate("INTERFACE-LOCAL", case, plan, explicit_expectations_only=True),
+                 "interface_trial", "exec"), namespace)
+    if initial == 16:
+        with pytest.raises(AssertionError, match="PRODUCT_MISMATCH"):
+            namespace["test_tc_cand_090"]()
+    else:
+        namespace["test_tc_cand_090"]()
+    output = capsys.readouterr().out
+    assert "RESTORE_STATUS: RESTORED" in output
+    readings = [json.loads(line.split(": ", 1)[1]) for line in output.splitlines()
+                if line.startswith("QA_ASSERTION_OBSERVED: ")]
+    assert readings and any(not row["matched"] for row in readings) == (initial == 16)
+    assert case.model_dump_json() == before and product.read_bytes() == original_product
+
+
+@pytest.mark.parametrize("fault", ["disabled", "hidden"])
+def test_execution_interface_unusable_at_execution_is_not_skipped(fault, mapped_controller_observation,
+        tmp_path, monkeypatch, capsys):
+    from playwright.sync_api import Locator, TimeoutError as PlaywrightTimeoutError
+    case, _ = mapped_tc_fixture("fanSpeed", "LOW", "HIGH")
+    observation = mapped_controller_observation.model_copy(deep=True)
+    element = next(e for e in observation.elements if e.selector == "#det-fan-high")
+    setattr(element, "enabled" if fault == "disabled" else "visible", False)
+    plan = pipeline.ControllerMapAgent3().plan(case, observation, {}).plan
+    assert pipeline.evaluate_checkpoint3_plan(case, plan, observation, execution_interface=True).status == CheckStatus.PASS
+    original_click = Locator.click
+    injected = []
+    def guarded_click(locator, *args, **kwargs):
+        if not injected and locator.evaluate("el => el.id === 'det-fan-high'"):
+            injected.append(True)
+            locator.evaluate("(el, fault) => {if(fault === 'disabled') el.disabled = true; else el.style.display = 'none';}", fault)
+            try:
+                return original_click(locator, *args, **{**kwargs, "timeout": 250})
+            finally:
+                # Release the isolated fault for cleanup, never retry the failed action.
+                locator.evaluate("el => {el.disabled = false; el.style.display = '';}")
+        return original_click(locator, *args, **kwargs)
+    monkeypatch.setattr(Locator, "click", guarded_click)
+    monkeypatch.setenv("QA_TARGET_URL", (REPO_ROOT / "product_baseline/virtual-controller.html").as_uri())
+    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
+    namespace = {}
+    exec(compile(compile_automation_candidate("INTERFACE-FAULT", case, plan, explicit_expectations_only=True),
+                 "interface_fault", "exec"), namespace)
+    with pytest.raises(PlaywrightTimeoutError):
+        namespace["test_tc_cand_090"]()
+    output = capsys.readouterr().out
+    assert injected == [True] and "QA_ASSERTIONS_COMPLETE:" not in output
+    assert "RESTORE_STATUS: RESTORED" in output
+
+
+@pytest.mark.parametrize("field,initial,target", [("status", "OPERATION", "STOP"), ("mode", "COOL", "HEAT"),
+    ("fanSpeed", "LOW", "HIGH"), ("setTemp", 27, 21), ("locked", False, True)])
+@pytest.mark.parametrize("fault", ["value", "order", "source", "assertion", "device", "missing", "duplicate"])
+def test_execution_interface_preserves_fidelity_and_element_guards(field, initial, target, fault,
+        mapped_controller_observation):
+    case, _ = mapped_tc_fixture(field, initial, target)
+    observation = mapped_controller_observation.model_copy(deep=True)
+    plan = pipeline.ControllerMapAgent3().plan(case, observation, {}).plan
+    if fault == "value":
+        next(a for a in plan.actions if a.phase == AutomationPhase.TEST).value = "WRONG"
+    elif fault == "order":
+        plan.actions[0], plan.actions[1] = plan.actions[1], plan.actions[0]
+    elif fault == "source":
+        plan.actions[0].source_text = "승인 TC에 없는 원문"
+    elif fault == "assertion":
+        plan.assertions.pop()
+    elif fault == "device":
+        plan.target_device_id = 2
+    elif fault == "missing":
+        observation.elements = [e for e in observation.elements if e.selector != ".btn-apply-cmd"]
+    else:
+        next(e for e in observation.elements if e.selector == ".btn-apply-cmd").match_count = 2
+    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, observation, execution_interface=True)
+    assert checkpoint.status == CheckStatus.FAIL
+
+
 @pytest.mark.parametrize("tag,role,input_type,expected", [
     ("button", None, None, "CLICK"),
     ("div", "button", None, "CLICK"),
@@ -88,7 +203,8 @@ def panel_readback_browser():
 
 
 @pytest.mark.parametrize("mutation", ["valid", "read_only", "input", "hidden", "disabled", "duplicate", "missing"])
-def test_observed_click_capability_preserves_cp3_guards(mutation):
+@pytest.mark.parametrize("interface", [False, True])
+def test_observed_click_capability_preserves_cp3_guards(mutation, interface):
     from qa_pipeline_agent3 import _observed_action_hint
     case, plan, obs = generic_control_guard_fixture()
     action = plan.actions[0]
@@ -110,9 +226,11 @@ def test_observed_click_capability_preserves_cp3_guards(mutation):
         obs.elements.pop()
     # Only test this operation's CP3-002; other fixture checks are unrelated.
     plan.actions = [action]
-    result = pipeline.evaluate_checkpoint3_plan(case, plan, obs, legacy_wording_checks=False)
+    result = pipeline.evaluate_checkpoint3_plan(case, plan, obs, legacy_wording_checks=False,
+                                               execution_interface=interface)
     check = next(item for item in result.checks if item.rule_id == "CP3-002")
-    assert check.status == (CheckStatus.PASS if mutation == "valid" else CheckStatus.FAIL)
+    allowed = mutation == "valid" or (interface and mutation in {"hidden", "disabled"})
+    assert check.status == (CheckStatus.PASS if allowed else CheckStatus.FAIL)
 
 
 @pytest.fixture
@@ -679,6 +797,78 @@ def test_frozen_tc_saved_binding_record_reassembles_original(tmp_path, mutation,
             pipeline_execution._verify_agent3_plan_value_formats(tmp_path, manifest, controller_observation, plan, case)
 
 
+@pytest.mark.parametrize("field,initial,target_value", [
+    ("status", "OPERATION", "STOP"), ("mode", "HEAT", "COOL"),
+    ("fanSpeed", "AUTO", "HIGH"), ("setTemp", 27, 21), ("locked", False, True)])
+@pytest.mark.parametrize("mapped", [False, True])
+@pytest.mark.parametrize("outcome,expected_status", [
+    (TrialOutcome.PASS, "PASSED"),
+    (TrialOutcome.PRODUCT_MISMATCH_CANDIDATE, "ASSERTION_FAILED"),
+    (TrialOutcome.AUTOMATION_ERROR, "EXECUTION_ERROR"),
+    (TrialOutcome.TIMEOUT, "TIMEOUT")])
+def test_execution_interface_saved_handoff_preserves_results_and_integrity(
+        tmp_path, monkeypatch, controller_observation, field, initial, target_value,
+        mapped, outcome, expected_status):
+    """Real A3 save/reload checks; AI, inventory and trial are explicit test doubles."""
+    case, reference = (mapped_tc_fixture if mapped else controller_lifecycle_fixture)(
+        field, initial, target_value)
+    original_case = case.model_dump_json()
+    run_id = "RUN-20261005-170000-ABCDEF"
+    run = tmp_path / run_id
+    product = REPO_ROOT / "product_baseline/virtual-controller.html"
+    observation = controller_observation.model_copy(update={
+        "target_sha256": pipeline._sha256_file(product)})
+    pipeline._write_json(run / "agent2_manifest.json", {"run_id": run_id})
+    monkeypatch.setattr(pipeline_execution, "_load_verified_agent2_run", lambda *_: (
+        None, {}, None, SimpleNamespace(test_cases=[case]), None,
+        {"agent2_design_sha256": "a" * 64}))
+    monkeypatch.setattr(pipeline_execution, "inspect_target_ui", lambda *a, **kw: observation)
+    def model_plan(*args, **kwargs):
+        assert not mapped, "Mapped TC must not call the binding model"
+        return pipeline.Agent3Response(plan=reference, response_id="local-fixture",
+                                       model="fixture", usage={})
+    monkeypatch.setattr(pipeline_execution, "OpenAIAgent3",
+                        lambda **kw: SimpleNamespace(plan=model_plan))
+    def scripted_trial(candidate, target, evidence_dir, **kwargs):
+        evidence_dir.mkdir(parents=True)
+        # Synthetic files deliberately test the handoff, not browser execution.
+        for name, content in {"trial-stdout.txt": "LOCAL SCRIPTED TRIAL: " + outcome.value,
+                              "trial-stderr.txt": "", "trial-final.png": "fixture",
+                              "trial-trace.zip": "fixture"}.items():
+            (evidence_dir / name).write_text(content, encoding="utf-8")
+        return _trial(outcome).model_copy(update={"evidence_sha256": {
+            p.name: pipeline._sha256_file(p) for p in evidence_dir.iterdir()}})
+    monkeypatch.setattr(pipeline_execution, "run_candidate_trial", scripted_trial)
+    exit_code = pipeline.run_agent3(SimpleNamespace(run_id=run_id, runs_root=str(tmp_path),
+        tc_id=case.tc_id, target_html=str(product), model="fixture", timeout=60))
+    assert exit_code == (0 if outcome in {TrialOutcome.PASS, TrialOutcome.PRODUCT_MISMATCH_CANDIDATE} else 2)
+    result, restored_case, manifest = pipeline._candidate_execution_record(run, run_id, product)
+    assert result.status.value == expected_status
+    assert result.source_outcome == outcome.value
+    assert result.reused and result.evidence_complete
+    assert original_case == restored_case.model_dump_json() == case.model_dump_json()
+    assert manifest["prompt_version"] == ("agent3-3.44" if mapped else "agent3-3.45")
+    assert manifest["execution_interface_contract"] == "1.0"
+
+    # A later read must reject changed policy, review, code and evidence without API.
+    manifest_file = run / "agent3_manifest.json"
+    for marker in (None, "unknown"):
+        pipeline._write_json(manifest_file, {**manifest, "execution_interface_contract": marker})
+        with pytest.raises(ValueError, match="실행 인터페이스 계약"):
+            pipeline._candidate_execution_record(run, run_id, product)
+    pipeline._write_json(manifest_file, manifest)
+    for path in (run / "agent3_grounding_review.json", run / result.test_file,
+                 run / result.stdout_file):
+        original_bytes = path.read_bytes()
+        try:
+            path.write_bytes(original_bytes + b"\nchanged-after-save")
+            with pytest.raises(ValueError, match="변경되어|SHA-256"):
+                pipeline._candidate_execution_record(run, run_id, product)
+        finally:
+            path.write_bytes(original_bytes)
+    assert pipeline._candidate_execution_record(run, run_id, product)[0] == result
+
+
 def test_frozen_tc_agent3_orchestration_saves_binding_and_shared_review(tmp_path, monkeypatch, controller_observation):
     from qa_pipeline_agent3 import assemble_tc_bindings
     case, reference = controller_lifecycle_fixture("fanSpeed", "HIGH", "LOW")
@@ -701,7 +891,8 @@ def test_frozen_tc_agent3_orchestration_saves_binding_and_shared_review(tmp_path
         target_html=str(REPO_ROOT / "product_baseline/virtual-controller.html"), model="fixture", timeout=60)) == 0
     assert calls == ["binding", "trial"]
     manifest = pipeline._read_json_payload(run / "agent3_manifest.json")
-    assert manifest["prompt_version"] == "agent3-3.43"
+    assert manifest["prompt_version"] == "agent3-3.44"
+    assert manifest["execution_interface_contract"] == "1.0"
     pipeline_execution._agent3_review_options(manifest)
     pipeline_execution._verify_agent3_plan_value_formats(run, manifest, observation, plan, case)
     payload = pipeline._read_json_payload(run / "agent3_grounding_input_attempt_1.json")

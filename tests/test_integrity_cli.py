@@ -487,6 +487,78 @@ def test_scope_contract_loader_preserves_legacy_and_rejects_missing_new_contract
         _load_verified_agent1_run(run_dir, run_id)
 
 
+@pytest.mark.parametrize("limit,blocked", [(260, True), (None, False)])
+def test_output_path_guard_is_windows_only_and_has_no_writes(tmp_path, monkeypatch, limit, blocked):
+    import qa_pipeline_io as io
+    monkeypatch.setattr(io, "_WINDOWS_PATH_LIMIT", limit)
+    path = tmp_path / ("p" * 140) / ("q" * 90) / "evidence.json"
+    if blocked:
+        with pytest.raises(ValueError, match="runs-root"):
+            io._check_output_paths(path)
+    else:
+        io._check_output_paths(path)
+    assert not path.parent.exists()
+
+
+def test_output_path_guard_checks_atomic_temp_and_unicode(tmp_path, monkeypatch):
+    import qa_pipeline_io as io
+    monkeypatch.setattr(io, "_WINDOWS_PATH_LIMIT", 260)
+    parent = tmp_path / ("p" * (220 - len(str(tmp_path)) - 1))
+    io._check_output_paths(parent / "x.json")  # 258-char temporary path fits.
+    with pytest.raises(ValueError, match="경로"):
+        io._check_output_paths(parent / "aa" / "x.json")
+    with pytest.raises(ValueError, match="경로"):
+        io._check_output_paths(parent / ("😀" * 3) / "x.json")
+    assert not parent.exists()
+
+
+def test_run_path_guard_precedes_agent1_client_and_network(tmp_path, monkeypatch):
+    import qa_pipeline_io as io
+    monkeypatch.setattr(io, "_WINDOWS_PATH_LIMIT", 260)
+    request_file = tmp_path / "request.json"
+    _write_json(request_file, cp1_request().model_dump(mode="json"))
+    calls = []
+    monkeypatch.setattr(pipeline_execution, "OpenAIAgent1", lambda **kw: calls.append(kw))
+    args = SimpleNamespace(request=str(request_file), srs=str(REPO_ROOT / "docs/01_PRODUCT_SRS.md"),
+        runs_root=str(tmp_path / ("deep" * 40)), model="fixture",
+        run_id="RUN-20261005-120000-ABCDEF")
+    with pytest.raises(ValueError, match="runs-root"):
+        pipeline_execution.run_agent1(args)
+    assert calls == [] and not Path(args.runs_root).exists()
+
+
+def test_actual_candidate_path_guard_precedes_loader_and_model(tmp_path, monkeypatch):
+    import qa_pipeline_io as io
+    monkeypatch.setattr(io, "_WINDOWS_PATH_LIMIT", 260)
+    run_id = "RUN-20261005-120000-ABCDEF"
+    run = tmp_path / run_id
+    run.mkdir()
+    args = SimpleNamespace(runs_root=str(tmp_path), run_id=run_id,
+        artifact_dir=str(run / ("candidate" * 18)), tc_id="TC-CAND-001")
+    with pytest.raises(ValueError, match="runs-root"):
+        pipeline_execution.run_agent3(args)
+    assert list(run.iterdir()) == []
+
+
+def test_standard_short_run_layout_is_allowed(tmp_path, monkeypatch):
+    import qa_pipeline_io as io
+    monkeypatch.setattr(io, "_WINDOWS_PATH_LIMIT", 260)
+    pipeline_execution._check_run_output_paths(REPO_ROOT / "runs" / "RUN-20261005-120000-ABCDEF")
+
+
+def test_agent2_resume_path_guard_precedes_loading_and_writes(tmp_path, monkeypatch):
+    import qa_pipeline_io as io
+    monkeypatch.setattr(io, "_WINDOWS_PATH_LIMIT", 260)
+    run = tmp_path / "RUN-20261005-120000-ABCDEF"
+    run.mkdir()
+    # Model a resolved historical run without relying on OS long-path creation.
+    deep = run / ("deep" * 40)
+    monkeypatch.setattr(pipeline_execution, "_resolve_run_dir", lambda *a: deep)
+    with pytest.raises(ValueError, match="runs-root"):
+        pipeline_execution.run_agent2(SimpleNamespace(runs_root=str(tmp_path), run_id=run.name))
+    assert list(run.iterdir()) == []
+
+
 def test_atomic_write_short_temp_preserves_original_on_failure(tmp_path, monkeypatch):
     import qa_pipeline_io as io
     parent = tmp_path / ("p" * max(1, 210 - len(str(tmp_path)) - 1))
@@ -790,9 +862,12 @@ def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
     assert pipeline.run_agent2(agent2_args) == (2 if detail_outcome == "unresolved" else 0)
     detail_manifest = pipeline._read_json_payload(run_dir / "agent2_manifest.json")
     assert detail_manifest["tc_detail_contract"] == "1.2"
-    assert detail_manifest["prompt_version"] == "agent2-2.54"
+    assert detail_manifest["prompt_version"] == "agent2-2.55"
+    assert detail_manifest["tc_execution_alignment_contract"] == "1.0"
     assert detail_manifest["scope_guard_contract"] == "1.2"
     assert all(p["scope_guard_contract"] == "1.2" for p in review_inputs if p["stage"] == "AGENT2")
+    assert all(p["tc_execution_alignment_contract"] == "1.0"
+               for p in review_inputs if p["stage"] == "AGENT2")
     assert detail_manifest["task_boundary_contract"] == "1.3"
     assert detail_manifest["output_tolerance_contract"] == "1.0"
     assert {payload["stage"] for payload in review_inputs} == (
@@ -924,6 +999,7 @@ def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
     )
     _write_json(run_dir / "checkpoint2.json", historical_cp.model_dump(mode="json"))
     legacy = {**manifest, "contract_version": "3.1", "tc_detail_contract": "1.0", "srs_revision_contract": "1.0",
+              "tc_execution_alignment_contract": None,
               "scope_guard_contract": None,
               "grounding_contract": None, "grounding_review_sha256": None, "grounding_reviews": [],
               "review_responsibility_contract": None,

@@ -3,6 +3,98 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("case", [
+    "normal", "fan_question", "lock_question", "missing_question", "tampered_analysis",
+    "tampered_checkpoint", "wrong_run", "internal_error", "later_stage", "quality_fail",
+    "proceed", "transport_error", "malformed",
+])
+def test_ui_distinguishes_verified_waiting_from_failure(tmp_path, monkeypatch, case):
+    run_id = "RUN-20261005-120000-ABCDEF"
+    run = tmp_path / "runs" / run_id
+    run.mkdir(parents=True)
+    question = {"fan_question": "새 풍량은 무엇인가요?", "lock_question": "잠글 대상은 무엇인가요?"}.get(
+        case, '새 하한은 몇 도인가요?\n"18°C"처럼 값을 알려주세요.')
+    analysis = {"decision": "WAITING_FOR_USER", "user_questions": [question]}
+    checkpoint = {"status": "PASS", "handoff_status": "PAUSE"}
+    if case == "missing_question":
+        analysis["user_questions"] = []
+    if case == "proceed":
+        analysis["decision"] = "PROCEED"
+    if case == "quality_fail":
+        checkpoint["status"] = "FAIL"
+    _write_json(run / "agent1_change_analysis.json", analysis)
+    _write_json(run / "checkpoint1.json", checkpoint)
+    manifest = {"run_id": run_id, "stage": "AGENT_1_CP1", **checkpoint,
+        "agent1_analysis_sha256": _sha256_file(run / "agent1_change_analysis.json"),
+        "checkpoint1_sha256": _sha256_file(run / "checkpoint1.json")}
+    _write_json(run / "run_manifest.json", manifest)
+    orchestrator = {"run_id": run_id, "status": "STOPPED", "stopped_at": "agent1",
+        "stage_exit_codes": {"agent1": 2}, "agent1_manifest_sha256": _sha256_file(run / "run_manifest.json")}
+    if case == "wrong_run":
+        orchestrator["run_id"] = "RUN-20261005-120000-FFFFFF"
+    if case == "internal_error":
+        orchestrator["status"] = "ERROR"
+    if case == "later_stage":
+        orchestrator["stage_exit_codes"]["agent2"] = 1
+    _write_json(run / "orchestrator_manifest.json", orchestrator)
+    if case == "tampered_analysis":
+        _write_json(run / "agent1_change_analysis.json", {**analysis, "user_questions": ["changed"]})
+    if case == "tampered_checkpoint":
+        _write_json(run / "checkpoint1.json", {**checkpoint, "extra": "changed"})
+    if case == "malformed":
+        (run / "agent1_change_analysis.json").write_text("{", encoding="utf-8")
+    before = {f.name: _sha256_file(f) for f in run.iterdir()}
+    monkeypatch.setattr(pipeline_ui, "_new_run_id", lambda: run_id)
+    bridge = pipeline_ui.PipelineUiBridge(runs_root=run.parent, requests_root=tmp_path,
+        target_html=REPO_ROOT / "product_baseline/virtual-controller.html", allow_live_run=True)
+    calls = []
+    def fake_command(*args):
+        calls.append(args[0])
+        return SimpleNamespace(returncode=1 if case == "transport_error" else 2)
+    monkeypatch.setattr(bridge, "_command", fake_command)
+    assert bridge.live_run_lock.acquire()
+    bridge._run_pipeline(tmp_path / "request.json")
+    state = bridge.state.snapshot()
+    expected_wait = case in {"normal", "fan_question", "lock_question"}
+    assert state["phase"] == ("WAITING_FOR_USER" if expected_wait else "FAILED")
+    assert state["running"] is False and calls == ["pipeline"]
+    if expected_wait:
+        assert question in state["message"]
+        summary = pipeline_ui.summarize_run(run.parent, run_id)
+        assert summary["overall_status"] == "확인 대기"
+        assert any(question in detail for detail in summary["stages"]["agent1"]["details"])
+    assert before == {f.name: _sha256_file(f) for f in run.iterdir()}
+    assert bridge.live_run_lock.acquire()
+    bridge.live_run_lock.release()
+
+
+def test_ui_waiting_message_is_not_failure_or_completion_in_browser():
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as api:
+        browser = api.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.route("https://**/*", lambda route: route.abort())
+        page.goto((REPO_ROOT / "product_baseline/virtual-controller.html").as_uri(),
+                  wait_until="domcontentloaded")
+        page.wait_for_function("typeof updateQaLiveExecutionControls === 'function'")
+        result = page.evaluate("""() => {
+            const seen = [];
+            setTowerStatus = (text, color) => seen.push({text, color});
+            qaLiveState.connected = true;
+            qaLiveState.demoMode = false;
+            qaLiveState.startApprovalArmed = false;
+            updateQaLiveExecutionControls({running:false, allow_live_run:true,
+                phase:'WAITING_FOR_USER', message:'확인 질문: 새 하한은 몇 도인가요?'});
+            return {seen, message:document.getElementById('qa-live-message').textContent,
+                disabled:document.getElementById('qa-live-start-btn').disabled};
+        }""")
+        assert result["seen"][-1]["text"] == "사용자 확인 대기"
+        assert result["seen"][-1]["color"] == "#fbbf24"
+        assert "새 하한은 몇 도인가요?" in result["message"]
+        assert result["disabled"] is False
+        browser.close()
+
+
 @pytest.mark.parametrize("requirement", ["REQ-CONTROL-001", "REQ-MODE-001", "REQ-TEMP-001", "REQ-FAN-001", "REQ-LOCK-001"])
 def test_tc_comparison_replacement_all_controls(tmp_path, monkeypatch, requirement):
     roots = build_approvable_ui_run(tmp_path, monkeypatch)
@@ -315,7 +407,7 @@ def test_old_approval_keeps_extra_expectation_guard(tmp_path, monkeypatch):
         pipeline_ui._verify_candidate_sources(tmp_path / 'RUN', 'TC-CAND-001')
 
 
-@pytest.mark.parametrize('new_policy', [False, True, 'output_tolerance', 'task_boundaries', 'value_roles', 'shared_evidence', 'scenario_review', 'terminal_observation', 'product_verdict'])
+@pytest.mark.parametrize('new_policy', [False, True, 'output_tolerance', 'task_boundaries', 'value_roles', 'shared_evidence', 'scenario_review', 'terminal_observation', 'product_verdict', 'execution_interface'])
 @pytest.mark.parametrize('review_state', ['valid', 'missing', 'tampered'])
 def test_approval_reconstructs_same_agent3_review_policy(tmp_path, monkeypatch, new_policy, review_state):
     import qa_pipeline_grounding as grounding
@@ -329,7 +421,7 @@ def test_approval_reconstructs_same_agent3_review_policy(tmp_path, monkeypatch, 
         'prompt_version': 'agent3-3.36' if new_policy else 'agent3-3.35'}
     if new_policy:
         manifest['review_responsibility_contract'] = '1.0'
-    if new_policy in {'output_tolerance', 'task_boundaries', 'value_roles', 'shared_evidence', 'scenario_review', 'terminal_observation', 'product_verdict'}:
+    if new_policy in {'output_tolerance', 'task_boundaries', 'value_roles', 'shared_evidence', 'scenario_review', 'terminal_observation', 'product_verdict', 'execution_interface'}:
         manifest['output_tolerance_contract'] = '1.0'
     if new_policy == 'task_boundaries':
         manifest['prompt_version'] = 'agent3-3.37'
@@ -343,17 +435,22 @@ def test_approval_reconstructs_same_agent3_review_policy(tmp_path, monkeypatch, 
     elif new_policy == 'scenario_review':
         manifest['prompt_version'] = 'agent3-3.40'
         manifest['task_boundary_contract'] = '1.3'
-    elif new_policy in {'terminal_observation', 'product_verdict'}:
+    elif new_policy in {'terminal_observation', 'product_verdict', 'execution_interface'}:
         manifest['prompt_version'] = 'agent3-3.42' if new_policy == 'product_verdict' else 'agent3-3.41'
         manifest['task_boundary_contract'] = '1.3'
         manifest['terminal_observation_contract'] = '1.0'
-        if new_policy == 'product_verdict':
+        if new_policy in {'product_verdict', 'execution_interface'}:
             manifest['product_verdict_contract'] = '1.0'
+        if new_policy == 'execution_interface':
+            manifest['prompt_version'] = 'agent3-3.45'
+            manifest['execution_interface_contract'] = '1.0'
     payload = grounding.build_grounding_input('AGENT3', None, {}, plan, test_case=case, observation=observation,
         include_execution_contract=True, include_review_responsibilities=bool(new_policy),
         allow_output_tolerance=bool(manifest.get('output_tolerance_contract')),
         include_task_boundaries=manifest.get('task_boundary_contract', False),
-        allow_state_change_terminal_observation=new_policy in {'terminal_observation', 'product_verdict'}, explicit_expectations_only=new_policy == 'product_verdict')
+        allow_state_change_terminal_observation=new_policy in {'terminal_observation', 'product_verdict', 'execution_interface'},
+        explicit_expectations_only=new_policy in {'product_verdict', 'execution_interface'},
+        execution_interface=new_policy == 'execution_interface')
     _write_json(folder / 'agent3_manifest.json', manifest)
     _write_json(folder / 'agent3_automation_plan.json', plan.model_dump(mode='json'))
     _write_json(folder / 'agent3_ui_observation.json', observation.model_dump(mode='json'))
@@ -373,7 +470,7 @@ def test_approval_reconstructs_same_agent3_review_policy(tmp_path, monkeypatch, 
     evaluate = a3.evaluate_checkpoint3_plan
     selected = []
     def capture_policy(*args, **kwargs):
-        selected.append((kwargs['review_value_roles'], kwargs['shared_evidence'], kwargs['allow_state_change_terminal_observation']))
+        selected.append((kwargs['review_value_roles'], kwargs['shared_evidence'], kwargs['allow_state_change_terminal_observation'], kwargs['execution_interface']))
         return evaluate(*args, **kwargs)
     monkeypatch.setattr(a3, 'evaluate_checkpoint3_plan', capture_policy)
     if review_state != 'valid':
@@ -381,9 +478,9 @@ def test_approval_reconstructs_same_agent3_review_policy(tmp_path, monkeypatch, 
             pipeline_ui._verify_candidate_sources(run, case.tc_id)
     else:
         pipeline_ui._verify_candidate_sources(run, case.tc_id)
-    assert selected == [(new_policy in {'value_roles', 'shared_evidence', 'scenario_review', 'terminal_observation', 'product_verdict'},
-                         new_policy in {'shared_evidence', 'scenario_review', 'terminal_observation', 'product_verdict'},
-                         new_policy in {'terminal_observation', 'product_verdict'})]
+    assert selected == [(new_policy in {'value_roles', 'shared_evidence', 'scenario_review', 'terminal_observation', 'product_verdict', 'execution_interface'},
+                         new_policy in {'shared_evidence', 'scenario_review', 'terminal_observation', 'product_verdict', 'execution_interface'},
+                         new_policy in {'terminal_observation', 'product_verdict', 'execution_interface'}, new_policy == 'execution_interface')]
 
 
 @pytest.mark.parametrize('value,required,limit', [(None, False, 10), (' ', True, 10), ('long', False, 2)])

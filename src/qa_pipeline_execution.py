@@ -158,7 +158,7 @@ def _verify_agent3_plan_value_formats(directory, manifest, observation, final_pl
         raise ValueError("TC와 실행 기록의 화면 연결 방식이 다릅니다.")
     records = manifest.get("plan_value_formats")
     if records is None:  # Historical plans remain unchanged and use their original checks.
-        if manifest.get("prompt_version") == "agent3-3.43":
+        if manifest.get("prompt_version") in {"agent3-3.43", "agent3-3.44"}:
             raise ValueError("TC 직접 인계의 화면 연결 원본 기록이 없습니다.")
         return
     if (not isinstance(records, list) or not records or len(records) > 2
@@ -171,7 +171,7 @@ def _verify_agent3_plan_value_formats(directory, manifest, observation, final_pl
         payload = _read_json_payload(directory / filename)
         if payload.get("contract") not in {"1.0", "2.0"}:
             raise ValueError("지원하지 않는 Agent 3 계획 값 형식 계약입니다.")
-        if (payload.get("contract") == "2.0") != (manifest.get("prompt_version") == "agent3-3.43"):
+        if (payload.get("contract") == "2.0") != (manifest.get("prompt_version") in {"agent3-3.43", "agent3-3.44"}):
             raise ValueError("TC 직접 인계와 값 형식 기록 버전이 다릅니다.")
         raw = Agent3AutomationPlan.model_validate(payload.get("raw_plan"))
         if payload["contract"] == "2.0":
@@ -232,15 +232,25 @@ def _load_grounding_review(directory, manifest, stage, new_version, payload, che
     return attach_grounding_check(checkpoint, check_review_record(payload, _read_json_payload(path)))
 
 
+def _check_run_output_paths(run_dir: Path, tc_id: str = "TC-CAND-001") -> None:
+    # Standard initial candidate layout; actual candidate IDs are checked again
+    # before A3 review. Read-only historical loaders are deliberately unaffected.
+    _check_output_paths(
+        run_dir / "agent3_candidates" / tc_id / "evidence" / tc_id / "trial-stdout.txt",
+        run_dir / "validation_evidence" / tc_id / "stdout.txt",
+    )
+
+
 def run_agent1(args: argparse.Namespace) -> int:
     request_path = Path(args.request).resolve()
     srs_path = Path(args.srs).resolve()
     request = _read_request(request_path)
     requirements = load_srs_requirements(srs_path)
     srs_text = srs_path.read_text(encoding="utf-8")
-    agent = OpenAIAgent1(model=args.model)
     run_id = getattr(args, "run_id", None) or _new_run_id()
     run_dir = Path(args.runs_root).resolve() / run_id
+    _check_run_output_paths(run_dir)
+    agent = OpenAIAgent1(model=args.model)
     run_dir.mkdir(parents=True, exist_ok=False)
 
     request_file = run_dir / "request.json"
@@ -443,7 +453,7 @@ def _output_tolerance_policy(manifest: dict[str, Any]) -> bool:
     marker = manifest.get("output_tolerance_contract")
     enabled = marker == "1.0"
     if (marker not in {None, "1.0"} or (enabled and manifest.get("grounding_contract") != "1.0")
-            or (manifest.get("prompt_version") in {"agent2-2.46", "agent2-2.47", "agent2-2.48", "agent2-2.49", "agent2-2.50", "agent2-2.51", "agent2-2.52", "agent2-2.53", "agent2-2.54"} and not enabled)):
+            or (manifest.get("prompt_version") in {"agent2-2.46", "agent2-2.47", "agent2-2.48", "agent2-2.49", "agent2-2.50", "agent2-2.51", "agent2-2.52", "agent2-2.53", "agent2-2.54", "agent2-2.55"} and not enabled)):
         raise ValueError("지원하지 않거나 누락된 출력 허용 계약입니다.")
     return enabled
 
@@ -455,8 +465,9 @@ def _task_boundary_policy(manifest: dict[str, Any]) -> str | None:
                 "agent1-2.21": ("2.11", "1.2"), "agent3-3.39": ("4.10", "1.2"),
                 "agent1-2.22": ("2.11", "1.3"), "agent2-2.49": ("3.13", "1.3"),
                 "agent3-3.40": ("4.10", "1.3"), "agent1-2.23": ("2.11", "1.3"),
-                "agent2-2.50": ("3.13", "1.3"), "agent2-2.51": ("3.13", "1.3"), "agent2-2.52": ("3.13", "1.3"), "agent2-2.53": ("3.13", "1.3"), "agent2-2.54": ("3.13", "1.3"), "agent3-3.41": ("4.10", "1.3"), "agent3-3.42": ("4.10", "1.3"), "agent3-3.43": ("4.10", "1.3")}
+                "agent2-2.50": ("3.13", "1.3"), "agent2-2.51": ("3.13", "1.3"), "agent2-2.52": ("3.13", "1.3"), "agent2-2.53": ("3.13", "1.3"), "agent2-2.54": ("3.13", "1.3"), "agent2-2.55": ("3.13", "1.3"), "agent3-3.41": ("4.10", "1.3"), "agent3-3.42": ("4.10", "1.3"), "agent3-3.43": ("4.10", "1.3")}
     prompt = manifest.get("prompt_version")
+    versions.update({"agent3-3.44": ("4.10", "1.3"), "agent3-3.45": ("4.10", "1.3")})
     marker = manifest.get("task_boundary_contract")
     enabled = marker is not None
     if (marker not in {None, "1.0", "1.1", "1.2", "1.3"} or enabled != (prompt in versions)
@@ -473,7 +484,7 @@ def _explicit_product_verdict_policy(manifest: dict[str, Any]) -> bool:
     marker = manifest.get("product_verdict_contract")
     enabled = marker == "1.0"
     if (marker not in {None, "1.0"}
-            or enabled != (manifest.get("prompt_version") in {"agent3-3.42", "agent3-3.43"})
+            or enabled != (manifest.get("prompt_version") in {"agent3-3.42", "agent3-3.43", "agent3-3.44", "agent3-3.45"})
             or (enabled and manifest.get("contract_version") != "4.10")):
         raise ValueError("지원하지 않거나 누락된 제품 판정 계약입니다.")
     return enabled
@@ -482,24 +493,29 @@ def _explicit_product_verdict_policy(manifest: dict[str, Any]) -> bool:
 def _agent3_review_options(manifest: dict[str, Any]) -> dict[str, bool]:
     """Use the same version-bound CP3/review options for execution and approval."""
     boundary = _task_boundary_policy(manifest)
+    interface = manifest.get("execution_interface_contract")
+    if (interface not in {None, "1.0"} or (interface == "1.0") !=
+            (manifest.get("prompt_version") in {"agent3-3.44", "agent3-3.45"})):
+        raise ValueError("지원하지 않거나 누락된 실행 인터페이스 계약입니다.")
     terminal = manifest.get("terminal_observation_contract")
     if (terminal not in {None, "1.0"}
-            or (terminal == "1.0") != (manifest.get("prompt_version") in {"agent3-3.41", "agent3-3.42", "agent3-3.43"})):
+            or (terminal == "1.0") != (manifest.get("prompt_version") in {"agent3-3.41", "agent3-3.42", "agent3-3.43", "agent3-3.44", "agent3-3.45"})):
         raise ValueError("지원하지 않거나 누락된 마지막 관찰 연결 계약입니다.")
     return {
+        "execution_interface": interface == "1.0",
         "allow_state_change_terminal_observation": terminal == "1.0",
         "explicit_expectations_only": _explicit_product_verdict_policy(manifest),
         "review_value_roles": boundary in {"1.1", "1.2", "1.3"},
         "shared_evidence": boundary in {"1.2", "1.3"},
         "include_execution_contract": manifest.get("prompt_version") in {
-            "agent3-3.35", "agent3-3.36", "agent3-3.37", "agent3-3.38", "agent3-3.39", "agent3-3.40", "agent3-3.41", "agent3-3.42", "agent3-3.43"},
+            "agent3-3.35", "agent3-3.36", "agent3-3.37", "agent3-3.38", "agent3-3.39", "agent3-3.40", "agent3-3.41", "agent3-3.42", "agent3-3.43", "agent3-3.44", "agent3-3.45"},
     }
 
 
 def _review_responsibility_policy(manifest: dict[str, Any], stage: str) -> bool:
     """One opt-in for new review ownership; old runs retain their exact policy."""
-    version, prompts = {"AGENT2": ("3.13", {"agent2-2.45", "agent2-2.46", "agent2-2.47", "agent2-2.48", "agent2-2.49", "agent2-2.50", "agent2-2.51", "agent2-2.52", "agent2-2.53", "agent2-2.54"}),
-                        "AGENT3": ("4.10", {"agent3-3.36", "agent3-3.37", "agent3-3.38", "agent3-3.39", "agent3-3.40", "agent3-3.41", "agent3-3.42", "agent3-3.43"})}[stage]
+    version, prompts = {"AGENT2": ("3.13", {"agent2-2.45", "agent2-2.46", "agent2-2.47", "agent2-2.48", "agent2-2.49", "agent2-2.50", "agent2-2.51", "agent2-2.52", "agent2-2.53", "agent2-2.54", "agent2-2.55"}),
+                        "AGENT3": ("4.10", {"agent3-3.36", "agent3-3.37", "agent3-3.38", "agent3-3.39", "agent3-3.40", "agent3-3.41", "agent3-3.42", "agent3-3.43", "agent3-3.44", "agent3-3.45"})}[stage]
     marker = manifest.get("review_responsibility_contract")
     enabled = marker == "1.0"
     if (marker not in {None, "1.0"} or enabled != (manifest.get("prompt_version") in prompts)
@@ -519,7 +535,8 @@ def _current_agent2_contract() -> dict[str, str]:
         "procedure_preservation_contract": "2.0",
         "wording_policy": "STRUCTURAL_ONLY_V1",
         "input_routing_contract": "1.0",
-        "prompt_version": "agent2-2.54",
+        "prompt_version": "agent2-2.55",
+        "tc_execution_alignment_contract": "1.0",
         "scope_guard_contract": "1.2",
         "task_boundary_contract": "1.3",
         "output_tolerance_contract": "1.0",
@@ -545,11 +562,17 @@ def _agent2_checkpoint_options(manifest: dict[str, Any]) -> dict[str, bool]:
     detail = manifest.get("tc_detail_contract")
     revision = manifest.get("srs_revision_contract")
     scope = manifest.get("scope_guard_contract")
+    alignment = manifest.get("tc_execution_alignment_contract")
+    if (alignment not in {None, "1.0"}
+            or (alignment == "1.0") != (manifest.get("prompt_version") == "agent2-2.55")
+            or (alignment == "1.0" and manifest.get("contract_version") != "3.13")):
+        raise ValueError("지원하지 않거나 누락된 TC 실행 정합 계약입니다.")
     if (scope not in {None, "1.2"}
-            or (scope == "1.2") != (manifest.get("prompt_version") in {"agent2-2.50", "agent2-2.51", "agent2-2.52", "agent2-2.53", "agent2-2.54"})):
+            or (scope == "1.2") != (manifest.get("prompt_version") in {"agent2-2.50", "agent2-2.51", "agent2-2.52", "agent2-2.53", "agent2-2.54", "agent2-2.55"})):
         raise ValueError("지원하지 않거나 누락된 Agent 2 범위 의미 검토 계약입니다.")
     return {
         "review_scope_semantics": scope == "1.2",
+        "align_tc_execution": alignment == "1.0",
         "require_input_contract": manifest.get("input_routing_contract") == "1.0",
         "review_expected_result_values": _review_responsibility_policy(manifest, "AGENT2"),
         "review_value_roles": _task_boundary_policy(manifest) in {"1.1", "1.3"},
@@ -577,6 +600,7 @@ def _agent2_checkpoint_options(manifest: dict[str, Any]) -> dict[str, bool]:
 
 def run_agent2(args: argparse.Namespace) -> int:
     run_dir = _resolve_run_dir(Path(args.runs_root), args.run_id)
+    _check_run_output_paths(run_dir)
     reservation_file = run_dir / "agent2_in_progress.json"
     approved_catalog_file = run_dir / "approved_regression_catalog.json"
     immutable_outputs = [
@@ -684,7 +708,8 @@ def run_agent2(args: argparse.Namespace) -> int:
             build_grounding_input("AGENT2", request, requirements, response.design,
                                   analysis=analysis, catalog=existing_catalog, include_condition_coverage=True,
                                   include_procedure_coverage=True, include_execution_contract=True, include_review_responsibilities=True,
-                                  allow_output_tolerance=True, include_task_boundaries="1.3", review_scope_semantics=True),
+                                  allow_output_tolerance=True, include_task_boundaries="1.3", review_scope_semantics=True,
+                                  include_tc_execution_alignment=True),
             checkpoint2, args.model, grounding_records)
         attempts[-1]["status"] = checkpoint2.status.value
         if checkpoint2.status == CheckStatus.FAIL:
@@ -745,7 +770,8 @@ def run_agent2(args: argparse.Namespace) -> int:
                 build_grounding_input("AGENT2", request, requirements, response.design,
                                       analysis=analysis, catalog=existing_catalog, include_condition_coverage=True,
                                       include_procedure_coverage=True, include_execution_contract=True, include_review_responsibilities=True,
-                                      allow_output_tolerance=True, include_task_boundaries="1.3", review_scope_semantics=True),
+                                      allow_output_tolerance=True, include_task_boundaries="1.3", review_scope_semantics=True,
+                                      include_tc_execution_alignment=True),
                 checkpoint2, args.model, grounding_records)
             attempts.append(
                 {
@@ -903,7 +929,7 @@ def _load_verified_agent2_run(
     policy = manifest.get("scope_restoration_policy")
     if policy not in {None, "STRUCTURED_V1"} or (manifest.get("contract_version") in {"3.10", "3.11", "3.12", "3.13"}) != (policy == "STRUCTURED_V1"):
         raise ValueError("지원하지 않거나 누락된 범위·복원 검사 정책입니다.")
-    if (procedure_contract == "2.0" and (manifest.get("contract_version") != "3.13" or manifest.get("grounding_contract") != "1.0")) or (manifest.get("prompt_version") in {"agent2-2.43", "agent2-2.44", "agent2-2.45", "agent2-2.46", "agent2-2.47", "agent2-2.48", "agent2-2.49", "agent2-2.50", "agent2-2.51", "agent2-2.52", "agent2-2.53", "agent2-2.54"} and procedure_contract != "2.0"):
+    if (procedure_contract == "2.0" and (manifest.get("contract_version") != "3.13" or manifest.get("grounding_contract") != "1.0")) or (manifest.get("prompt_version") in {"agent2-2.43", "agent2-2.44", "agent2-2.45", "agent2-2.46", "agent2-2.47", "agent2-2.48", "agent2-2.49", "agent2-2.50", "agent2-2.51", "agent2-2.52", "agent2-2.53", "agent2-2.54", "agent2-2.55"} and procedure_contract != "2.0"):
         raise ValueError("새 절차 검토 계약에는 전체 모델 근거 검토가 필요합니다.")
     recomputed = evaluate_checkpoint2(
         request,
@@ -917,11 +943,12 @@ def _load_verified_agent2_run(
         build_grounding_input("AGENT2", request, requirements, design, analysis=analysis, catalog=existing_catalog,
                               include_condition_coverage=manifest.get("contract_version") in {"3.12", "3.13"},
                               include_procedure_coverage=procedure_contract == "2.0",
-                              include_execution_contract=manifest.get("prompt_version") in {"agent2-2.44", "agent2-2.45", "agent2-2.46", "agent2-2.47", "agent2-2.48", "agent2-2.49", "agent2-2.50", "agent2-2.51", "agent2-2.52", "agent2-2.53", "agent2-2.54"},
+                              include_execution_contract=manifest.get("prompt_version") in {"agent2-2.44", "agent2-2.45", "agent2-2.46", "agent2-2.47", "agent2-2.48", "agent2-2.49", "agent2-2.50", "agent2-2.51", "agent2-2.52", "agent2-2.53", "agent2-2.54", "agent2-2.55"},
                               include_review_responsibilities=_review_responsibility_policy(manifest, "AGENT2"),
                               allow_output_tolerance=_output_tolerance_policy(manifest),
                               include_task_boundaries=_task_boundary_policy(manifest),
-                              review_scope_semantics=_agent2_checkpoint_options(manifest)["review_scope_semantics"]), recomputed)
+                              review_scope_semantics=_agent2_checkpoint_options(manifest)["review_scope_semantics"],
+                              include_tc_execution_alignment=_agent2_checkpoint_options(manifest)["align_tc_execution"]), recomputed)
     if not _checkpoint_revalidation_matches(checkpoint, recomputed, legacy=legacy_wording):
         raise ValueError("Stored Checkpoint 2 differs from the current CP2 rules.")
     if checkpoint.status != CheckStatus.PASS:
@@ -1184,6 +1211,7 @@ def run_agent3(args: argparse.Namespace) -> int:
     run_dir = _resolve_run_dir(Path(args.runs_root), args.run_id)
     artifact_dir_arg = getattr(args, "artifact_dir", None)
     artifact_dir = Path(artifact_dir_arg).resolve() if artifact_dir_arg else run_dir
+    _check_output_paths(artifact_dir / "evidence" / args.tc_id / "trial-stdout.txt")
     if artifact_dir != run_dir:
         try:
             artifact_dir.relative_to(run_dir)
@@ -1267,9 +1295,9 @@ def run_agent3(args: argparse.Namespace) -> int:
                                   model=response.model, usage=response.usage)
         value_formats = [value_format]
         _write_json(artifact_dir / "agent3_automation_plan_attempt_1.json", response.plan.model_dump(mode="json"))
-        checkpoint = evaluate_checkpoint3_plan(test_case, response.plan, observation, require_precondition_proof=True, require_restore_plan_links=True, require_restore_comparison_basis=True, legacy_wording_checks=False, allow_terminal_observation_anchor=True, require_assertion_target_identity=True, review_precondition_coverage=True, review_value_roles=True, shared_evidence=True, allow_state_change_terminal_observation=True)
+        checkpoint = evaluate_checkpoint3_plan(test_case, response.plan, observation, require_precondition_proof=True, require_restore_plan_links=True, require_restore_comparison_basis=True, legacy_wording_checks=False, allow_terminal_observation_anchor=True, require_assertion_target_identity=True, review_precondition_coverage=True, review_value_roles=True, shared_evidence=True, allow_state_change_terminal_observation=True, execution_interface=True)
         checkpoint = _run_grounding_review(artifact_dir, "AGENT3", 1,
-            build_grounding_input("AGENT3", None, requirements, response.plan, test_case=test_case, observation=observation, include_execution_contract=True, include_review_responsibilities=True, allow_output_tolerance=True, include_task_boundaries="1.3", allow_state_change_terminal_observation=True, explicit_expectations_only=True),
+            build_grounding_input("AGENT3", None, requirements, response.plan, test_case=test_case, observation=observation, include_execution_contract=True, include_review_responsibilities=True, allow_output_tolerance=True, include_task_boundaries="1.3", allow_state_change_terminal_observation=True, explicit_expectations_only=True, execution_interface=True),
             checkpoint, args.model, grounding_records)
         attempts = [
             {
@@ -1295,9 +1323,9 @@ def run_agent3(args: argparse.Namespace) -> int:
                                       model=response.model, usage=response.usage)
             value_formats.append(value_format)
             _write_json(artifact_dir / "agent3_automation_plan_attempt_2.json", response.plan.model_dump(mode="json"))
-            checkpoint = evaluate_checkpoint3_plan(test_case, response.plan, observation, require_precondition_proof=True, require_restore_plan_links=True, require_restore_comparison_basis=True, legacy_wording_checks=False, allow_terminal_observation_anchor=True, require_assertion_target_identity=True, review_precondition_coverage=True, review_value_roles=True, shared_evidence=True, allow_state_change_terminal_observation=True)
+            checkpoint = evaluate_checkpoint3_plan(test_case, response.plan, observation, require_precondition_proof=True, require_restore_plan_links=True, require_restore_comparison_basis=True, legacy_wording_checks=False, allow_terminal_observation_anchor=True, require_assertion_target_identity=True, review_precondition_coverage=True, review_value_roles=True, shared_evidence=True, allow_state_change_terminal_observation=True, execution_interface=True)
             checkpoint = _run_grounding_review(artifact_dir, "AGENT3", 2,
-                build_grounding_input("AGENT3", None, requirements, response.plan, test_case=test_case, observation=observation, include_execution_contract=True, include_review_responsibilities=True, allow_output_tolerance=True, include_task_boundaries="1.3", allow_state_change_terminal_observation=True, explicit_expectations_only=True),
+                build_grounding_input("AGENT3", None, requirements, response.plan, test_case=test_case, observation=observation, include_execution_contract=True, include_review_responsibilities=True, allow_output_tolerance=True, include_task_boundaries="1.3", allow_state_change_terminal_observation=True, explicit_expectations_only=True, execution_interface=True),
                 checkpoint, args.model, grounding_records)
             attempts.append(
                 {
@@ -1355,7 +1383,8 @@ def run_agent3(args: argparse.Namespace) -> int:
             "plan_fidelity_contract": "1.2",
             "precondition_proof_contract": "1.0",
             "restore_confirmation_contract": "1.2",
-            "prompt_version": "agent3-3.43" if test_case.execution_spec is not None else "agent3-3.42",
+            "prompt_version": "agent3-3.44" if test_case.execution_spec is not None else "agent3-3.45",
+            "execution_interface_contract": "1.0",
             "product_verdict_contract": "1.0",
             "terminal_observation_contract": "1.0",
             "task_boundary_contract": "1.3",
@@ -1523,7 +1552,7 @@ def _candidate_execution_record(
     test_case = next((item for item in design.test_cases if item.tc_id == tc_id), None)
     if test_case is None:
         raise ValueError("Agent 3 선택 TC가 현재 Agent 2 설계에 없습니다.")
-    if (test_case.execution_spec is not None) != (agent3_manifest.get("prompt_version") == "agent3-3.43"):
+    if (test_case.execution_spec is not None) != (agent3_manifest.get("prompt_version") in {"agent3-3.43", "agent3-3.44"}):
         raise ValueError("TC 실행 정의와 Agent 3 인계 버전이 다릅니다.")
 
     artifact_hashes = (
@@ -1578,6 +1607,7 @@ def _candidate_execution_record(
         review_precondition_coverage=_review_responsibility_policy(agent3_manifest, "AGENT3"),
         review_value_roles=review_options["review_value_roles"],
         shared_evidence=review_options["shared_evidence"],
+        execution_interface=review_options["execution_interface"],
         require_restore_confirmation_detail=restore_contract in {"1.0", "1.1", "1.2"},
         require_restore_plan_links=restore_contract in {"1.1", "1.2"},
         require_restore_comparison_basis=restore_contract == "1.2")
@@ -1588,7 +1618,8 @@ def _candidate_execution_record(
                               allow_output_tolerance=_output_tolerance_policy(agent3_manifest),
                               include_task_boundaries=_task_boundary_policy(agent3_manifest),
                               allow_state_change_terminal_observation=review_options["allow_state_change_terminal_observation"],
-                              explicit_expectations_only=review_options["explicit_expectations_only"]), current_checkpoint3)
+                              explicit_expectations_only=review_options["explicit_expectations_only"],
+                              execution_interface=review_options["execution_interface"]), current_checkpoint3)
     current_code = compile_automation_candidate(run_id, test_case, plan,
         explicit_expectations_only=review_options["explicit_expectations_only"])
     current_static_checks = evaluate_compiled_candidate(test_case, current_code)
@@ -1898,6 +1929,7 @@ def run_existing_regression(
     baseline_test_file = baseline_test_file.resolve()
     target_html = target_html.resolve()
     evidence_dir = evidence_root / spec.tc_id
+    _check_output_paths(evidence_dir / "stdout.txt")
     evidence_dir.mkdir(parents=True, exist_ok=False)
     stdout_file = evidence_dir / "stdout.txt"
     stderr_file = evidence_dir / "stderr.txt"

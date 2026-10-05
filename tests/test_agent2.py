@@ -2,6 +2,86 @@
 
 from pipeline_test_support import *
 
+@pytest.mark.parametrize("role", list(ConditionChangeRole))
+@pytest.mark.parametrize("values", [("MED", "HIGH"), ("18°C", "30°C"), ("HEAT", "COOL")])
+def test_reuse_target_alignment_preserves_condition_roles(role, values):
+    request, analysis, design, catalog = compound_reuse_fixture(values)
+    analysis.confirmed_conditions[0].change_role = role
+    analysis.requirement_effects[0].relation = RequirementRelation.VERIFY
+    before = analysis.model_dump()
+    options = dict(existing_catalog=catalog, legacy_wording_checks=False)
+    old = evaluate_checkpoint2(request, analysis, design, cp2_requirements(), **options)
+    new = evaluate_checkpoint2(request, analysis, design, cp2_requirements(),
+                               align_tc_execution=True, **options)
+    assert (cp2_check(old, "CP2-008").status == CheckStatus.PASS) == (role == ConditionChangeRole.CHANGED)
+    assert (cp2_check(new, "CP2-008").status == CheckStatus.PASS) == (role != ConditionChangeRole.SUPPORTING)
+    assert analysis.model_dump() == before
+
+
+@pytest.mark.parametrize("fault", ["wrong_requirement", "missing_link", "unknown_tc"])
+def test_reuse_alignment_does_not_accept_unrelated_selection(fault):
+    request, analysis, design, catalog = compound_reuse_fixture(layout="one_complete")
+    analysis.confirmed_conditions[0].change_role = ConditionChangeRole.UNCHANGED
+    if fault == "wrong_requirement":
+        analysis.confirmed_conditions[0].requirement_ids = ["REQ-STATE-001"]
+    elif fault == "missing_link":
+        design.related_existing_tests[0].source_condition_ids = []
+    else:
+        design.related_existing_tests[0].tc_id = "TC-UNKNOWN-999"
+    result = evaluate_checkpoint2(request, analysis, design, cp2_requirements(),
+        existing_catalog=catalog, align_tc_execution=True, legacy_wording_checks=False)
+    assert cp2_check(result, "CP2-008").status == CheckStatus.FAIL
+
+
+@pytest.mark.parametrize("field,initial,target", [
+    ("setTemp", 16, 15), ("setTemp", 30, 31), ("fanSpeed", "LOW", "HIGH"),
+    ("mode", "COOL", "HEAT"), ("status", "OPERATION", "STOP"), ("locked", False, True)])
+def test_boundary_execution_definition_does_not_require_redundant_metadata(field, initial, target):
+    case, _ = mapped_tc_fixture(field, initial, target, blocked=True)
+    case.test_type = TcType.BOUNDARY
+    case.test_data.requested_mode = case.test_data.requested_temperature_c = None
+    case.test_data.requested_modes = []
+    case.test_data.requested_temperatures_c = []
+    if field == "setTemp":
+        op = next(o for o in case.execution_spec.operations
+                  if o.phase == AutomationPhase.TEST and o.action_type == AutomationActionType.SET_TEMPERATURE)
+        op.action_type, op.value = AutomationActionType.CLICK, None
+        op.target = "temperature.decrease" if target < initial else "temperature.increase"
+        case.steps[0] = op.source_text = "온도 감소 버튼을 누른다." if target < initial else "온도 증가 버튼을 누른다."
+    before = case.model_dump()
+    design = cp2_valid_design().model_copy(update={"test_cases": [case]})
+    options = dict(legacy_wording_checks=False)
+    old = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements(), **options)
+    new = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements(),
+                               align_tc_execution=True, **options)
+    assert cp2_check(old, "CP2-010").status == CheckStatus.FAIL
+    assert cp2_check(new, "CP2-010").status == CheckStatus.PASS
+    assert cp2_check(new, "CP2-024").status == CheckStatus.PASS
+    assert case.model_dump() == before
+    case.execution_spec.verifications.pop()
+    broken = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements(),
+                                 align_tc_execution=True, **options)
+    assert cp2_check(broken, "CP2-024").status == CheckStatus.FAIL
+    assert cp2_check(broken, "CP2-010").status == CheckStatus.FAIL
+
+
+@pytest.mark.parametrize("fault", ["missing", "unknown", "old_prompt", "old_contract", "no_review"])
+def test_tc_execution_alignment_manifest_is_version_bound(fault):
+    manifest = pipeline_execution._current_agent2_contract()
+    assert pipeline_execution._agent2_checkpoint_options(manifest)["align_tc_execution"]
+    old = {**manifest, "prompt_version": "agent2-2.54"}
+    old.pop("tc_execution_alignment_contract")
+    assert not pipeline_execution._agent2_checkpoint_options(old)["align_tc_execution"]
+    if fault == "missing": manifest.pop("tc_execution_alignment_contract")
+    elif fault == "unknown": manifest["tc_execution_alignment_contract"] = "2.0"
+    elif fault == "old_prompt": manifest["prompt_version"] = "agent2-2.54"
+    elif fault == "old_contract": manifest["contract_version"] = "3.12"
+    else: manifest.pop("grounding_contract")
+    with pytest.raises(ValueError):
+        pipeline_execution._agent2_checkpoint_options(manifest)
+
+
+
 
 @pytest.mark.parametrize("rewrite", [False, True])
 def test_agent2_exact_connection_catalog_initial_and_rewrite(rewrite):
@@ -663,6 +743,7 @@ def test_trace_source_count_is_not_new_semantic_authority(version, mutation):
     historical.pop("output_tolerance_contract")
     historical.pop("task_boundary_contract")
     historical.pop("scope_guard_contract")
+    historical.pop("tc_execution_alignment_contract")
     settings = _agent2_checkpoint_options(historical)
     # Isolate the changed rule using historical compact fixtures, not a Live verdict.
     result = evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements(),
@@ -1012,7 +1093,7 @@ def test_agent2_sends_approved_procedures_on_initial_and_rewrite_calls():
         assert "근거 개수와 검증 사실 개수는 다릅니다" in instructions
         assert "유지 조건이라는 이유로 이번 요청에 필요한 검사를 생략" in instructions
         assert "후보와 기존 TC를 합친 실제 검사 범위" in instructions
-        assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-54"
+        assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-55"
         assert "기존 TC는 전체 단위로 실행" in instructions
         assert "명시적 제외와 충돌하는 검사가 포함돼 있으면 선택하지 않고" in instructions
         assert "기존 assertion을 삭제하지 않습니다" in instructions
@@ -1198,7 +1279,7 @@ def test_agent2_uses_structured_responses_api() -> None:
     assert response.usage["total_tokens"] == 300
     assert responses.kwargs["text_format"] is pipeline.LiveAgent2TestDesign
     assert responses.kwargs["store"] is False
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-54"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-55"
     agent2_input = responses.kwargs["input"][1]["content"]
     assert "[기존 사람 작성·자동화 TC 카탈로그]" in agent2_input
     assert '[코드로 확인한 SRS 개정 범위]' in agent2_input
