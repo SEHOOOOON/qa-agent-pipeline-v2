@@ -3,6 +3,44 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("actual,expected,equal", [
+    (True, True, True), (False, False, True), (True, 1, False), (False, 0, False),
+    (1, True, False), (0, False, False), (21, 21.0, True), (21.0, 21, True),
+    ("21", 21, False), ("HEAT", "heat", False), ("AUTO", "AUTO", True),
+    ({"locked": 1}, {"locked": True}, False),
+    ({"setTemp": 21}, {"setTemp": 21.0}, True),
+    ({"nested": [False, 21]}, {"nested": [0, 21.0]}, False),
+    ([21, False], [21.0, False], True), (None, None, True), (None, False, False),
+])
+def test_typed_value_comparison_contract(actual, expected, equal):
+    from qa_pipeline_agent3 import _TYPED_VALUE_COMPARISON_HELPER
+    scope = {}
+    exec(_TYPED_VALUE_COMPARISON_HELPER, scope)
+    assert scope["_qa_values_equal"](actual, expected) is equal
+
+
+@pytest.mark.parametrize("field,initial,target", [
+    ("status", "OPERATION", "STOP"), ("mode", "COOL", "HEAT"),
+    ("fanSpeed", "AUTO", "LOW"), ("setTemp", 27, 21), ("locked", False, True)])
+def test_typed_compilation_uses_common_comparison_and_keeps_legacy(field, initial, target):
+    import ast
+    case, plan = controller_lifecycle_fixture(field, initial, target)
+    old = compile_automation_candidate("RUN-COMPARE", case, plan, explicit_expectations_only=True)
+    new = compile_automation_candidate("RUN-COMPARE", case, plan, explicit_expectations_only=True, typed_values=True)
+    assert "_qa_values_equal" not in old
+    assert "def _qa_values_equal" in new
+    tree = ast.parse(new)
+    # Inspect actual emitted assertions, not just an unused helper definition.
+    checks = [node for node in ast.walk(tree) if isinstance(node, ast.If)
+              and isinstance(node.test, ast.UnaryOp) and isinstance(node.test.operand, ast.Call)
+              and isinstance(node.test.operand.func, ast.Name) and node.test.operand.func.id == "_qa_values_equal"]
+    assert any(ast.unparse(node.test.operand.args[0]) == "actual" for node in checks)
+    assert any(ast.unparse(node.test.operand.args[0]) == "restored_controller" for node in checks)
+    assert all(c.status != CheckStatus.FAIL for c in pipeline.evaluate_compiled_candidate(case, new))
+    assert old == compile_automation_candidate("RUN-COMPARE", case, plan,
+        explicit_expectations_only=True, typed_values=False)
+
+
 @pytest.mark.parametrize("initial_mode,selected_device,initial,target,relative", [
     ("FAN", 4, 19, 18, True), ("DRY", 4, 28, 27, True),
     ("FAN", 1, 19, 18, True), ("DRY", 1, 28, 27, True),
@@ -42,7 +80,7 @@ def test_execution_interface_preparation_changes_actionability(initial_mode, sel
     monkeypatch.setenv("QA_TARGET_URL", product.as_uri())
     monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
     namespace = {}
-    exec(compile(compile_automation_candidate("INTERFACE-LOCAL", case, plan, explicit_expectations_only=True),
+    exec(compile(compile_automation_candidate("INTERFACE-LOCAL", case, plan, explicit_expectations_only=True, typed_values=True),
                  "interface_trial", "exec"), namespace)
     if initial == 16:
         with pytest.raises(AssertionError, match="PRODUCT_MISMATCH"):
@@ -55,6 +93,36 @@ def test_execution_interface_preparation_changes_actionability(initial_mode, sel
                 if line.startswith("QA_ASSERTION_OBSERVED: ")]
     assert readings and any(not row["matched"] for row in readings) == (initial == 16)
     assert case.model_dump_json() == before and product.read_bytes() == original_product
+
+
+def test_typed_internal_boolean_mismatch_is_reported_and_restored(tmp_path, monkeypatch, capsys):
+    from playwright.sync_api import Page
+    case, plan = controller_lifecycle_fixture("locked", False, True)
+    original = Page.evaluate
+    injected = []
+    def observe(page, expression, arg=None):
+        value = original(page, expression, arg)
+        if isinstance(arg, dict) and arg.get("fields") == ["locked"] and value == {"locked": True}:
+            injected.append(True)
+            return {"locked": 1}  # collector fault, not a product modification
+        return value
+    monkeypatch.setattr(Page, "evaluate", observe)
+    product = REPO_ROOT / "product_baseline/virtual-controller.html"
+    before = product.read_bytes()
+    monkeypatch.setenv("QA_TARGET_URL", product.as_uri())
+    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
+    code = compile_automation_candidate("TYPED-OBSERVATION", case, plan,
+        explicit_expectations_only=True, typed_values=True)
+    scope = {}
+    exec(compile(code, "typed_trial", "exec"), scope)
+    with pytest.raises(AssertionError, match="PRODUCT_MISMATCH"):
+        scope["test_tc_cand_090"]()
+    output = capsys.readouterr().out
+    assert injected and "RESTORE_STATUS: RESTORED" in output
+    readings = [json.loads(line.split(": ", 1)[1]) for line in output.splitlines()
+                if line.startswith("QA_ASSERTION_OBSERVED: ")]
+    assert any(row["actual"] == {"locked": 1} and row["matched"] is False for row in readings)
+    assert product.read_bytes() == before
 
 
 @pytest.mark.parametrize("fault", ["disabled", "hidden"])
@@ -847,7 +915,8 @@ def test_execution_interface_saved_handoff_preserves_results_and_integrity(
     assert result.source_outcome == outcome.value
     assert result.reused and result.evidence_complete
     assert original_case == restored_case.model_dump_json() == case.model_dump_json()
-    assert manifest["prompt_version"] == ("agent3-3.44" if mapped else "agent3-3.45")
+    assert manifest["prompt_version"] == ("agent3-3.46" if mapped else "agent3-3.47")
+    assert manifest["value_comparison_contract"] == "1.0"
     assert manifest["execution_interface_contract"] == "1.0"
 
     # A later read must reject changed policy, review, code and evidence without API.
@@ -855,6 +924,11 @@ def test_execution_interface_saved_handoff_preserves_results_and_integrity(
     for marker in (None, "unknown"):
         pipeline._write_json(manifest_file, {**manifest, "execution_interface_contract": marker})
         with pytest.raises(ValueError, match="실행 인터페이스 계약"):
+            pipeline._candidate_execution_record(run, run_id, product)
+    pipeline._write_json(manifest_file, manifest)
+    for marker in (None, "unknown"):
+        pipeline._write_json(manifest_file, {**manifest, "value_comparison_contract": marker})
+        with pytest.raises(ValueError, match="값 비교 계약"):
             pipeline._candidate_execution_record(run, run_id, product)
     pipeline._write_json(manifest_file, manifest)
     for path in (run / "agent3_grounding_review.json", run / result.test_file,
@@ -891,7 +965,7 @@ def test_frozen_tc_agent3_orchestration_saves_binding_and_shared_review(tmp_path
         target_html=str(REPO_ROOT / "product_baseline/virtual-controller.html"), model="fixture", timeout=60)) == 0
     assert calls == ["binding", "trial"]
     manifest = pipeline._read_json_payload(run / "agent3_manifest.json")
-    assert manifest["prompt_version"] == "agent3-3.44"
+    assert manifest["prompt_version"] == "agent3-3.46"
     assert manifest["execution_interface_contract"] == "1.0"
     pipeline_execution._agent3_review_options(manifest)
     pipeline_execution._verify_agent3_plan_value_formats(run, manifest, observation, plan, case)
@@ -1832,13 +1906,14 @@ def test_panel_reader_does_not_substitute_card_or_internal(field, value):
 
 
 @pytest.mark.parametrize('field,initial,requested,blocked', _CONTROL_SCENARIOS)
+@pytest.mark.parametrize('typed_values', [False, True])
 def test_controller_common_lifecycle_on_unmodified_product(tmp_path, monkeypatch, capsys, controller_observation,
-                                                         field, initial, requested, blocked):
+                                                         field, initial, requested, blocked, typed_values):
     case, plan = controller_lifecycle_fixture(field, initial, requested, blocked=blocked)
     checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation, legacy_wording_checks=False,
         require_restore_plan_links=True, require_plan_fidelity=True, require_assertion_target_identity=True)
     assert checkpoint.status == CheckStatus.PASS, checkpoint.model_dump_json(indent=2)
-    code = compile_automation_candidate('LOCAL-CONTROLLER-LIFECYCLE', case, plan)
+    code = compile_automation_candidate('LOCAL-CONTROLLER-LIFECYCLE', case, plan, typed_values=typed_values)
     assert all(c.status == CheckStatus.PASS for c in pipeline.evaluate_compiled_candidate(case, code))
     target = Path(__file__).resolve().parents[1] / 'product_baseline/virtual-controller.html'
     before = target.read_bytes()

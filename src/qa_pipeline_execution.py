@@ -158,7 +158,7 @@ def _verify_agent3_plan_value_formats(directory, manifest, observation, final_pl
         raise ValueError("TC와 실행 기록의 화면 연결 방식이 다릅니다.")
     records = manifest.get("plan_value_formats")
     if records is None:  # Historical plans remain unchanged and use their original checks.
-        if manifest.get("prompt_version") in {"agent3-3.43", "agent3-3.44"}:
+        if manifest.get("prompt_version") in {"agent3-3.43", "agent3-3.44", "agent3-3.46"}:
             raise ValueError("TC 직접 인계의 화면 연결 원본 기록이 없습니다.")
         return
     if (not isinstance(records, list) or not records or len(records) > 2
@@ -171,7 +171,7 @@ def _verify_agent3_plan_value_formats(directory, manifest, observation, final_pl
         payload = _read_json_payload(directory / filename)
         if payload.get("contract") not in {"1.0", "2.0"}:
             raise ValueError("지원하지 않는 Agent 3 계획 값 형식 계약입니다.")
-        if (payload.get("contract") == "2.0") != (manifest.get("prompt_version") in {"agent3-3.43", "agent3-3.44"}):
+        if (payload.get("contract") == "2.0") != (manifest.get("prompt_version") in {"agent3-3.43", "agent3-3.44", "agent3-3.46"}):
             raise ValueError("TC 직접 인계와 값 형식 기록 버전이 다릅니다.")
         raw = Agent3AutomationPlan.model_validate(payload.get("raw_plan"))
         if payload["contract"] == "2.0":
@@ -467,7 +467,7 @@ def _task_boundary_policy(manifest: dict[str, Any]) -> str | None:
                 "agent3-3.40": ("4.10", "1.3"), "agent1-2.23": ("2.11", "1.3"),
                 "agent2-2.50": ("3.13", "1.3"), "agent2-2.51": ("3.13", "1.3"), "agent2-2.52": ("3.13", "1.3"), "agent2-2.53": ("3.13", "1.3"), "agent2-2.54": ("3.13", "1.3"), "agent2-2.55": ("3.13", "1.3"), "agent3-3.41": ("4.10", "1.3"), "agent3-3.42": ("4.10", "1.3"), "agent3-3.43": ("4.10", "1.3")}
     prompt = manifest.get("prompt_version")
-    versions.update({"agent3-3.44": ("4.10", "1.3"), "agent3-3.45": ("4.10", "1.3")})
+    versions.update({key: ("4.10", "1.3") for key in ("agent3-3.44", "agent3-3.45", "agent3-3.46", "agent3-3.47")})
     marker = manifest.get("task_boundary_contract")
     enabled = marker is not None
     if (marker not in {None, "1.0", "1.1", "1.2", "1.3"} or enabled != (prompt in versions)
@@ -484,22 +484,33 @@ def _explicit_product_verdict_policy(manifest: dict[str, Any]) -> bool:
     marker = manifest.get("product_verdict_contract")
     enabled = marker == "1.0"
     if (marker not in {None, "1.0"}
-            or enabled != (manifest.get("prompt_version") in {"agent3-3.42", "agent3-3.43", "agent3-3.44", "agent3-3.45"})
+            or enabled != (manifest.get("prompt_version") in {"agent3-3.42", "agent3-3.43", "agent3-3.44", "agent3-3.45", "agent3-3.46", "agent3-3.47"})
             or (enabled and manifest.get("contract_version") != "4.10")):
         raise ValueError("지원하지 않거나 누락된 제품 판정 계약입니다.")
     return enabled
 
 
+def _typed_value_comparison_policy(manifest: dict[str, Any]) -> bool:
+    """Compiler-only version; absence preserves historical candidate bytes."""
+    marker = manifest.get("value_comparison_contract")
+    if (marker not in {None, "1.0"}
+            or (marker == "1.0") != (manifest.get("prompt_version") in {"agent3-3.46", "agent3-3.47"})
+            or (marker is not None and not _explicit_product_verdict_policy(manifest))):
+        raise ValueError("지원하지 않는 값 비교 계약입니다.")
+    return marker == "1.0"
+
+
 def _agent3_review_options(manifest: dict[str, Any]) -> dict[str, bool]:
     """Use the same version-bound CP3/review options for execution and approval."""
     boundary = _task_boundary_policy(manifest)
+    _typed_value_comparison_policy(manifest)
     interface = manifest.get("execution_interface_contract")
     if (interface not in {None, "1.0"} or (interface == "1.0") !=
-            (manifest.get("prompt_version") in {"agent3-3.44", "agent3-3.45"})):
+            (manifest.get("prompt_version") in {"agent3-3.44", "agent3-3.45", "agent3-3.46", "agent3-3.47"})):
         raise ValueError("지원하지 않거나 누락된 실행 인터페이스 계약입니다.")
     terminal = manifest.get("terminal_observation_contract")
     if (terminal not in {None, "1.0"}
-            or (terminal == "1.0") != (manifest.get("prompt_version") in {"agent3-3.41", "agent3-3.42", "agent3-3.43", "agent3-3.44", "agent3-3.45"})):
+            or (terminal == "1.0") != (manifest.get("prompt_version") in {"agent3-3.41", "agent3-3.42", "agent3-3.43", "agent3-3.44", "agent3-3.45", "agent3-3.46", "agent3-3.47"})):
         raise ValueError("지원하지 않거나 누락된 마지막 관찰 연결 계약입니다.")
     return {
         "execution_interface": interface == "1.0",
@@ -508,14 +519,14 @@ def _agent3_review_options(manifest: dict[str, Any]) -> dict[str, bool]:
         "review_value_roles": boundary in {"1.1", "1.2", "1.3"},
         "shared_evidence": boundary in {"1.2", "1.3"},
         "include_execution_contract": manifest.get("prompt_version") in {
-            "agent3-3.35", "agent3-3.36", "agent3-3.37", "agent3-3.38", "agent3-3.39", "agent3-3.40", "agent3-3.41", "agent3-3.42", "agent3-3.43", "agent3-3.44", "agent3-3.45"},
+            "agent3-3.35", "agent3-3.36", "agent3-3.37", "agent3-3.38", "agent3-3.39", "agent3-3.40", "agent3-3.41", "agent3-3.42", "agent3-3.43", "agent3-3.44", "agent3-3.45", "agent3-3.46", "agent3-3.47"},
     }
 
 
 def _review_responsibility_policy(manifest: dict[str, Any], stage: str) -> bool:
     """One opt-in for new review ownership; old runs retain their exact policy."""
     version, prompts = {"AGENT2": ("3.13", {"agent2-2.45", "agent2-2.46", "agent2-2.47", "agent2-2.48", "agent2-2.49", "agent2-2.50", "agent2-2.51", "agent2-2.52", "agent2-2.53", "agent2-2.54", "agent2-2.55"}),
-                        "AGENT3": ("4.10", {"agent3-3.36", "agent3-3.37", "agent3-3.38", "agent3-3.39", "agent3-3.40", "agent3-3.41", "agent3-3.42", "agent3-3.43", "agent3-3.44", "agent3-3.45"})}[stage]
+                        "AGENT3": ("4.10", {"agent3-3.36", "agent3-3.37", "agent3-3.38", "agent3-3.39", "agent3-3.40", "agent3-3.41", "agent3-3.42", "agent3-3.43", "agent3-3.44", "agent3-3.45", "agent3-3.46", "agent3-3.47"})}[stage]
     marker = manifest.get("review_responsibility_contract")
     enabled = marker == "1.0"
     if (marker not in {None, "1.0"} or enabled != (manifest.get("prompt_version") in prompts)
@@ -1345,7 +1356,8 @@ def run_agent3(args: argparse.Namespace) -> int:
         if checkpoint.status == CheckStatus.PASS:
             candidate_dir.mkdir(parents=True, exist_ok=False)
             candidate_file = candidate_dir / f"test_{args.tc_id.lower().replace('-', '_')}.py"
-            code = compile_automation_candidate(args.run_id, test_case, response.plan, explicit_expectations_only=True)
+            code = compile_automation_candidate(args.run_id, test_case, response.plan,
+                explicit_expectations_only=True, typed_values=True)
             static_checks = evaluate_compiled_candidate(test_case, code)
             checkpoint.checks.extend(static_checks)
             if any(item.status == CheckStatus.FAIL for item in static_checks):
@@ -1383,8 +1395,9 @@ def run_agent3(args: argparse.Namespace) -> int:
             "plan_fidelity_contract": "1.2",
             "precondition_proof_contract": "1.0",
             "restore_confirmation_contract": "1.2",
-            "prompt_version": "agent3-3.44" if test_case.execution_spec is not None else "agent3-3.45",
+            "prompt_version": "agent3-3.46" if test_case.execution_spec is not None else "agent3-3.47",
             "execution_interface_contract": "1.0",
+            "value_comparison_contract": "1.0",
             "product_verdict_contract": "1.0",
             "terminal_observation_contract": "1.0",
             "task_boundary_contract": "1.3",
@@ -1552,7 +1565,7 @@ def _candidate_execution_record(
     test_case = next((item for item in design.test_cases if item.tc_id == tc_id), None)
     if test_case is None:
         raise ValueError("Agent 3 선택 TC가 현재 Agent 2 설계에 없습니다.")
-    if (test_case.execution_spec is not None) != (agent3_manifest.get("prompt_version") in {"agent3-3.43", "agent3-3.44"}):
+    if (test_case.execution_spec is not None) != (agent3_manifest.get("prompt_version") in {"agent3-3.43", "agent3-3.44", "agent3-3.46"}):
         raise ValueError("TC 실행 정의와 Agent 3 인계 버전이 다릅니다.")
 
     artifact_hashes = (
@@ -1621,7 +1634,8 @@ def _candidate_execution_record(
                               explicit_expectations_only=review_options["explicit_expectations_only"],
                               execution_interface=review_options["execution_interface"]), current_checkpoint3)
     current_code = compile_automation_candidate(run_id, test_case, plan,
-        explicit_expectations_only=review_options["explicit_expectations_only"])
+        explicit_expectations_only=review_options["explicit_expectations_only"],
+        typed_values=_typed_value_comparison_policy(agent3_manifest))
     current_static_checks = evaluate_compiled_candidate(test_case, current_code)
     current_checkpoint3.checks.extend(current_static_checks)
     if any(check.status == CheckStatus.FAIL for check in current_static_checks):
@@ -1837,7 +1851,8 @@ def _current_candidate_execution_record(
     )
     manifest = _read_json_payload(artifact_dir / "agent3_manifest.json")
     current_code = compile_automation_candidate(run_id, test_case, plan,
-        explicit_expectations_only=_explicit_product_verdict_policy(manifest))
+        explicit_expectations_only=_explicit_product_verdict_policy(manifest),
+        typed_values=_typed_value_comparison_policy(manifest))
     stored_candidate_file = _candidate_file_for_result(run_dir, stored_result)
     if (
         stored_candidate_file.is_file()

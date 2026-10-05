@@ -2803,14 +2803,33 @@ def _safe_comment(value: str) -> str:
 
 
 
+_TYPED_VALUE_COMPARISON_HELPER = '''
+def _qa_values_equal(actual, expected):
+    # JSON numbers may be int/float; booleans are not numbers in this contract.
+    if type(actual) in (int, float) and type(expected) in (int, float):
+        return actual == expected
+    if type(actual) is not type(expected):
+        return False
+    if isinstance(actual, dict):
+        return actual.keys() == expected.keys() and all(_qa_values_equal(actual[k], expected[k]) for k in actual)
+    if isinstance(actual, list):
+        return len(actual) == len(expected) and all(_qa_values_equal(a, b) for a, b in zip(actual, expected))
+    return actual == expected
+
+'''
+
+
 def compile_automation_candidate(
     run_id: str,
     test_case: ProductTestCaseCandidate,
     plan: Agent3AutomationPlan,
     *,
     explicit_expectations_only: bool = False,
+    typed_values: bool = False,
 ) -> str:
     """Compile a constrained plan; historical callers retain their verdict policy."""
+    def different(actual: str, expected: str) -> str:
+        return f"not _qa_values_equal({actual}, {expected})" if typed_values else f"{actual} != {expected}"
     handoff_errors = tc_plan_handoff_errors(test_case, plan)
     if handoff_errors:
         raise Agent3Error("TC 실행 정의 인계 오류: " + " / ".join(handoff_errors))
@@ -2961,6 +2980,8 @@ def compile_automation_candidate(
             "",
         ]
     )
+    if typed_values:
+        lines.extend(_TYPED_VALUE_COMPARISON_HELPER.splitlines())
     if needs_legacy_temperature_helpers:
         lines.extend(
             [
@@ -2997,7 +3018,10 @@ def compile_automation_candidate(
         )
     if uses_controller_helpers:
         lines.append(f'_CONTROLLER_BUTTONS = {_py_literal(_CONTROLLER_BUTTONS)}')
-        lines.extend(_CONTROLLER_RESTORE_HELPERS.splitlines())
+        restore_helpers = _CONTROLLER_RESTORE_HELPERS
+        if typed_values:
+            restore_helpers = restore_helpers.replace("if current == target:", "if _qa_values_equal(current, target):")
+        lines.extend(restore_helpers.splitlines())
     lines.extend(
         [
         f"def test_{test_case.tc_id.lower().replace('-', '_')}():",
@@ -3084,19 +3108,19 @@ def compile_automation_candidate(
         for variable, assertion in restore_baselines:
             lines.extend([
                 f"{indent}    actual = {_restoration_read_expression(assertion, plan.target_device_id)}",
-                f"{indent}    if actual != prepared_{variable}:",
+                f"{indent}    if {different('actual', 'prepared_' + variable)}:",
                 f"{indent}        changes.append({_py_literal(assertion.result_id)} + ' state differs from pre-test observation')",
             ])
         if uses_dynamic_hvac_restore:
             lines.extend([
                 f"{indent}    actual_hvac = page.evaluate(\"id => {{ const d = window.__vccs.devices.find(d => d.id === id); return d ? {{mode: d.mode, setTemp: d.setTemp}} : null; }}\", {plan.target_device_id})",
-                f"{indent}    if actual_hvac != prepared_hvac_baseline:",
+                f"{indent}    if {different('actual_hvac', 'prepared_hvac_baseline')}:",
                 f"{indent}        changes.append('HVAC state differs from prepared observation')",
             ])
         if uses_controller_restore:
             lines.extend([
                 f'{indent}    actual_controller = _controller_snapshot(page, {plan.target_device_id})',
-                f"{indent}    if actual_controller['state'] != controller_prepared['state'] or any(actual_controller['ui'][k] != controller_prepared['ui'][k] for k in ('card_classes', 'card_values', 'card_locked')):",
+                f"""{indent}    if {different("actual_controller['state']", "controller_prepared['state']")} or any({different("actual_controller['ui'][k]", "controller_prepared['ui'][k]")} for k in ('card_classes', 'card_values', 'card_locked')):""",
                 f"{indent}        changes.append('controller applied state differs from prepared observation')",
             ])
         lines.append(f"{indent}    return changes")
@@ -3147,14 +3171,14 @@ def compile_automation_candidate(
             expected = {f.field_name: f.expected_value for f in assertion.expected_fields}
             lines.extend([
                 f'{indent}actual = {_restoration_read_expression(assertion, plan.target_device_id)}',
-                f'{indent}if actual != {expected!r}:',
+                f'{indent}if {different("actual", repr(expected))}:',
                 f"{indent}    mismatches.append({assertion.result_id!r} + ': controller UI=' + repr(actual))",
             ])
         elif assertion.strategy == AssertionStrategy.UI_TEMPERATURE:
             lines.extend(
                 [
                     f"{indent}actual = _displayed_temperature(page, '#det-temp-display')",
-                    f"{indent}if actual != {float(assertion.expected_number)}:",
+                    f"{indent}if {different('actual', repr(float(assertion.expected_number)))}:",
                     f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + f': UI temperature={{actual}}')",
                 ]
             )
@@ -3162,7 +3186,7 @@ def compile_automation_candidate(
             lines.extend(
                 [
                     f"{indent}actual = page.evaluate(\"id => window.__vccs.devices.find(d => d.id === id).setTemp\", {plan.target_device_id})",
-                    f"{indent}if actual != {float(assertion.expected_number)}:",
+                    f"{indent}if {different('actual', repr(float(assertion.expected_number)))}:",
                     f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + f': internal setTemp={{actual}}')",
                 ]
             )
@@ -3181,7 +3205,7 @@ def compile_automation_candidate(
                         }
                     )
                     + ")",
-                    f"{indent}if actual != {_py_literal(expected_fields)}:",
+                    f"{indent}if {different('actual', _py_literal(expected_fields))}:",
                     f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + f': internal device fields={{actual}}')",
                 ]
             )
@@ -3234,7 +3258,7 @@ def compile_automation_candidate(
             lines.extend(
                 [
                     f"{indent}actual = page.locator({_py_literal(assertion.selector)}).input_value()",
-                    f"{indent}if actual != str({_py_literal(assertion.expected_value)}):",
+                    f"{indent}if {different('actual', 'str(' + _py_literal(assertion.expected_value) + ')')}:",
                     f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + f': UI value={{actual}}')",
                 ]
             )
@@ -3242,7 +3266,7 @@ def compile_automation_candidate(
             lines.extend(
                 [
                     f"{indent}actual = page.locator({_py_literal(assertion.selector)}).is_checked()",
-                    f"{indent}if actual != {_py_literal(assertion.expected_value)}:",
+                    f"{indent}if {different('actual', _py_literal(assertion.expected_value))}:",
                     f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + f': checked={{actual}}')",
                 ]
             )
@@ -3250,7 +3274,7 @@ def compile_automation_candidate(
             lines.extend(
                 [
                     f"{indent}actual = page.locator({_py_literal(assertion.selector)}).is_enabled()",
-                    f"{indent}if actual != {_py_literal(assertion.expected_value)}:",
+                    f"{indent}if {different('actual', _py_literal(assertion.expected_value))}:",
                     f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + f': enabled={{actual}}')",
                 ]
             )
@@ -3258,7 +3282,7 @@ def compile_automation_candidate(
             lines.extend(
                 [
                     f"{indent}actual = page.evaluate({_py_literal('() => ' + assertion.selector)})",
-                    f"{indent}if actual != {_py_literal(assertion.expected_value)}:",
+                    f"{indent}if {different('actual', _py_literal(assertion.expected_value))}:",
                     f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + f': internal value={{actual}}')",
                 ]
             )
@@ -3442,7 +3466,7 @@ def compile_automation_candidate(
     if uses_controller_restore:
         lines.extend([
             f'                restored_controller = _controller_snapshot(page, {plan.target_device_id})',
-            '                if restored_controller != controller_original:',
+            f'                if {different("restored_controller", "controller_original")}:',
             "                    restore_mismatches.append('controller original=' + repr(controller_original) + ', actual=' + repr(restored_controller))",
         ])
     for action in restore_actions:
@@ -3453,7 +3477,7 @@ def compile_automation_candidate(
             lines.extend(
                 [
                     f"                restore_control_value = page.locator({_py_literal(action.selector)}).input_value()",
-                    f"                if restore_control_value != str({_py_literal(action.value)}):",
+                    f"                if {different('restore_control_value', 'str(' + _py_literal(action.value) + ')')}:",
                     f"                    restore_mismatches.append({_py_literal(action.selector)} + f' value={{restore_control_value}}')",
                 ]
             )
@@ -3465,7 +3489,7 @@ def compile_automation_candidate(
             lines.extend(
                 [
                     f"                restore_control_checked = page.locator({_py_literal(action.selector)}).is_checked()",
-                    f"                if restore_control_checked != {_py_literal(expected_checked)}:",
+                    f"                if {different('restore_control_checked', _py_literal(expected_checked))}:",
                     f"                    restore_mismatches.append({_py_literal(action.selector)} + f' checked={{restore_control_checked}}')",
                 ]
             )
@@ -3496,7 +3520,7 @@ def compile_automation_candidate(
         lines.extend(
             [
                 f"                restore_actual = {actual}",
-                f"                if restore_actual != {variable}:",
+                f"                if {different('restore_actual', variable)}:",
                 f"                    restore_mismatches.append({_py_literal(assertion.selector)} + f' baseline={{{variable}}}, actual={{restore_actual}}')",
             ]
         )
@@ -3510,10 +3534,10 @@ def compile_automation_candidate(
         lines.extend(
             [
                 "                restore_ui_temperature = _temperature(page)",
-                f"                if restore_ui_temperature != {initial_temperature}:",
+                f"                if {different('restore_ui_temperature', repr(initial_temperature))}:",
                 "                    restore_mismatches.append(f'UI temperature={restore_ui_temperature}')",
                 f"                restore_internal_temperature = page.evaluate(\"id => window.__vccs.devices.find(d => d.id === id).setTemp\", {plan.target_device_id})",
-                f"                if restore_internal_temperature != {initial_temperature}:",
+                f"                if {different('restore_internal_temperature', repr(initial_temperature))}:",
                 "                    restore_mismatches.append(f'internal setTemp={restore_internal_temperature}')",
             ]
         )
@@ -3521,7 +3545,7 @@ def compile_automation_candidate(
         lines.extend(
             [
                 f"                restored_hvac_state = page.evaluate(\"id => {{ const device = window.__vccs.devices.find(d => d.id === id); return device ? {{mode: device.mode, setTemp: device.setTemp}} : null; }}\", {plan.target_device_id})",
-                "                if restored_hvac_state != observed_hvac_baseline:",
+                f"                if {different('restored_hvac_state', 'observed_hvac_baseline')}:",
                 "                    restore_mismatches.append(f'internal HVAC baseline={observed_hvac_baseline}, actual={restored_hvac_state}')",
             ]
         )

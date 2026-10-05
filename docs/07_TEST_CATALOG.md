@@ -1,5 +1,7 @@
 # 자동 테스트 카탈로그
 
+값 비교 계약: `test_typed_value_comparison_contract`와 `test_typed_compilation_uses_common_comparison_and_keeps_legacy`가 참/거짓·숫자·문자열·복합값과 다섯 관제점의 실제 생성 비교식을 확인합니다. 저장 인계 회귀에서는 새 비교 계약 누락/변조를 차단합니다. P2의 `test_p1_emitted_comparator_agrees_with_independent_p2_grader`는 두 저장소 비교 기준을 독립 대조합니다. 실행 수와 증거 위치는 인계 문서에 기록합니다.
+
 본시험 구조화 관찰 기록: `test_controller_common_lifecycle_on_unmodified_product`는 기존 다섯 관제점 조작·복원 검사에 더해 각 검사 정의·실제 값·일치 여부·완료 기록을 확인합니다. P2의 별도 로컬 대조 및 변조·누락·제품 불일치 반례는 P2 `test_execution_observations.py`에서 관리합니다. 실제 모델 채점 정확도와 구분합니다.
 
 Slack 표시 회귀: test_readable_slack_report_preserves_verdict_and_does_not_invent_restore는 정상/불일치 제목, 네 요약 구역, 근거 없는 복원 성공 금지, 승인 경계와 메시지 길이를 확인합니다. 실제 외부 전송 시험은 아닙니다.
