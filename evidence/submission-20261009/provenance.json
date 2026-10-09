@@ -1,0 +1,23 @@
+{
+  "date_kst": "2026-10-09",
+  "tc_copies": {
+    "TC-V2-001": {
+      "source_sha256": "171894b8e6aece9d7f7622ddce6ca36e9c62917d028474fd2735d6b0a6db5c0f",
+      "copy_sha256": "171894b8e6aece9d7f7622ddce6ca36e9c62917d028474fd2735d6b0a6db5c0f",
+      "byte_identical": true
+    },
+    "TC-V2-002": {
+      "source_sha256": "d9e2908b646f31f665d208745544d9c3d86690f4617ea518b72f42b928c40a0e",
+      "copy_sha256": "d9e2908b646f31f665d208745544d9c3d86690f4617ea518b72f42b928c40a0e",
+      "byte_identical": true
+    }
+  },
+  "p1_code_commit": "950a3ae0936de78b21a59d6d15c29f3ade5d8e6f",
+  "source_documents": {
+    "README.md": "ef526e2714d6288dcdc054eb696109a6bda9550d0f81a0c64ec21359a516090b",
+    "PROJECT_HANDOFF.md": "7a638f54b457de0b0f5e621674f897d3e314947258e3c09f639945cf4eeb005c",
+    "docs/PROJECT_GUIDE.md": "44ce6168ec3d5fe22fdd16dfea36aad6eb49c5d00efc466d406c5ecaa0396c37",
+    "docs/07_TEST_CATALOG.md": "7470056fd929204125ec436a2f6e200cf71f29599a0918bc43f0ebdbc52d9bce"
+  },
+  "scope": "현재 문서의 요약과 승인 TC의 동일 사본. 공식 파일이나 과거 기록을 수정하지 않음."
+}

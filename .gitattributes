@@ -3,3 +3,5 @@ approved_assets/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,c
 # Public evidence is also hashed as raw bytes; never rewrite historical snapshots.
 examples/results/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 product_baseline/** text eol=lf whitespace=-trailing-space
+# Selected submission evidence includes byte-identical TC copies and hashes.
+evidence/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
