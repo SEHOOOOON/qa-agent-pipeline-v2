@@ -1,0 +1,269 @@
+{
+  "contract_version": "1.0",
+  "official_tc_id": "TC-V2-002",
+  "source_run_id": "RUN-20260918-110541-4102E0",
+  "source_tc_id": "TC-CAND-001",
+  "reviewer": "사용자 승인 · Codex 대행",
+  "approval_note": "사용자가 대화에서 원본 MED의 SRS 및 공식 TC 등록을 명시적으로 승인했습니다. 현재 승인 검사와 실행 증거를 확인한 뒤 대행 등록합니다. 자동 원복하지 않습니다.",
+  "approved_at": "2026-09-19T04:27:55.955748+00:00",
+  "srs_revision_applied": true,
+  "srs_revision_file": "srs_revisions/TC-V2-002.json",
+  "test_case": {
+    "tc_id": "TC-CAND-001",
+    "title": "중앙 관제에서 MED 풍량 적용 시 중풍 표시와 내부 fanSpeed=MED 검증",
+    "purpose": "CHANGE_VALIDATION",
+    "test_type": "NORMAL",
+    "requirement_ids": [
+      "REQ-FAN-001"
+    ],
+    "source_condition_ids": [
+      "COND-001",
+      "COND-002",
+      "COND-003"
+    ],
+    "control_path": "CENTRAL",
+    "target_role": "PRIMARY_TEST_DEVICE",
+    "test_data": {
+      "initial_mode": null,
+      "requested_mode": null,
+      "requested_modes": [],
+      "initial_temperature_c": null,
+      "requested_temperature_c": null,
+      "requested_temperatures_c": [],
+      "restore_observed_hvac_state": false
+    },
+    "condition_execution": "SINGLE_FLOW",
+    "grouping_reason": null,
+    "intermediate_reset_steps": [],
+    "preconditions": [
+      "중앙 관제 패널에서 오류와 잠금이 없는 단일 장비를 대상으로 한다.",
+      "대상 장비를 선택하고 LOW 풍량을 적용한 뒤 장비 카드와 내부 fanSpeed가 LOW인지 확인한다."
+    ],
+    "steps": [
+      "중앙 관제 패널에서 대상 장비 카드를 선택한다.",
+      "대상 장비의 MED 풍량을 선택한다.",
+      "선택한 풍량을 적용한다."
+    ],
+    "expected_results": [
+      {
+        "result_id": "ER-001",
+        "statement": "대상 장비 카드에 중풍이 표시되어야 합니다.",
+        "observation_layer": "UI",
+        "source_condition_ids": [
+          "COND-002"
+        ],
+        "verify_after_step": "선택한 풍량을 적용한다.",
+        "observation_target": "대상 장비 카드의 풍량 표시"
+      },
+      {
+        "result_id": "ER-002",
+        "statement": "대상 장비의 내부 fanSpeed는 MED여야 합니다.",
+        "observation_layer": "INTERNAL_STATE",
+        "source_condition_ids": [
+          "COND-003"
+        ],
+        "verify_after_step": "선택한 풍량을 적용한다.",
+        "observation_target": "대상 장비의 내부 fanSpeed"
+      }
+    ],
+    "common_qa_criteria": [
+      "NORMAL_FLOW",
+      "RECOVERY_AND_RESET"
+    ],
+    "domain_qa_criteria": [
+      "TARGET_DEVICE_ACCURACY",
+      "UI_INTERNAL_STATE_CONSISTENCY"
+    ],
+    "feature_requirement_ids": [
+      "REQ-FAN-001"
+    ],
+    "independent_execution": true,
+    "independence_reason": "LOW 시작 상태를 준비하고 확인한 뒤 시험하며, 종료 후 준비 전 상태로 복원하고 화면·내부값을 비교한다. 다른 TC 결과에 의존하지 않는다.",
+    "double_assert_policy": "REQUIRED",
+    "double_assert_reason": "MED 적용 결과는 장비 카드의 사용자용 한글 라벨과 내부 fanSpeed 코드가 서로 다른 표현으로 같은 동작 의미를 나타내므로 UI와 INTERNAL_STATE를 함께 확인한다.",
+    "restore_required": true,
+    "state_effect": "STATE_CHANGE",
+    "restore_steps": [
+      "준비와 시험으로 바뀐 관제점 값을 준비 전 기록한 원래 상태로 복원하고 적용한다.",
+      "복원 후 대상 장비 카드의 풍량 표시를 준비 전 관찰값과 비교한다.",
+      "복원 후 대상 장비의 내부 fanSpeed를 준비 전 관찰값과 비교한다."
+    ],
+    "restoration": {
+      "operation_steps": [
+        "준비와 시험으로 바뀐 관제점 값을 준비 전 기록한 원래 상태로 복원하고 적용한다."
+      ],
+      "confirmations": [
+        {
+          "source_text": "복원 후 대상 장비 카드의 풍량 표시를 준비 전 관찰값과 비교한다.",
+          "result_ids": [
+            "ER-001"
+          ],
+          "comparisons": [
+            {
+              "result_id": "ER-001",
+              "source_excerpt": "복원 후 대상 장비 카드의 풍량 표시를 준비 전 관찰값과 비교한다.",
+              "basis": "OBSERVED_BASELINE"
+            }
+          ]
+        },
+        {
+          "source_text": "복원 후 대상 장비의 내부 fanSpeed를 준비 전 관찰값과 비교한다.",
+          "result_ids": [
+            "ER-002"
+          ],
+          "comparisons": [
+            {
+              "result_id": "ER-002",
+              "source_excerpt": "복원 후 대상 장비의 내부 fanSpeed를 준비 전 관찰값과 비교한다.",
+              "basis": "OBSERVED_BASELINE"
+            }
+          ]
+        }
+      ],
+      "verify_when": "AFTER_RESTORE"
+    },
+    "automation_candidate": true,
+    "automation_reason": "TC 실행 정의를 공통 연결표로 연결해 장비 카드와 내부값을 검사하고 준비 전 상태 복원을 확인한다.",
+    "execution_spec": {
+      "operations": [
+        {
+          "action_id": "ACT-001",
+          "phase": "PRECONDITION",
+          "action_type": "SELECT_DEVICE",
+          "value": null,
+          "source_text": "중앙 관제 패널에서 오류와 잠금이 없는 단일 장비를 대상으로 한다.",
+          "target": "device.select"
+        },
+        {
+          "action_id": "ACT-002",
+          "phase": "PRECONDITION",
+          "action_type": "CLICK",
+          "value": null,
+          "source_text": "대상 장비를 선택하고 LOW 풍량을 적용한 뒤 장비 카드와 내부 fanSpeed가 LOW인지 확인한다.",
+          "target": "fanSpeed.low"
+        },
+        {
+          "action_id": "ACT-003",
+          "phase": "PRECONDITION",
+          "action_type": "APPLY_COMMANDS",
+          "value": null,
+          "source_text": "대상 장비를 선택하고 LOW 풍량을 적용한 뒤 장비 카드와 내부 fanSpeed가 LOW인지 확인한다.",
+          "target": "command.apply"
+        },
+        {
+          "action_id": "ACT-004",
+          "phase": "TEST",
+          "action_type": "SELECT_DEVICE",
+          "value": null,
+          "source_text": "중앙 관제 패널에서 대상 장비 카드를 선택한다.",
+          "target": "device.select"
+        },
+        {
+          "action_id": "ACT-005",
+          "phase": "TEST",
+          "action_type": "CLICK",
+          "value": null,
+          "source_text": "대상 장비의 MED 풍량을 선택한다.",
+          "target": "fanSpeed.med"
+        },
+        {
+          "action_id": "ACT-006",
+          "phase": "TEST",
+          "action_type": "APPLY_COMMANDS",
+          "value": null,
+          "source_text": "선택한 풍량을 적용한다.",
+          "target": "command.apply"
+        },
+        {
+          "action_id": "ACT-007",
+          "phase": "RESTORE",
+          "action_type": "RESTORE_OBSERVED_CONTROLLER",
+          "value": null,
+          "source_text": "준비와 시험으로 바뀐 관제점 값을 준비 전 기록한 원래 상태로 복원하고 적용한다.",
+          "target": "controller.restore"
+        }
+      ],
+      "verifications": [
+        {
+          "result_id": "ER-001",
+          "observation_layer": "UI",
+          "strategy": "CONTROLLER_UI_FIELDS_EQUALS",
+          "expected_number": null,
+          "expected_text": null,
+          "expected_value": null,
+          "expected_fields": [
+            {
+              "field_name": "fanSpeed",
+              "expected_value": "MED"
+            }
+          ],
+          "after_action_id": "ACT-006",
+          "target": "card.fanSpeed"
+        },
+        {
+          "result_id": "ER-002",
+          "observation_layer": "INTERNAL_STATE",
+          "strategy": "INTERNAL_DEVICE_FIELDS_EQUALS",
+          "expected_number": null,
+          "expected_text": null,
+          "expected_value": null,
+          "expected_fields": [
+            {
+              "field_name": "fanSpeed",
+              "expected_value": "MED"
+            }
+          ],
+          "after_action_id": "ACT-006",
+          "target": "internal.fanSpeed"
+        }
+      ],
+      "precondition_verifications": [
+        {
+          "source_text": "중앙 관제 패널에서 오류와 잠금이 없는 단일 장비를 대상으로 한다.",
+          "read_kind": "BASELINE_CONTEXT",
+          "expected_value": true,
+          "observation_target": "context.target_device_visible"
+        },
+        {
+          "source_text": "중앙 관제 패널에서 오류와 잠금이 없는 단일 장비를 대상으로 한다.",
+          "read_kind": "BASELINE_CONTEXT",
+          "expected_value": true,
+          "observation_target": "context.error_free"
+        },
+        {
+          "source_text": "중앙 관제 패널에서 오류와 잠금이 없는 단일 장비를 대상으로 한다.",
+          "read_kind": "BASELINE_CONTEXT",
+          "expected_value": true,
+          "observation_target": "context.unlocked"
+        },
+        {
+          "source_text": "대상 장비를 선택하고 LOW 풍량을 적용한 뒤 장비 카드와 내부 fanSpeed가 LOW인지 확인한다.",
+          "read_kind": "CONTROLLER_UI_FIELD",
+          "expected_value": "LOW",
+          "observation_target": "card.fanSpeed"
+        },
+        {
+          "source_text": "대상 장비를 선택하고 LOW 풍량을 적용한 뒤 장비 카드와 내부 fanSpeed가 LOW인지 확인한다.",
+          "read_kind": "INTERNAL_VALUE",
+          "expected_value": "LOW",
+          "observation_target": "internal.fanSpeed"
+        }
+      ],
+      "binding_contract": "controller-map-1.0"
+    }
+  },
+  "maintenance_revision": {
+    "version": "20261005",
+    "changed_at_kst": "2026-10-05",
+    "authorization": "사용자가 과거 TC를 현재 형식으로 수정하도록 대화에서 명시 지시",
+    "kind": "LOCAL_FORMAT_AND_RECOVERY_REFRESH",
+    "model_review": "NOT_RUN",
+    "compilation_id": "LOCAL-TC-REFRESH-20261005",
+    "previous_test_case_file": "test_cases/TC-V2-002.json",
+    "previous_test_case_sha256": "20b91e21cea7b4e0e4f9ae160bfa1c78d083bc3a0cc519b033d1608bea519e39",
+    "previous_automation_file": "automation/test_tc_v2_002.py",
+    "previous_automation_sha256": "ca2336c3f234963f9c49da7621a8faee757be07a81d7c0e758714e05de43d69f",
+    "change": "제품 기대결과·근거는 유지. LOW 준비 확인, 현재 실행 정의, 준비 전 화면·내부값 복원 비교를 연결.",
+    "limitation": "로컬 브라우저 검증. 새 API 생성·평가 또는 과거 Run 재평가가 아님."
+  }
+}

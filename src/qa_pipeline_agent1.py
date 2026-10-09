@@ -72,9 +72,9 @@ Use UNCHANGED only for maintained behavior; do not label a new acceptance criter
 19. 질문이 없고 변경 전 근거, 변경 후 정책과 전달할 확정 조건이 명확하면 PROCEED를 선택합니다. PARTIAL_PROCEED는 확정 조건을 Agent 2로 계속 전달하고 excluded_scope와 information_gaps만 최종 보고 대상으로 남깁니다. 핵심 기대 결과를 확정할 수 없어 분리 진행도 불가능할 때만 WAITING_FOR_USER를 선택합니다.
 20. 테스트케이스, 테스트 절차나 Playwright 코드는 작성하지 않습니다.
 21. Agent 1은 요구사항 영향도와 확정 조건을 Agent 2에 빠짐없이 전달하는 단계입니다. 현재 UI·하네스·자동화 구현 지원 여부를 이유로 영향 있는 Requirement를 NO_IMPACT로 낮추거나 확정된 제품 조건을 excluded_scope로 보내지 않습니다. TC 구성·기존 TC 선택·자동화 가능 여부는 Agent 2 이후 단계의 책임입니다.
-22. 대상 외 VERIFY·UPDATE_REQUIRED에는 scope_evidence를 작성합니다. request_condition_ids는 실제 변경 요청에서 인용한 CHANGE_REQUEST 조건만 연결하고, srs_source_text에는 해당 연관 Requirement 원문을 인용합니다. reason에는 어떤 요청 변경이 어떤 기존 동작에 영향을 주는지 적습니다. SRS에 존재하거나 같은 화면에서 실행된다는 이유만으로 검사 범위를 늘리지 않습니다. 근거가 없는 항목은 NO_IMPACT로 검토 기록만 남깁니다.
+22. 연결 관계는 confirmed_conditions.requirement_ids 한 곳에만 작성합니다. 대상 외 VERIFY·UPDATE_REQUIRED는 해당 CHANGE_REQUEST 조건의 requirement_ids에 연결하고 scope_evidence에는 basis와 해당 연관 SRS 원문 srs_source_text만 작성합니다. request_condition_ids는 프로그램이 이 연결 목록에서 계산하므로 작성하지 않습니다. SRS 조건만 연결하면 요청 영향의 근거가 되지 않습니다. reason에는 어떤 요청 변경이 어떤 기존 동작에 영향을 주는지 적습니다. SRS에 존재하거나 같은 화면에서 실행된다는 이유만으로 검사 범위를 늘리지 않습니다. 근거가 없는 항목은 NO_IMPACT로 검토 기록만 남깁니다.
 23. DIRECT_REQUEST·REQUEST_TRACE_ONLY·CHANGE_DEPENDENCY는 범위 근거를 설명하는 분류입니다. 분류명만으로 진행·보류를 정하지 않습니다. 요청 문장에 Requirement ID나 SRS 전체 문장을 넣을 필요는 없습니다. 실제 요청 조건과 연관 Requirement의 연결을 보존하고, 그 검사가 요청된 범위인지 기존 의미 검토에서 원문과 대조합니다. 원문에 없는 ID·문장을 만들거나 명시된 조건을 NO_IMPACT로 지우지 않습니다.
-24. 요청된 결과에 관련 SRS를 참고로 연결하는 것과 새 검사·정책 변경을 추가하는 것을 구분합니다. 참고 연결은 관련 SRS 전체를 시험한다는 뜻이 아닙니다. source_text에는 실제 요청 원문을, scope_evidence에는 연결 조건 ID와 해당 SRS 원문을 보존합니다. 분류와 무관하게 요청 밖 알림·기능·기대값을 추가하지 않습니다. 실제 범위가 불명확하면 질문하고, 단지 ID·전체 SRS 문장이 요청에 없다는 이유로 질문하거나 보류하지 않습니다.
+24. 요청된 결과에 관련 SRS를 참고로 연결하는 것과 새 검사·정책 변경을 추가하는 것을 구분합니다. 참고 연결은 관련 SRS 전체를 시험한다는 뜻이 아닙니다. source_text에는 실제 요청 원문을, scope_evidence에는 해당 SRS 원문을 보존합니다. 연결 조건 ID는 조건 목록에서 계산됩니다. 분류와 무관하게 요청 밖 알림·기능·기대값을 추가하지 않습니다. 실제 범위가 불명확하면 질문하고, 단지 ID·전체 SRS 문장이 요청에 없다는 이유로 질문하거나 보류하지 않습니다.
 """.strip()
 
 
@@ -93,6 +93,7 @@ class Agent1Response:
     response_id: str | None
     model: str
     usage: dict[str, int | None]
+    link_draft: Agent1AnalysisDraft | None = None
 
 
 def _response_usage_summary(response: Any) -> dict[str, int | None]:
@@ -175,7 +176,7 @@ class OpenAIAgent1:
             feedback = "\n".join(f"- {item}" for item in (checkpoint_feedback or []))
             user_input += (
                 "\n\n[이전 분석 결과]\n"
-                f"{previous_analysis.model_dump_json(indent=2)}\n\n"
+                f"{agent1_link_draft(previous_analysis).model_dump_json(indent=2)}\n\n"
                 "[Checkpoint 1 재작업 요청]\n"
                 f"{feedback}\n"
                 "이전 결과의 근거 있는 내용은 유지하고 위 실패만 수정하세요. "
@@ -187,12 +188,12 @@ class OpenAIAgent1:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent1-2-23",
+                prompt_cache_key="qa-v2-agent1-2-24",
                 input=[
                     {"role": "system", "content": AGENT1_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
                 ],
-                text_format=Agent1Analysis,
+                text_format=Agent1AnalysisDraft,
             )
         except Exception as exc:  # SDK exceptions vary by transport and status.
             raise Agent1Error(f"Agent 1 모델 호출에 실패했습니다 ({type(exc).__name__}). 외부 오류 본문은 저장하지 않습니다.") from None
@@ -201,11 +202,13 @@ class OpenAIAgent1:
         if parsed is None:
             raise Agent1Error("모델이 구조화된 Agent 1 결과를 반환하지 않았습니다.")
 
+        draft = Agent1AnalysisDraft.model_validate(parsed.model_dump(mode="json"))
         return Agent1Response(
-            analysis=parsed,
+            analysis=bind_agent1_requirement_links(draft),
             response_id=getattr(response, "id", None),
             model=self.model,
             usage=_response_usage_summary(response),
+            link_draft=draft,
         )
 
 # ---------------------------------------------------------------------------

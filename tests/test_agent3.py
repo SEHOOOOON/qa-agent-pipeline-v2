@@ -2,6 +2,54 @@
 
 from pipeline_test_support import *
 
+def test_saved_dry_tc_executes_unchanged_and_restores(controller_observation, tmp_path, monkeypatch, capsys):
+    """Replay the real rejected draft, not a hand-corrected replacement or AI review."""
+    from qa_pipeline_agent3 import assemble_tc_bindings, resolve_controller_bindings, tc_plan_handoff_errors
+    path = REPO_ROOT / "runs/cont1006/runs/RUN-20261006-124032-11E19F/agent2_test_design_attempt_1.json"
+    if not path.exists():
+        pytest.skip("Local saved API evidence is not distributed")
+    original = path.read_bytes()
+    case = pipeline.Agent2TestDesign.model_validate_json(original).test_cases[0]
+    before = case.model_dump_json()
+    plan = assemble_tc_bindings(case, resolve_controller_bindings(case))
+    assert not tc_plan_handoff_errors(case, plan)
+    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
+        require_precondition_proof=True, require_restore_plan_links=True,
+        require_restore_comparison_basis=True, legacy_wording_checks=False,
+        allow_terminal_observation_anchor=True, require_assertion_target_identity=True,
+        review_precondition_coverage=True, review_value_roles=True, shared_evidence=True,
+        allow_state_change_terminal_observation=True, execution_interface=True)
+    assert checkpoint.status == CheckStatus.PASS, checkpoint.model_dump_json(indent=2)
+    monkeypatch.setenv("QA_TARGET_URL", (REPO_ROOT / "product_baseline/virtual-controller.html").as_uri())
+    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
+    code = compile_automation_candidate("LOCAL-SAVED-DRY", case, plan,
+        explicit_expectations_only=True, typed_values=True)
+    namespace = {}
+    exec(compile(code, "saved_dry", "exec"), namespace)
+    functions = [value for name, value in namespace.items() if name.startswith("test_") and callable(value)]
+    assert len(functions) == 1
+    functions[0]()
+    output = capsys.readouterr().out
+    assert "RESTORE_STATUS: RESTORED" in output
+    assert "RESTORE_CONFIRMATIONS_VERIFIED:" in output
+    assert "PRODUCT_MISMATCH" not in output and "RESTORE_MISMATCH" not in output
+    assert (tmp_path / "evidence" / "trial-trace.zip").is_file()
+    assert case.model_dump_json() == before and path.read_bytes() == original
+
+@pytest.mark.parametrize("value,valid", [(None, True), ("---", True), ("24°C", False)])
+def test_fixed_text_cp3_and_compiler_share_expectation(value, valid):
+    case, plan, observation = agent3_test_case(), agent3_plan(), agent3_observation()
+    case.expected_results[0].statement = "온도 표시는 ---이다."
+    plan.assertions[0] = AutomationAssertion(
+        result_id=case.expected_results[0].result_id, observation_layer="UI",
+        strategy="DISABLED_TEMPERATURE_TEXT", selector="#det-temp-display", expected_text=value)
+    result = evaluate_checkpoint3_plan(case, plan, observation)
+    errors = " ".join(c.message for c in result.checks)
+    assert ("expected_text is unsupported" not in errors) == valid
+    if valid:
+        code = compile_automation_candidate("LOCAL-FIXED-TEXT", case, plan)
+        assert "'---' not in actual" in code
+
 
 @pytest.mark.parametrize("actual,expected,equal", [
     (True, True, True), (False, False, True), (True, 1, False), (False, 0, False),
@@ -524,10 +572,17 @@ def test_controller_map_collection_preserves_actual_identity_and_missing_values(
 
 @pytest.mark.parametrize("field,initial,target", [("status", "STOP", "OPERATION"),
     ("mode", "COOL", "HEAT"), ("fanSpeed", "HIGH", "LOW"), ("setTemp", 27, 21), ("locked", False, True)])
-def test_controller_map_five_controls_execute_without_binding_model(field, initial, target,
+@pytest.mark.parametrize("presentation", ["original", "metadata_only"])
+def test_controller_map_five_controls_execute_without_binding_model(field, initial, target, presentation,
         mapped_controller_observation, tmp_path, monkeypatch, capsys):
     from qa_pipeline_agent3 import ControllerMapAgent3, evaluate_agent3_eligibility
     case, reference = mapped_tc_fixture(field, initial, target)
+    if presentation == "metadata_only":
+        case.purpose = TcPurpose.RELATED_REGRESSION
+        case.condition_execution = pipeline.ConditionExecution.SEQUENTIAL_TRANSITION
+        case.grouping_reason = None
+        case.test_data.requested_modes = ["HEAT", "HEAT"]
+        case.test_data.restore_observed_hvac_state = True
     eligibility = evaluate_agent3_eligibility(case)
     observation = mapped_controller_observation.model_copy(deep=True)
     observation.elements = [e for e in observation.elements if e.selector in eligibility.required_selectors]
@@ -546,6 +601,148 @@ def test_controller_map_five_controls_execute_without_binding_model(field, initi
     output = capsys.readouterr().out
     assert "RESTORE_STATUS: RESTORED" in output and "PRODUCT_MISMATCH" not in output
     assert case.model_dump_json() == before
+
+
+@pytest.mark.parametrize("field,initial,target,prepare,read_only,failure_phase", [
+    ("mode", "HEAT", "AUTO", {"status": "OPERATION", "fanSpeed": "MED"}, False, None),
+    ("mode", "FAN", "COOL", {"fanSpeed": "HIGH"}, False, None),
+    ("mode", "DRY", "HEAT", {"status": "OPERATION"}, False, None),
+    ("setTemp", 18, 29.5, {"mode": "AUTO", "fanSpeed": "MED"}, False, "request"),
+    ("setTemp", 29.5, 16.5, {"mode": "HEAT", "status": "OPERATION"}, False, "setup"),
+    ("fanSpeed", "MED", "AUTO", {"mode": "HEAT"}, False, None),
+    ("status", "STOP", "OPERATION", {"mode": "HEAT", "fanSpeed": "HIGH"}, False, None),
+    ("locked", True, False, {"mode": "AUTO"}, False, None),
+    ("fanSpeed", "HIGH", "HIGH", {"mode": "FAN"}, False, None),
+    ("setTemp", 24, 24, None, True, None),
+    ("setTemp", 18, 29, {"mode": "AUTO", "fanSpeed": "MED"}, False, None),
+    ("setTemp", 29, 17, {"mode": "HEAT", "status": "OPERATION"}, False, None),
+], ids=["heat-auto-medium", "fan-cool-high", "dry-heat-running", "auto-temp-half-up",
+        "heat-temp-half-down", "heat-fan-auto", "heat-power-on", "auto-unlock",
+        "fan-high-idempotent", "temperature-read-only", "auto-temp-integer-up", "heat-temp-integer-down"])
+def test_local_matrix_new_combinations_preserve_tc_and_restore(field, initial, target, prepare,
+        read_only, failure_phase, mapped_controller_observation, tmp_path, monkeypatch, capsys):
+    """Prepared reference TCs: real browser execution, not fresh AI generation."""
+    from qa_pipeline_agent3 import ControllerMapAgent3
+    case, _ = mapped_tc_fixture(field, initial, target, prepare=prepare, read_only=read_only)
+    original = case.model_dump_json()
+    plan = ControllerMapAgent3().plan(case, mapped_controller_observation, {}).plan
+    checkpoint = evaluate_checkpoint3_plan(case, plan, mapped_controller_observation)
+    assert checkpoint.status == CheckStatus.PASS, checkpoint.model_dump_json(indent=2)
+    code = compile_automation_candidate("LOCAL-NEW-COMBINATIONS", case, plan,
+                                      explicit_expectations_only=True, typed_values=True)
+    monkeypatch.setenv("QA_TARGET_URL", (REPO_ROOT / "product_baseline/virtual-controller.html").as_uri())
+    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
+    namespace = {}
+    exec(compile(code, "local_matrix", "exec"), namespace)
+    try:
+        if failure_phase:
+            with pytest.raises(RuntimeError, match="temperature adjustment stopped: repeated display"):
+                namespace["test_tc_cand_090"]()
+        else:
+            namespace["test_tc_cand_090"]()
+    finally:
+        output = capsys.readouterr().out
+        _write_text_atomic(tmp_path / "execution.txt", output)
+        _write_json(tmp_path / "test_case.json", case.model_dump(mode="json"))
+        _write_json(tmp_path / "plan.json", plan.model_dump(mode="json"))
+        assert case.model_dump_json() == original
+        if not read_only:
+            assert "RESTORE_STATUS: RESTORED" in output
+    if failure_phase:
+        assert "QA_ASSERTIONS_COMPLETE:" not in output and "PRODUCT_MISMATCH:" not in output
+        return  # Expected execution stop, never a successful product test.
+    observations = [json.loads(line.split(": ", 1)[1]) for line in output.splitlines()
+                    if line.startswith("QA_ASSERTION_OBSERVED: ")]
+    assert len(observations) == len(plan.assertions) == 2
+    assert all(row["matched"] is True for row in observations)
+    assert "PRODUCT_MISMATCH" not in output and "RESTORE_MISMATCH" not in output
+    if not read_only:
+        assert "RESTORE_STATUS: RESTORED" in output
+        assert "RESTORE_CONFIRMATIONS_VERIFIED: ER-090,ER-091" in output
+    assert case.model_dump_json() == original
+
+
+@pytest.mark.parametrize("helper", ["_set_temperature", "_request_temperature"])
+@pytest.mark.parametrize("values,target,reason,clicks", [
+    ([24], 24, None, 0),
+    ([24, 25, 26], 26, None, 2),
+    ([18, 18.5, 19], 19, None, 2),
+    ([24.5, 25.5, 26.5], 26.5, None, 2),
+    ([29, 30, 29], 29.5, "repeated display", 2),
+    ([18, 19, 18], 18.25, "repeated display", 2),
+    ([30, 30], 31, "no progress", 1),
+    ([24, 24], 25, "no progress", 1),
+    ([None], 25, "unreadable display", 0),
+    ([24, None], 25, "unreadable display", 1),
+    (list(range(41)), 40, None, 40),
+    (list(range(41)), 41, "attempt limit", 40),
+])
+def test_temperature_adjustment_shared_progress_guard(helper, values, target, reason, clicks,
+        tmp_path, monkeypatch):
+    monkeypatch.setenv("QA_TARGET_URL", "about:blank")
+    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path))
+    case, plan = mapped_tc_fixture()
+    code = compile_automation_candidate("LOCAL-PROGRESS", case, plan, typed_values=True)
+    namespace = {}
+    exec(compile(code, "progress_guard", "exec"), namespace)
+    page = TemperatureSequencePage(values)
+    namespace["_temperature"] = lambda _: page.temperature()
+    # A TEST boundary request may stop at an unchanged display; its assertions
+    # still decide product pass/fail. Preparation and restoration require exact arrival.
+    expected_error = reason and not (helper == "_request_temperature" and reason == "no progress")
+    if expected_error:
+        with pytest.raises(RuntimeError, match=reason):
+            namespace[helper](page, target)
+    else:
+        namespace[helper](page, target)
+    assert len(page.clicks) == clicks
+
+
+@pytest.mark.parametrize("initial,target", [(18, 29.5), (29.5, 16.5)])
+def test_temperature_unreachable_trial_is_execution_error_not_product_failure(initial, target, tmp_path):
+    from qa_pipeline_agent3 import ControllerMapAgent3
+    case, _ = mapped_tc_fixture("setTemp", initial, target, prepare={"mode": "HEAT"})
+    target_html = REPO_ROOT / "product_baseline/virtual-controller.html"
+    observation = inspect_target_ui(target_html, required_selectors=set(pipeline._UI_SELECTOR_INVENTORY),
+                                    discover_generic=False)
+    plan = ControllerMapAgent3().plan(case, observation, {}).plan
+    code_file = tmp_path / "test_unreachable.py"
+    _write_text_atomic(code_file, compile_automation_candidate("LOCAL-UNREACHABLE", case, plan,
+                       explicit_expectations_only=True, typed_values=True))
+    result = pipeline.run_candidate_trial(code_file, target_html, tmp_path / "trial", timeout_seconds=90)
+    assert result.outcome == pipeline.TrialOutcome.AUTOMATION_ERROR
+    assert pipeline._neutral_status_from_trial(result.outcome) == pipeline.NeutralExecutionStatus.EXECUTION_ERROR
+    output = (tmp_path / "trial" / result.stdout_file).read_text(encoding="utf-8")
+    assert "temperature adjustment stopped: repeated display" in output
+    assert "RESTORE_STATUS: RESTORED" in output
+    assert result.evidence_complete
+
+
+@pytest.mark.parametrize("capture_fails", [False, True])
+def test_error_capture_preserves_original_error_and_restoration(capture_fails,
+        mapped_controller_observation, tmp_path, monkeypatch, capsys):
+    from playwright.sync_api import Page
+    from qa_pipeline_agent3 import ControllerMapAgent3
+    case, _ = mapped_tc_fixture("setTemp", 18, 29.5)
+    plan = ControllerMapAgent3().plan(case, mapped_controller_observation, {}).plan
+    code = compile_automation_candidate("LOCAL-CAPTURE-FAILURE", case, plan,
+                                      explicit_expectations_only=True)
+    monkeypatch.setenv("QA_TARGET_URL", (REPO_ROOT / "product_baseline/virtual-controller.html").as_uri())
+    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path))
+    if capture_fails:
+        def fail_capture(*args, **kwargs):
+            raise RuntimeError("test-only screenshot failure")
+        monkeypatch.setattr(Page, "screenshot", fail_capture)
+    namespace = {}
+    exec(compile(code, "capture_test", "exec"), namespace)
+    with pytest.raises(RuntimeError, match="temperature adjustment stopped: repeated display"):
+        namespace["test_tc_cand_090"]()
+    output = capsys.readouterr().out
+    assert "RESTORE_STATUS: RESTORED" in output
+    assert "PRODUCT_MISMATCH:" not in output and "QA_ASSERTIONS_COMPLETE:" not in output
+    assert ("EVIDENCE_CAPTURE_FAILED:" in output) == capture_fails
+    assert (tmp_path / "trial-final.png").is_file() != capture_fails
+    assert (tmp_path / "trial-trace.zip").is_file()
 
 
 @pytest.mark.parametrize("value,allowed", [(None, True), (1, True), (2, False),
@@ -1629,7 +1826,7 @@ def test_plan_value_format_pipeline_uses_same_plan_for_review_and_compile(tmp_pa
     original_compile = pipeline_execution.compile_automation_candidate
     def compile_plan(run_id, tc, plan, **kwargs):
         assert plan == canonical
-        assert kwargs == {"explicit_expectations_only": True}
+        assert kwargs == {"explicit_expectations_only": True, "typed_values": True}
         return original_compile(run_id, tc, plan, **kwargs)
     monkeypatch.setattr(pipeline_execution, "compile_automation_candidate", compile_plan)
     monkeypatch.setattr(pipeline_execution, "run_candidate_trial", lambda *a, **kw: _trial(TrialOutcome.PASS))

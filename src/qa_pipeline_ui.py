@@ -220,6 +220,53 @@ def _candidate_validation(run_dir: Path, tc_id: str) -> dict[str, Any]:
     raise ValueError("선택한 후보 TC의 변경 검증 결과를 찾을 수 없습니다.")
 
 
+def _candidate_artifacts(run_dir: Path, tc_id: str) -> tuple[Path, dict, dict]:
+    """Resolve approval/revalidation from the execution's recorded source, never a search fallback."""
+    from qa_pipeline_io import _verify_sha256
+    from qa_pipeline_reporting import _safe_run_file
+
+    execution = _read_json(run_dir / "validation_manifest.json")
+    summary_file = run_dir / "agent3_run_summary.json"
+    summary = _read_json(summary_file)
+    entries = [item for item in summary.get("entries", [])
+               if isinstance(item, dict) and item.get("tc_id") == tc_id]
+    if "source_agent3_artifacts" not in execution:
+        # Historical multi-candidate layout; full source verification still runs below.
+        directory = run_dir / "agent3_candidates" / tc_id
+        return directory, _read_json(directory / "agent3_manifest.json"), entries[0] if len(entries) == 1 else {}
+    artifacts = execution["source_agent3_artifacts"]
+    if not isinstance(artifacts, list) or any(not isinstance(item, dict) for item in artifacts):
+        raise ValueError("후보 실행 원본 목록이 올바르지 않습니다.")
+    matches = [item for item in artifacts if item.get("tc_id") == tc_id]
+    if len(matches) != 1:
+        raise ValueError("후보 TC의 실행 원본 연결은 정확히 하나여야 합니다.")
+    source = matches[0]
+    path = _safe_run_file(run_dir, source.get("agent3_manifest_file"))
+    allowed = {(run_dir / "agent3_manifest.json").resolve(),
+               (run_dir / "agent3_candidates" / tc_id / "agent3_manifest.json").resolve()}
+    if path is None or path not in allowed:
+        raise ValueError("후보 Manifest 경로가 해당 TC의 저장 위치와 다릅니다.")
+    _verify_sha256(path, source.get("agent3_manifest_sha256"), "후보 Manifest")
+    manifest = _read_json(path)
+    if (manifest.get("tc_id") != tc_id or manifest.get("run_id") != run_dir.name
+            or manifest.get("stage") != "AGENT_3_CP3_TRIAL"):
+        raise ValueError("후보 Manifest의 TC·Run·단계가 실행 기록과 다릅니다.")
+    if path.parent == run_dir.resolve():
+        if len(artifacts) != 1 or summary_file.exists() or execution.get("source_agent3_run_summary_sha256") is not None:
+            raise ValueError("단일 후보와 다중 후보 실행 기록이 혼합되어 있습니다.")
+        entry = {"status": manifest.get("status"),
+                 "checkpoint_status": _read_json(path.parent / "checkpoint3.json").get("status")}
+    else:
+        _verify_sha256(summary_file, execution.get("source_agent3_run_summary_sha256"), "Agent 3 요약")
+        if len(entries) != 1:
+            raise ValueError("후보 TC의 실행 요약 연결은 정확히 하나여야 합니다.")
+        entry = entries[0]
+        if (entry.get("artifact_dir") != path.parent.relative_to(run_dir.resolve()).as_posix()
+                or entry.get("manifest_sha256") != source.get("agent3_manifest_sha256")):
+            raise ValueError("후보 실행 요약과 Manifest 위치·해시가 다릅니다.")
+    return path.parent, manifest, entry
+
+
 def _verify_candidate_sources(run_dir: Path, tc_id: str) -> None:
     from qa_pipeline_execution import (_load_verified_agent2_run, _read_json_model, _verify_sha256,
                                        _legacy_wording_policy, _load_grounding_review, _review_responsibility_policy,
@@ -243,8 +290,7 @@ def _verify_candidate_sources(run_dir: Path, tc_id: str) -> None:
         if any(check.rule_id == "CP2-017" and check.status != CheckStatus.PASS for check in current_cp2.checks):
             raise ValueError("신규 TC 기대 결과가 현재 요구사항 대조 규칙을 통과하지 못했습니다.")
     test_case = next(item for item in design.test_cases if item.tc_id == tc_id)
-    candidate_dir = run_dir / "agent3_candidates" / tc_id
-    manifest = _read_json(candidate_dir / "agent3_manifest.json")
+    candidate_dir, manifest, _ = _candidate_artifacts(run_dir, tc_id)
     _verify_sha256(run_dir / "agent2_manifest.json", manifest.get("source_agent2_manifest_sha256"), "Agent 2 인계")
     if manifest.get("source_agent2_design_sha256") != source.get("agent2_design_sha256"):
         raise ValueError("후보 TC 설계 인계 해시가 다릅니다.")
@@ -295,19 +341,12 @@ def _candidate_approval_check(
         raise ValueError("올바르지 않은 후보 TC ID입니다.")
     test_case = _candidate_test_case(run_dir, tc_id)
     result = _candidate_validation(run_dir, tc_id)
-    candidate_dir = run_dir / "agent3_candidates" / tc_id
-    manifest = _read_json(candidate_dir / "agent3_manifest.json")
-    summary = _read_json(run_dir / "agent3_run_summary.json")
+    try:
+        candidate_dir, manifest, entry = _candidate_artifacts(run_dir, tc_id)
+    except (ValueError, OSError) as exc:
+        return test_case, result, run_dir, [f"승인 원본 위치 검증 실패: {exc}"]
     checkpoint4 = _read_json(run_dir / "checkpoint4.json")
     final_report = _read_json(run_dir / "final_report.json")
-    entry = next(
-        (
-            item
-            for item in summary.get("entries") or []
-            if isinstance(item, dict) and item.get("tc_id") == tc_id
-        ),
-        {},
-    )
     candidate_name = manifest.get("candidate_file")
     candidate_root = (candidate_dir / "candidates").resolve()
     candidate_file = (candidate_root / str(candidate_name or "")).resolve()
@@ -415,8 +454,7 @@ def revalidate_candidate_asset(
     validation = _candidate_validation(run_dir, tc_id)
     if validation.get("status") != "PASSED":
         raise ValueError("기존 변경 검증을 통과한 후보만 승인 전 재검증할 수 있습니다.")
-    candidate_dir = run_dir / "agent3_candidates" / tc_id
-    manifest = _read_json(candidate_dir / "agent3_manifest.json")
+    candidate_dir, manifest, _ = _candidate_artifacts(run_dir, tc_id)
     candidate_root = (candidate_dir / "candidates").resolve()
     candidate_file = (
         candidate_root / str(manifest.get("candidate_file") or "")
@@ -1219,6 +1257,10 @@ def summarize_run(
     test_cases = design.get("test_cases") or []
     selected_ids = selection.get("selected_tc_ids") or []
     executed_ids = agent3_summary.get("executed_tc_ids") or []
+    if not selection and not agent3_summary and validation:
+        selected_ids = [item.get("test_id") for item in validation.get("candidate_results", [])
+                        if isinstance(item, dict) and item.get("test_id")]
+        executed_ids = selected_ids
     exclusions = agent3_summary.get("자동화_제외_TC") or []
     validation_results = [
         *(validation.get("candidate_results") or []),
@@ -1269,7 +1311,7 @@ def summarize_run(
         "summary": (
             f"선택 {len(selected_ids)}건 · 후보 시험 완료 {len(executed_ids)}건 · "
             f"자동화 제외 {len(exclusions)}건"
-            if selection
+            if selection or validation
             else "Agent 3 산출물이 아직 없습니다."
         ),
         "details": [

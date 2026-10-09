@@ -12,10 +12,10 @@
         "REQ-CONTROL-001",
         "REQ-STATE-001"
       ],
-      "test_case_file": "test_cases/TC-V2-001.json",
-      "test_case_sha256": "79a7b17b444f9f86c9758e0d4f178119ac456dc5d3b919dd332a317bf5f8efbc",
-      "automation_file": "automation/test_tc_v2_001.py",
-      "automation_sha256": "68188e6e407a2a156a2dd30e26f06eb96ccb0811355904bb9baca5c29d5d978f",
+      "test_case_file": "revisions/20261005/TC-V2-001/test_case.json",
+      "test_case_sha256": "171894b8e6aece9d7f7622ddce6ca36e9c62917d028474fd2735d6b0a6db5c0f",
+      "automation_file": "revisions/20261005/TC-V2-001/automation.py",
+      "automation_sha256": "0e888baf250b56b4b4ca05ea0e1cd1b5aa50312d486a19dc322685aa040ed125",
       "target_sha256": "c7b9b7bca36fa027589aeec5113117284f031992fe9b766ecbcd498bf0605038",
       "approval_revalidation_file": "provenance/TC-V2-001-revalidation-summary.json",
       "approval_revalidation_sha256": "efa9b5e533947896eca5b024f11e183680a0bc28f200ed4fd78d7187b726d9da",
@@ -27,7 +27,21 @@
       "srs_revision_after_sha256": "ac3575f13acf17576385e57b90c7264985c0fbdcbf207069f0f24cd20f3a3b56",
       "reviewer": "오세훈",
       "approval_note": "현재 HTML 재검증 PASS 및 Screenshot·Trace·해시 확인",
-      "approved_at": "2026-08-30T09:38:57.689154+00:00"
+      "approved_at": "2026-08-30T09:38:57.689154+00:00",
+      "maintenance_revision": {
+        "version": "20261005",
+        "changed_at_kst": "2026-10-05",
+        "authorization": "사용자가 과거 TC를 현재 형식으로 수정하도록 대화에서 명시 지시",
+        "kind": "LOCAL_FORMAT_AND_RECOVERY_REFRESH",
+        "model_review": "NOT_RUN",
+        "compilation_id": "LOCAL-TC-REFRESH-20261005",
+        "previous_test_case_file": "test_cases/TC-V2-001.json",
+        "previous_test_case_sha256": "79a7b17b444f9f86c9758e0d4f178119ac456dc5d3b919dd332a317bf5f8efbc",
+        "previous_automation_file": "automation/test_tc_v2_001.py",
+        "previous_automation_sha256": "68188e6e407a2a156a2dd30e26f06eb96ccb0811355904bb9baca5c29d5d978f",
+        "change": "제품 기대결과·근거는 유지. LOW 준비 확인, 현재 실행 정의, 준비 전 화면·내부값 복원 비교를 연결.",
+        "limitation": "로컬 브라우저 검증. 새 API 생성·평가 또는 과거 Run 재평가가 아님."
+      }
     },
     {
       "source_key": "RUN-20260918-110541-4102E0:TC-CAND-001",
@@ -38,10 +52,10 @@
       "requirement_ids": [
         "REQ-FAN-001"
       ],
-      "test_case_file": "test_cases/TC-V2-002.json",
-      "test_case_sha256": "20b91e21cea7b4e0e4f9ae160bfa1c78d083bc3a0cc519b033d1608bea519e39",
-      "automation_file": "automation/test_tc_v2_002.py",
-      "automation_sha256": "ca2336c3f234963f9c49da7621a8faee757be07a81d7c0e758714e05de43d69f",
+      "test_case_file": "revisions/20261005/TC-V2-002/test_case.json",
+      "test_case_sha256": "d9e2908b646f31f665d208745544d9c3d86690f4617ea518b72f42b928c40a0e",
+      "automation_file": "revisions/20261005/TC-V2-002/automation.py",
+      "automation_sha256": "b652752d82849b8251aa969063fab32889984392631e703eada146f58024482d",
       "target_sha256": "3deb582b46c9041b82b04da0d6b8de7150c46f2266c8bee3ef8fb83ee8d208fa",
       "approval_revalidation_file": null,
       "approval_revalidation_sha256": null,
@@ -53,7 +67,21 @@
       "srs_revision_file": "srs_revisions/TC-V2-002.json",
       "srs_revision_sha256": "000df3f93babd71819f0957a5567515e0e34689ca778cafdfa86f9afb6bee8c1",
       "srs_revision_before_sha256": "5d315f19668181895c0a6d2dc58883fd82f81058784665dc8e8a23819aafb506",
-      "srs_revision_after_sha256": "fe23fb44d165408df85ca866b656acf4bb289add3ce68ba140b8ea12e4b2145d"
+      "srs_revision_after_sha256": "fe23fb44d165408df85ca866b656acf4bb289add3ce68ba140b8ea12e4b2145d",
+      "maintenance_revision": {
+        "version": "20261005",
+        "changed_at_kst": "2026-10-05",
+        "authorization": "사용자가 과거 TC를 현재 형식으로 수정하도록 대화에서 명시 지시",
+        "kind": "LOCAL_FORMAT_AND_RECOVERY_REFRESH",
+        "model_review": "NOT_RUN",
+        "compilation_id": "LOCAL-TC-REFRESH-20261005",
+        "previous_test_case_file": "test_cases/TC-V2-002.json",
+        "previous_test_case_sha256": "20b91e21cea7b4e0e4f9ae160bfa1c78d083bc3a0cc519b033d1608bea519e39",
+        "previous_automation_file": "automation/test_tc_v2_002.py",
+        "previous_automation_sha256": "ca2336c3f234963f9c49da7621a8faee757be07a81d7c0e758714e05de43d69f",
+        "change": "제품 기대결과·근거는 유지. LOW 준비 확인, 현재 실행 정의, 준비 전 화면·내부값 복원 비교를 연결.",
+        "limitation": "로컬 브라우저 검증. 새 API 생성·평가 또는 과거 Run 재평가가 아님."
+      }
     }
   ]
 }

@@ -1,6 +1,88 @@
 """Transport/contract/branch tests. Scripted judgments do not measure model accuracy."""
 from pipeline_test_support import *
 
+@pytest.mark.parametrize("enabled", [False, True])
+def test_essential_review_policy_reaches_model_instructions(enabled):
+    payload = grounding.build_grounding_input("AGENT2", cp1_request(), cp2_requirements(),
+        cp2_valid_design(), analysis=cp2_analysis(), include_tc_execution_alignment=True,
+        essential_checks=enabled)
+    calls = []
+    def parse(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(output_parsed=None)
+    reviewer = grounding.OpenAIGroundingReviewer(model="test",
+        client=SimpleNamespace(responses=SimpleNamespace(parse=parse)))
+    with pytest.raises(ValueError, match="구조화 응답"):
+        reviewer.review(payload)
+    instructions = calls[0]["input"][0]["content"]
+    assert ("호스트의 ESSENTIAL_VALIDATION 계약" in instructions) == enabled
+    assert json.loads(calls[0]["input"][1]["content"]) == payload
+    if not enabled:
+        assert instructions == grounding.REVIEW_INSTRUCTIONS
+
+@pytest.mark.parametrize("verdict,expected", [("SUPPORTED", "PASS"), ("UNSUPPORTED", "FAIL"), ("UNCERTAIN", "REVIEW")])
+def test_essential_policy_keeps_required_semantic_verdict(verdict, expected):
+    payload = grounding.build_grounding_input("AGENT2", cp1_request(), cp2_requirements(),
+        cp2_valid_design(), analysis=cp2_analysis(), include_condition_coverage=True,
+        include_tc_execution_alignment=True, essential_checks=True)
+    record = fake_grounding_record(payload, verdict=verdict)
+    # A combined observation alone is not an omitted test. An unsupported
+    # meaning or unknown requirement still stops. These are scripted verdicts.
+    for item in record["review"]["items"]:
+        item["single_fact"] = False
+    result = grounding.check_review_record(payload, record)
+    assert result.status.value == expected
+    changed = {**payload, "essential_validation_contract": None}
+    with pytest.raises(ValueError, match="해시"):
+        grounding.check_review_record(changed, record)
+
+
+@pytest.mark.parametrize("strategy,expected", [
+    ("UI_TEMPERATURE", 21), ("INTERNAL_SET_TEMP", 21),
+    ("INTERNAL_DEVICE_FIELDS_EQUALS", {"mode": "HEAT"}),
+    ("CONTROLLER_UI_FIELDS_EQUALS", {"mode": "HEAT"}),
+    ("TOAST_VISIBLE", True), ("CONTROLS_DISABLED", [False, False]),
+    ("DISABLED_TEMPERATURE_TEXT", "---"), ("UI_TEXT_CONTAINS", "ready"),
+    ("UI_VALUE_EQUALS", "False"), ("UI_CHECKED_EQUALS", False),
+    ("UI_ENABLED_EQUALS", False), ("INTERNAL_VALUE_EQUALS", False),
+])
+def test_reader_facts_preserve_effective_expectation_and_anchor(strategy, expected):
+    from qa_pipeline_agent3 import _assertion_reader_facts
+    assertion = pipeline.AutomationAssertion(result_id="ER-001", observation_layer="UI",
+        strategy=strategy, selector="#observed", expected_number=21, expected_text="ready",
+        expected_value=False, expected_fields=[{"field_name": "mode", "expected_value": "HEAT"}],
+        after_action_id="ACT-005")
+    before = assertion.model_dump()
+    facts = _assertion_reader_facts(assertion, 1)
+    assert facts["effective_expected"] == expected
+    assert facts["after_action_id"] == "ACT-005"
+    assert facts["plan_anchor"] == "#observed"
+    assert assertion.model_dump() == before
+
+
+def test_every_supported_strategy_has_reader_semantics_including_fixed_toast_rules():
+    from qa_pipeline_agent3 import _ASSERTION_READER_SEMANTICS, _assertion_reader_facts, _BLOCKING_TOAST_ACTUAL_TERMS
+    assert set(_ASSERTION_READER_SEMANTICS) == set(pipeline.AssertionStrategy)
+    assertion = pipeline.AutomationAssertion(result_id="ER-001", observation_layer="UI",
+        strategy="TOAST_BLOCKING", selector="#global-toast", after_action_id="ACT-002")
+    facts = _assertion_reader_facts(assertion, 1)
+    assert facts["comparison"] == "visible_and_any_term"
+    assert facts["effective_expected"] == {"visible": True, "any_text_term": list(_BLOCKING_TOAST_ACTUAL_TERMS)}
+
+
+@pytest.mark.parametrize("fault,value", [("expected_fields", [{"field_name": "mode", "expected_value": "DRY"}]),
+    ("selector", "#device-card-2"), ("after_action_id", "ACT-099")])
+def test_reader_facts_do_not_hide_wrong_plan_value_target_or_timing(fault, value):
+    from qa_pipeline_agent3 import execution_interface_facts
+    case, plan = mapped_tc_fixture("mode", "COOL", "HEAT")
+    observation = generic_control_guard_fixture()[2]
+    changed = plan.model_copy(deep=True)
+    data = changed.assertions[0].model_dump()
+    data[fault] = value
+    changed.assertions[0] = pipeline.AutomationAssertion.model_validate(data)
+    assert execution_interface_facts(changed, observation) != execution_interface_facts(plan, observation)
+    assert pipeline.tc_plan_handoff_errors(case, changed)
+
 
 @pytest.mark.parametrize("prompt,marker,valid", [
     ("agent3-3.43", None, True), ("agent3-3.43", "1.0", False),
@@ -48,7 +130,9 @@ def test_execution_interface_preserves_tc_review_and_old_payload(field, initial,
                 if dependency["selector"] in observed else 0)
         code = compile_automation_candidate("INTERFACE", case, plan, explicit_expectations_only=True)
         assert "return _displayed_temperature(page, '#det-temp-display')" in code
-        assert "selector = '#det-temp-up-btn' if current < target else '#det-temp-down-btn'" in code
+        assert "selector = '#det-temp-up-btn' if before < target else '#det-temp-down-btn'" in code
+        assert "_adjust_temperature(page, target, allow_blocked=False)" in code
+        assert "_adjust_temperature(page, target, allow_blocked=True)" in code
     with pytest.raises(ValueError, match="해시"):
         grounding.check_review_record(new, fake_grounding_record(old))
     record = fake_grounding_record(new)
@@ -406,6 +490,7 @@ def test_new_scope_and_terminal_policies_cannot_silently_downgrade(stage, mutati
     if mutation.startswith("historical"): manifest["prompt_version"] = historical_prompt
     if mutation.startswith("historical") and stage == "AGENT2":
         manifest.pop("tc_execution_alignment_contract")
+        manifest.pop("essential_validation_contract")
     if mutation in {"none", "historical"}:
         assert reader(manifest)[option] == (mutation == "none")
     else:
@@ -807,7 +892,7 @@ def test_scope_and_preparation_guidance_is_consistent_across_agents():
     import qa_pipeline_agent2 as a2
     assert "보조_근거는 제품 기준의 참고" in a1.AGENT1_SYSTEM_INSTRUCTIONS
     assert "준비→목표 전환 하나는 SINGLE_FLOW" in a2.AGENT2_SYSTEM_INSTRUCTIONS
-    assert "운전 모드 전용" in a2.AGENT2_SYSTEM_INSTRUCTIONS
+    assert "다른 관제점 값을 넣거나 실행 정의와 모순되게 쓰지 않습니다" in a2.AGENT2_SYSTEM_INSTRUCTIONS
     assert "원문 한 문장을 통째로 steps에 복사" in a2.AGENT2_SYSTEM_INSTRUCTIONS
     assert "전체 시험을 요구하지 않습니다" in grounding.REVIEW_INSTRUCTIONS
     assert "PROCEDURE_COVERAGE" in grounding.REVIEW_INSTRUCTIONS
@@ -941,12 +1026,30 @@ def test_grounding_coverage_evidence_and_decisions(stage, mutation, allow_tolera
     elif mutation == "contract":
         record["contract"] = "unknown"
     if mutation in {"hash", "stage", "contract"}:
-        with pytest.raises(ValueError, match="해시"):
+        expected = {"hash": "입력 해시", "stage": "검토의 단계", "contract": "계약 형식"}[mutation]
+        with pytest.raises(ValueError, match=expected):
             grounding.check_review_record(payload, record)
     else:
         result = grounding.check_review_record(payload, record)
         assert result.status == (CheckStatus.PASS if mutation == "none" or (mutation == "order" and allow_tolerance) else
                                  CheckStatus.REVIEW if mutation == "uncertain" else CheckStatus.FAIL)
+
+
+@pytest.mark.parametrize("stage", ["AGENT1", "AGENT2", "AGENT3"])
+@pytest.mark.parametrize("field, message", [
+    ("contract", "계약 형식"), ("stage", "검토의 단계"), ("input_sha256", "입력 해시"),
+])
+def test_saved_review_missing_identity_reports_cause_before_reading_verdict(stage, field, message):
+    payload = review_payload(stage)
+    record = source_selected_review_record(payload)
+    record.pop(field)
+    # Invalid identity must stop before using (or even reading) the saved verdict.
+    record.pop("review")
+    before = json.dumps(record, sort_keys=True)
+    with pytest.raises(ValueError, match=message) as error:
+        grounding.check_review_record(payload, record)
+    assert "이전 판정을 재사용할 수 없습니다" in str(error.value)
+    assert json.dumps(record, sort_keys=True) == before
 
 
 @pytest.mark.parametrize("stage", ["AGENT2", "AGENT3"])

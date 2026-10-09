@@ -3,6 +3,142 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("decision,mode", [("APPROVE", "ADD"), ("APPROVE", "REPLACE"),
+                                         ("DECLINE", "ADD"), ("HOLD", "ADD")])
+def test_saved_single_run_asset_choices_preserve_sources(saved_single_approval_run, decision, mode):
+    runs, assets, target, run_id, tc_id, srs = saved_single_approval_run
+    run = runs / run_id
+    before = {str(p.relative_to(assets)): p.read_bytes() for p in assets.rglob('*') if p.is_file()}
+    source_before = {str(p.relative_to(run)): p.read_bytes() for p in run.rglob('*') if p.is_file()}
+    srs_before = srs.read_bytes()
+    case = pipeline_ui._candidate_test_case(run, tc_id)
+    comparison = pipeline_ui.candidate_asset_comparison(case, assets)
+    assert not pipeline_ui._candidate_approval_check(run, tc_id, target_html=target)[3]
+    result = pipeline_ui.decide_candidate_asset(runs, assets, target, run_id, tc_id,
+        srs_path=srs, decision=decision, reviewer="로컬 검사", note="사본 선택 경로 시험",
+        registration_mode=mode, replace_tc_ids=["TC-MODE-003"] if mode == "REPLACE" else [],
+        comparison_sha256=comparison["fingerprint"])
+    assert result["decision"] == {"APPROVE": "APPROVED", "DECLINE": "DECLINED", "HOLD": "HELD"}[decision]
+    assert all((run / name).read_bytes() == content for name, content in source_before.items())
+    assert srs.read_bytes() == srs_before
+    if decision == "APPROVE":
+        assert all((assets / name).read_bytes() == content for name, content in before.items() if name != 'registry.json')
+        _, snapshot = pipeline.load_approved_regression_catalog(assets)
+        ids = {item.tc_id for item in pipeline._catalog_from_snapshot(snapshot)}
+        assert result['official_tc_id'] in ids
+        assert ("TC-MODE-003" not in ids) == (mode == "REPLACE")
+        assert {"TC-MODE-001", "TC-MODE-002"}.issubset(ids)
+    else:
+        assert before == {str(p.relative_to(assets)): p.read_bytes() for p in assets.rglob('*') if p.is_file()}
+    view = pipeline_ui.summarize_run(runs, run_id, target_html=target, approved_assets_root=assets)
+    assert view['candidate_assets'][0]['decision']['decision'] == result['decision']
+
+
+@pytest.mark.parametrize("damage", ["outside", "other_tc", "missing_manifest", "wrong_hash",
+    "duplicate", "missing_source", "mixed_summary", "missing_trace", "changed_code", "wrong_tc_identity"])
+def test_saved_single_run_approval_rejects_damaged_evidence(saved_single_approval_run, damage):
+    runs, assets, target, run_id, tc_id, srs = saved_single_approval_run
+    run = runs / run_id
+    path = run / 'validation_manifest.json'
+    metadata = json.loads(path.read_text(encoding='utf-8'))
+    source = metadata['source_agent3_artifacts'][0]
+    if damage == 'outside': source['agent3_manifest_file'] = '../agent3_manifest.json'
+    elif damage == 'other_tc': source['tc_id'] = 'TC-CAND-999'
+    elif damage == 'missing_manifest': source['agent3_manifest_file'] = 'missing.json'
+    elif damage == 'wrong_hash': source['agent3_manifest_sha256'] = '0' * 64
+    elif damage == 'duplicate': metadata['source_agent3_artifacts'].append(dict(source))
+    elif damage == 'missing_source': metadata['source_agent3_artifacts'] = []
+    elif damage == 'mixed_summary': _write_json(run / 'agent3_run_summary.json', {'entries': []})
+    elif damage == 'missing_trace': (run / 'evidence' / tc_id / 'trial-trace.zip').unlink()
+    elif damage == 'changed_code':
+        code = next((run / 'candidates').glob('*.py'))
+        code.write_text(code.read_text(encoding='utf-8') + '\n# changed\n', encoding='utf-8')
+    else:
+        mf = run / 'agent3_manifest.json'
+        altered = json.loads(mf.read_text(encoding='utf-8'))
+        altered['tc_id'] = 'TC-CAND-999'
+        _write_json(mf, altered)
+        source['agent3_manifest_sha256'] = _sha256_file(mf)
+    _write_json(path, metadata)
+    before = {str(p.relative_to(assets)): p.read_bytes() for p in assets.rglob('*') if p.is_file()}
+    assert pipeline_ui._candidate_approval_check(run, tc_id, target_html=target)[3]
+    with pytest.raises(ValueError):
+        pipeline_ui.decide_candidate_asset(runs, assets, target, run_id, tc_id,
+            srs_path=srs, decision='APPROVE', reviewer='검사', note='차단 확인')
+    assert before == {str(p.relative_to(assets)): p.read_bytes() for p in assets.rglob('*') if p.is_file()}
+    assert not (run / 'asset_decisions.json').exists()
+
+
+@pytest.mark.parametrize('layout', ['single', 'multi'])
+@pytest.mark.parametrize('damage', ['none', 'wrong_tc', 'wrong_run', 'wrong_path', 'duplicate', 'bad_hash', 'missing'])
+def test_asset_source_resolver_layouts_and_guards(tmp_path, layout, damage):
+    run = tmp_path / 'RUN-20261007-120000-ABCDEF'
+    tc_id = 'TC-CAND-001'
+    directory = run if layout == 'single' else run / 'agent3_candidates' / tc_id
+    mf = directory / 'agent3_manifest.json'
+    _write_json(mf, dict(run_id=run.name, tc_id=tc_id, stage='AGENT_3_CP3_TRIAL', status='PASS'))
+    _write_json(directory / 'checkpoint3.json', {'status': 'PASS'})
+    if damage in {'wrong_tc', 'wrong_run'}:
+        value = json.loads(mf.read_text(encoding='utf-8'))
+        value['tc_id' if damage == 'wrong_tc' else 'run_id'] = 'OTHER'
+        _write_json(mf, value)
+    item = dict(tc_id=tc_id, agent3_manifest_file=mf.relative_to(run).as_posix(), agent3_manifest_sha256=_sha256_file(mf))
+    summary_hash = None
+    if layout == 'multi':
+        _write_json(run / 'agent3_run_summary.json', {'entries': [dict(tc_id=tc_id, status='PASS', checkpoint_status='PASS',
+            artifact_dir=directory.relative_to(run).as_posix(), manifest_sha256=_sha256_file(mf))]})
+        summary_hash = _sha256_file(run / 'agent3_run_summary.json')
+    if damage == 'wrong_path': item['agent3_manifest_file'] = '../agent3_manifest.json'
+    if damage == 'bad_hash': item['agent3_manifest_sha256'] = '0' * 64
+    items = [item, dict(item)] if damage == 'duplicate' else [] if damage == 'missing' else [item]
+    _write_json(run / 'validation_manifest.json', dict(source_agent3_artifacts=items, source_agent3_run_summary_sha256=summary_hash))
+    if damage == 'none':
+        actual, manifest, entry = pipeline_ui._candidate_artifacts(run, tc_id)
+        assert actual == directory.resolve() and manifest['tc_id'] == tc_id and entry['checkpoint_status'] == 'PASS'
+    else:
+        with pytest.raises(ValueError): pipeline_ui._candidate_artifacts(run, tc_id)
+
+
+def test_saved_single_run_local_revalidation_uses_same_source(saved_single_approval_run):
+    runs, assets, target, run_id, tc_id, _ = saved_single_approval_run
+    record = pipeline_ui.revalidate_candidate_asset(runs, target, run_id, tc_id)
+    assert record['outcome'] == 'PASS' and record['evidence_complete']
+    assert not pipeline_ui._candidate_approval_check(runs / run_id, tc_id, target_html=target)[3]
+
+
+@pytest.mark.parametrize("earlier_decision", [None, "HOLD", "DECLINE"])
+def test_saved_single_registered_asset_reexecutes_without_source_stub(
+        saved_single_approval_run, earlier_decision, tmp_path):
+    runs, assets, target, run_id, tc_id, srs = saved_single_approval_run
+    run = runs / run_id
+    before = {p.relative_to(assets): p.read_bytes() for p in assets.rglob("*") if p.is_file()}
+    srs_before = srs.read_bytes()
+    if earlier_decision:
+        pipeline_ui.decide_candidate_asset(runs, assets, target, run_id, tc_id,
+            srs_path=srs, decision=earlier_decision, reviewer="로컬 검증", note="등록 전 선택")
+        assert before == {p.relative_to(assets): p.read_bytes() for p in assets.rglob("*") if p.is_file()}
+    comparison = pipeline_ui.candidate_asset_comparison(pipeline_ui._candidate_test_case(run, tc_id), assets)
+    kwargs = dict(srs_path=srs, decision="APPROVE", reviewer="로컬 검증",
+                  note="사본 신규 등록과 재사용 확인", comparison_sha256=comparison["fingerprint"])
+    record = pipeline_ui.decide_candidate_asset(runs, assets, target, run_id, tc_id, **kwargs)
+    after = {p.relative_to(assets): p.read_bytes() for p in assets.rglob("*") if p.is_file()}
+    assert record["decision"] == "APPROVED"
+    assert pipeline_ui.decide_candidate_asset(runs, assets, target, run_id, tc_id, **kwargs) == record
+    assert after == {p.relative_to(assets): p.read_bytes() for p in assets.rglob("*") if p.is_file()}
+    catalog, snapshot = pipeline.load_approved_regression_catalog(assets)
+    spec = next(item for item in catalog if item.tc_id == record["official_tc_id"])
+    assert spec.tc_id in {item.tc_id for item in pipeline._catalog_from_snapshot(snapshot)}
+    result = pipeline.run_existing_regression(spec, assets / spec.automation_file, target,
+        tmp_path / "registered-evidence", timeout_seconds=90)
+    _write_json(tmp_path / "registered-result.json", result.model_dump(mode="json"))
+    assert result.status == pipeline.NeutralExecutionStatus.PASSED
+    assert result.evidence_complete and result.test_sha256 == spec.automation_sha256
+    stdout = next((tmp_path / "registered-evidence").rglob("*stdout*")).read_text(encoding="utf-8")
+    assert "RESTORE_STATUS: RESTORED" in stdout
+    assert after == {p.relative_to(assets): p.read_bytes() for p in assets.rglob("*") if p.is_file()}
+    assert srs.read_bytes() == srs_before
+
+
 @pytest.mark.parametrize("case", [
     "normal", "fan_question", "lock_question", "missing_question", "tampered_analysis",
     "tampered_checkpoint", "wrong_run", "internal_error", "later_stage", "quality_fail",
@@ -223,6 +359,10 @@ def test_tc_comparison_baseline_replacement_and_snapshot_history(tmp_path, monke
             tc_id="TC-TEMP-001", source_condition_ids=["COND-001"], selection_reason="과거 선택")],
     })
     _write_json(old_run / "agent2_test_design.json", design.model_dump(mode="json"))
+    # Isolate the post-handoff retirement guard; the real handoff loader has
+    # separate valid-source and tampering controls in test_orchestration_execution.
+    monkeypatch.setattr(pipeline_execution, "_load_verified_agent2_run",
+        lambda *_: (None, None, None, design, None, {}))
     monkeypatch.setattr(pipeline_execution, "_candidate_execution_records", lambda *_: ([], [], {}))
     def unexpected(*a, **k):
         raise AssertionError("대체된 TC 실행 전 중단해야 합니다")
@@ -1664,7 +1804,10 @@ def test_pipeline_ui_failure_message_is_safe_and_actionable(tmp_path: Path) -> N
 
     message = pipeline_ui._safe_run_error(run_dir)
 
-    assert message == "모델 연결 실패: <REPO_ROOT>\\private-input.json"
+    expected_path = str(pipeline_ui.REPO_ROOT / "private-input.json").replace(
+        str(pipeline_ui.REPO_ROOT), "<REPO_ROOT>"
+    )
+    assert message == f"모델 연결 실패: {expected_path}"
     assert str(pipeline_ui.REPO_ROOT) not in message
 
     (run_dir / "run_error.json").unlink()

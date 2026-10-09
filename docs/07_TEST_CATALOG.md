@@ -1,5 +1,35 @@
 # 자동 테스트 카탈로그
 
+`test_validation_execution_checks_handoff_before_any_trial`는 신규/재사용/제외 요약과 설계 변조·Manifest 누락·Checkpoint 변조를 조합해 제품 시험 전 차단을 확인한다. 실제 인계 로더를 사용하며 모델·브라우저는 호출하지 않는다. `uses_verified_design_for_selection`은 검증된 설계를 재사용하는 순서를 확인하는 대역 단위 검사다. 기존 실행 집계 단위 검사는 인계를 명시적으로 대역 처리하므로 전체 인계 검증 수로 세지 않는다.
+
+`test_error_capture_preserves_original_error_and_restoration`는 조작 오류 시 캡처 생성과 캡처 실패 주입을 비교한다. 캡처 오류가 원래 실행 오류를 가리지 않고 원상 복원과 trace를 보존하는지 확인한다.
+
+`test_temperature_adjustment_shared_progress_guard`는 실제 생성 함수에 제어된 표시 시퀀스를 넣어 정수/소수점 도달, 왕복 반복, 표시 읽기 실패, 정지 시 본시험과 준비의 차이, 최대 횟수 경계를 확인한다. `test_temperature_unreachable_trial_is_execution_error_not_product_failure`는 제품 브라우저에서 목표값 준비/변경 실패가 실행 오류로 분류되고 복원되는지 확인한다. 조절 단위를 제품 요구사항으로 새로 정하는 검사가 아니다. 아래 새 조합의 소수점 두 건은 제품 성공이 아니라 예상 반복 중단·복원 회귀로 구분한다.
+
+`test_local_matrix_new_combinations_preserve_tc_and_restore`는 기존 공통 builder로 준비한 TC를 사용해 모드·풍량·전원·잠금·온도 조합, 같은 값 재적용과 조회를 실제 브라우저에서 검사한다. 새 요구사항의 AI 해석이나 의미 검토를 대체하지 않는다. 소수점 설정과 같이 현재 UI 조작으로 도달하지 못하는 입력은 성공과 구분해 기록한다.
+
+`test_saved_single_registered_asset_reexecutes_without_source_stub`는 실제 저장 PASS Run의 독립 사본을 즉시 승인·보류 후 승인·미등록 후 승인하고, 중복 등록 방지와 카탈로그 재조회 및 등록 코드의 실제 로컬 재실행·복원을 확인한다. 원본 연결 검사는 대역 처리하지 않는다. 공식 자산이 아닌 사본만 갱신하며 결과 수치와 미검증 범위는 인계 문서를 따른다.
+
+`test_pipeline_ui.py`의 `saved_single_run` 검사는 실제 PASS 기록 사본에서 추가·선택 대체·미등록·보류, 기존 자산/Run/SRS 보존, 변경된 원본·경로·TC·증거 누락 차단, 로컬 브라우저 재검증과 승인 화면 요약을 확인한다. 원본 연결 검사를 대역 처리하지 않으며 해당 로컬 Run이 없는 배포 환경에서는 건너뛴다. `test_asset_source_resolver_layouts_and_guards`는 배포 가능한 합성 자료로 단일/다중 저장 위치와 TC·Run·경로·중복·해시·누락 방어를 별도로 검사한다. 새 API 호출·운영 공식 승인 시험과는 구분한다.
+
+`test_saved_dry_tc_executes_unchanged_and_restores`는 실제 API가 남긴 냉방→제습 초안을 수정하지 않고 현재 CP3·화면 연결·컴파일·로컬 브라우저 실행·복원까지 확인한다. 원본 바이트와 TC 불변, 복원 확인 로그와 실행 trace를 검사한다. 로컬 저장 자료가 없는 배포 환경에서는 건너뛰며, 새 모델 생성이나 의미 검토 성공을 대신하지 않는다.
+
+`test_agent2.py` essential 검사는 다섯 관제점의 분류/묶음 설명/중복 값/기록 표시/TC 언급 차이와 검사 누락 반례를 대조한다. 저장 cont1006 초안은 원본 수정 없이 현재 CP2 전체 검사와 연결/컴파일을 대조한다. `test_grounding.py`는 의미 검토 PASS/FAIL/REVIEW·정책 해시, `test_integrity_cli.py`는 최초/재작성/과거 버전 인계, `test_orchestration_execution.py`는 분류와 무관한 구조화 후보 선택을 검사한다. A3의 five_controls 브라우저 시험은 원래 분류와 설명만 바꾼 입력에서 동일 실행·복원을 확인한다. 실제 모델 정확도나 모든 미래 시나리오의 성공률은 이 검사 수로 판단하지 않는다.
+
+`test_agent2.py`의 fixed_text/text_contract/saved_disabled_display 검사는 고정 기대값 생략·동일값 허용·충돌 차단과 저장 실패 원본 보존을 확인합니다. `test_agent3.py`의 fixed_text 검사는 후속 검사와 생성 코드의 같은 비교값 사용을 확인합니다. 실제 모델 평가와는 구분합니다.
+
+`test_srs_agent1.py`의 single_requirement_map 검사는 단일 연결 입력·여러 관제점 ID·누락/위조/범위 확대 방어·Agent 2와 의미 검토의 동일 분석 전달을 확인한다. `test_integrity_cli.py`에서는 모델 원본 해시·재계산 비교·계약 누락·잘못된 원본 경로를 확인한다. 연결표 검사는 합성 입력이며 해당 관제점의 실제 모델·제품 성공을 의미하지 않는다.
+
+`test_grounding.py`의 reader 관련 검사는 지원 전략 전체의 설명 누락, 고정 기대값, 계획 보존, 잘못된 값·대상·확인 시점의 차단 유지를 확인한다. 설명 자료의 존재는 실제 모델 검토 성공을 의미하지 않는다.
+
+같은 파일의 `test_grounding_coverage_evidence_and_decisions`와 `test_saved_review_missing_identity_reports_cause_before_reading_verdict`는 Agent 1~3의 저장 검토에 대해 계약 형식·단계·입력 해시 오류를 구분하고, 누락된 식별 정보로 판정을 읽거나 재사용하지 않는지 확인한다. 오류 안내만 구분하며 기존 PASS/FAIL/REVIEW와 해시 보호는 유지한다.
+
+`test_native_recovery.py`: 준비 전 비기본 상태 보존, 전체 장비의 다섯 관제점 복원, 본시험 실패 보존, 상태 불변 시 불필요한 복구 생략, 화면/내부 복원 불일치 검출과 컨텍스트 폐기, 복원 근거 없는 성공 거절, 과거 계약 유지. P2 `test_native_recovery_evidence.py`는 해시·TC·필수 관찰 누락, 불일치, bool/숫자 혼동과 실패 상태를 확인한다.
+
+`test_basic_tc_details.py`: 기본 TC 6건의 준비·절차·기대결과/기존 코드 연결, 전체 항목 보존, 선택과 적용 구분, 미실행 표시, 복원 성공 과장 금지, Snapshot 누락·변조·중복/번호 오류 거절, 과거 기록 최신 명세 소급 금지를 확인한다. P2 `test_basic_tc_transfer.py`는 상세가 있는/없는 Snapshot 전달을 확인한다. 실제 브라우저 결과와 API 여부는 인계 문서를 따른다.
+
+`test_approved_tc_refresh.py`는 유지보수한 승인 TC의 원본 파일·해시, 제품 기대 문구/번호/근거 보존, 저장 계획과 현재 실행 정의·복원 계약, 재사용 카탈로그 원문 전달을 확인합니다. 등록 코드는 Registry와 당시 유지보수 검증 해시로 고정하며 최신 컴파일러 출력과 바이트 일치를 요구하지 않습니다. 현재 코드 생성은 별도 계약 검사로 확인하고, TC/코드 사본의 바이트 변경은 계속 차단합니다. 실제 브라우저 및 고장 주입 검증 결과는 인계 문서에 따로 기록합니다.
+
 값 비교 계약: `test_typed_value_comparison_contract`와 `test_typed_compilation_uses_common_comparison_and_keeps_legacy`가 참/거짓·숫자·문자열·복합값과 다섯 관제점의 실제 생성 비교식을 확인합니다. 저장 인계 회귀에서는 새 비교 계약 누락/변조를 차단합니다. P2의 `test_p1_emitted_comparator_agrees_with_independent_p2_grader`는 두 저장소 비교 기준을 독립 대조합니다. 실행 수와 증거 위치는 인계 문서에 기록합니다.
 
 본시험 구조화 관찰 기록: `test_controller_common_lifecycle_on_unmodified_product`는 기존 다섯 관제점 조작·복원 검사에 더해 각 검사 정의·실제 값·일치 여부·완료 기록을 확인합니다. P2의 별도 로컬 대조 및 변조·누락·제품 불일치 반례는 P2 `test_execution_observations.py`에서 관리합니다. 실제 모델 채점 정확도와 구분합니다.

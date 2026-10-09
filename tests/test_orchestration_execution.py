@@ -3,6 +3,91 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize('summary', ['reuse', 'excluded', 'candidate'])
+@pytest.mark.parametrize('damage', ['design', 'missing_manifest', 'checkpoint'])
+def test_validation_execution_checks_handoff_before_any_trial(tmp_path, monkeypatch, summary, damage):
+    runs = tmp_path / 'runs'
+    runs.mkdir()
+    run, run_id = build_historical_agent2_run(runs)
+    pipeline_execution._load_verified_agent2_run(run, run_id)
+    target = tmp_path / 'virtual-controller.html'
+    baseline = tmp_path / 'test_controller.py'
+    target.write_text('<!doctype html>', encoding='utf-8')
+    baseline.write_text('def test_placeholder(): pass\n', encoding='utf-8')
+    if summary != 'candidate':
+        _write_json(run/'agent3_run_summary.json', dict(run_id=run_id,
+            stage='AGENT_3_RUN_SUMMARY', status='NOT_REQUIRED' if summary == 'reuse' else 'PARTIAL',
+            entries=[], target_file=target.name, target_sha256=_sha256_file(target)))
+    if damage == 'design':
+        design = pipeline_execution._read_json_model(run/'agent2_test_design.json', Agent2TestDesign)
+        design.existing_tc_comparison_completed = True
+        design.related_existing_tests = [ExistingTestSelection(tc_id='TC-MODE-002',
+            source_condition_ids=['COND-001'], selection_reason='검증 후 바뀐 선택')]
+        _write_json(run/'agent2_test_design.json', design.model_dump(mode='json', by_alias=True))
+    elif damage == 'missing_manifest':
+        (run/'agent2_manifest.json').unlink()
+    else:
+        path = run/'checkpoint2.json'
+        path.write_text(path.read_text(encoding='utf-8')+'\n', encoding='utf-8')
+    called=[]
+    monkeypatch.setattr(pipeline_execution, 'run_existing_regression',
+        lambda spec,*a,source=pipeline.ExecutionSource.EXISTING_REGRESSION,**kw:
+            (called.append(spec.tc_id) or _neutral_execution_result(spec.tc_id,source)))
+    with pytest.raises(ValueError):
+        pipeline.run_validation_execution(_validation_execution_args(tmp_path,run_id,target,baseline))
+    assert called == []
+    assert not (run/'validation_execution.json').exists()
+    assert (run/'validation_error.json').exists()
+
+
+@pytest.mark.parametrize('route', ['reuse', 'excluded', 'candidate'])
+def test_validation_execution_uses_verified_design_for_selection(tmp_path, monkeypatch, route):
+    # Stage orchestration control; real integrity failures are covered above.
+    run_id='RUN-20261009-120000-ABCDEF'
+    run=tmp_path/'runs'/run_id
+    run.mkdir(parents=True)
+    target=tmp_path/'virtual-controller.html'
+    baseline=tmp_path/'test_controller.py'
+    target.write_text('<!doctype html>',encoding='utf-8')
+    baseline.write_text('def test_placeholder(): pass\n',encoding='utf-8')
+    verified=Agent2TestDesign(request_id='CR-REUSE-001',existing_tc_comparison_completed=True,
+        related_existing_tests=[ExistingTestSelection(tc_id='TC-TEMP-001',
+            source_condition_ids=['COND-001'],selection_reason='기존 시험 선택')],
+        test_cases=[],coverage_summary='기존 TC 재사용')
+    on_disk=verified.model_copy(update={'related_existing_tests':[]})
+    _write_json(run/'agent2_test_design.json',on_disk.model_dump(mode='json',by_alias=True))
+    order=[]
+    def loader(*a):
+        order.append('verified')
+        return None,None,None,verified,None,{}
+    def candidates(*a):
+        assert order == ['verified']
+        order.append(route)
+        return [],[],None
+    monkeypatch.setattr(pipeline_execution,'_load_verified_agent2_run',loader)
+    monkeypatch.setattr(pipeline_execution,'_candidate_execution_records',candidates)
+    def runner(spec,*a,source=pipeline.ExecutionSource.EXISTING_REGRESSION,**kw):
+        order.append(spec.tc_id)
+        return _neutral_execution_result(spec.tc_id,source)
+    monkeypatch.setattr(pipeline_execution,'run_existing_regression',runner)
+    assert pipeline.run_validation_execution(_validation_execution_args(tmp_path,run_id,target,baseline)) == 0
+    assert order == ['verified',route,'TC-ENV-000','TC-TEMP-001']
+
+@pytest.mark.parametrize("field,initial,target", [
+    ("status", "OPERATION", "STOP"), ("mode", "COOL", "HEAT"),
+    ("fanSpeed", "AUTO", "LOW"), ("setTemp", 27, 21), ("locked", False, True)])
+def test_structured_candidate_routing_does_not_depend_on_purpose_label(field, initial, target):
+    case, _ = mapped_tc_fixture(field, initial, target)
+    design = cp2_valid_design().model_copy(update={"test_cases": [case]})
+    expected, _ = pipeline_orchestrator._select_agent3_tcs(design)
+    case.purpose = TcPurpose.RELATED_REGRESSION
+    selected, _ = pipeline_orchestrator._select_agent3_tcs(design)
+    assert selected == expected == [case.tc_id]
+    case.execution_spec.verifications.pop()
+    with pytest.raises(pipeline.Agent3Error, match="실행 정의"):
+        pipeline_orchestrator._select_agent3_tcs(design)
+
+
 @pytest.mark.parametrize('blocked', [False, True])
 def test_single_tc_compatibility_wrapper_keeps_verified_loader(tmp_path, monkeypatch, blocked):
     design = cp2_valid_design()
@@ -254,9 +339,10 @@ def test_error_manifest_preserves_original_error_with_broken_summary(tmp_path):
     ("1 skipped in 0.1s", "SKIPPED"),
 ])
 def test_regression_skip_uses_result_summary_not_warning(tmp_path, monkeypatch, stdout, status):
+    from dataclasses import replace
     monkeypatch.setattr(pipeline_execution, "_run_trial_subprocess",
         lambda *a, **kw: SimpleNamespace(returncode=0, stdout=stdout, stderr=""))
-    result = pipeline.run_existing_regression(pipeline.EXISTING_REGRESSION_CATALOG[0],
+    result = pipeline.run_existing_regression(replace(pipeline.EXISTING_REGRESSION_CATALOG[0], recovery_contract=None),
         REPO_ROOT / "product_baseline/tests/test_controller.py",
         REPO_ROOT / "product_baseline/virtual-controller.html", tmp_path / "evidence", timeout_seconds=10)
     assert result.status.value == status
@@ -746,6 +832,12 @@ def test_existing_regression_runs_from_a_copied_neutral_workspace(
         assert (workspace / "tests" / "conftest.py").is_file()
         assert (workspace / "virtual-controller.html").is_file()
         evidence_dir = Path(kwargs["env"]["QA_EVIDENCE_DIR"])
+        assert kwargs["env"]["QA_NATIVE_RECOVERY"] == "1"
+        assert kwargs["env"]["QA_NATIVE_TC_ID"] == "TC-TEMP-001"
+        assert "_native_restore" in (workspace / "tests" / "conftest.py").read_text(encoding="utf-8")
+        # Synthetic subprocess evidence; real state comparison is tested in test_native_recovery.
+        (evidence_dir / "native-restoration.json").write_text(
+            json.dumps({"fixture": True, "status": "RESTORED"}), encoding="utf-8")
         trace_file = evidence_dir / "trial-trace.zip"
         with zipfile.ZipFile(trace_file, "w") as archive:
             archive.writestr(
@@ -800,7 +892,10 @@ def test_existing_regression_runs_from_a_copied_neutral_workspace(
 
 @pytest.mark.parametrize("with_confirmation", [False, True])
 def test_existing_regression_preserves_success_output_without_inventing_checks(tmp_path, with_confirmation):
+    from dataclasses import replace
     spec = next(item for item in pipeline.EXISTING_REGRESSION_CATALOG if item.tc_id == "TC-TEMP-001")
+    # Historical output-only fixture has no browser/product recovery contract.
+    spec = replace(spec, recovery_contract=None)
     baseline = tmp_path / "test_controller.py"
     marker = "RESTORE_CONFIRMATIONS_VERIFIED: ER-001,ER-002"
     statement = f"print({marker!r})" if with_confirmation else "pass"
@@ -1032,8 +1127,18 @@ def test_current_candidate_trial_returns_technical_failure_for_agent4(
     assert result.evidence_complete is False
     assert len(result.evidence_files) == 2
 
+@pytest.fixture
+def verified_handoff_stub(monkeypatch):
+    # These orchestration unit tests provide only the design, not a whole Run.
+    # The real loader and corrupt-source controls are tested separately above.
+    monkeypatch.setattr(pipeline_execution, "_load_verified_agent2_run",
+        lambda run_dir, run_id: (None, None, None,
+            pipeline_execution._read_json_model(run_dir / "agent2_test_design.json", Agent2TestDesign),
+            None, {}))
+
+
 def test_validation_execution_reuses_candidate_and_runs_related_regressions(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, verified_handoff_stub
 ) -> None:
     run_id = "RUN-20260816-020000-ABCDEF"
     run_dir = tmp_path / "runs" / run_id
@@ -1121,7 +1226,7 @@ def test_validation_execution_reuses_candidate_and_runs_related_regressions(
     assert manifest["project1_modified"] is False
 
 def test_validation_execution_carries_multiple_candidates_and_exclusions(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, verified_handoff_stub
 ) -> None:
     run_id = "RUN-20260816-025000-ABCDEF"
     run_dir = tmp_path / "runs" / run_id
@@ -1193,7 +1298,7 @@ def test_validation_execution_carries_multiple_candidates_and_exclusions(
     ]
 
 def test_validation_execution_runs_existing_tc_when_no_new_candidate_is_needed(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, verified_handoff_stub
 ) -> None:
     run_id = "RUN-20260816-026000-ABCDEF"
     run_dir = tmp_path / "runs" / run_id
@@ -1262,7 +1367,7 @@ def test_validation_execution_runs_existing_tc_when_no_new_candidate_is_needed(
     assert [item.test_id for item in bundle.regression_results] == ["TC-TEMP-001"]
 
 def test_validation_execution_stops_regressions_when_precheck_is_not_passed(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, verified_handoff_stub
 ) -> None:
     run_id = "RUN-20260816-030000-ABCDEF"
     run_dir = tmp_path / "runs" / run_id

@@ -1,6 +1,90 @@
 """qa_pipeline_v2 역할별 자동 회귀 테스트."""
 
 from pipeline_test_support import *
+from pydantic import ValidationError
+
+
+@pytest.mark.parametrize("requirement_id", [
+    "REQ-POWER-001", "REQ-MODE-001", "REQ-TEMP-001", "REQ-FAN-001", "REQ-LOCK-001"])
+def test_single_requirement_map_is_inverted_without_control_specific_rules(requirement_id):
+    from qa_pipeline_contracts import agent1_link_draft, bind_agent1_requirement_links
+    request, analysis, requirements = cp1_scope_case(direct=True, requirement_id="REQ-STATE-001")
+    # Mapping test, not a claim about these synthetic product scenarios.
+    draft = agent1_link_draft(analysis)
+    condition = draft.confirmed_conditions[-1]
+    effect = next(e for e in draft.requirement_effects if e.requirement_id == "REQ-STATE-001")
+    condition.requirement_ids = [requirement_id]
+    effect.requirement_id = requirement_id
+    before = draft.model_dump()
+    bound = bind_agent1_requirement_links(draft)
+    bound_effect = next(e for e in bound.requirement_effects if e.scope_evidence is not None)
+    expected = (["COND-001", "COND-002", "COND-005", "COND-006"]
+                if requirement_id == "REQ-TEMP-001" else ["COND-006"])
+    assert bound_effect.scope_evidence.request_condition_ids == expected
+    assert bound.confirmed_conditions == draft.confirmed_conditions
+    assert draft.model_dump() == before
+
+
+def test_single_requirement_map_schema_cannot_write_reverse_links():
+    from qa_pipeline_contracts import Agent1AnalysisDraft, agent1_link_draft, bind_agent1_requirement_links
+    request, analysis, requirements = cp1_scope_case(direct=True, requirement_id="REQ-STATE-001")
+    draft = agent1_link_draft(analysis)
+    schema = Agent1AnalysisDraft.model_json_schema()
+    assert "request_condition_ids" not in json.dumps(schema)
+    data = draft.model_dump(mode="json")
+    effect = next(e for e in data["requirement_effects"] if e["scope_evidence"] is not None)
+    effect["scope_evidence"]["request_condition_ids"] = ["COND-999"]
+    with pytest.raises(ValidationError):
+        Agent1AnalysisDraft.model_validate(data)
+    assert bind_agent1_requirement_links(draft) == analysis
+
+
+@pytest.mark.parametrize("mutation", ["missing_link", "srs_only"])
+def test_single_requirement_map_does_not_invent_missing_request_links(mutation):
+    from qa_pipeline_contracts import agent1_link_draft, bind_agent1_requirement_links
+    _, analysis, _ = cp1_scope_case(direct=True, requirement_id="REQ-STATE-001")
+    draft = agent1_link_draft(analysis)
+    if mutation == "missing_link":
+        draft.confirmed_conditions[-1].requirement_ids = [draft.target_requirement_id]
+    else:
+        draft.confirmed_conditions[-1].source_type = ConditionSource.SRS
+    with pytest.raises(ValidationError):
+        bind_agent1_requirement_links(draft)
+
+
+@pytest.mark.parametrize("mutation", ["unknown_requirement", "forged_source", "no_impact"])
+def test_single_requirement_map_keeps_source_and_scope_protection(mutation):
+    from qa_pipeline_contracts import agent1_link_draft, bind_agent1_requirement_links
+    request, analysis, requirements = cp1_scope_case(direct=True, requirement_id="REQ-STATE-001")
+    draft = agent1_link_draft(analysis)
+    effect = next(e for e in draft.requirement_effects if e.requirement_id == "REQ-STATE-001")
+    if mutation == "unknown_requirement":
+        effect.requirement_id = "REQ-UNKNOWN-999"
+        draft.confirmed_conditions[-1].requirement_ids = [effect.requirement_id]
+    elif mutation == "forged_source":
+        effect.scope_evidence.srs_source_text = "요구사항에 없는 근거"
+    else:
+        effect.relation = RequirementRelation.NO_IMPACT
+    bound = bind_agent1_requirement_links(draft)
+    result = evaluate_checkpoint1(request, bound, requirements,
+        legacy_wording_checks=False, review_scope_semantics=True)
+    assert result.status == CheckStatus.FAIL
+
+
+def test_single_requirement_map_same_analysis_reaches_agent2_and_semantic_review():
+    from qa_pipeline_contracts import agent1_link_draft, bind_agent1_requirement_links
+    import qa_pipeline_grounding as grounding
+    request, analysis, requirements = cp1_scope_case(direct=True, requirement_id="REQ-STATE-001")
+    bound = bind_agent1_requirement_links(agent1_link_draft(analysis))
+    a1 = grounding.build_grounding_input("AGENT1", request, requirements, bound,
+        include_task_boundaries="1.3", review_scope_semantics=True)
+    a2 = grounding.build_grounding_input("AGENT2", request, requirements, cp2_valid_design(),
+        analysis=bound, include_task_boundaries="1.3", review_scope_semantics=True)
+    assert a2["context"]["analysis_not_primary_evidence"] == bound.model_dump(mode="json")
+    item = next(i for i in a1["items"] if i["item_id"] == "requirement_effects/2")
+    assert item["content"] == bound.requirement_effects[2].model_dump(mode="json")
+    # An explicitly rejected meaning must stay rejected despite structural binding.
+    assert grounding.check_review_record(a1, fake_grounding_record(a1, verdict="UNSUPPORTED")).status == CheckStatus.FAIL
 
 @pytest.mark.parametrize("basis", ["DIRECT_REQUEST", "REQUEST_TRACE_ONLY", "CHANGE_DEPENDENCY"])
 @pytest.mark.parametrize("requirement_id", ["REQ-NOTIFY-001", "REQ-STATE-001"])
@@ -929,8 +1013,8 @@ def test_agent1_uses_structured_responses_api() -> None:
 
     assert result.response_id == "resp_test"
     assert result.usage["total_tokens"] == 150
-    assert responses.kwargs["text_format"] is Agent1Analysis
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent1-2-23"
+    assert responses.kwargs["text_format"] is pipeline.Agent1AnalysisDraft
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent1-2-24"
     assert responses.kwargs["store"] is False
     instructions = responses.kwargs["input"][0]["content"]
     assert "현재 SRS는 제품 기능과 허용 조건" in instructions

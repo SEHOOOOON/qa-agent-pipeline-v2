@@ -80,7 +80,7 @@ class Agent1FakeResponses:
         self.kwargs = kwargs
         return SimpleNamespace(
             id="resp_test",
-            output_parsed=agent1_analysis(),
+            output_parsed=kwargs["text_format"].model_validate(agent1_analysis().model_dump(mode="json")),
             usage=SimpleNamespace(input_tokens=100, output_tokens=50, total_tokens=150),
         )
 
@@ -1096,6 +1096,19 @@ def mapped_tc_fixture(field="setTemp", initial=27, requested=21, **kwargs):
     return case, plan
 
 
+class TemperatureSequencePage:
+    """Controlled display after each click; test-only, never a product oracle."""
+    def __init__(self, values):
+        self.values = values
+        self.clicks = []
+
+    def temperature(self):
+        return self.values[min(len(self.clicks), len(self.values) - 1)]
+
+    def locator(self, selector):
+        return SimpleNamespace(click=lambda: self.clicks.append(selector))
+
+
 def permitted_then_blocked_fixture(field, initial, permitted, rejected):
     """A permitted transition followed by a lock-blocked command in the same TC."""
     case, plan = controller_lifecycle_fixture(field, initial, permitted)
@@ -1731,6 +1744,22 @@ def _write_agent4_inputs(
         )
     _write_json(run_dir / "validation_manifest.json", validation_manifest)
     return run_dir, run_id
+
+@pytest.fixture
+def saved_single_approval_run(tmp_path):
+    """Real local API evidence copied intact; no source-check or review stub."""
+    import shutil
+    run_id = "RUN-20261006-124032-11E19F"
+    source = REPO_ROOT / "runs/cont1007/runs" / run_id
+    if not source.exists():
+        pytest.skip("Local real API evidence is not distributed")
+    runs, assets = tmp_path / "runs", tmp_path / "assets"
+    shutil.copytree(source, runs / run_id)
+    shutil.copytree(REPO_ROOT / "approved_assets", assets)
+    srs = tmp_path / "srs.md"
+    shutil.copy2(REPO_ROOT / "docs/01_PRODUCT_SRS.md", srs)
+    return runs, assets, REPO_ROOT / "product_baseline/virtual-controller.html", run_id, "TC-CAND-001", srs
+
 
 def build_approvable_ui_run(
     tmp_path: Path,
