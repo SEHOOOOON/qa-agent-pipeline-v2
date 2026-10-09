@@ -241,6 +241,15 @@ def _check_run_output_paths(run_dir: Path, tc_id: str = "TC-CAND-001") -> None:
     )
 
 
+def _save_agent1_link_draft(run_dir, attempt, response):
+    draft = response.link_draft or agent1_link_draft(response.analysis)
+    if bind_agent1_requirement_links(draft) != response.analysis:
+        raise ValueError("조건 목록에서 계산한 근거 연결과 Agent 1 인계 결과가 다릅니다.")
+    path = run_dir / f"agent1_link_draft_attempt_{attempt}.json"
+    _write_json(path, draft.model_dump(mode="json"))
+    return {"file": path.name, "sha256": _sha256_file(path)}
+
+
 def run_agent1(args: argparse.Namespace) -> int:
     request_path = Path(args.request).resolve()
     srs_path = Path(args.srs).resolve()
@@ -263,6 +272,7 @@ def run_agent1(args: argparse.Namespace) -> int:
     try:
         response = agent.analyze(request, requirements)
         _save_received_usage(run_dir, "AGENT1", 1, "generation", response)
+        link_source = _save_agent1_link_draft(run_dir, 1, response)
         checkpoint = evaluate_checkpoint1(request, response.analysis, requirements, legacy_wording_checks=False, allow_background_range_paraphrase=True, allow_srs_quote_parts=True, review_range_semantics="1.3", review_scope_semantics=True)
         _write_json(run_dir / "agent1_change_analysis_attempt_1.json", response.analysis.model_dump(mode="json"))
         checkpoint = _run_grounding_review(run_dir, "AGENT1", 1,
@@ -297,6 +307,7 @@ def run_agent1(args: argparse.Namespace) -> int:
                 ],
             )
             _save_received_usage(run_dir, "AGENT1", 2, "generation", response)
+            link_source = _save_agent1_link_draft(run_dir, 2, response)
             checkpoint = evaluate_checkpoint1(request, response.analysis, requirements, legacy_wording_checks=False, allow_background_range_paraphrase=True, allow_srs_quote_parts=True, review_range_semantics="1.3", review_scope_semantics=True)
             _write_json(run_dir / "agent1_change_analysis_attempt_2.json", response.analysis.model_dump(mode="json"))
             checkpoint = _run_grounding_review(run_dir, "AGENT1", 2,
@@ -326,7 +337,9 @@ def run_agent1(args: argparse.Namespace) -> int:
                 "input_routing_contract": "1.0",
                 "meaning_guard_contract": "1.0",
                 "scope_guard_contract": "1.2",
-                "prompt_version": "agent1-2.23",
+                "prompt_version": "agent1-2.24",
+                "requirement_link_contract": "1.0",
+                "requirement_link_source": link_source,
                 "task_boundary_contract": "1.3",
                 "output_tolerance_contract": "1.0",
                 "run_id": run_id,
@@ -402,6 +415,20 @@ def _load_verified_agent1_run(run_dir: Path, run_id: str) -> tuple[
     requirements = load_srs_requirements(srs_snapshot_file)
     analysis = _read_json_model(analysis_file, Agent1Analysis)
     checkpoint = _read_json_model(checkpoint_file, Checkpoint1Result)
+    link_contract = manifest.get("requirement_link_contract")
+    if (link_contract not in {None, "1.0"} or
+            (link_contract == "1.0") != (manifest.get("prompt_version") == "agent1-2.24")):
+        raise ValueError("지원하지 않거나 누락된 단일 근거 연결 계약입니다.")
+    if link_contract == "1.0":
+        source = manifest.get("requirement_link_source") or {}
+        name = source.get("file", "")
+        if not re.fullmatch(r"agent1_link_draft_attempt_[12]\.json", name):
+            raise ValueError("근거 연결 원본 경로가 올바르지 않습니다.")
+        draft_path = run_dir / name
+        _verify_sha256(draft_path, source.get("sha256"), "근거 연결 원본")
+        draft = _read_json_model(draft_path, Agent1AnalysisDraft)
+        if bind_agent1_requirement_links(draft) != analysis:
+            raise ValueError("단일 근거 연결 원본과 저장 분석이 다릅니다.")
     scope_contract = manifest.get("scope_guard_contract")
     if scope_contract not in {"1.1", "1.2"} and any(
         item.scope_evidence is not None
@@ -414,7 +441,7 @@ def _load_verified_agent1_run(run_dir: Path, run_id: str) -> tuple[
     ) or (
         manifest.get("contract_version") in {"2.6", "2.7", "2.8", "2.9", "2.10", "2.11"} and scope_contract not in {"1.1", "1.2"}
     ) or (
-        (scope_contract == "1.2") != (manifest.get("prompt_version") == "agent1-2.23")
+        (scope_contract == "1.2") != (manifest.get("prompt_version") in {"agent1-2.23", "agent1-2.24"})
     ) or (
         scope_contract == "1.2" and manifest.get("contract_version") != "2.11"
     ):
@@ -453,7 +480,7 @@ def _output_tolerance_policy(manifest: dict[str, Any]) -> bool:
     marker = manifest.get("output_tolerance_contract")
     enabled = marker == "1.0"
     if (marker not in {None, "1.0"} or (enabled and manifest.get("grounding_contract") != "1.0")
-            or (manifest.get("prompt_version") in {"agent2-2.46", "agent2-2.47", "agent2-2.48", "agent2-2.49", "agent2-2.50", "agent2-2.51", "agent2-2.52", "agent2-2.53", "agent2-2.54", "agent2-2.55"} and not enabled)):
+            or (manifest.get("prompt_version") in {"agent2-2.46", "agent2-2.47", "agent2-2.48", "agent2-2.49", "agent2-2.50", "agent2-2.51", "agent2-2.52", "agent2-2.53", "agent2-2.54", "agent2-2.55", "agent2-2.56"} and not enabled)):
         raise ValueError("지원하지 않거나 누락된 출력 허용 계약입니다.")
     return enabled
 
@@ -464,8 +491,8 @@ def _task_boundary_policy(manifest: dict[str, Any]) -> str | None:
                 "agent1-2.20": ("2.11", "1.1"), "agent2-2.48": ("3.13", "1.1"), "agent3-3.38": ("4.10", "1.1"),
                 "agent1-2.21": ("2.11", "1.2"), "agent3-3.39": ("4.10", "1.2"),
                 "agent1-2.22": ("2.11", "1.3"), "agent2-2.49": ("3.13", "1.3"),
-                "agent3-3.40": ("4.10", "1.3"), "agent1-2.23": ("2.11", "1.3"),
-                "agent2-2.50": ("3.13", "1.3"), "agent2-2.51": ("3.13", "1.3"), "agent2-2.52": ("3.13", "1.3"), "agent2-2.53": ("3.13", "1.3"), "agent2-2.54": ("3.13", "1.3"), "agent2-2.55": ("3.13", "1.3"), "agent3-3.41": ("4.10", "1.3"), "agent3-3.42": ("4.10", "1.3"), "agent3-3.43": ("4.10", "1.3")}
+                "agent3-3.40": ("4.10", "1.3"), "agent1-2.23": ("2.11", "1.3"), "agent1-2.24": ("2.11", "1.3"),
+                "agent2-2.50": ("3.13", "1.3"), "agent2-2.51": ("3.13", "1.3"), "agent2-2.52": ("3.13", "1.3"), "agent2-2.53": ("3.13", "1.3"), "agent2-2.54": ("3.13", "1.3"), "agent2-2.55": ("3.13", "1.3"), "agent2-2.56": ("3.13", "1.3"), "agent3-3.41": ("4.10", "1.3"), "agent3-3.42": ("4.10", "1.3"), "agent3-3.43": ("4.10", "1.3")}
     prompt = manifest.get("prompt_version")
     versions.update({key: ("4.10", "1.3") for key in ("agent3-3.44", "agent3-3.45", "agent3-3.46", "agent3-3.47")})
     marker = manifest.get("task_boundary_contract")
@@ -525,7 +552,7 @@ def _agent3_review_options(manifest: dict[str, Any]) -> dict[str, bool]:
 
 def _review_responsibility_policy(manifest: dict[str, Any], stage: str) -> bool:
     """One opt-in for new review ownership; old runs retain their exact policy."""
-    version, prompts = {"AGENT2": ("3.13", {"agent2-2.45", "agent2-2.46", "agent2-2.47", "agent2-2.48", "agent2-2.49", "agent2-2.50", "agent2-2.51", "agent2-2.52", "agent2-2.53", "agent2-2.54", "agent2-2.55"}),
+    version, prompts = {"AGENT2": ("3.13", {"agent2-2.45", "agent2-2.46", "agent2-2.47", "agent2-2.48", "agent2-2.49", "agent2-2.50", "agent2-2.51", "agent2-2.52", "agent2-2.53", "agent2-2.54", "agent2-2.55", "agent2-2.56"}),
                         "AGENT3": ("4.10", {"agent3-3.36", "agent3-3.37", "agent3-3.38", "agent3-3.39", "agent3-3.40", "agent3-3.41", "agent3-3.42", "agent3-3.43", "agent3-3.44", "agent3-3.45", "agent3-3.46", "agent3-3.47"})}[stage]
     marker = manifest.get("review_responsibility_contract")
     enabled = marker == "1.0"
@@ -546,7 +573,8 @@ def _current_agent2_contract() -> dict[str, str]:
         "procedure_preservation_contract": "2.0",
         "wording_policy": "STRUCTURAL_ONLY_V1",
         "input_routing_contract": "1.0",
-        "prompt_version": "agent2-2.55",
+        "prompt_version": "agent2-2.56",
+        "essential_validation_contract": "1.0",
         "tc_execution_alignment_contract": "1.0",
         "scope_guard_contract": "1.2",
         "task_boundary_contract": "1.3",
@@ -573,17 +601,21 @@ def _agent2_checkpoint_options(manifest: dict[str, Any]) -> dict[str, bool]:
     detail = manifest.get("tc_detail_contract")
     revision = manifest.get("srs_revision_contract")
     scope = manifest.get("scope_guard_contract")
+    essential = manifest.get("essential_validation_contract")
+    if essential not in {None, "1.0"} or (essential == "1.0") != (manifest.get("prompt_version") == "agent2-2.56"):
+        raise ValueError("지원하지 않거나 누락된 핵심 검사 계약입니다.")
     alignment = manifest.get("tc_execution_alignment_contract")
     if (alignment not in {None, "1.0"}
-            or (alignment == "1.0") != (manifest.get("prompt_version") == "agent2-2.55")
+            or (alignment == "1.0") != (manifest.get("prompt_version") in {"agent2-2.55", "agent2-2.56"})
             or (alignment == "1.0" and manifest.get("contract_version") != "3.13")):
         raise ValueError("지원하지 않거나 누락된 TC 실행 정합 계약입니다.")
     if (scope not in {None, "1.2"}
-            or (scope == "1.2") != (manifest.get("prompt_version") in {"agent2-2.50", "agent2-2.51", "agent2-2.52", "agent2-2.53", "agent2-2.54", "agent2-2.55"})):
+            or (scope == "1.2") != (manifest.get("prompt_version") in {"agent2-2.50", "agent2-2.51", "agent2-2.52", "agent2-2.53", "agent2-2.54", "agent2-2.55", "agent2-2.56"})):
         raise ValueError("지원하지 않거나 누락된 Agent 2 범위 의미 검토 계약입니다.")
     return {
         "review_scope_semantics": scope == "1.2",
         "align_tc_execution": alignment == "1.0",
+        "essential_checks": essential == "1.0",
         "require_input_contract": manifest.get("input_routing_contract") == "1.0",
         "review_expected_result_values": _review_responsibility_policy(manifest, "AGENT2"),
         "review_value_roles": _task_boundary_policy(manifest) in {"1.1", "1.3"},
@@ -643,8 +675,7 @@ def run_agent2(args: argparse.Namespace) -> int:
         approved_assets_root
     )
     retired = _retired_tc_ids(approved_snapshot)
-    existing_catalog = tuple(item for item in (*EXISTING_REGRESSION_CATALOG, *approved_catalog)
-                             if item.tc_id not in retired)
+    existing_catalog = _catalog_from_snapshot(approved_snapshot)
     try:
         with reservation_file.open("x", encoding="utf-8") as handle:
             json.dump(
@@ -720,7 +751,7 @@ def run_agent2(args: argparse.Namespace) -> int:
                                   analysis=analysis, catalog=existing_catalog, include_condition_coverage=True,
                                   include_procedure_coverage=True, include_execution_contract=True, include_review_responsibilities=True,
                                   allow_output_tolerance=True, include_task_boundaries="1.3", review_scope_semantics=True,
-                                  include_tc_execution_alignment=True),
+                                  include_tc_execution_alignment=True, essential_checks=True),
             checkpoint2, args.model, grounding_records)
         attempts[-1]["status"] = checkpoint2.status.value
         if checkpoint2.status == CheckStatus.FAIL:
@@ -782,7 +813,7 @@ def run_agent2(args: argparse.Namespace) -> int:
                                       analysis=analysis, catalog=existing_catalog, include_condition_coverage=True,
                                       include_procedure_coverage=True, include_execution_contract=True, include_review_responsibilities=True,
                                       allow_output_tolerance=True, include_task_boundaries="1.3", review_scope_semantics=True,
-                                      include_tc_execution_alignment=True),
+                                      include_tc_execution_alignment=True, essential_checks=True),
                 checkpoint2, args.model, grounding_records)
             attempts.append(
                 {
@@ -940,7 +971,7 @@ def _load_verified_agent2_run(
     policy = manifest.get("scope_restoration_policy")
     if policy not in {None, "STRUCTURED_V1"} or (manifest.get("contract_version") in {"3.10", "3.11", "3.12", "3.13"}) != (policy == "STRUCTURED_V1"):
         raise ValueError("지원하지 않거나 누락된 범위·복원 검사 정책입니다.")
-    if (procedure_contract == "2.0" and (manifest.get("contract_version") != "3.13" or manifest.get("grounding_contract") != "1.0")) or (manifest.get("prompt_version") in {"agent2-2.43", "agent2-2.44", "agent2-2.45", "agent2-2.46", "agent2-2.47", "agent2-2.48", "agent2-2.49", "agent2-2.50", "agent2-2.51", "agent2-2.52", "agent2-2.53", "agent2-2.54", "agent2-2.55"} and procedure_contract != "2.0"):
+    if (procedure_contract == "2.0" and (manifest.get("contract_version") != "3.13" or manifest.get("grounding_contract") != "1.0")) or (manifest.get("prompt_version") in {"agent2-2.43", "agent2-2.44", "agent2-2.45", "agent2-2.46", "agent2-2.47", "agent2-2.48", "agent2-2.49", "agent2-2.50", "agent2-2.51", "agent2-2.52", "agent2-2.53", "agent2-2.54", "agent2-2.55", "agent2-2.56"} and procedure_contract != "2.0"):
         raise ValueError("새 절차 검토 계약에는 전체 모델 근거 검토가 필요합니다.")
     recomputed = evaluate_checkpoint2(
         request,
@@ -954,12 +985,13 @@ def _load_verified_agent2_run(
         build_grounding_input("AGENT2", request, requirements, design, analysis=analysis, catalog=existing_catalog,
                               include_condition_coverage=manifest.get("contract_version") in {"3.12", "3.13"},
                               include_procedure_coverage=procedure_contract == "2.0",
-                              include_execution_contract=manifest.get("prompt_version") in {"agent2-2.44", "agent2-2.45", "agent2-2.46", "agent2-2.47", "agent2-2.48", "agent2-2.49", "agent2-2.50", "agent2-2.51", "agent2-2.52", "agent2-2.53", "agent2-2.54", "agent2-2.55"},
+                              include_execution_contract=manifest.get("prompt_version") in {"agent2-2.44", "agent2-2.45", "agent2-2.46", "agent2-2.47", "agent2-2.48", "agent2-2.49", "agent2-2.50", "agent2-2.51", "agent2-2.52", "agent2-2.53", "agent2-2.54", "agent2-2.55", "agent2-2.56"},
                               include_review_responsibilities=_review_responsibility_policy(manifest, "AGENT2"),
                               allow_output_tolerance=_output_tolerance_policy(manifest),
                               include_task_boundaries=_task_boundary_policy(manifest),
                               review_scope_semantics=_agent2_checkpoint_options(manifest)["review_scope_semantics"],
-                              include_tc_execution_alignment=_agent2_checkpoint_options(manifest)["align_tc_execution"]), recomputed)
+                              include_tc_execution_alignment=_agent2_checkpoint_options(manifest)["align_tc_execution"],
+                              essential_checks=_agent2_checkpoint_options(manifest)["essential_checks"]), recomputed)
     if not _checkpoint_revalidation_matches(checkpoint, recomputed, legacy=legacy_wording):
         raise ValueError("Stored Checkpoint 2 differs from the current CP2 rules.")
     if checkpoint.status != CheckStatus.PASS:
@@ -1931,6 +1963,80 @@ def browser_context_args(browser_context_args):
 """
 
 
+_NATIVE_RECOVERY_PLUGIN = r'''
+import hashlib
+import json
+import os
+from pathlib import Path
+
+def _native_snapshot(page):
+    return page.evaluate("""() => {
+      const h=window.__vccs;
+      const element=e=>({classes:[...e.classList].sort(), text:e.innerText,
+        disabled:!!e.disabled, checked:!!e.checked});
+      return {devices:JSON.parse(JSON.stringify(h.devices)),
+        selected:[...h.selectedUnitIds], pending:JSON.parse(JSON.stringify(h.pendingState)),
+        gateway:h.isGatewayOnline, multi:document.querySelector('#chk-multi-select').checked,
+        cards:[...document.querySelectorAll('.ac-device-card')].map(e=>({id:e.id,...element(e)})),
+        panel:[...document.querySelectorAll('#det-control-section button, #det-temp-display, #det-temp-adjust-card')].map(e=>({id:e.id,...element(e)}))};
+    }""")
+
+def _native_restore(page, original):
+    # Recovery of test-injected faults is simulator maintenance, not a product assertion.
+    page.evaluate("""s => {
+      localStorage.setItem('vccs_simulator_devices', JSON.stringify(s.devices));
+      localStorage.setItem('vccs_simulator_selected_ids', JSON.stringify(s.selected));
+      localStorage.setItem('vccs_simulator_gateway', JSON.stringify(s.gateway));
+      localStorage.setItem('vccs_simulator_multiselect', JSON.stringify(s.multi));
+    }""", original)
+    page.reload(wait_until='load')
+    page.wait_for_function('() => !!window.__vccs')
+    page.evaluate("""s => {
+      Object.assign(window.__vccs.pendingState, s.pending);
+      window.__vccs.updatePanelUI();
+    }""", original)
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_pyfunc_call(pyfuncitem):
+    if os.environ.get('QA_NATIVE_RECOVERY') != '1':
+        return None
+    page=pyfuncitem.funcargs['page']
+    page.goto(os.environ['QA_TARGET_URL'], wait_until='load')
+    page.wait_for_function('() => !!window.__vccs')
+    original=_native_snapshot(page)
+    record={'contract_version':'native-recovery-1.0', 'test_function':pyfuncitem.name,
+            'test_id':os.environ.get('QA_NATIVE_TC_ID'),
+            'adapter_sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+            'method':'SIMULATOR_SAVED_STATE_RELOAD', 'original':original, 'status':'STARTED'}
+    try:
+        pyfuncitem.obj(**{name:pyfuncitem.funcargs[name] for name in pyfuncitem._fixtureinfo.argnames})
+    except BaseException as exc:
+        record['product_test_error_type']=type(exc).__name__
+        raise
+    finally:
+        try:
+            changed = json.dumps(_native_snapshot(page), sort_keys=True) != json.dumps(original, sort_keys=True)
+            if changed:
+                _native_restore(page, original)
+            restored=_native_snapshot(page)
+            record['restored']=restored
+            if json.dumps(original, sort_keys=True) != json.dumps(restored, sort_keys=True):
+                raise RuntimeError('RESTORE_MISMATCH: baseline screen/internal state')
+            record['status']='RESTORED' if changed else 'UNCHANGED'
+            print('RESTORE_STATUS: '+record['status'])
+        except BaseException as exc:
+            record['status']='FAILED'
+            record['restore_error_type']=type(exc).__name__
+            print('RESTORE_STATUS: FAILED')
+            page.context.close()
+            raise RuntimeError('RESTORE_MISMATCH: native recovery failed; context retired') from exc
+        finally:
+            destination=Path(os.environ['QA_EVIDENCE_DIR'])/'native-restoration.json'
+            destination.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding='utf-8')
+    return True
+'''
+
+
 def run_existing_regression(
     spec: ExistingRegressionSpec,
     baseline_test_file: Path,
@@ -1971,7 +2077,11 @@ def run_existing_regression(
         isolated_target = temp_root / "virtual-controller.html"
         shutil.copy2(baseline_test_file, isolated_test)
         shutil.copy2(target_html, isolated_target)
-        _write_text_atomic(tests_dir / "conftest.py", _BASELINE_VIEWPORT_CONFTEST)
+        if spec.recovery_contract not in (None, "native-recovery-1.0"):
+            raise ValueError("지원하지 않는 기본 TC 복원 계약입니다.")
+        native_recovery = (spec.source == "BASELINE" and source != ExecutionSource.ENVIRONMENT_PRECHECK
+                           and spec.recovery_contract == "native-recovery-1.0")
+        _write_text_atomic(tests_dir / "conftest.py", _BASELINE_VIEWPORT_CONFTEST + (_NATIVE_RECOVERY_PLUGIN if native_recovery else ""))
         env = {
             name: os.environ[name]
             for name in _AGENT3_TRIAL_ENV_ALLOWLIST
@@ -1981,6 +2091,9 @@ def run_existing_regression(
         env["PYTHONIOENCODING"] = "utf-8"
         env["QA_TARGET_URL"] = isolated_target.as_uri()
         env["QA_EVIDENCE_DIR"] = str(evidence_dir.resolve())
+        if native_recovery:
+            env["QA_NATIVE_RECOVERY"] = "1"
+            env["QA_NATIVE_TC_ID"] = spec.tc_id
         try:
             completed = _run_trial_subprocess(
                 [
@@ -2023,6 +2136,9 @@ def run_existing_regression(
             elif exit_code == 0:
                 status = NeutralExecutionStatus.PASSED
                 source_outcome = "PYTEST_PASSED"
+            elif "RESTORE_STATUS: FAILED" in combined:
+                status = NeutralExecutionStatus.EXECUTION_ERROR
+                source_outcome = "RESTORE_MISMATCH"
             elif "AssertionError" in combined:
                 status = NeutralExecutionStatus.ASSERTION_FAILED
                 source_outcome = "PYTEST_FAILED"
@@ -2069,13 +2185,16 @@ def run_existing_regression(
             # 신뢰 가능한 증거 목록에 포함하지 않는다.
             trace_file.unlink()
     evidence_items = [stdout_file, stderr_file]
-    for name in ("trial-final.png", "trial-trace.zip"):
+    for name in ("trial-final.png", "trial-trace.zip", "native-restoration.json"):
         optional_evidence = evidence_dir / name
         if optional_evidence.is_file():
             evidence_items.append(optional_evidence)
     evidence_paths = [
         path.relative_to(evidence_root.parent).as_posix() for path in evidence_items
     ]
+    if native_recovery and status == NeutralExecutionStatus.PASSED and not (evidence_dir / "native-restoration.json").is_file():
+        status = NeutralExecutionStatus.EXECUTION_ERROR
+        source_outcome = "NATIVE_RECOVERY_EVIDENCE_MISSING"
     return NeutralExecutionResult(
         test_id=spec.tc_id,
         source=source,
@@ -2098,6 +2217,7 @@ def run_existing_regression(
         evidence_complete=(
             stdout_file.is_file()
             and stderr_file.is_file()
+            and (not native_recovery or (evidence_dir / "native-restoration.json").is_file())
             and (
                 spec.source != "APPROVED"
                 or {"trial-final.png", "trial-trace.zip"}.issubset(
@@ -2163,11 +2283,11 @@ def _verified_existing_catalog_for_execution(
 
     manifest_file = run_dir / "agent2_manifest.json"
     if not manifest_file.is_file():
-        return EXISTING_REGRESSION_CATALOG, {}
+        return _catalog_from_snapshot({}), {}
     manifest = _read_json_payload(manifest_file)
     snapshot_hash = manifest.get("approved_regression_catalog_sha256")
     if snapshot_hash is None:
-        return EXISTING_REGRESSION_CATALOG, {}
+        return _catalog_from_snapshot({}), {}
     snapshot_file = run_dir / "approved_regression_catalog.json"
     _verify_sha256(snapshot_file, snapshot_hash, "승인 TC 카탈로그 Snapshot")
     catalog = _catalog_from_snapshot(_read_json_payload(snapshot_file))
@@ -2222,6 +2342,12 @@ def run_validation_execution(args: argparse.Namespace) -> int:
 
     target_before = _sha256_file(target_html)
     baseline_before = _sha256_file(baseline_test_file)
+    # New snapshots pin native code as well as detail; historical Runs are not backfilled.
+    catalog_path = run_dir / "approved_regression_catalog.json"
+    if catalog_path.is_file():
+        details = _read_json_payload(catalog_path).get("baseline_details")
+        if details is not None and details.get("source_sha256") != baseline_before:
+            raise ValueError("기본 TC 상세 명세와 실행 코드 버전이 다릅니다.")
     try:
         existing_catalog, approved_automation_files = (
             _verified_existing_catalog_for_execution(

@@ -1,0 +1,42 @@
+{
+  "api_calls": 0,
+  "normal": {
+    "outcome": "PASS",
+    "exit_code": 0,
+    "duration_ms": 9125,
+    "stdout_file": "trial-stdout.txt",
+    "stderr_file": "trial-stderr.txt",
+    "screenshot_file": "trial-final.png",
+    "trace_file": "trial-trace.zip",
+    "evidence_sha256": {
+      "trial-stdout.txt": "c64da5224a43ef0d279a57ed72046dca073622478b085d889582c369ed256b65",
+      "trial-stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "trial-final.png": "a6c33c0e7eb28fbb9aa16ecdcefc4d1dd65363bfb371f69e4ac6d5bf91893772",
+      "trial-trace.zip": "6c7817e02a288ef0f4b87fdbf5622ad487e705a0ce3a604a0215bb90db61eaee"
+    },
+    "evidence_complete": true
+  },
+  "regression": [
+    {
+      "tc": "TC-V2-002",
+      "variant": "different_original",
+      "verified": true
+    },
+    {
+      "tc": "TC-V2-002",
+      "variant": "restore_internal_fault",
+      "verified": true
+    },
+    {
+      "tc": "TC-V2-002",
+      "variant": "restore_ui_fault",
+      "verified": true
+    }
+  ],
+  "testcase_sha256": "d9e2908b646f31f665d208745544d9c3d86690f4617ea518b72f42b928c40a0e",
+  "automation_sha256": "b652752d82849b8251aa969063fab32889984392631e703eada146f58024482d",
+  "plan_sha256": "1e6c308981045bf9c6d63152fc1aff676cd6f6ff53934c6dd1c548e82b079faa",
+  "product_sha256": "66a7170dd4b0ea6c7ee1394df0bc5263054367da5ccd2b5de4c892430a7d1320",
+  "evidence_location": "runs/tc_refresh_1005/TC-V2-002",
+  "scope": "local browser only; original approval remains historical, revision authorized separately"
+}

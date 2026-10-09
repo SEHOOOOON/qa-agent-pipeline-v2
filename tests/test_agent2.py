@@ -2,6 +2,135 @@
 
 from pipeline_test_support import *
 
+def essential_cp2(design):
+    return evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements(),
+        **pipeline_execution._agent2_checkpoint_options(pipeline_execution._current_agent2_contract()))
+
+
+@pytest.mark.parametrize("field,initial,target", [
+    ("status", "OPERATION", "STOP"), ("mode", "COOL", "HEAT"),
+    ("fanSpeed", "AUTO", "LOW"), ("setTemp", 27, 21), ("locked", False, True)])
+@pytest.mark.parametrize("variant", ["group_label", "duplicate_values", "record_flag", "purpose_label", "dependency_mention"])
+def test_essential_checks_use_execution_not_presentation(field, initial, target, variant):
+    case, _ = mapped_tc_fixture(field, initial, target)
+    if variant == "group_label":
+        case.condition_execution = pipeline.ConditionExecution.SEQUENTIAL_TRANSITION
+        case.grouping_reason = None
+    elif variant == "duplicate_values":
+        case.test_data.requested_modes = ["HEAT", "HEAT"]
+    elif variant == "record_flag":
+        case.test_data.restore_observed_hvac_state = True
+        case.test_data.requested_mode = case.test_data.requested_temperature_c = None
+    elif variant == "purpose_label":
+        case.purpose = TcPurpose.RELATED_REGRESSION
+    else:
+        # Readable text is preserved verbatim, including a reference to another
+        # test; mentioning it alone must not prove a dependency.
+        line = "앞선 TC와 비교 가능한 기록을 남기되 이 시험은 현재 장비에서 시작한다."
+        case.preconditions.append(line)
+    design = cp2_valid_design().model_copy(update={"test_cases": [case]})
+    case.independent_execution = True
+    case.source_condition_ids = [c.condition_id for c in cp2_analysis().confirmed_conditions]
+    before = design.model_dump()
+    cp = essential_cp2(design)
+    rule = "CP2-016" if variant == "purpose_label" else "CP2-013" if variant == "dependency_mention" else "CP2-015"
+    assert cp2_check(cp, rule).status == CheckStatus.PASS, cp.model_dump_json(indent=2)
+    assert design.model_dump() == before
+    # Never turn malformed executable data into PASS.
+    case.execution_spec.verifications.pop()
+    assert cp2_check(essential_cp2(design), "CP2-024").status == CheckStatus.FAIL
+
+
+def test_essential_duplicate_title_does_not_hide_duplicate_ids():
+    design = cp2_valid_design()
+    other = design.test_cases[0].model_copy(deep=True)
+    other.tc_id = "TC-CAND-099"
+    for i, er in enumerate(other.expected_results):
+        er.result_id = f"ER-{i + 900:03d}"
+    design.test_cases.append(other)
+    assert cp2_check(essential_cp2(design), "CP2-002").status == CheckStatus.PASS
+    other.tc_id = design.test_cases[0].tc_id
+    assert cp2_check(essential_cp2(design), "CP2-002").status == CheckStatus.FAIL
+
+
+def test_essential_state_label_does_not_override_explicit_layer_policy():
+    design = cp2_valid_design()
+    case = design.test_cases[0]
+    case.test_type = TcType.STATE_CONSISTENCY
+    case.expected_results = [er for er in case.expected_results if er.observation_layer == ObservationLayer.UI]
+    case.double_assert_policy = DoubleAssertPolicy.UI_ONLY
+    case.double_assert_reason = None
+    assert cp2_check(essential_cp2(design), "CP2-006").status == CheckStatus.PASS
+    case.double_assert_policy = DoubleAssertPolicy.REQUIRED
+    assert cp2_check(essential_cp2(design), "CP2-006").status == CheckStatus.FAIL
+
+
+@pytest.mark.parametrize("fault", ["missing", "unknown", "old_prompt"])
+def test_essential_manifest_is_version_bound(fault):
+    manifest = pipeline_execution._current_agent2_contract()
+    assert pipeline_execution._agent2_checkpoint_options(manifest)["essential_checks"]
+    if fault == "missing":
+        manifest.pop("essential_validation_contract")
+    elif fault == "unknown":
+        manifest["essential_validation_contract"] = "9.0"
+    else:
+        manifest["prompt_version"] = "agent2-2.55"
+    with pytest.raises(ValueError):
+        pipeline_execution._agent2_checkpoint_options(manifest)
+
+@pytest.mark.parametrize("value,valid", [(None, True), ("---", True), ("24°C", False), ("", False)])
+def test_fixed_text_accepts_identical_expectation_without_mutating_tc(value, valid):
+    case, plan = controller_lifecycle_fixture("mode", "COOL", "DRY")
+    case, _ = frozen_tc_and_bindings(case, plan)
+    check = case.execution_spec.verifications[0]
+    check.strategy = pipeline.AssertionStrategy.DISABLED_TEMPERATURE_TEXT
+    check.expected_fields = []
+    check.expected_value = check.expected_number = None
+    check.expected_text = value
+    before = case.model_dump()
+    errors = pipeline.tc_execution_spec_errors(case)
+    assert (not any("자료형" in error for error in errors)) == valid
+    assert case.model_dump() == before
+
+
+@pytest.mark.parametrize("strategy", list(pipeline.AssertionStrategy))
+def test_text_contract_rejects_unused_text_for_other_readers(strategy):
+    from qa_pipeline_contracts import assertion_text_matches_contract, FIXED_ASSERTION_TEXT
+    assert assertion_text_matches_contract(strategy, "---") == (
+        strategy == pipeline.AssertionStrategy.UI_TEXT_CONTAINS or strategy in FIXED_ASSERTION_TEXT)
+
+
+def test_saved_disabled_display_failure_rechecks_without_editing_output():
+    path = REPO_ROOT / "runs/cont1006/runs/RUN-20261006-124032-11E19F/agent2_test_design_attempt_1.json"
+    if not path.exists():
+        pytest.skip("Local saved API evidence is not distributed")
+    before = path.read_bytes()
+    design = pipeline.Agent2TestDesign.model_validate_json(before)
+    assert all(not pipeline.tc_execution_spec_errors(case) for case in design.test_cases)
+    request, requirements, analysis, _, _ = pipeline_execution._load_verified_agent1_run(path.parent, path.parent.name)
+    catalog = pipeline_execution._catalog_from_snapshot(
+        json.loads((path.parent / "approved_regression_catalog.json").read_text(encoding="utf-8")))
+    options = pipeline_execution._agent2_checkpoint_options(pipeline_execution._current_agent2_contract())
+    original_cp = evaluate_checkpoint2(request, analysis, design, requirements, existing_catalog=catalog, **options)
+    assert original_cp.status == CheckStatus.PASS, original_cp.model_dump_json(indent=2)
+    changed = design.model_copy(deep=True)
+    for tc in changed.test_cases:
+        tc.purpose = TcPurpose.RELATED_REGRESSION
+        tc.condition_execution = pipeline.ConditionExecution.SEQUENTIAL_TRANSITION
+        tc.grouping_reason = None
+        tc.test_data.requested_modes = ["DRY", "DRY"]
+    assert evaluate_checkpoint2(request, analysis, changed, requirements,
+        existing_catalog=catalog, **options).status == CheckStatus.PASS
+    from qa_pipeline_agent3 import resolve_controller_bindings, assemble_tc_bindings
+    case = design.test_cases[0]
+    plan = assemble_tc_bindings(case, resolve_controller_bindings(case))
+    assert next(a for a in plan.assertions if a.result_id == "ER-005").expected_text == "---"
+    assert "'---' not in actual" in compile_automation_candidate("LOCAL-SAVED-DISPLAY", case, plan)
+    check = next(v for v in design.test_cases[0].execution_spec.verifications if v.result_id == "ER-005")
+    check.expected_text = "24°C"
+    assert pipeline.tc_execution_spec_errors(design.test_cases[0])
+    assert path.read_bytes() == before
+
 @pytest.mark.parametrize("role", list(ConditionChangeRole))
 @pytest.mark.parametrize("values", [("MED", "HIGH"), ("18°C", "30°C"), ("HEAT", "COOL")])
 def test_reuse_target_alignment_preserves_condition_roles(role, values):
@@ -71,6 +200,7 @@ def test_tc_execution_alignment_manifest_is_version_bound(fault):
     assert pipeline_execution._agent2_checkpoint_options(manifest)["align_tc_execution"]
     old = {**manifest, "prompt_version": "agent2-2.54"}
     old.pop("tc_execution_alignment_contract")
+    old.pop("essential_validation_contract")
     assert not pipeline_execution._agent2_checkpoint_options(old)["align_tc_execution"]
     if fault == "missing": manifest.pop("tc_execution_alignment_contract")
     elif fault == "unknown": manifest["tc_execution_alignment_contract"] = "2.0"
@@ -744,6 +874,7 @@ def test_trace_source_count_is_not_new_semantic_authority(version, mutation):
     historical.pop("task_boundary_contract")
     historical.pop("scope_guard_contract")
     historical.pop("tc_execution_alignment_contract")
+    historical.pop("essential_validation_contract")
     settings = _agent2_checkpoint_options(historical)
     # Isolate the changed rule using historical compact fixtures, not a Live verdict.
     result = evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements(),
@@ -1049,7 +1180,9 @@ def test_approved_reuse_context_preserves_spec_without_registration_metadata():
                   "restore_steps", "independent_execution", "independence_reason"):
         assert context[field] == original[field]
     assert context["expected_results"] == [
-        {key: result.get(key) for key in ("statement", "observation_layer", "verify_after_step")}
+        {**{key: result.get(key) for key in ("statement", "observation_layer", "verify_after_step")},
+         **({"observation_target": result["observation_target"]}
+            if result.get("observation_target") is not None else {})}
         for result in original["expected_results"]
     ]
     rendered = pipeline.render_existing_regression_context(approved)
@@ -1093,7 +1226,7 @@ def test_agent2_sends_approved_procedures_on_initial_and_rewrite_calls():
         assert "근거 개수와 검증 사실 개수는 다릅니다" in instructions
         assert "유지 조건이라는 이유로 이번 요청에 필요한 검사를 생략" in instructions
         assert "후보와 기존 TC를 합친 실제 검사 범위" in instructions
-        assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-55"
+        assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-56"
         assert "기존 TC는 전체 단위로 실행" in instructions
         assert "명시적 제외와 충돌하는 검사가 포함돼 있으면 선택하지 않고" in instructions
         assert "기존 assertion을 삭제하지 않습니다" in instructions
@@ -1279,7 +1412,7 @@ def test_agent2_uses_structured_responses_api() -> None:
     assert response.usage["total_tokens"] == 300
     assert responses.kwargs["text_format"] is pipeline.LiveAgent2TestDesign
     assert responses.kwargs["store"] is False
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-55"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-56"
     agent2_input = responses.kwargs["input"][1]["content"]
     assert "[기존 사람 작성·자동화 TC 카탈로그]" in agent2_input
     assert '[코드로 확인한 SRS 개정 범위]' in agent2_input

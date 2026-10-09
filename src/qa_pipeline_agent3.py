@@ -1891,6 +1891,60 @@ def _trailing_observation_steps(
     }
 
 
+_DISABLED_TEMPERATURE_TEXT = FIXED_ASSERTION_TEXT[AssertionStrategy.DISABLED_TEMPERATURE_TEXT]
+
+# Describes supported operations, not whether the product or the TC is correct.
+_ASSERTION_READER_SEMANTICS = {
+    AssertionStrategy.UI_TEMPERATURE: ("displayed_temperature", "equals", "온도 표시를 숫자로 읽어 expected_number와 비교합니다."),
+    AssertionStrategy.INTERNAL_SET_TEMP: ("device.setTemp", "equals", "대상 장비 ID의 내부 setTemp를 expected_number와 비교합니다."),
+    AssertionStrategy.INTERNAL_DEVICE_FIELDS_EQUALS: ("device.fields", "equals", "대상 장비 ID의 지정 내부 필드를 expected_fields와 비교합니다."),
+    AssertionStrategy.CONTROLLER_UI_FIELDS_EQUALS: ("controller_ui_fields", "equals", "패널은 버튼 선택 상태와 온도 표시를, 카드는 상태 클래스·모드/풍량/온도·잠금 표시를 읽습니다. 내부값이 아닌 DOM 필드를 expected_fields와 비교합니다."),
+    AssertionStrategy.TOAST_VISIBLE: ("toast.show_class", "equals", "알림 요소의 class에 show가 있는지 확인합니다. 문구 내용은 검사하지 않습니다."),
+    AssertionStrategy.TOAST_BLOCKING: ("toast.show_class_and_text", "visible_and_any_term", "알림 show 클래스와 소문자·양끝 공백 제거 문구를 읽고 차단 표현 중 하나가 포함되는지 확인합니다. 정확한 문구 일치 검사가 아닙니다."),
+    AssertionStrategy.CONTROLS_DISABLED: ("temperature_buttons.is_enabled", "all_false", "두 온도 버튼의 is_enabled 값을 읽어 모두 비활성인지 확인합니다. 클릭하지 않습니다."),
+    AssertionStrategy.DISABLED_TEMPERATURE_TEXT: ("inner_text", "contains", "온도 표시창의 inner_text를 읽어 고정된 비활성 표시 문자열이 포함되는지 확인합니다. 별도 expected_text가 없어도 이 전략에 고정된 비교값이 있습니다."),
+    AssertionStrategy.UI_TEXT_CONTAINS: ("inner_text", "contains", "지정 요소의 화면 문구에 expected_text가 포함되는지 확인합니다."),
+    AssertionStrategy.UI_VALUE_EQUALS: ("input_value", "equals", "지정 입력 요소의 문자열 값을 문자열로 변환한 expected_value와 비교합니다."),
+    AssertionStrategy.UI_CHECKED_EQUALS: ("is_checked", "equals", "지정 요소의 체크 상태를 expected_value와 비교합니다."),
+    AssertionStrategy.UI_ENABLED_EQUALS: ("is_enabled", "equals", "지정 요소의 활성 상태를 expected_value와 비교합니다."),
+    AssertionStrategy.INTERNAL_VALUE_EQUALS: ("internal_expression", "equals", "허용된 내부 읽기 표현식의 값을 expected_value와 비교합니다."),
+}
+
+
+def _assertion_reader_facts(assertion: AutomationAssertion, device_id: int) -> dict:
+    kind, comparison, behavior = _ASSERTION_READER_SEMANTICS[assertion.strategy]
+    strategy = assertion.strategy
+    selectors = [assertion.selector]
+    if strategy in {AssertionStrategy.UI_TEMPERATURE, AssertionStrategy.DISABLED_TEMPERATURE_TEXT}:
+        selectors = [_TEMPERATURE_CONTROLS["display"]]
+    elif strategy == AssertionStrategy.CONTROLS_DISABLED:
+        selectors = [_TEMPERATURE_CONTROLS["decrease"], _TEMPERATURE_CONTROLS["increase"]]
+    elif strategy in {AssertionStrategy.TOAST_VISIBLE, AssertionStrategy.TOAST_BLOCKING}:
+        selectors = ["#global-toast"]
+    expected = assertion.expected_value
+    if strategy in {AssertionStrategy.UI_TEMPERATURE, AssertionStrategy.INTERNAL_SET_TEMP}:
+        expected = assertion.expected_number
+    elif strategy in {AssertionStrategy.INTERNAL_DEVICE_FIELDS_EQUALS, AssertionStrategy.CONTROLLER_UI_FIELDS_EQUALS}:
+        expected = {f.field_name: f.expected_value for f in assertion.expected_fields}
+    elif strategy == AssertionStrategy.UI_TEXT_CONTAINS:
+        expected = assertion.expected_text
+    elif strategy == AssertionStrategy.UI_VALUE_EQUALS:
+        expected = str(assertion.expected_value)
+    elif strategy == AssertionStrategy.DISABLED_TEMPERATURE_TEXT:
+        expected = _DISABLED_TEMPERATURE_TEXT
+    elif strategy == AssertionStrategy.CONTROLS_DISABLED:
+        expected = [False, False]
+    elif strategy == AssertionStrategy.TOAST_VISIBLE:
+        expected = True
+    elif strategy == AssertionStrategy.TOAST_BLOCKING:
+        expected = {"visible": True, "any_text_term": list(_BLOCKING_TOAST_ACTUAL_TERMS)}
+    return {"result_id": assertion.result_id, "strategy": strategy.value,
+        "plan_anchor": assertion.selector, "read_selectors": selectors,
+        "target_device_id": device_id, "observation_layer": assertion.observation_layer.value,
+        "after_action_id": assertion.after_action_id, "read_kind": kind,
+        "comparison": comparison, "effective_expected": expected, "behavior": behavior}
+
+
 def execution_interface_facts(plan: Agent3AutomationPlan, observation: UiObservation) -> dict:
     """Describe emitted adapters, not successful execution or product expectations."""
     elements = {e.selector: e for e in observation.elements}
@@ -1907,17 +1961,7 @@ def execution_interface_facts(plan: Agent3AutomationPlan, observation: UiObserva
                     "match_count": elements[selector].match_count if selector in elements else 0,
                     "action_hint": elements[selector].action_hint if selector in elements else None}
                     for selector in _TEMPERATURE_CONTROLS.values()]})
-    readers = []
-    for assertion in plan.assertions:
-        if assertion.strategy == AssertionStrategy.CONTROLS_DISABLED:
-            readers.append({"result_id": assertion.result_id, "plan_anchor": assertion.selector,
-                "read_selectors": [_TEMPERATURE_CONTROLS["decrease"], _TEMPERATURE_CONTROLS["increase"]],
-                "behavior": "두 온도 버튼의 is_enabled 값을 읽어 모두 비활성인지 확인합니다. 클릭하지 않습니다."})
-        elif assertion.strategy == AssertionStrategy.CONTROLLER_UI_FIELDS_EQUALS:
-            readers.append({"result_id": assertion.result_id, "plan_anchor": assertion.selector,
-                "fields": [f.field_name for f in assertion.expected_fields],
-                "behavior": "패널은 각 버튼의 선택 상태와 온도 표시를, 장비 카드는 상태 클래스·모드/풍량/온도 표시·잠금 표시를 읽습니다. "
-                    "컨테이너 전체 문장이나 고정된 버튼 이름과 비교하지 않으며 내부값을 화면값으로 대체하지 않습니다."})
+    readers = [_assertion_reader_facts(a, plan.target_device_id) for a in plan.assertions]
     return {"contract": "1.0", "trial_success_proved": False,
         "actionability": "UI 목록의 visible/enabled는 수집 당시 상태입니다. 대상 선택·준비 후에는 달라질 수 있습니다. "
             "존재·유일성·조작 종류는 사전에 검사하고, 실제 조작 가능 여부는 각 동작 시 Playwright가 확인합니다. "
@@ -2290,7 +2334,7 @@ def evaluate_checkpoint3_plan(
                 fidelity_errors.append(
                     f"{assertion.result_id}: notification expected_text must be a meaningful phrase, not the whole Expected Result sentence"
                 )
-        elif assertion.expected_text is not None:
+        elif not assertion_text_matches_contract(assertion.strategy, assertion.expected_text):
             fidelity_errors.append(
                 f"{assertion.result_id}: expected_text is unsupported by the current compiler"
             )
@@ -2993,26 +3037,33 @@ def compile_automation_candidate(
                 "def _temperature(page):",
                 f"    return _displayed_temperature(page, {_TEMPERATURE_CONTROLS['display']!r})",
                 "",
-                "def _set_temperature(page, target):",
-                "    for _ in range(40):",
-                "        current = _temperature(page)",
-                "        if current == target:",
-                "            return",
-                f"        selector = {_TEMPERATURE_CONTROLS['increase']!r} if current < target else {_TEMPERATURE_CONTROLS['decrease']!r}",
-                "        page.locator(selector).click()",
-                "    raise RuntimeError(f'temperature setup failed: target={target}, actual={_temperature(page)}')",
-                "",
-                "def _request_temperature(page, target):",
+                "def _adjust_temperature(page, target, *, allow_blocked):",
+                "    seen = set()",
                 "    for _ in range(40):",
                 "        before = _temperature(page)",
                 "        if before == target:",
                 "            return",
+                "        if before is None:",
+                "            raise RuntimeError(f'temperature adjustment stopped: unreadable display, target={target}')",
+                "        if before in seen:",
+                "            raise RuntimeError(f'temperature adjustment stopped: repeated display, target={target}, actual={before}')",
+                "        seen.add(before)",
                 f"        selector = {_TEMPERATURE_CONTROLS['increase']!r} if before < target else {_TEMPERATURE_CONTROLS['decrease']!r}",
                 "        page.locator(selector).click()",
                 "        after = _temperature(page)",
-                "        if after == before:",
+                "        if after == target:",
                 "            return",
-                "    raise RuntimeError(f'temperature request did not settle: target={target}, actual={_temperature(page)}')",
+                "        if after == before:",
+                "            if allow_blocked:",
+                "                return",
+                "            raise RuntimeError(f'temperature adjustment stopped: no progress, target={target}, actual={after}')",
+                "    raise RuntimeError(f'temperature adjustment stopped: attempt limit, target={target}, actual={_temperature(page)}')",
+                "",
+                "def _set_temperature(page, target):",
+                "    _adjust_temperature(page, target, allow_blocked=False)",
+                "",
+                "def _request_temperature(page, target):",
+                "    _adjust_temperature(page, target, allow_blocked=True)",
                 "",
             ]
         )
@@ -3242,7 +3293,7 @@ def compile_automation_candidate(
             lines.extend(
                 [
                     f"{indent}actual = page.locator('#det-temp-display').inner_text()",
-                    f"{indent}if '---' not in actual:",
+                    f"{indent}if {_DISABLED_TEMPERATURE_TEXT!r} not in actual:",
                     f"{indent}    mismatches.append({_py_literal(assertion.result_id)} + ': disabled text missing')",
                 ]
             )
@@ -3394,6 +3445,13 @@ def compile_automation_candidate(
             f"{indent}print('QA_ASSERTIONS_COMPLETE: ' + json.dumps({dict(version='assertion-observations-1.0', run_id=run_id, tc_id=test_case.tc_id)!r}))",
             f"{indent}assert not mismatches, 'PRODUCT_MISMATCH: ' + ' | '.join(mismatches)",
             f"{indent}test_completed = True",
+            "        except Exception:",
+            "            try:",
+            "                if not (EVIDENCE_DIR / 'trial-final.png').exists():",
+            "                    page.screenshot(path=str(EVIDENCE_DIR / 'trial-final.png'), full_page=True)",
+            "            except Exception:",
+            "                print('EVIDENCE_CAPTURE_FAILED: failure screenshot unavailable')",
+            "            raise",
             "        finally:",
         ]
     )

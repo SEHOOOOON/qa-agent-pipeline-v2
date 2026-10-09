@@ -889,6 +889,7 @@ def _run_test_case_catalog(run_dir: Path, design: dict, *, approved_assets_root:
     snapshot_path = run_dir / "approved_regression_catalog.json"
     snapshot = _read_json_payload(snapshot_path) if snapshot_path.is_file() else {}
     catalog = _catalog_from_snapshot(snapshot)
+    cases.update(_baseline_cases_from_snapshot(snapshot))
     saved_cases = {item["tc_id"]: item.get("test_case_json") for item in snapshot.get("approved_assets", [])}
     specs = {item.tc_id: item for item in (*catalog, ENVIRONMENT_PRECHECK)}
     approved_root = approved_assets_root.resolve()
@@ -968,6 +969,7 @@ def build_run_test_rows(run_dir: Path, *, approved_assets_root: Path = DEFAULT_A
                        or (case.get("automation_reason") if manual else "") or result.get("raw_message") or ""),
             "preconditions": case.get("preconditions") or [], "steps": case.get("steps") or [],
             "expected_results": expected, "restore_steps": case.get("restore_steps") or [],
+            "restoration_note": case.get("restoration_note"),
             "expected_result_details": [
                 {key: item.get(key) for key in (
                     "result_id", "statement", "observation_layer", "observation_target", "verify_after_step"

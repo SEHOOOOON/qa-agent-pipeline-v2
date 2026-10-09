@@ -76,8 +76,8 @@ SRS revision proposals must use grounded numbers and preserve the meaning of the
 4. 모든 confirmed_condition을 test_cases 또는 관련_기존_TC의 source_condition_ids 중 최소 한 곳에 반영합니다. 실제로 바뀐 제품 판정 조건은 신규·수정 후보 또는 변경 후 동작을 이미 그대로 검증하는 기존 TC 중 한 경로에 반영합니다. 보조 기준 연결만으로 그 전체의 시험 완료를 주장하지 않습니다. 준비·선택·복원 절차를 제품 기대 결과로 바꾸지 않습니다. 준비는 preconditions에, 본 시험은 steps에, 종료 후 복원은 restore_steps에 원문의 의미와 순서를 보존하여 상세하게 작성합니다. 복원이 필요하면 restore_required=true로 설정합니다.
 5. 모든 기대 결과는 source_condition_ids로 제품 판정 근거를 연결합니다. 근거에 없는 수치·시간·문구·UI 동작을 추가하지 않습니다. 장비 선택 성공, 사전조건 준비 완료, 시험 종료 후 복원처럼 실행을 위한 절차는 steps·preconditions·restore_steps에만 두고, 변경 요청이 그 동작 자체의 제품 결과를 요구하지 않는 한 expected_results로 만들지 않습니다. Condition 원문에 없는 `선택하고 적용할 수 있다`, `클릭할 수 있다`, `입력할 수 있다` 같은 실행 행동 성공 문장을 새 기대 결과로 만들지 않습니다. Condition 자체가 설정 가능·선택 가능 같은 제품 기능을 요구하면 이를 삭제하지 말고 버튼 활성 상태, 선택값 반영 또는 적용 뒤 상태처럼 실제로 판정할 관찰값으로 구체화합니다.
 5-1. 제출 전 각 TC를 자체 점검합니다. (a) TC의 requirement_ids는 그 TC의 source_condition_ids가 함께 근거를 가져야 하고, (b) 각 기대 결과의 source_condition_ids는 그 TC의 source_condition_ids 범위 안에 있어야 하며, (c) 각 기대 결과의 UI 표시·상태는 연결 Condition의 source_text 원문에 실제로 있어야 합니다. TC 수준 Condition에는 제품 판정 기준뿐 아니라 준비·복원 지시가 포함될 수 있으므로 모든 TC Condition을 억지로 expected_results에 다시 넣지 않습니다. 특히 UI·내부 상태 이중 검증 TC는 사용자가 요청한 UI 변경 결과와 그 동작을 뒷받침하는 내부 상태를 사용하고, 별도의 UI 상태 표시를 새로 만들지 않습니다.
-5-2. initial_mode·requested_mode·requested_modes는 운전 모드 전용입니다. 풍량·전원·잠금 등 다른 관제점 값을 넣지 않습니다. 전용 필드가 없는 관제점은 기존 preconditions·steps·expected_results에 대상과 값을 명시하며 모드 필드를 빌려 쓰지 않습니다. 준비할 운전 모드는 initial_mode와 preconditions에, 본 시험 목표만 requested_mode 또는 requested_modes에 기록합니다. 준비를 실제로 조작하더라도 그것만으로 본 시험 requested 값이 되지 않습니다. 온도 initial/requested 필드도 같은 기준입니다.
-5-2-1. 기존 중앙 관제 온도·모드 흐름의 묶음 TC가 실행 전 모드·설정 온도를 요구사항으로 고정하지 않았지만 시험 중 두 값 중 하나를 변경하고 원상 복구해야 하면 restore_observed_hvac_state=true를 사용합니다. 이때 임의 initial_mode·initial_temperature_c를 만들지 말고 restore_steps에 `실행 직전 관찰한 모드와 설정 온도로 복원하고 적용한다`는 뜻을 명시합니다. 이 표시는 처음 보는 일반 기능의 내부 값을 임의로 복원하는 허가가 아닙니다.
+5-2. initial/requested 모드·온도 필드는 선택 요약입니다. execution_spec에 준비·시험 조작과 값이 있으면 같은 값을 요약에 다시 작성할 필요가 없습니다. 작성할 경우 다른 관제점 값을 넣거나 실행 정의와 모순되게 쓰지 않습니다. 준비·입력·기대값은 서로 구분합니다.
+5-2-1. 실행 정의가 있는 TC는 프로그램의 준비 전 기록과 구조화 restoration을 사용합니다. 별도 restore_observed_hvac_state 표시나 설명에 특정 단어를 반복할 필요는 없습니다. 초기값을 추측하지 않으며 명시된 준비 상태는 실제 확인으로 연결합니다.
 5-2-2. 새 state_effect TC에서는 중앙 관제 전원·모드·풍량·온도·잠금에 같은 준비·복원 기준을 적용합니다. 준비 전 관련 화면·내부값 기록 → 명시된 사전조건 준비·확인 → 시험 → 준비와 시험으로 바뀐 관제점의 원래 관찰 상태 복원·확인 순서입니다. restoration.operation_steps에는 준비와 시험으로 바뀐 관제점을 준비 전 관찰 상태로 복원하고 적용하는 조작 하나를 적고, confirmations에는 실제 ER의 같은 화면·내부 관찰 대상을 OBSERVED_BASELINE으로 비교하도록 연결합니다. 관련 없는 제품 기대결과나 고정 복원값은 추가하지 않습니다. initial_mode·initial_temperature_c는 준비 완료 상태이지 복원 기본값이 아닙니다. 준비 도중 실패해도 원래 상태로 복원하고, 차단 시험도 준비로 바꾼 값은 되돌립니다. 이 공통 조작은 Agent 3의 RESTORE_OBSERVED_CONTROLLER로 구현하며 새 불리언 필드나 기능별 예외를 만들지 않습니다. 기존 HVAC 표시가 있는 TC의 호환 경로는 유지합니다. 다른 기능·다중 장비의 준비와 복원은 추정하지 않습니다.
 5-3. 각 expected_result는 한 observation_layer에서 독립적으로 한 번 판정할 수 있는 관찰값 하나만 기술합니다. 화면 모드·화면 온도·대기값 반영·버튼 활성 상태처럼 서로 다른 관찰값을 한 Expected Result에 묶지 말고 고유한 ER ID로 분리합니다. 내부 장비 객체의 서로 연관된 여러 필드는 하나의 INTERNAL_STATE 결과로 함께 기록할 수 있습니다. Expected Result를 분리한다는 것은 TC 자체를 분리한다는 뜻이 아닙니다.
 5-4. 하나의 TC 안에 여러 조건 구간이 있으면 각 expected_result의 verify_after_step에 그 결과를 확인해야 하는 steps의 문장을 정확히 복사합니다. 마지막에 한꺼번에 확인하면 앞 조건의 결과가 사라질 수 있으므로, 조건별 실행 직후 판정 위치를 명시합니다. 같은 적용 동작을 반복하면 각 steps에 순번 또는 해당 조건을 넣어 서로 구별하고 verify_after_step은 그 완전한 문장을 복사합니다. 확인만 하는 마지막 단계는 직전 조작 직후의 판정이며 별도 클릭을 뜻하지 않습니다.
@@ -87,20 +87,20 @@ SRS revision proposals must use grounded numbers and preserve the meaning of the
 5-8. 준비·조작 확인은 preconditions·steps에 기록하고 제품 판정인 expected_results와 구분합니다. 입력에 근거 없는 화면명·버튼명·선택 표시·내부 필드명을 만들어 상세함을 채우지 않습니다. 복원은 restore_steps에서 복원 대상·초기값 또는 관찰한 원상태·적용·확인 방법을 설명하되 선택과 적용을 한 문장으로 묶어도 됩니다. 복원 실패를 제품 기대 결과로 추가하지 않습니다. 기존 승인 TC는 새 작성 형식에 맞추려고 덮어쓰거나 불필요하게 재생성하지 않습니다.
 5-9. 중앙 관제의 장비 값을 조작할 때는 대상 장비 선택을 값 선택/입력보다 앞의 별도 steps 항목에 씁니다. 입력에 이미 선택된 상태가 근거로 있으면 preconditions에 그 상태를 명시하고 불필요한 재선택은 하지 않습니다. '대상 장비에 MED를 선택한다'는 풍량 선택이지 장비 선택 설명이 아닙니다. 요청의 준비·복원은 해당 필드에서 실제 대상·조작·확인을 구분해 설명합니다. 복원 확인에는 기존 기대결과의 observation_target과 같은 확인 위치, 초기값 또는 실행 전 관찰값과 비교하는 방법을 적습니다. '복원한다', '결과를 확인한다'로 끝내지 않습니다. 초기값 확인과 복원 확인은 제품 기대결과에 추가하지 않습니다.
 5-10. 복원 확인은 대상마다 비교 기준을 구분합니다. 내부 코드와 사용자 화면 표시가 같다고 가정하지 않습니다. 화면과 내부값은 각각 준비 전 같은 관찰 위치에서 기록한 실제 값과 비교합니다. 원문에 명시된 준비값은 사전조건 준비·확인에만 사용하며 복원 목표와 혼동하지 않습니다. 각 대상과 비교 방법을 한 구절에 완결하고, 여러 구절은 '확인하고', '확인하며' 등으로 연결하거나 별도 문장으로 적을 수 있습니다. 다른 대상의 구절에 있는 초기값/시험 전 상태 표현을 빌려 쓰지 않습니다. 근거 없는 표시명이나 사전조건을 추가하지 않습니다.
-6. test_cases의 purpose는 CHANGE_VALIDATION만 사용합니다. 유지되는 기존 동작은 RELATED_REGRESSION 후보를 새로 만들지 말고 관련_기존_TC로 분리합니다.
+6. test_cases는 이번에 필요한 새 시험, 관련_기존_TC는 이미 등록된 시험의 선택입니다. purpose는 설명용이며 이름으로 실제 검증 범위를 대신하지 않습니다. 기존 TC로 충분히 확인할 수 있는 시험은 불필요하게 복제하지 않습니다.
 6-1. 범위 변경은 변경된 경계뿐 아니라 변경 후 범위의 하한과 상한을 각각 검증합니다. 같은 관제점의 같은 범위 규칙이면 하한·상한을 하나의 TC 안에서 조건 구간으로 묶을 수 있습니다.
 6-2. 현재 V2의 제품 조작 기준은 중앙 관제 패널 하나입니다. 모든 실행 TC는 control_path=CENTRAL을 사용하며 LOCAL·현장 리모컨 TC를 만들지 않습니다.
 7. TC 분리 단위는 입력값 하나가 아니라 하나의 업무 규칙입니다. 같은 관제점·제어 경로·업무 규칙이고 입력값이나 모드만 달라지는 경우에는 하나의 TC로 묶어 중복을 줄입니다. 예시의 특정 모드명·온도값을 고정 규칙으로 사용하지 말고 현재 입력의 Requirement와 confirmed_condition으로 동일 업무 규칙인지 판단합니다.
 7-1. condition_execution은 본 시험의 판정 구간 수를 나타냅니다. 시작 상태 준비 후 목표 결과 하나를 확인하면 SINGLE_FLOW입니다. 준비 상태와 목표 상태가 다르다는 이유만으로 SEQUENTIAL_TRANSITION을 선택하지 않습니다. 요청이 여러 중간 결과 자체를 순서대로 확인하도록 요구하면 SEQUENTIAL_TRANSITION, 여러 독립 조건을 각각 초기화해 시험하면 INDEPENDENT_VARIANTS입니다. 준비·복원을 빼도 본 시험 조건이 여러 개인지 먼저 확인합니다.
-7-2. INDEPENDENT_VARIANTS는 각 조건이 앞 조건의 결과에 의존하지 않도록 steps 안에 초기화·재준비 절차를 넣고, 그 문장을 intermediate_reset_steps에도 정확히 복사합니다. SEQUENTIAL_TRANSITION은 전환 순서가 Requirement의 검증 목적일 때만 사용하며 임의로 독립 조건을 연결하지 않습니다.
-7-3. 묶음 TC는 grouping_reason에 같은 TC로 처리하는 근거가 되는 공통 관제점·업무 규칙을 구체적으로 기록합니다. 서로 다른 Requirement 목적, 서로 다른 제어 경로, 실패 원인이 무관한 기능은 별도 TC로 분리합니다.
+7-2. 독립 조건의 시험 사이에 필요한 초기화·재준비는 steps와 execution_spec에 연결합니다. intermediate_reset_steps는 선택 색인이며 작성하면 해당 steps 원문을 참조합니다. 실제로 필요한 초기화를 분류명이나 색인으로 대신할 수 없습니다.
+7-3. grouping_reason은 선택 설명입니다. 묶음의 적절성은 이름이 아니라 실제 조작·중간 확인·초기화가 요청과 맞는지로 판단합니다.
 7-4. 묶음 TC의 각 조건은 steps와 expected_results에서 구분되어야 합니다. 한 조건의 입력·행동·결과를 작성한 뒤 필요한 초기화 또는 전환을 거쳐 다음 조건을 작성합니다. 모든 결과를 TC 마지막 상태에서 한꺼번에 확인하도록 작성하지 않습니다.
-7-5. requested_modes와 requested_temperatures_c에는 묶음 TC가 실제로 요청하는 모든 모드·온도 값을 중복 없이 기록합니다. 단일 조건은 기존 requested_mode와 requested_temperature_c를 사용할 수 있습니다. test_data와 절차에 없는 값을 자동화 단계가 추정하게 하지 않습니다.
+7-5. 실제 입력값과 조작 순서는 execution_spec에 작성합니다. requested_modes·requested_temperatures_c는 선택 요약이며 값의 나열 방식이나 중복만으로 시험을 분리하지 않습니다. 자동화 단계는 요약이나 문장을 다시 해석해 값을 만들지 않습니다.
 7-5a. execution_spec이 있는 TC의 실제 입력·버튼 조작은 그 정의를 기준으로 연결합니다. 증가/감소 등 상대 조작은 버튼과 순서만 명시하며 결과로 유지돼야 할 값을 requested 값으로 만들지 않습니다. 별도 명시적 모드·온도 입력이 없으면 requested 필드는 null/빈 배열로 둡니다. 기대값은 expected_results와 verifications에 보존합니다.
 7-6. 초기 준비·중간 초기화·최종 복원에만 쓰는 값은 시험 조건의 requested 값에 섞지 않습니다. 해당 절차와 초기값으로 기록합니다. 복원값을 요청 목록에 넣어 생긴 검사 오류는 그 값을 분리해 고치며, 오류를 피하려고 반복 시험 조건을 새로 만들지 않습니다.
 8. REQ-CONTROL-001을 검증하면 CENTRAL 경로에서 관제 패널을 통한 적용을 다룹니다. 과거 산출물의 LOCAL 값이나 REQ-LOCAL-*를 현재 SRS 근거로 추정하거나 새 TC로 확장하지 않습니다.
 9. target_role은 고정 장치 ID를 추측하지 말고 PRIMARY_TEST_DEVICE처럼 역할로 지정합니다.
-10. test_data의 모드·온도 필드에는 해당 관제점 값만 넣습니다. 명시된 준비 모드·온도는 initial 필드와 사전조건에, 본 시험의 모드·온도는 requested 필드에 기록합니다. 전원·풍량·잠금 값은 기존 절차와 결과에 명시합니다. 값의 이름이 다른 관제점과 같아도 필드 의미를 바꾸지 않습니다.
+10. test_data 요약을 작성할 경우 해당 관제점의 값만 쓰며 실행 정의와 일치시킵니다. 실제 준비 상태와 그 확인, 본 시험 조작·기대값은 실행 정의에 빠짐없이 연결합니다.
 11. 상태 변경 또는 차단을 검증하는 TC는 사용자 화면(UI)과 내부 상태(INTERNAL_STATE)를 함께 확인합니다. 이중 검증은 동일 변경을 서로 다른 계층에서 확인하는 원칙이지, 요청에 없는 화면 배지·선택 표시·잠금 상태 표시를 추가하라는 뜻이 아닙니다. 변경된 버튼 disabled 상태가 UI 결과라면 내부 locked 같은 근거 상태와 짝지을 수 있으며 별도 잠금 표시 UI를 요구하지 않습니다. 변경 요청·SRS에 `locked`, `mode`, `setTemp`처럼 내부 필드 식별자가 명시돼 있으면 INTERNAL_STATE 기대 결과에도 그 식별자를 번역하거나 생략하지 않고 정확히 보존합니다.
 11-1. common_qa_criteria·domain_qa_criteria·feature_requirement_ids는 선택적인 설명용 QA 분류입니다. 적용 기준이 분명할 때 기록하고 없으면 빈 배열을 허용합니다. 분류를 채우기 위해 새 검사·기대값을 추가하지 않습니다. requirement_ids·source_condition_ids와 각 기대결과의 실제 요구 연결은 필수이며, feature_requirement_ids를 기록한다면 해당 TC의 Requirement ID만 사용합니다.
 11-2. 각 TC는 이전 TC 결과에 의존하지 않고 단독 실행 가능해야 합니다. independent_execution=true로 선언하되 선언·설명만으로 독립 실행이 입증되지는 않습니다. independence_reason은 선택 설명으로 null을 허용합니다. 필요한 초기 상태는 preconditions·test_data로 직접 준비하고 확인하며, 상태가 바뀌면 restore_steps로 복원합니다.
@@ -259,7 +259,9 @@ precondition_verifications는 명시된 시작 상태만 확인합니다. 값 �
 INTERNAL_SET_TEMP는 expected_number, UI_TEXT_CONTAINS는 expected_text,
 UI_VALUE_EQUALS/UI_CHECKED_EQUALS/UI_ENABLED_EQUALS/INTERNAL_VALUE_EQUALS는 expected_value,
 CONTROLLER_UI_FIELDS_EQUALS/INTERNAL_DEVICE_FIELDS_EQUALS는 expected_fields를 사용합니다.
-그 외 기대값 필드는 비웁니다. 조작 target, verifications.target과 strategy,
+그 외 기대값 필드는 비웁니다. 고정 비교 전략은 기대값을 생략해도 되며,
+DISABLED_TEMPERATURE_TEXT의 expected_text에 동일한 "---"를 명시해도 됩니다.
+고정 비교값과 다른 값은 허용하지 않습니다. 조작 target, verifications.target과 strategy,
 준비 확인 observation_target과 read_kind는 입력의 [실행 연결표의 정확한 항목 목록]에서
 해당 조합을 그대로 선택합니다. 항목 이름을 축약·확장·번역하거나 접두사를 추가하지 않습니다.
 목록은 실행기 연결표에서 직접 가져오며 제품 기대값이나 필수 시험 범위를 뜻하지 않습니다.
@@ -376,7 +378,7 @@ class OpenAIAgent2:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent2-2-55",
+                prompt_cache_key="qa-v2-agent2-2-56",
                 input=[
                     {"role": "system", "content": AGENT2_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
@@ -748,6 +750,7 @@ def evaluate_checkpoint2(
     allow_multiple_trace_sources: bool = False,
     review_scope_semantics: bool = False,
     align_tc_execution: bool = False,
+    essential_checks: bool = False,
 ) -> Checkpoint2Result:
     checks: list[CheckResult] = []
 
@@ -776,10 +779,10 @@ def evaluate_checkpoint2(
             if normalized_titles.count(item) > 1
         }
     )
-    if duplicate_tc_ids or duplicate_result_ids or duplicate_titles:
+    if duplicate_tc_ids or duplicate_result_ids or (duplicate_titles and not essential_checks):
         add("CP2-002", CheckStatus.FAIL, "TC·기대 결과 ID 또는 제목이 중복됩니다.")
     else:
-        add("CP2-002", CheckStatus.PASS, "TC·기대 결과 ID와 제목이 고유합니다.")
+        add("CP2-002", CheckStatus.PASS, "TC·기대 결과 ID가 고유합니다. 제목은 식별자가 아닙니다." if essential_checks else "TC·기대 결과 ID와 제목이 고유합니다.")
 
     known_conditions = {item.condition_id: item for item in analysis.confirmed_conditions}
     requirement_relations = {
@@ -899,7 +902,7 @@ def evaluate_checkpoint2(
         layers = {result.observation_layer for result in tc.expected_results}
         requires_double_assert = (
             (not review_scope_semantics and "REQ-STATE-001" in (source_requirements - trace_only_requirements))
-            or tc.test_type == TcType.STATE_CONSISTENCY
+            or (not essential_checks and tc.test_type == TcType.STATE_CONSISTENCY)
         )
         if requires_double_assert and not {
             ObservationLayer.UI,
@@ -934,7 +937,7 @@ def evaluate_checkpoint2(
                 policy_errors.append(f"{tc.tc_id}:UI·내부 상태 이중 검증의 판정 단계 불일치; 같은 조작 직후 함께 확인 필요")
         requires_double_assert = (
             (not review_scope_semantics and "REQ-STATE-001" in (set(tc.requirement_ids) - (trace_only_requirements if use_structured_scope_restoration else set())))
-            or tc.test_type == TcType.STATE_CONSISTENCY
+            or (not essential_checks and tc.test_type == TcType.STATE_CONSISTENCY)
         )
         if requires_double_assert and tc.double_assert_policy != DoubleAssertPolicy.REQUIRED:
             policy_errors.append(f"{tc.tc_id}:필수 이중 검증 정책 누락")
@@ -953,6 +956,7 @@ def evaluate_checkpoint2(
             policy_errors.append(f"{tc.tc_id}:INTERNAL_ONLY 계층 불일치")
         if (
             tc.double_assert_policy != DoubleAssertPolicy.REQUIRED
+            and not essential_checks
             and not tc.double_assert_reason
         ):
             policy_errors.append(f"{tc.tc_id}:이중 검증 예외 사유 누락")
@@ -1023,7 +1027,7 @@ def evaluate_checkpoint2(
         required_change_paths.append(("REQ-CONTROL-001", ControlPath.CENTRAL))
     for requirement_id, control_path in required_change_paths:
         candidate_has_path = any(
-            tc.purpose == TcPurpose.CHANGE_VALIDATION
+            (essential_checks or tc.purpose == TcPurpose.CHANGE_VALIDATION)
             and tc.control_path == control_path
             and request.target_requirement_id in tc.requirement_ids
             and requirement_id in tc.requirement_ids
@@ -1050,7 +1054,7 @@ def evaluate_checkpoint2(
         tc
         for tc in design.test_cases
         if request.target_requirement_id in tc.requirement_ids
-        and tc.purpose == TcPurpose.CHANGE_VALIDATION
+        and (essential_checks or tc.purpose == TcPurpose.CHANGE_VALIDATION)
     ]
     if (
         uncovered_requirements
@@ -1194,7 +1198,7 @@ def evaluate_checkpoint2(
         if (
             not tc.independent_execution
             or (require_qa_explanation_metadata and not tc.independence_reason)
-            or has_cross_tc_dependency
+            or (has_cross_tc_dependency and not essential_checks)
         ):
             independence_errors.append(tc.tc_id)
     if independence_errors:
@@ -1316,6 +1320,18 @@ def evaluate_checkpoint2(
 
     grouping_errors: list[str] = []
     for tc in design.test_cases:
+        if essential_checks and tc.execution_spec is not None:
+            # CP2-024 owns action/value/anchor coverage. Runtime records and
+            # restores BEFORE_SETUP; prose and duplicate test_data are not a
+            # second execution plan. Explicit reset instructions must still
+            # exist in the TC and be implemented at their original position.
+            for step in tc.intermediate_reset_steps:
+                if step not in tc.steps or not any(
+                    op.phase == AutomationPhase.TEST and op.source_text == step
+                    for op in tc.execution_spec.operations
+                ):
+                    grouping_errors.append(f"{tc.tc_id}:중간 초기화의 실행 연결 누락")
+            continue
         data = tc.test_data
         plural_values_used = bool(
             data.requested_modes or data.requested_temperatures_c
@@ -1461,7 +1477,7 @@ def evaluate_checkpoint2(
         for tc in design.test_cases
         if tc.purpose != TcPurpose.CHANGE_VALIDATION
     ]
-    if regenerated_regressions:
+    if regenerated_regressions and not essential_checks:
         existing_selection_errors.append(
             "기존 회귀를 신규 후보로 재작성=" + ",".join(regenerated_regressions)
         )
@@ -1478,7 +1494,7 @@ def evaluate_checkpoint2(
             for requirement_id in tc.requirement_ids
         )
     ]
-    if verify_only_candidates:
+    if verify_only_candidates and not essential_checks:
         existing_selection_errors.append(
             "VERIFY 유지 동작을 신규 후보로 중복 생성="
             + ",".join(verify_only_candidates)
@@ -1509,7 +1525,7 @@ def evaluate_checkpoint2(
         and set(result.source_condition_ids).issubset(unchanged_condition_ids)
         and set(result.source_condition_ids).intersection(existing_conditions)
     ]
-    if duplicated_unchanged_results:
+    if duplicated_unchanged_results and not essential_checks:
         existing_selection_errors.append(
             "관련 기존 TC로 선택한 유지 동작을 신규 기대 결과로 중복="
             + ",".join(duplicated_unchanged_results)

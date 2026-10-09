@@ -15,7 +15,7 @@ import urllib.error
 import urllib.request
 import uuid
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -205,6 +205,43 @@ class Agent1Analysis(StrictModel):
     # Missing in historical analyses; never inferred when loading old evidence.
     procedure_notes: list[NonEmptyStr] = Field(default_factory=list)
     decision: AnalysisDecision
+
+
+class RequirementScopeDraft(StrictModel):
+    """Model writes source evidence; request-condition IDs are derived by the host."""
+    basis: ScopeBasis
+    srs_source_text: NonEmptyStr
+
+
+class RequirementEffectDraft(RequirementEffect):
+    scope_evidence: RequirementScopeDraft | None = None
+
+
+class Agent1AnalysisDraft(Agent1Analysis):
+    requirement_effects: list[RequirementEffectDraft] = Field(min_length=1)
+
+
+def bind_agent1_requirement_links(draft: Agent1AnalysisDraft) -> Agent1Analysis:
+    """Invert the sole condition→Requirement map without inferring new links."""
+    data = draft.model_dump(mode="json")
+    for effect in data["requirement_effects"]:
+        proof = effect.get("scope_evidence")
+        if proof is not None:
+            proof["request_condition_ids"] = [
+                condition.condition_id for condition in draft.confirmed_conditions
+                if condition.source_type == ConditionSource.CHANGE_REQUEST
+                and effect["requirement_id"] in condition.requirement_ids
+            ]
+    return Agent1Analysis.model_validate(data)
+
+
+def agent1_link_draft(analysis: Agent1Analysis) -> Agent1AnalysisDraft:
+    """Project a stored contract for comparison, without changing stored evidence."""
+    data = analysis.model_dump(mode="json")
+    for effect in data["requirement_effects"]:
+        if effect.get("scope_evidence") is not None:
+            effect["scope_evidence"].pop("request_condition_ids", None)
+    return Agent1AnalysisDraft.model_validate(data)
 
 
 class CheckResult(StrictModel):
@@ -557,6 +594,16 @@ class AssertionStrategy(str, Enum):
     INTERNAL_VALUE_EQUALS = "INTERNAL_VALUE_EQUALS"
 
 
+FIXED_ASSERTION_TEXT = {AssertionStrategy.DISABLED_TEMPERATURE_TEXT: "---"}
+
+
+def assertion_text_matches_contract(strategy: AssertionStrategy, value: str | None) -> bool:
+    """Allow an omitted or identical fixed value; never ignore a conflicting value."""
+    if strategy == AssertionStrategy.UI_TEXT_CONTAINS:
+        return value is not None
+    return value is None or (strategy in FIXED_ASSERTION_TEXT and value == FIXED_ASSERTION_TEXT[strategy])
+
+
 class AutomationCandidateStatus(str, Enum):
     READY_FOR_EXECUTION = "READY_FOR_EXECUTION"
     PRODUCT_MISMATCH_DETECTED = "PRODUCT_MISMATCH_DETECTED"
@@ -877,12 +924,11 @@ def tc_execution_spec_errors(tc: ProductTestCaseCandidate) -> list[str]:
             errors.append(f"{check.result_id}: 확인 시점 이전의 마지막 조작과 불일치")
         numeric = check.strategy in {AssertionStrategy.UI_TEMPERATURE, AssertionStrategy.INTERNAL_SET_TEMP}
         fields = check.strategy in {AssertionStrategy.INTERNAL_DEVICE_FIELDS_EQUALS, AssertionStrategy.CONTROLLER_UI_FIELDS_EQUALS}
-        text = check.strategy == AssertionStrategy.UI_TEXT_CONTAINS
         scalar = check.strategy in {AssertionStrategy.UI_VALUE_EQUALS, AssertionStrategy.UI_CHECKED_EQUALS,
                                    AssertionStrategy.UI_ENABLED_EQUALS, AssertionStrategy.INTERNAL_VALUE_EQUALS}
         if ((check.expected_number is not None) != numeric
                 or bool(check.expected_fields) != fields
-                or (check.expected_text is not None) != text
+                or not assertion_text_matches_contract(check.strategy, check.expected_text)
                 or (check.expected_value is not None) != scalar):
             errors.append(f"{check.result_id}: 확인 방식과 기대값 자료형 불일치")
         if check.strategy in {AssertionStrategy.UI_CHECKED_EQUALS, AssertionStrategy.UI_ENABLED_EQUALS} and type(check.expected_value) is not bool:
@@ -1175,6 +1221,7 @@ class ExistingRegressionSpec:
 
     # Whitelisted product-test specification, not code, paths or approval metadata.
     reuse_context_json: str | None = None
+    recovery_contract: str | None = "native-recovery-1.0"
 
 
 EXISTING_REGRESSION_CATALOG = (
@@ -1263,6 +1310,53 @@ def _catalog_snapshot_entry(spec: ExistingRegressionSpec) -> dict[str, Any]:
     }
 
 
+def _baseline_cases_from_snapshot(payload: dict[str, Any]) -> dict[str, dict]:
+    """Only saved native-test detail; never backfill old Runs from today's file."""
+    details = payload.get("baseline_details")
+    if details is None:
+        return {}
+    if not isinstance(details, dict) or details.get("contract_version") != "baseline-details-1.0":
+        raise ValueError("기본 TC 상세 명세 계약이 올바르지 않습니다.")
+    cases = {}
+    for row in details.get("cases", []):
+        text = row["test_case_json"]
+        if hashlib.sha256(text.encode("utf-8")).hexdigest() != row["test_case_sha256"]:
+            raise ValueError("기본 TC 상세 명세 해시가 다릅니다.")
+        case = json.loads(text)
+        if case["tc_id"] != row["tc_id"] or row["tc_id"] in cases:
+            raise ValueError("기본 TC 상세 명세 번호가 다르거나 중복됩니다.")
+        cases[row["tc_id"]] = case
+    if set(cases) != {s.tc_id for s in EXISTING_REGRESSION_CATALOG}:
+        raise ValueError("기본 TC 상세 명세가 누락되거나 추가됐습니다.")
+    return cases
+
+
+def _baseline_detail_snapshot() -> dict:
+    root = Path(__file__).resolve().parents[1]
+    details = json.loads((root / "docs/basic_tc_details.json").read_text(encoding="utf-8"))
+    if _sha256_file(root / "product_baseline/tests/test_controller.py") != details["source_sha256"]:
+        raise ValueError("기본 시험 코드가 바뀌었습니다. 상세 TC 명세를 함께 검토하세요.")
+    specs = {s.tc_id: s for s in EXISTING_REGRESSION_CATALOG}
+    rows = []
+    for authored in details["cases"]:
+        case = {k: v for k, v in authored.items() if k != "checks"}
+        spec = specs[case["tc_id"]]
+        case.update(requirement_ids=list(spec.requirement_ids),
+            execution_backend=details["execution_backend"],
+            test_function=spec.test_function,
+            restore_steps=[details["restoration_scope"]], restoration_note=details["restoration_scope"],
+            restoration_status="RUNTIME_VERIFICATION_REQUIRED",
+            restoration_contract="native-recovery-1.0",
+            expected_results=[dict(result_id=f"ER-{i:03}", statement=statement)
+                              for i, statement in enumerate(authored["checks"], 1)])
+        text = json.dumps(case, ensure_ascii=False)
+        rows.append(dict(tc_id=case["tc_id"], test_case_json=text,
+                         test_case_sha256=hashlib.sha256(text.encode("utf-8")).hexdigest()))
+    snapshot = dict(contract_version=details["contract_version"], source_sha256=details["source_sha256"], cases=rows)
+    _baseline_cases_from_snapshot({"baseline_details": snapshot})
+    return snapshot
+
+
 def _catalog_from_snapshot(payload: dict[str, Any]) -> tuple[ExistingRegressionSpec, ...]:
     entries = payload.get("approved_assets") or []
     if not isinstance(entries, list):
@@ -1286,7 +1380,12 @@ def _catalog_from_snapshot(payload: dict[str, Any]) -> tuple[ExistingRegressionS
             )
         )
     retired = _retired_tc_ids(payload)
-    catalog = tuple(item for item in (*EXISTING_REGRESSION_CATALOG, *approved)
+    details = _baseline_cases_from_snapshot(payload)
+    baseline = tuple(replace(s, reuse_context_json=json.dumps(details[s.tc_id], ensure_ascii=False),
+                            recovery_contract=details[s.tc_id].get("restoration_contract"))
+                     if s.tc_id in details else replace(s, recovery_contract=None)
+                     for s in EXISTING_REGRESSION_CATALOG)
+    catalog = tuple(item for item in (*baseline, *approved)
                     if item.tc_id not in retired)
     _existing_regression_by_id(catalog)
     return catalog
@@ -1316,7 +1415,7 @@ def load_approved_regression_catalog(
     approved_assets_root = approved_assets_root.resolve()
     registry_file = approved_assets_root / "registry.json"
     if not registry_file.is_file():
-        return (), {"contract_version": "1.0", "approved_assets": []}
+        return (), {"contract_version": "1.0", "approved_assets": [], "baseline_details": _baseline_detail_snapshot()}
     registry = json.loads(registry_file.read_text(encoding="utf-8"))
     assets = registry.get("assets")
     if not isinstance(assets, list):
@@ -1439,6 +1538,7 @@ def load_approved_regression_catalog(
     return tuple(approved), {
         "contract_version": "1.0",
         "registry_sha256": _sha256_file(registry_file),
+        "baseline_details": _baseline_detail_snapshot(),
         "approved_assets": snapshot_entries,
         "supersessions": registry.get("supersessions", []),
     }
@@ -1459,7 +1559,7 @@ def render_existing_regression_context(
         + " | 검증 동작: "
         + " / ".join(item.covered_behaviors)
         + (
-            "\n  승인 TC 명세 · 사전조건/절차/기대결과/판정 시점/복원:\n  "
+            "\n  기존 TC 명세 · 사전조건/절차/기대결과/판정 시점/복원:\n  "
             + item.reuse_context_json
             if item.reuse_context_json else ""
         )

@@ -1,0 +1,42 @@
+{
+  "api_calls": 0,
+  "normal": {
+    "outcome": "PASS",
+    "exit_code": 0,
+    "duration_ms": 9156,
+    "stdout_file": "trial-stdout.txt",
+    "stderr_file": "trial-stderr.txt",
+    "screenshot_file": "trial-final.png",
+    "trace_file": "trial-trace.zip",
+    "evidence_sha256": {
+      "trial-stdout.txt": "bf74005096950c202ae4dadd8951d74bc6ab1e160a331cbd5d0fb60d2ddb28fe",
+      "trial-stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "trial-final.png": "13d89d3a261d2098984da80065ba620e49362431e1a7b218508f881e699b29c0",
+      "trial-trace.zip": "5d3025e22db7feab36ee88f52f4f10540ba0e14b2b73b3ffba9b8c13b407759a"
+    },
+    "evidence_complete": true
+  },
+  "regression": [
+    {
+      "tc": "TC-V2-001",
+      "variant": "different_original",
+      "verified": true
+    },
+    {
+      "tc": "TC-V2-001",
+      "variant": "restore_internal_fault",
+      "verified": true
+    },
+    {
+      "tc": "TC-V2-001",
+      "variant": "restore_ui_fault",
+      "verified": true
+    }
+  ],
+  "testcase_sha256": "171894b8e6aece9d7f7622ddce6ca36e9c62917d028474fd2735d6b0a6db5c0f",
+  "automation_sha256": "0e888baf250b56b4b4ca05ea0e1cd1b5aa50312d486a19dc322685aa040ed125",
+  "plan_sha256": "336c5c62b168c4b422cacc1664ae24b18fecf5fe917e413ebde03021b8e7f13c",
+  "product_sha256": "66a7170dd4b0ea6c7ee1394df0bc5263054367da5ccd2b5de4c892430a7d1320",
+  "evidence_location": "runs/tc_refresh_1005/TC-V2-001",
+  "scope": "local browser only; original approval remains historical, revision authorized separately"
+}

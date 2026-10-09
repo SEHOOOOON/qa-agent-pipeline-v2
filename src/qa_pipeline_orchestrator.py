@@ -121,7 +121,7 @@ def _select_agent3_tcs(
     candidates: list[tuple[ProductTestCaseCandidate, Agent3EligibilityResult]] = []
     summaries: list[dict[str, Any]] = []
     for test_case in design.test_cases:
-        if test_case.purpose != TcPurpose.CHANGE_VALIDATION:
+        if test_case.purpose != TcPurpose.CHANGE_VALIDATION and test_case.execution_spec is None:
             summaries.append(
                 {
                     "tc_id": test_case.tc_id,

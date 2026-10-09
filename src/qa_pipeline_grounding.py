@@ -197,7 +197,7 @@ def build_grounding_input(stage, request, requirements, artifact, *, analysis=No
                           include_review_responsibilities=False, allow_output_tolerance=False,
                           include_task_boundaries=False, review_scope_semantics=False,
                           allow_state_change_terminal_observation=False, explicit_expectations_only=False,
-                          include_tc_execution_alignment=False, execution_interface=False):
+                          include_tc_execution_alignment=False, execution_interface=False, essential_checks=False):
     """Host enumerates review targets; the reviewer cannot choose a smaller scope."""
     documents, items = [], []
     def doc(source_id, value):
@@ -437,6 +437,18 @@ def build_grounding_input(stage, request, requirements, artifact, *, analysis=No
             "execution_spec에 상대 버튼 조작이 있으면 명시적인 입력 모드·온도가 없는 requested 필드는 비어 있어도 됩니다. "
             "유지될 기대값을 요청 입력으로 바꾸지 않습니다. compiler_recovery_facts는 프로그램 복원 동작의 "
             "근거이며 요청·SRS의 제품 기대값이나 실제 시험 성공의 근거가 아닙니다.")
+    if essential_checks:
+        if stage != "AGENT2" or not include_tc_execution_alignment:
+            raise ValueError("핵심 검사 계약은 실행 정의를 검토하는 Agent 2에만 적용합니다.")
+        payload["essential_validation_contract"] = "1.0"
+        doc("ESSENTIAL_VALIDATION", "제목·purpose·test_type·grouping_reason은 설명이며 이름만으로 반려하거나 검사를 추가하지 않습니다. "
+            "실제 범위·조작·입력/기대값·확인 시점·중간 초기화는 요청/SRS와 execution_spec을 대조합니다. "
+            "test_data는 선택 요약으로 별도 실행 계획이 아닙니다. 생략·동일값 중복은 반려하지 않되 실제 값 충돌은 확인합니다. "
+            "여러 필드를 함께 확인한 결과도 필요한 검사가 모두 연결되면 문장 분리만 강제하지 않습니다. "
+            "값 기록과 복원은 COMPILER_RECOVERY 근거로 확인하며 새 제품 기대결과를 추가하지 않습니다. "
+            "다른 TC를 언급했다는 이유만으로 의존이라고 하지 않되, 실제로 다른 시험의 결과가 필요한 절차는 반려합니다. "
+            "VERIFY/유지 분류만으로 신규 시험을 금지하지 않습니다. 기존 TC가 요청을 실제로 전부 확인하는지 대조하여 "
+            "불필요한 복제와 검사 누락·범위 확대를 확인합니다. 한 시점에 여러 결과를 확인해도 되지만 요구된 중간 검사는 생략할 수 없습니다.")
     if allow_output_tolerance:
         payload["output_tolerance_contract"] = "1.0"
     if include_task_boundaries:
@@ -460,6 +472,10 @@ def evaluate_grounding_review(payload, review):
             and (payload["stage"] != "AGENT3" or payload.get("product_verdict_contract") != "1.0"))):
         raise ValueError("지원하지 않는 실행 인터페이스 계약입니다.")
     alignment = payload.get("tc_execution_alignment_contract")
+    essential = payload.get("essential_validation_contract")
+    if essential not in {None, "1.0"} or (essential is not None and
+            (payload["stage"] != "AGENT2" or alignment != "1.0")):
+        raise ValueError("지원하지 않는 핵심 검사 계약입니다.")
     if alignment not in {None, "1.0"} or (alignment is not None and payload["stage"] != "AGENT2"):
         raise ValueError("지원하지 않는 TC 실행 정합 계약입니다.")
     if payload.get("task_boundary_contract") not in {None, "1.0", "1.1", "1.2", "1.3"}:
@@ -496,7 +512,7 @@ def evaluate_grounding_review(payload, review):
         if (payload.get("task_boundary_contract") in {"1.1", "1.2", "1.3"}
                 and result.verdict == "UNSUPPORTED" and not result.citations):
             invalid_review.append(f"{result.item_id}: 근거 없는 반려 판정")
-        if (kinds.get(result.item_id) == "EXPECTED_RESULT" and not result.single_fact
+        if (essential is None and kinds.get(result.item_id) == "EXPECTED_RESULT" and not result.single_fact
                 and result.verdict != "UNCERTAIN"):
             problems.append(f"{result.item_id}: 독립된 기대결과를 분리하고 모든 검사를 보존해야 합니다: {result.reason}")
         if result.verdict == "UNSUPPORTED":
@@ -544,9 +560,17 @@ class OpenAIGroundingReviewer:
 
     def review(self, payload):
         response_schema = source_selection_schema(payload)
+        instructions = REVIEW_INSTRUCTIONS
+        if payload.get("essential_validation_contract") == "1.0":
+            instructions += (
+                "\n이번 AGENT2 검토는 호스트의 ESSENTIAL_VALIDATION 계약을 적용합니다. "
+                "제목·분류·선택 요약·묶음 설명·단순 TC 언급 때문에 반려하지 않습니다. "
+                "실제 조작·값·대상·시점·필수 확인·초기화는 요청/SRS와 execution_spec으로 대조하세요. "
+                "여러 필드가 있어 single_fact=false여도 필요한 검사가 모두 연결되면 그 사실만으로 UNSUPPORTED로 판단하지 않습니다. "
+                "값 충돌·누락·실제 의존·불필요 복제는 계속 지적하고 불확실하면 UNCERTAIN입니다.")
         response = self.client.responses.parse(model=self.model, reasoning={"effort": "medium"},
             store=False, prompt_cache_key="qa-v2-grounding-1-17",
-            input=[{"role": "system", "content": REVIEW_INSTRUCTIONS},
+            input=[{"role": "system", "content": instructions},
                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
             text_format=response_schema)
         parsed = getattr(response, "output_parsed", None)
@@ -568,9 +592,13 @@ class OpenAIGroundingReviewer:
 
 
 def check_review_record(payload, record):
-    if (record.get("contract") != "grounding-1.0" or record.get("stage") != payload["stage"]
-            or record.get("input_sha256") != _review_digest(payload)):
-        raise ValueError("근거 검토의 계약·단계·입력 해시가 현재 산출물과 다릅니다.")
+    if record.get("contract") != "grounding-1.0":
+        raise ValueError("저장된 근거 검토의 계약 형식이 없거나 지원하지 않는 형식입니다. 이전 판정을 재사용할 수 없습니다.")
+    if record.get("stage") != payload["stage"]:
+        raise ValueError("저장된 근거 검토의 단계가 현재 검토 단계와 다릅니다. 이전 판정을 재사용할 수 없습니다.")
+    if record.get("input_sha256") != _review_digest(payload):
+        raise ValueError("저장된 근거 검토의 입력 해시가 현재 검토 자료와 다릅니다. 이전 판정을 재사용할 수 없습니다. "
+                         "원본 기록을 보존하고 입력 변경 여부를 확인한 뒤 현재 자료로 재검토하세요.")
     binding = record.get("citation_binding_contract")
     if binding is not None or "source_selection" in record:
         if binding != "source-id-1.0" or "source_selection" not in record:

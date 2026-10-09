@@ -2,6 +2,20 @@
 
 from pipeline_test_support import *
 
+@pytest.mark.parametrize("field,initial,target", [
+    ("status", "OPERATION", "STOP"), ("mode", "COOL", "HEAT"),
+    ("fanSpeed", "AUTO", "LOW"), ("setTemp", 27, 21), ("locked", False, True)])
+def test_structured_candidate_routing_does_not_depend_on_purpose_label(field, initial, target):
+    case, _ = mapped_tc_fixture(field, initial, target)
+    design = cp2_valid_design().model_copy(update={"test_cases": [case]})
+    expected, _ = pipeline_orchestrator._select_agent3_tcs(design)
+    case.purpose = TcPurpose.RELATED_REGRESSION
+    selected, _ = pipeline_orchestrator._select_agent3_tcs(design)
+    assert selected == expected == [case.tc_id]
+    case.execution_spec.verifications.pop()
+    with pytest.raises(pipeline.Agent3Error, match="실행 정의"):
+        pipeline_orchestrator._select_agent3_tcs(design)
+
 
 @pytest.mark.parametrize('blocked', [False, True])
 def test_single_tc_compatibility_wrapper_keeps_verified_loader(tmp_path, monkeypatch, blocked):
@@ -254,9 +268,10 @@ def test_error_manifest_preserves_original_error_with_broken_summary(tmp_path):
     ("1 skipped in 0.1s", "SKIPPED"),
 ])
 def test_regression_skip_uses_result_summary_not_warning(tmp_path, monkeypatch, stdout, status):
+    from dataclasses import replace
     monkeypatch.setattr(pipeline_execution, "_run_trial_subprocess",
         lambda *a, **kw: SimpleNamespace(returncode=0, stdout=stdout, stderr=""))
-    result = pipeline.run_existing_regression(pipeline.EXISTING_REGRESSION_CATALOG[0],
+    result = pipeline.run_existing_regression(replace(pipeline.EXISTING_REGRESSION_CATALOG[0], recovery_contract=None),
         REPO_ROOT / "product_baseline/tests/test_controller.py",
         REPO_ROOT / "product_baseline/virtual-controller.html", tmp_path / "evidence", timeout_seconds=10)
     assert result.status.value == status
@@ -746,6 +761,12 @@ def test_existing_regression_runs_from_a_copied_neutral_workspace(
         assert (workspace / "tests" / "conftest.py").is_file()
         assert (workspace / "virtual-controller.html").is_file()
         evidence_dir = Path(kwargs["env"]["QA_EVIDENCE_DIR"])
+        assert kwargs["env"]["QA_NATIVE_RECOVERY"] == "1"
+        assert kwargs["env"]["QA_NATIVE_TC_ID"] == "TC-TEMP-001"
+        assert "_native_restore" in (workspace / "tests" / "conftest.py").read_text(encoding="utf-8")
+        # Synthetic subprocess evidence; real state comparison is tested in test_native_recovery.
+        (evidence_dir / "native-restoration.json").write_text(
+            json.dumps({"fixture": True, "status": "RESTORED"}), encoding="utf-8")
         trace_file = evidence_dir / "trial-trace.zip"
         with zipfile.ZipFile(trace_file, "w") as archive:
             archive.writestr(
@@ -800,7 +821,10 @@ def test_existing_regression_runs_from_a_copied_neutral_workspace(
 
 @pytest.mark.parametrize("with_confirmation", [False, True])
 def test_existing_regression_preserves_success_output_without_inventing_checks(tmp_path, with_confirmation):
+    from dataclasses import replace
     spec = next(item for item in pipeline.EXISTING_REGRESSION_CATALOG if item.tc_id == "TC-TEMP-001")
+    # Historical output-only fixture has no browser/product recovery contract.
+    spec = replace(spec, recovery_contract=None)
     baseline = tmp_path / "test_controller.py"
     marker = "RESTORE_CONFIRMATIONS_VERIFIED: ER-001,ER-002"
     statement = f"print({marker!r})" if with_confirmation else "pass"

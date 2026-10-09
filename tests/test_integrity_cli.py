@@ -3,6 +3,43 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("mutation", ["raw_hash", "raw_content", "missing_contract", "path"])
+def test_single_requirement_map_saved_source_is_verified(tmp_path, monkeypatch, mutation):
+    request, analysis, _ = cp1_combined_srs_case()
+    class FakeAgent:
+        def __init__(self, **kwargs):
+            pass
+        def analyze(self, *args, **kwargs):
+            return pipeline.Agent1Response(analysis=analysis.model_copy(deep=True),
+                response_id=None, model="offline", usage={},
+                link_draft=pipeline.agent1_link_draft(analysis))
+    monkeypatch.setattr(pipeline_execution, "OpenAIAgent1", FakeAgent)
+    request_file = tmp_path / "request.json"
+    _write_json(request_file, request.model_dump(mode="json"))
+    assert pipeline.run_agent1(SimpleNamespace(request=str(request_file),
+        srs=str(REPO_ROOT / "docs/01_PRODUCT_SRS.md"), runs_root=str(tmp_path / "runs"),
+        model=None)) == 0
+    run = next((tmp_path / "runs").iterdir())
+    assert _load_verified_agent1_run(run, run.name)[2] == analysis
+    manifest_file = run / "run_manifest.json"
+    manifest = pipeline._read_json_payload(manifest_file)
+    source = manifest["requirement_link_source"]
+    path = run / source["file"]
+    if mutation in {"raw_hash", "raw_content"}:
+        raw = pipeline._read_json_payload(path)
+        raw["change_summary"] += " 변경"
+        _write_json(path, raw)
+        if mutation == "raw_content":
+            source["sha256"] = pipeline._sha256_file(path)
+    elif mutation == "missing_contract":
+        manifest.pop("requirement_link_contract")
+    else:
+        source["file"] = "../outside.json"
+    _write_json(manifest_file, manifest)
+    with pytest.raises(ValueError):
+        _load_verified_agent1_run(run, run.name)
+
+
 @pytest.mark.parametrize("command", ["report", "agent4"])
 @pytest.mark.parametrize("send", [False, True])
 def test_reporting_cli_loads_env_only_for_explicit_send(tmp_path, monkeypatch, command, send):
@@ -211,11 +248,13 @@ def test_srs_quote_policy_initial_rewrite_and_verified_loader(tmp_path, monkeypa
         with pytest.raises(ValueError, match="SRS 인용 계약"):
             _load_verified_agent1_run(run_dir, run_dir.name)
     _write_json(manifest_file, {**original, "contract_version": "2.9",
-        "scope_guard_contract": "1.1", "prompt_version": "agent1-2.22"})
+        "scope_guard_contract": "1.1", "prompt_version": "agent1-2.22",
+        "requirement_link_contract": None})
     with pytest.raises(ValueError, match="SRS 인용 계약"):
         _load_verified_agent1_run(run_dir, run_dir.name)
     _write_json(manifest_file, {**original, "contract_version": "2.9", "srs_quote_contract": None,
-        "scope_guard_contract": "1.1", "prompt_version": "agent1-2.22"})
+        "scope_guard_contract": "1.1", "prompt_version": "agent1-2.22",
+        "requirement_link_contract": None})
     with pytest.raises(ValueError, match="작업 경계 계약"):
         _load_verified_agent1_run(run_dir, run_dir.name)
     _write_json(manifest_file, original)
@@ -383,14 +422,15 @@ def test_request_trace_run_handoff_requires_new_scope_contract(tmp_path, monkeyp
         with pytest.raises(ValueError, match="검사 범위 계약"):
             _load_verified_agent1_run(run_dir, run_dir.name)
     _write_json(manifest_file, {**original, "prompt_version": "agent1-2.22"})
-    with pytest.raises(ValueError, match="검사 범위 계약"):
+    with pytest.raises(ValueError, match="근거 연결 계약"):
         _load_verified_agent1_run(run_dir, run_dir.name)
     for invalid in (None, "0.9", "unknown"):
         _write_json(manifest_file, {**original, "input_routing_contract": invalid})
         with pytest.raises(ValueError, match="입력 분류 계약"):
             _load_verified_agent1_run(run_dir, run_dir.name)
     _write_json(manifest_file, {**original, "contract_version": "2.6",
-        "scope_guard_contract": "1.1", "prompt_version": "agent1-2.22"})
+        "scope_guard_contract": "1.1", "prompt_version": "agent1-2.22",
+        "requirement_link_contract": None})
     with pytest.raises(ValueError, match="입력 분류 계약"):
         _load_verified_agent1_run(run_dir, run_dir.name)
     for contract, scope in [("2.6", None), ("2.6", "1.0"), ("2.5", "1.0"), ("2.5", "1.1")]:
@@ -447,7 +487,7 @@ def test_scope_gate_rewrite_and_pause_before_agent2(tmp_path, monkeypatch, outco
     run_dir = next((tmp_path / "runs").iterdir())
     manifest = pipeline._read_json_payload(run_dir / "run_manifest.json")
     assert manifest["scope_guard_contract"] == "1.2"
-    assert manifest["prompt_version"] == "agent1-2.23"
+    assert manifest["prompt_version"] == "agent1-2.24"
     assert manifest["task_boundary_contract"] == "1.3"
     if outcome == "scope_review":
         assert len(calls) == 1
@@ -862,7 +902,11 @@ def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
     assert pipeline.run_agent2(agent2_args) == (2 if detail_outcome == "unresolved" else 0)
     detail_manifest = pipeline._read_json_payload(run_dir / "agent2_manifest.json")
     assert detail_manifest["tc_detail_contract"] == "1.2"
-    assert detail_manifest["prompt_version"] == "agent2-2.55"
+    assert detail_manifest["prompt_version"] == "agent2-2.56"
+    assert detail_manifest["essential_validation_contract"] == "1.0"
+    assert all(p["essential_validation_contract"] == "1.0"
+               and any(d["source_id"] == "ESSENTIAL_VALIDATION" for d in p["source_documents"])
+               for p in review_inputs if p["stage"] == "AGENT2")
     assert detail_manifest["tc_execution_alignment_contract"] == "1.0"
     assert detail_manifest["scope_guard_contract"] == "1.2"
     assert all(p["scope_guard_contract"] == "1.2" for p in review_inputs if p["stage"] == "AGENT2")
@@ -999,7 +1043,8 @@ def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
     )
     _write_json(run_dir / "checkpoint2.json", historical_cp.model_dump(mode="json"))
     legacy = {**manifest, "contract_version": "3.1", "tc_detail_contract": "1.0", "srs_revision_contract": "1.0",
-              "tc_execution_alignment_contract": None,
+                  "tc_execution_alignment_contract": None,
+                  "essential_validation_contract": None,
               "scope_guard_contract": None,
               "grounding_contract": None, "grounding_review_sha256": None, "grounding_reviews": [],
               "review_responsibility_contract": None,
