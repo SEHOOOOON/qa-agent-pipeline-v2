@@ -1,0 +1,34 @@
+{
+  "contract_version": "1.3",
+  "run_id": "RUN-20261009-103040-2FC290",
+  "stage": "FINAL_REPORT",
+  "analysis_sha256": "fa377cc8dc8872631f4fa9cebb0dae2b4df2c34f787576f542d838b1c9931c30",
+  "checkpoint4_sha256": "803fe47d466adede472edfcfeaf004f6c1393b07fa0509da3aa7193b32f6814a",
+  "total_results": 2,
+  "status_counts": {
+    "PASSED": 2,
+    "ASSERTION_FAILED": 0,
+    "EXECUTION_ERROR": 0,
+    "TIMEOUT": 0,
+    "SKIPPED": 0
+  },
+  "product_result_count": 1,
+  "environment_result_count": 1,
+  "pipeline_fixture_result_count": 0,
+  "검토_항목": [],
+  "제외_범위": [
+    "다중 장비 제어",
+    "벽면 리모컨과 실제 장비 통신",
+    "알림 문구와 색상 검사",
+    "명시한 전환 이외의 추가 회귀 시험",
+    "기존 전원 기능의 운전에서 정지로의 전환을 시험합니다. 제품 기준 변경이나 SRS 개정 요청이 아닙니다.",
+    "이번 시험 범위는 운전에서 정지로의 전환이며 기존 SRS 제품 기준은 변경하지 않습니다."
+  ],
+  "제외된_정보_부족": [],
+  "최종_확인_사항": [],
+  "SRS_개정_제안": [],
+  "자동화_제외_TC": [],
+  "recommendation": "PASS",
+  "checkpoint_status": "PASS",
+  "created_at": "2026-10-09T10:37:50.389332+00:00"
+}
