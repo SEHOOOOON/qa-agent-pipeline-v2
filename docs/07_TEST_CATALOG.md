@@ -56,6 +56,11 @@ TC 실행 정합 회귀는 `test_agent2.py`와 `test_grounding.py`에서 유지/
 | 실행 조정 | [test_orchestration_execution.py](../tests/test_orchestration_execution.py) | 후보 선택·제외·오류 중단·기존 회귀·실행 집계 |
 | Agent 4 | [test_agent4_reporting.py](../tests/test_agent4_reporting.py) | 결과 분류·증거·CP4·사람 검토서·외부 보고 |
 | UI·승인 | [test_pipeline_ui.py](../tests/test_pipeline_ui.py) | 조회/실행 권한·승인·재시험·동시성·SRS 반영·복구 |
+| 제출 데모·근거 | [test_submission_demo.py](../tests/test_submission_demo.py) | 실제 포폴 링크로 저장 데모 열기·API 미호출·Live 연결 오류 보존·공개 관찰 로그 해시/발췌·복원 비교 표기·시험 범위와 공통 필수 확인 구분 |
+
+공개 근거 보존 검사는 임시 Git 인덱스에서 `core.autocrlf=true`로 추가·새 체크아웃을 수행합니다. `evidence/`, `examples/results/`, `approved_assets/`의 바이트 보존과 제출 근거 Manifest의 해시 일치를 대조하며 원본 파일을 재정규화하지 않습니다.
+
+외부 보고 검사는 한쪽만 실패하는 경우와 응답 유실을 대역으로 확인합니다. 제품 판정과 전송 상태를 분리하고, 실패한 전송을 자동 재시도하지 않으며 이전 전송 기록을 보존하는지 대조합니다. 실제 Slack·Notion 수신 검증은 별도입니다.
 
 공유 데이터와 대역은 [pipeline_test_support.py](../tests/pipeline_test_support.py)에서 관리합니다. 같은 테스트 함수도 입력 조합에 따라 여러 건으로 수집되므로 함수 수와 실행 건수를 혼동하지 않습니다.
 

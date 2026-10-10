@@ -108,6 +108,8 @@ python src/qa_pipeline_ui.py --allow-live-run --allow-asset-approval
 
 HTML을 직접 열거나 공개 웹 주소에 접속하면 MED 풍량 정상 변경의 저장된 데모가 표시됩니다. 데모 승인은 화면 시연이며 파일에 반영되지 않습니다. 실제 시험은 로컬 서버가 별도 브라우저에서 수행하고, 관제 화면에는 실행 상태와 결과가 표시됩니다.
 
+포폴의 저장 데모 링크는 `product_baseline/virtual-controller.html?mode=demo`를 사용합니다. 단순 로컬 정적 서버에서도 실행 서버 없이 열 수 있습니다. `mode=live`의 연결 오류를 데모 성공으로 대체하지 않습니다. 중앙제어 조작 화면은 PC용이며, 모바일에서는 포폴의 요약 영상을 이용하세요.
+
 CLI에서는 현재 SRS와 비교할 변경 요청 JSON을 준비한 뒤 다음 순서로 실행합니다. 아래 `변경요청.json`은 실제 파일 경로로 바꿉니다. [요청·실행 증거 목록](examples/README.md)의 HIGH·MED 요청은 과거 시연 자료이며, 이미 등록된 내용을 신규 등록하는 예시로 사용하지 않습니다.
 
 ```powershell
@@ -141,6 +143,8 @@ git diff --check
 - [미정 조건이 남은 사례](examples/results/agent1-agent2-agent3-agent4-partial-information/README.md)
 
 위 자료는 **실행 당시의 증거**이며 최신 구현 전체를 재검증한 기록이 아닙니다. 이전 AUTO 온도 기록(`agent1-agent2-auto-temperature`, `agent1-agent2-agent3-auto-temperature`)은 Git에 저장된 줄바꿈 바이트와 당시 Manifest 해시가 달라 현재 검증기에 재인계 가능한 성공 증거로 사용하지 않습니다. 과거 원본·해시를 다시 써서 성공으로 바꾸지 않습니다.
+
+`evidence/`, `examples/results/`, `approved_assets/`는 Git 체크아웃 때 줄바꿈을 변환하지 않습니다. 내려받은 근거 파일의 바이트 해시를 보존하기 위한 설정이며, 이미 불일치한 과거 기록의 해시를 보정하지 않습니다.
 
 [공개 포트폴리오](https://sehooooon.github.io/qa-agent-pipeline-v2/project.html)는 기존 공개본을 유지합니다. 최신 코드와 설명이 다를 수 있으므로 현재 상태는 이 README와 인계 문서를 확인하세요. 수정 중인 포폴·백업·새 영상은 사용자 검토 전 공개하지 않습니다.
 

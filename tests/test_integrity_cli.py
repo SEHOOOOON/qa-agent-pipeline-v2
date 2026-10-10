@@ -109,7 +109,7 @@ def test_public_and_approved_evidence_preserves_bytes_with_windows_checkout(tmp_
     git("config", "core.autocrlf", "true")
     git("config", "core.safecrlf", "false")
     (root / ".gitattributes").write_bytes((REPO_ROOT / ".gitattributes").read_bytes())
-    paths = subprocess.check_output(["git", "ls-files", "-z", "--", "examples/results", "approved_assets"], cwd=REPO_ROOT).decode().split("\0")
+    paths = subprocess.check_output(["git", "ls-files", "-z", "--", "examples/results", "approved_assets", "evidence"], cwd=REPO_ROOT).decode().split("\0")
     originals = {}
     for name in filter(None, paths):
         originals[name] = (REPO_ROOT / name).read_bytes()
@@ -124,6 +124,11 @@ def test_public_and_approved_evidence_preserves_bytes_with_windows_checkout(tmp_
     for name, raw in originals.items():
         assert git("show", ":" + name) == raw, name
         assert (output / name).read_bytes() == raw, name
+    exported = output / "evidence/submission-20261010"
+    manifest = pipeline._read_json_payload(exported / "manifest.json")
+    assert len(manifest["files"]) == 5
+    for name, record in manifest["files"].items():
+        assert _sha256_file(exported / name) == record["export_sha256"]
 
 
 

@@ -3,6 +3,45 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize('failed_destination', ['SLACK', 'NOTION'])
+@pytest.mark.parametrize('failure', ['http', 'response_lost'])
+def test_partial_delivery_failure_stays_separate_from_product_pass(tmp_path, monkeypatch, failed_destination, failure):
+    """Transport fakes only: no real send, no automatic retry on uncertain receipt."""
+    run_dir, run_id = _write_agent4_inputs(tmp_path)
+    args = SimpleNamespace(run_id=run_id, runs_root=str(tmp_path/'runs'))
+    assert pipeline.run_agent4(args) == 0
+    before = (run_dir/'final_report.json').read_bytes()
+    preview = (run_dir/'external_reporting.json').read_bytes()
+    monkeypatch.setenv('SLACK_WEBHOOK_URL', 'https://hooks.slack.com/services/test-only')
+    monkeypatch.setenv('NOTION_API_KEY', 'test-only-not-a-secret')
+    monkeypatch.setenv('NOTION_DATA_SOURCE_ID', 'test-source')
+    calls = []
+    def fake_http(method, url, payload=None, **kwargs):
+        dest = 'SLACK' if 'hooks.slack.com' in url else 'NOTION'
+        calls.append((dest, method, url))
+        if dest == failed_destination:
+            if failure == 'response_lost':
+                raise TimeoutError('Response lost; acceptance cannot be inferred')
+            return 503, {}
+        if url.endswith('/query'):
+            return 200, {'results': []}
+        if '/children' in url and method == 'GET':
+            return 200, {'results': [], 'has_more': False}
+        return 200, {'id': 'test-page'}
+    monkeypatch.setattr(pipeline_reporting, '_http_json_request', fake_http)
+    assert pipeline.run_external_reporting(SimpleNamespace(**vars(args), send=True)) == 3
+    attempts = list((run_dir/'external_reporting_attempts').iterdir())
+    assert len(attempts) == 1
+    delivery = json.loads((attempts[0]/'external_reporting.json').read_text(encoding='utf-8'))
+    for dest in ['SLACK', 'NOTION']:
+        assert delivery[dest.lower()]['status'] == ('FAILED' if dest == failed_destination else 'SENT')
+    assert len([call for call in calls if call[0] == failed_destination]) == 1
+    assert (run_dir/'final_report.json').read_bytes() == before
+    assert (run_dir/'external_reporting.json').read_bytes() == preview
+    stage = pipeline_ui.summarize_run(tmp_path/'runs', run_id)['stages']['agent4']
+    assert f"Slack: {delivery['slack']['status']} / Notion: {delivery['notion']['status']}" in stage['details']
+
+
 @pytest.mark.parametrize("status", ["PASSED", "ASSERTION_FAILED", "NOT_EXECUTED"])
 def test_slack_readable_terms_only_change_display(tmp_path, monkeypatch, status):
     import qa_pipeline_reporting as reporting
