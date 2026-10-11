@@ -24,6 +24,22 @@ import pytest
 
 import qa_pipeline_ui as pipeline_ui
 
+
+@pytest.fixture
+def isolated_ui_srs(tmp_path_factory, monkeypatch):
+    """Approval/rollback tests must never write the repository's real SRS."""
+    original = pipeline_ui.DEFAULT_SRS
+    before = original.read_bytes()
+    isolated = tmp_path_factory.mktemp("isolated-ui-srs") / "srs.md"
+    isolated.write_bytes(before)
+    for function in (pipeline_ui.decide_candidate_asset,
+                     pipeline_ui._decide_candidate_asset_impl,
+                     pipeline_ui.PipelineUiBridge.__init__):
+        monkeypatch.setattr(function, "__kwdefaults__",
+                            {**function.__kwdefaults__, "srs_path": isolated})
+    yield isolated
+    assert original.read_bytes() == before, "UI test modified the repository SRS"
+
 import qa_pipeline_execution as pipeline_execution
 import qa_pipeline_orchestrator as pipeline_orchestrator
 
@@ -1076,6 +1092,23 @@ def frozen_tc_and_bindings(case, plan):
         extension_reasons=[], technical_notes=[])
     return case, bindings
 
+
+
+def repeated_restoration_fixture(field="setTemp", initial=27, requested=21):
+    """Same reader used by separate ERs; no altered product expectations."""
+    case, _ = mapped_tc_fixture(field, initial, requested)
+    for index, (er, check, confirmation) in enumerate(zip(
+            list(case.expected_results), list(case.execution_spec.verifications),
+            list(case.restoration.confirmations)), 97):
+        rid = f"ER-{index:03d}"
+        case.expected_results.append(er.model_copy(deep=True, update={"result_id": rid}))
+        case.execution_spec.verifications.append(check.model_copy(deep=True, update={"result_id": rid}))
+        duplicate = confirmation.model_copy(deep=True)
+        duplicate.result_ids = [rid]
+        duplicate.comparisons[0].result_id = rid
+        case.restoration.confirmations.append(duplicate)
+    case.restore_steps = case.restoration.operation_steps + [c.source_text for c in case.restoration.confirmations]
+    return case
 
 def mapped_tc_fixture(field="setTemp", initial=27, requested=21, **kwargs):
     """Local reference builder only; production never infers keys from selectors."""

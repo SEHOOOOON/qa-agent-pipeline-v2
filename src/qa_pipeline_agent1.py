@@ -66,7 +66,7 @@ Use UNCHANGED only for maintained behavior; do not label a new acceptance criter
 14. NO_IMPACT Requirement는 confirmed_conditions의 requirement_ids에 연결하지 않습니다.
 15. excluded_scope에는 요청에 명시된 제외 범위, 이번 변경과 무관한 범위, 또는 기대 결과가 불명확해 이번 실행에서 분리할 수 있는 범위를 기록합니다. 확정 조건과 제외 범위를 섞지 않습니다.
 16. 변경 요청 내부의 충돌, 필수 기대 동작 누락 또는 대상 Requirement 불일치가 있을 때만 information_gaps와 user_questions에 기록합니다. 명확한 확정 조건도 함께 있고 불명확한 범위를 별도로 격리할 수 있으면 PARTIAL_PROCEED를 선택하고, 이번 실행에서 제외하는 information_gaps 원문을 `제외된_정보_부족`에 같은 목록으로 기록합니다.
-16-1. 인수 조건 원문에 목표값 미정·미확정 등 정보 부족이 명시되어 있으면 해당 원문 전체를 information_gaps, 제외된_정보_부족, excluded_scope에 동일하게 보존하고 confirmed_conditions에는 넣지 않습니다. 명확한 인수 기준을 임의로 정보 부족으로 바꾸어 제외하지 않습니다.
+16-1. 인수 조건 원문에 목표값 미정·미확정 등 정보 부족이 명시되어 있으면 해당 원문 전체를 information_gaps에 보존하고 user_questions에 필요한 질문을 남기며 confirmed_conditions에는 넣지 않습니다. 확정 범위와 분리하여 PARTIAL_PROCEED할 때만 같은 원문을 제외된_정보_부족과 excluded_scope에도 보존합니다. 핵심 조건이 미정이라 WAITING_FOR_USER이면 그 조건은 확인할 대상이지 제외 범위가 아닙니다. 요청에 명시된 실제 제외 범위는 별도로 유지합니다. 명확한 인수 기준을 임의로 정보 부족으로 바꾸어 제외하지 않습니다.
 17. 변경 요청에 이미 명시된 값을 SRS에 없다는 이유로 다시 확정해 달라고 질문하지 않습니다.
 18. Toast 같은 안내 수단의 정확한 문구는 변경 요청이 문구 일치를 요구할 때만 필수 정보로 봅니다.
 19. 질문이 없고 변경 전 근거, 변경 후 정책과 전달할 확정 조건이 명확하면 PROCEED를 선택합니다. PARTIAL_PROCEED는 확정 조건을 Agent 2로 계속 전달하고 excluded_scope와 information_gaps만 최종 보고 대상으로 남깁니다. 핵심 기대 결과를 확정할 수 없어 분리 진행도 불가능할 때만 WAITING_FOR_USER를 선택합니다.
@@ -129,7 +129,7 @@ class OpenAIAgent1:
         model: str | None = None,
         client: Any | None = None,
     ) -> None:
-        self.model = model or os.getenv("OPENAI_MODEL", "gpt-5.6-terra")
+        self.model = model or os.getenv("OPENAI_MODEL", "gpt-6.1-sol")
         if client is None:
             if not os.getenv("OPENAI_API_KEY"):
                 raise Agent1Error(
@@ -188,7 +188,7 @@ class OpenAIAgent1:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent1-2-24",
+                prompt_cache_key="qa-v2-agent1-2-25",
                 input=[
                     {"role": "system", "content": AGENT1_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
@@ -516,6 +516,7 @@ def evaluate_checkpoint1(
     allow_srs_quote_parts: bool = False,
     review_range_semantics: bool = False,
     review_scope_semantics: bool = False,
+    align_request_roles: bool = False,
 ) -> Checkpoint1Result:
     # The default preserves historical callers. New runs explicitly disable
     # wording heuristics and record that policy in their immutable manifest.
@@ -797,6 +798,11 @@ def evaluate_checkpoint1(
         & {_normalize(item) for item in analysis.excluded_information_gaps}
         & {_normalize(item) for item in analysis.excluded_scope}
     ) if analysis.decision == AnalysisDecision.PARTIAL_PROCEED else set()
+    if align_request_roles and analysis.decision == AnalysisDecision.WAITING_FOR_USER:
+        # Waiting preserves unresolved input without declaring it out of scope.
+        # CP1-010 and the mandatory review still check the question/decision;
+        # WAITING_FOR_USER never authorizes the Agent 2 handoff.
+        recorded_gaps = {_normalize(item) for item in analysis.information_gaps}
     unresolved_notes = {
         _normalize(note) for note in positive_acceptance_notes
         if _normalize(note) in recorded_gaps
@@ -970,6 +976,12 @@ def evaluate_checkpoint1(
             and (not legacy_wording_checks or not _is_test_procedure_note(part, legacy=not require_input_contract))
             and _normalize(part) not in {_normalize(s) for s in request.out_of_scope}
         ]
+        # A VERIFY quote may include its stated preparation context, as CP1-007
+        # already permits. It must also cite an actual requested condition;
+        # before_value alone remains insufficient authority for another check.
+        scope_quote_parts = positive_request_parts + (
+            [request.before_value] if align_request_roles and baseline_test else []
+        )
         for effect in analysis.requirement_effects:
             if (effect.requirement_id == request.target_requirement_id
                     or effect.relation == RequirementRelation.NO_IMPACT):
@@ -987,7 +999,10 @@ def evaluate_checkpoint1(
                         and item.source_type == ConditionSource.CHANGE_REQUEST
                         and (not legacy_wording_checks or not _is_scope_exclusion_text(item.source_text, legacy=not require_input_contract))
                         and (not legacy_wording_checks or not _is_test_procedure_note(item.source_text, legacy=not require_input_contract))
-                        and (bool(_request_quote_parts(item.source_text, positive_request_parts)) if shared_sources
+                        and (any(
+                            any(_contains_fact(part, excerpt) for part in positive_request_parts)
+                            for excerpt in _request_quote_parts(item.source_text, scope_quote_parts)
+                        ) if shared_sources
                              else any(_contains_fact(part, item.source_text) for part in positive_request_parts))
                         for item in sources
                     )):

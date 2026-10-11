@@ -836,7 +836,10 @@ def _slack_report_payload(report: FinalReport, run_dir: Path | None = None) -> d
               "SKIPPED": "⏭️ 건너뜀", "NOT_EXECUTED": "⏸️ 미실행", "MANUAL_REVIEW": "👤 수동 확인"}
     lines = []
     for row in products[:8]:
-        lines.append(safe(row["tc_id"]) + " · " + labels.get(row["status"], "확인 필요"))
+        exclusion = next((e for e in report.automation_exclusions if e.tc_id == row["tc_id"]), None)
+        review_failed = row["status"] == "NOT_EXECUTED" and exclusion is not None and exclusion.candidate_status.value == "REVISION_REQUIRED"
+        label = "⏸️ 검토 실패로 시험 미실행 — 제품 PASS/FAIL 판정 없음" if review_failed else labels.get(row["status"], "확인 필요")
+        lines.append(safe(row["tc_id"]) + " · " + label)
         if row["expected_results"]:
             lines.append("확인한 기준:" if row["status"] == "PASSED" else "확인할 기준:")
             lines.extend("  • " + readable(s) for s in row["expected_results"])
@@ -1018,6 +1021,26 @@ def _notion_report_records(
                 } if run_dir and (run_dir / "agent2_manifest.json").is_file() else {},
             }
         )
+    recorded_ids = {record["tc_id"] for record in records}
+    for exclusion in report.automation_exclusions:
+        if exclusion.tc_id in recorded_ids:
+            continue  # Never overwrite an actual execution result with an exclusion.
+        row = rows.get(exclusion.tc_id, {})
+        review_failed = exclusion.candidate_status.value == "REVISION_REQUIRED"
+        notice = "검토 실패로 시험 미실행 — 제품 PASS/FAIL 판정 없음" if review_failed else "자동화 제외로 시험 미실행 — 제품 PASS/FAIL 판정 없음"
+        records.append({
+            "run_id": report.run_id, "tc_id": exclusion.tc_id,
+            "source": "AUTOMATION_EXCLUSION", "requirement_ids": [],
+            "result": "NOT_EXECUTED", "finding_category": "NOT_EXECUTED",
+            "recommendation": report.recommendation.value,
+            "verification_scope_summary": verification_scope_summary(report.model_dump(mode="json", by_alias=True)),
+            "execution_notice": notice, "reason": exclusion.reason,
+            "evidence_complete": False, "title": row.get("title", exclusion.tc_id),
+            "test_category": row.get("category", "미분류"), "priority": row.get("priority", "미지정"),
+            "tc_detail": {key: row.get(key, []) for key in (
+                "preconditions", "steps", "expected_results", "expected_result_details", "restore_steps")},
+        })
+        recorded_ids.add(exclusion.tc_id)
     return records
 
 
@@ -1098,6 +1121,9 @@ def _notion_tc_blocks(record: dict[str, Any]) -> list[dict[str, Any]]:
             }})
 
     add("paragraph", "저장된 TC 설계입니다. 아래 기대결과는 실제 관찰값이 아닙니다. 실행 결과는 페이지 속성에서 확인하며, 통과가 공식 등록 승인을 뜻하지는 않습니다.")
+    if record.get("execution_notice"):
+        add("paragraph", record["execution_notice"])
+        add("paragraph", "사유: " + str(record.get("reason") or "상세 검토 기록 확인 필요"))
     add("heading_3", "사전조건")
     for value in detail.get("preconditions") or ["상세 사전조건이 기록되어 있지 않습니다."]:
         add("bulleted_list_item", value)
@@ -1243,6 +1269,7 @@ def _upsert_notion_reports(
                         {
                             "text": {
                                 "content": (
+                                    (f"{record['execution_notice']} | 사유: {record.get('reason', '')} | " if record.get('execution_notice') else "") +
                                     f"Run {record['run_id']} | {record['result']} | "
                                     f"{finding} | {record['recommendation']} | {record.get('verification_scope_summary', '')}"
                                 )[:2000]

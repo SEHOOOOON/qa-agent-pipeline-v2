@@ -757,6 +757,25 @@ class PreconditionReadKind(str, Enum):
     BASELINE_CONTEXT = "BASELINE_CONTEXT"
 
 
+CONTROLLER_BASELINE_CAPTURE_SEQUENCE = (
+    "SELECT_TARGET_AND_WAIT_FOR_SELECTED_ID", "CAPTURE_ORIGINAL_READERS",
+    "PREPARE_AND_TEST", "RESTORE_AND_COMPARE_SAME_READERS",
+)
+CONTROLLER_BASELINE_CAPTURE_MEANING = (
+    "BEFORE_SETUP means after the leading target-selection actions and their selectedUnitId waits, "
+    "before the first non-selection action. The initial UI Inventory panel may show another device; "
+    "it is not the captured baseline. This describes compiler order only, not a successful trial "
+    "or permission to use another target/reader."
+)
+QA_CONTROLLER_BASELINE_GUIDANCE = """실행기의 원래값 기록 순서 (제품 기대결과가 아님):
+지원되는 중앙제어 복원 경로는 대상 장비를 선택하고 selectedUnitId가 그 대상인지 확인한 뒤, 준비 조작을 시작하기 전에 해당 장비의 원래값을 기록합니다.
+BEFORE_SETUP은 '대상 선택 완료 후 → 원래값 기록 → 첫 준비/시험 조작'입니다. 장비 선택 전 기록을 의미하지 않습니다.
+초기 UI Inventory에서 보인 패널은 다른 장비일 수 있으며 복원 기준값으로 사용하지 않습니다. 복원은 같은 대상·같은 관찰 위치의 실제 기록값과 비교합니다.
+이는 지원되는 전원·모드·풍량·온도·잠금 복원 기능의 순서 설명입니다. TC별 compiler_recovery_facts가 없는 경로나 다른 관찰 대상의 지원·성공을 보장하지 않습니다.
+요청에 별도의 기록 순서가 명시되어 충돌한다면 요청이나 TC를 몰래 바꾸지 말고 충돌을 설명합니다. 임의 초기값·제품 기대결과·새 필수 검사를 추가하지 않습니다.
+""" + CONTROLLER_BASELINE_CAPTURE_MEANING
+
+
 QA_EXECUTION_CONTRACT = """Host execution contract (not a new product requirement):
 restore_required and structured restoration define ordinary restoration. restore_observed_hvac_state is only the legacy mode/temperature compatibility option, NOT a master restoration switch. False is correct for fan/power/lock-only tests with valid restoration.
 For state_effect TCs, the compiler saves original observations BEFORE setup, checks preconditions AFTER setup, then runs TEST. RESTORE_OBSERVED_CONTROLLER restores all changed controller fields through the UI. restore_confirmations link ER readers to their saved original values; selectors/reader implementations need not be repeated in each confirmation. Actual success still requires runtime evidence.
@@ -768,6 +787,23 @@ SRS changes and official TC registration require separate human approval. Checkp
 
 
 QA_EXPECTATION_SCOPE_GUIDANCE = """차단·제한과 상태 유지의 범위를 구분합니다. 원문이 금지한 동작, 보존할 대상과 판정 시점만 기대결과에 연결합니다. 차단이라는 분류만으로 시험 시작 상태 전체 유지, 다른 관제점 불변, UI 선택 비활성이나 원래 값 복귀를 추가하지 않습니다. 반대로 원문에 명시된 유지·필수 검사도 생략하지 않습니다. 선택/입력 중 패널 값과 적용 후 장비 값은 서로 다른 관찰 대상이며, 연속 조작을 단일 입력으로 바꾸어 해석하지 않습니다. 화면 관찰은 조작 수단의 근거이지 제품 정답의 근거가 아닙니다. 근거가 모호하면 확인 사항으로 남기고 실제 관찰값에 맞춰 기대값을 바꾸지 않습니다.
+"""
+
+
+QA_DESIGN_REVIEW_GUIDANCE = """설계·검토 공통 기준 (시험 결과나 제품 요구사항을 대신하지 않음):
+요청 원문과 SRS를 함께 대조합니다. AI의 조건 목록·분류·coverage_summary를 정답으로 삼지 않습니다. 요청한 변경·유지·금지 조건과 그 판정을 위해 필요한 조작·관찰은 모두 연결하며, 미검증이라고 적는 것으로 필수 누락을 면제하지 않습니다.
+정책의 허용 범위를 변경하는 요청은 기존 경계 검사 원칙대로 변경 후 하한과 상한을 확인합니다. 단일 값/전환 시험에 등장한 기존 범위를 전체 범위 변경으로 해석하지 않습니다. 사용자가 시험 범위를 명시적으로 한정했다면 그 범위를 보존하고 확인한 부분만 보고합니다. 전체 범위 검증 요구와 제외가 충돌하면 임의로 어느 쪽을 지우지 않고 확인 사항으로 남깁니다.
+추가하면 유용하다는 이유만으로 요청 밖 검사를 필수로 확대하지 않습니다. 반려할 때는 원문의 어떤 요구가 실제 조작·관찰·판정에서 빠지거나 달라졌는지 설명합니다. 같은 의미의 문장 분할·동의어·추가 관찰만으로 반려하지 않습니다. 검사 누락·잘못된 기대값·대상/시점 혼동·근거 없는 전체 완료 주장은 계속 반려합니다.
+SRS 개정은 변경 부분만 수정하되 proposed_acceptance_criteria가 인수 기준 셀 전체를 교체한다는 점을 지킵니다. 현재 인수 기준의 의미를 출발점으로 바뀌는 대상·조건·값만 교체하고, 나머지 대상의 적용·차단·유지 기준은 완성 문장에 명시적으로 보존합니다. reason의 '나머지 동일' 설명이나 시험 TC 한 건을 전체 기준 대신 저장하지 않습니다. 기존 기준의 보존은 그 모든 기능을 이번에 실행하라는 뜻이 아닙니다. 요청에 없는 정책을 추정하거나 공식 SRS를 자동 변경하지 않습니다.
+"""
+
+QA_HUMAN_JUDGMENT_EXAMPLES = """사람의 판단을 반영한 참고 사례 v1 (2026-10-10):
+아래는 대화에서 확인한 판단 원칙을 설명하는 개발용 예시입니다. 현재 요청의 정답·제품 SRS·실행 증거가 아닙니다. 예시의 값·대상·범위를 현재 TC에 복사하지 말고 현재 요청/SRS를 우선하세요. 전제가 다르거나 불명확하면 결론을 그대로 적용하지 않습니다. 인용 근거는 현재 입력의 REQUEST/SRS/실제 산출물에서 찾고 이 예시를 근거로 선택하지 마세요.
+R01/R02/R05 — 전제: IDU-00의 냉방 범위는 20~30°C이고, 여기서는 하한 조작만 비교합니다. 감소 직후 패널20 유지 → 적용 → 같은 장비 카드20·내부20 확인은 허용합니다. 적용 뒤 카드/내부 확인 순서만 바뀌고 그 사이 조작이 없으면 의미는 같습니다(R01). 감소 전에 확인한 카드/내부20만으로 감소 후 적용 결과를 확인했다고 하면 수정이 필요합니다(R02). 하한20에서 감소 후19를 기대하는 것도 수정 대상입니다(R05). 이유: 패널의 선택값과 적용 후 장비값은 다르며 하한에서 더 내려가지 않아야 합니다. 이 좁은 예시가 실제 범위 변경 요청의 상한 검사를 면제하지는 않습니다.
+R04/R06 — 전제: IDU-00을 난방17°C로 준비해16°C 적용 후 패널·카드·내부값을 확인하는 요청입니다. 적용 전 패널16을 추가로 확인해도 적용 후 필수 확인이 있으면 허용합니다(R04). IDU-00 화면과 IDU-01 내부값을 비교하면 수정 대상입니다(R06). 이유: 추가 관찰은 필수 관찰을 대신하지 않으며 같은 장비를 대조해야 합니다.
+R07/R08 — 전제: 실제 시작은 운전·냉방24°C·약풍, 준비는 운전·난방27°C·중풍, 시험은 정지하면서 나머지 설정 유지입니다. 시험 후 준비 상태로만 되돌리면 복원 대상이 잘못됐습니다(R07). 준비를 시작하기 전에 기록한 원래 상태로 되돌리고 화면·내부값을 대조해야 합니다(R08). 이유: 시험 준비도 장비 상태를 바꾼 작업이므로 복원에 포함합니다. 고정된24°C가 아니라 실제 기록값이 복원 기준입니다.
+R03은 사용자가 내부값 검사를 프로그램이 자동 보충한다고 이해했던 사례라 확정 예시에서 제외했습니다. 누락 허용의 근거로 쓰지 않습니다. 실제 자동 보장 범위는 별도로 제공되는 실행 계약으로만 판단하세요.
+이 사례들은 이미 검토·공유된 참고 자료이며 독립 평가 정답지나 실제 AI 성공 기록이 아닙니다.
 """
 
 
@@ -850,6 +886,37 @@ class LiveProductTestCaseCandidate(ProductTestCaseCandidate):
 
 class LiveAgent2TestDesign(Agent2TestDesign):
     test_cases: list[LiveProductTestCaseCandidate] = Field(default_factory=list)
+
+
+class SrsRevisionDraft(StrictModel):
+    """Model-authored change only; current text belongs to the frozen SRS."""
+    proposal_id: Annotated[str, StringConstraints(pattern=r"^SRS-REV-\d{3}$")]
+    requirement_id: RequirementId
+    source_condition_ids: list[Annotated[str, StringConstraints(pattern=r"^COND-\d{3}$")]] = Field(min_length=1)
+    proposed_acceptance_criteria: NonEmptyStr
+    reason: NonEmptyStr
+
+
+class Agent2TransportDesign(LiveAgent2TestDesign):
+    srs_revision_proposals: list[SrsRevisionDraft] = Field(default_factory=list, alias="SRS_개정_제안")
+
+
+def materialize_srs_revision_sources(draft, requirements):
+    """Attach only original text. Never repair IDs or proposed semantics."""
+    payload = draft.model_dump(mode="json", by_alias=True)
+    attached = []
+    for proposal in payload["SRS_개정_제안"]:
+        key = proposal["requirement_id"]
+        source = requirements.get(key)
+        if source is None or source.requirement_id != key:
+            raise ValueError("SRS 개정안의 Requirement ID가 고정 SRS에 없습니다: " + key)
+        if "current_acceptance_criteria" in proposal:
+            raise ValueError("새 모델 응답에 프로그램 소유 원문이 포함됐습니다.")
+        proposal["current_acceptance_criteria"] = source.acceptance_criteria
+        attached.append({"proposal_id": proposal["proposal_id"], "requirement_id": key,
+                         "current_acceptance_criteria": source.acceptance_criteria,
+                         "source": "FROZEN_SRS_PROGRAM_COPY"})
+    return Agent2TestDesign.model_validate(payload), attached
 
 
 class OperationBinding(StrictModel):

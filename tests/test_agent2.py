@@ -2,6 +2,196 @@
 
 from pipeline_test_support import *
 
+@pytest.mark.parametrize("field,initial,target", [
+    ("status", "OPERATION", "STOP"), ("mode", "COOL", "HEAT"),
+    ("fanSpeed", "HIGH", "LOW"), ("setTemp", 29, 22), ("locked", False, True)])
+@pytest.mark.parametrize("layout", ["split", "reversed_comparisons", "different_prose", "shared_prose"])
+def test_live_restoration_layout_preserves_every_reader(field, initial, target, layout):
+    from qa_pipeline_agent2 import _normalize_agent2_live_design
+    case = repeated_restoration_fixture(field, initial, target)
+    if layout == "different_prose":
+        for index, c in enumerate(case.restoration.confirmations):
+            c.source_text += f" (확인 {index + 1})"
+            c.comparisons[0].source_excerpt = c.source_text
+    elif layout == "shared_prose":
+        for c in case.restoration.confirmations:
+            c.source_text = "각 연결 대상이 준비 전 관찰 상태와 같은지 확인한다."
+            c.comparisons[0].source_excerpt = c.source_text
+    elif layout == "reversed_comparisons":
+        first, second, third, fourth = case.restoration.confirmations
+        for a, b in ((first, third), (second, fourth)):
+            a.result_ids += b.result_ids
+            a.comparisons = b.comparisons + a.comparisons
+        case.restoration.confirmations = [first, second]
+    case.restore_steps = case.restoration.operation_steps + [c.source_text for c in case.restoration.confirmations]
+    before = case.model_dump(mode="json")
+    design = cp2_valid_design().model_copy(update={"test_cases": [case]})
+    normalized, changes = _normalize_agent2_live_design(design)
+    after = normalized.test_cases[0]
+    assert case.model_dump(mode="json") == before
+    assert pipeline._structured_restoration_errors(after) == []
+    assert pipeline.tc_execution_spec_errors(after) == []
+    assert case.model_dump(exclude={"restoration", "restore_steps"}) == after.model_dump(exclude={"restoration", "restore_steps"})
+    def links(tc):
+        return sorted((c.source_text, x.result_id, x.source_excerpt, x.basis.value)
+                      for c in tc.restoration.confirmations for x in c.comparisons)
+    assert links(case) == links(after)
+    assert case.restoration.operation_steps == after.restoration.operation_steps
+    assert bool(changes) == (layout != "different_prose")
+    again, repeated_changes = _normalize_agent2_live_design(normalized)
+    assert again.model_dump() == normalized.model_dump() and not repeated_changes
+
+
+@pytest.mark.parametrize("fault", [
+    "missing_er", "duplicate_er", "unknown_er", "wrong_basis", "excerpt",
+    "missing_comparison", "duplicate_comparison", "missing_mirror", "duplicate_operation",
+    "operation_is_confirmation", "unknown_target", "duplicate_expected_id"])
+def test_live_restoration_layout_does_not_repair_broken_contract(fault):
+    from qa_pipeline_agent2 import _normalize_agent2_live_design
+    case = repeated_restoration_fixture()
+    c = case.restoration.confirmations[0]
+    if fault == "missing_er":
+        case.restoration.confirmations.pop()
+    elif fault == "duplicate_er":
+        case.restoration.confirmations.append(c.model_copy(deep=True))
+    elif fault == "unknown_er":
+        c.result_ids = ["ER-999"]; c.comparisons[0].result_id = "ER-999"
+    elif fault == "wrong_basis":
+        c.comparisons[0].basis = pipeline.RestoreComparisonBasis.PROVED_INITIAL
+    elif fault == "excerpt":
+        c.comparisons[0].source_excerpt += " 변경"
+    elif fault == "missing_comparison":
+        c.comparisons = []
+    elif fault == "duplicate_comparison":
+        c.comparisons.append(c.comparisons[0].model_copy(deep=True))
+    elif fault == "duplicate_operation":
+        case.restoration.operation_steps *= 2
+    elif fault == "operation_is_confirmation":
+        case.restoration.operation_steps[0] = c.source_text
+    elif fault == "unknown_target":
+        case.expected_results[0].observation_target = None
+    elif fault == "duplicate_expected_id":
+        case.expected_results[-1].result_id = case.expected_results[0].result_id
+    case.restore_steps = case.restoration.operation_steps + [x.source_text for x in case.restoration.confirmations]
+    if fault == "missing_mirror":
+        case.restore_steps.pop()
+    design = cp2_valid_design().model_copy(update={"test_cases": [case]})
+    after, changes = _normalize_agent2_live_design(design)
+    assert not changes
+    assert after.model_dump() == design.model_dump()
+    assert pipeline._structured_restoration_errors(after.test_cases[0])
+
+
+@pytest.mark.parametrize("field,initial,target", [
+    ("status", "OPERATION", "STOP"), ("mode", "COOL", "HEAT"),
+    ("fanSpeed", "AUTO", "LOW"), ("setTemp", 27, 21), ("locked", False, True)])
+@pytest.mark.parametrize("variant,valid", [
+    ("paired", True), ("extra_panel", True), ("separate_read_lines", True),
+    ("different_action", False), ("different_condition", True),
+    ("missing_ui", False), ("missing_internal", False)])
+def test_double_assert_execution_anchors(field, initial, target, variant, valid):
+    case, _ = mapped_tc_fixture(field, initial, target)
+    case.double_assert_policy = DoubleAssertPolicy.REQUIRED
+    spec = case.execution_spec
+    test_ops = [op for op in spec.operations if op.phase == pipeline.AutomationPhase.TEST]
+    if variant == "extra_panel":
+        case.expected_results.append(case.expected_results[0].model_copy(deep=True, update={
+            "result_id": "ER-099", "verify_after_step": case.steps[0],
+            "statement": f"패널의 {field} 선택 값은 {target}이다.",
+            "observation_target": f"패널의 {field}"}))
+        spec.verifications.append(spec.verifications[0].model_copy(deep=True, update={
+            "result_id": "ER-099", "after_action_id": test_ops[0].action_id,
+            "target": f"panel.{field}"}))
+    elif variant == "separate_read_lines":
+        case.steps.extend(["적용된 카드 상태를 확인한다.", "적용된 내부 상태를 확인한다."])
+        case.expected_results[0].verify_after_step = case.steps[-2]
+        case.expected_results[1].verify_after_step = case.steps[-1]
+    elif variant == "different_action":
+        case.expected_results[0].verify_after_step = case.steps[0]
+        spec.verifications[0].after_action_id = test_ops[0].action_id
+    elif variant == "different_condition":
+        case.expected_results[0].source_condition_ids = ["COND-098"]
+    elif variant.startswith("missing_"):
+        index = 0 if variant == "missing_ui" else 1
+        case.expected_results.pop(index)
+        spec.verifications.pop(index)
+    design = cp2_valid_design().model_copy(update={"test_cases": [case]})
+    result = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements(),
+                                  pair_observation_anchors=True)
+    assert (cp2_check(result, "CP2-006").status == CheckStatus.PASS) == valid
+    if variant in {"paired", "extra_panel", "separate_read_lines"}:
+        assert not pipeline.tc_execution_spec_errors(case)
+    if variant in {"extra_panel", "separate_read_lines"}:
+        old = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
+        assert cp2_check(old, "CP2-006").status == CheckStatus.FAIL
+
+
+@pytest.mark.parametrize("fault", ["missing", "unknown", "downgrade", "old_prompt"])
+def test_double_assert_anchor_contract_is_version_bound(fault):
+    manifest = pipeline_execution._current_agent2_contract()
+    manifest.pop("baseline_capture_order_contract")
+    assert pipeline_execution._agent2_checkpoint_options(manifest)["pair_observation_anchors"]
+    if fault == "missing":
+        manifest.pop("double_assert_timing_contract")
+    elif fault == "unknown":
+        manifest["double_assert_timing_contract"] = "9.0"
+    elif fault == "downgrade":
+        manifest["double_assert_timing_contract"] = "1.0"
+    else:
+        manifest["prompt_version"] = "agent2-2.56"
+        manifest.pop("design_review_contract")
+        manifest.pop("focused_design_review_contract")
+        manifest.pop("human_judgment_examples_contract", None)
+    with pytest.raises(ValueError, match="관찰 시점"):
+        pipeline_execution._agent2_checkpoint_options(manifest)
+    manifest = pipeline_execution._current_agent2_contract()
+    manifest.pop("design_review_contract")
+    manifest.pop("focused_design_review_contract")
+    manifest.pop("human_judgment_examples_contract", None)
+    manifest.update(prompt_version="agent2-2.56", double_assert_timing_contract="1.0")
+    manifest.pop("baseline_capture_order_contract")
+    assert not pipeline_execution._agent2_checkpoint_options(manifest)["pair_observation_anchors"]
+
+
+@pytest.mark.parametrize("field,initial,target", [
+    ("status", "OPERATION", "STOP"), ("mode", "COOL", "HEAT"),
+    ("fanSpeed", "MED", "HIGH"), ("setTemp", 28, 22), ("locked", False, True)])
+def test_live_reference_whitespace_normalization_preserves_source_and_values(field, initial, target):
+    from qa_pipeline_agent2 import _normalize_agent2_live_design
+    case, _ = mapped_tc_fixture(field, initial, target)
+    case.expected_results[0].verify_after_step = "  " + "  ".join(case.steps[-1].split()) + "\n"
+    case.execution_spec.operations[-1].source_text += "  "
+    case.execution_spec.precondition_verifications[0].source_text += "\t"
+    design = cp2_valid_design().model_copy(update={"test_cases": [case]})
+    before = design.model_dump()
+    normalized, changes = _normalize_agent2_live_design(design)
+    assert design.model_dump() == before
+    assert len(changes) == 3
+    assert not pipeline.tc_execution_spec_errors(normalized.test_cases[0])
+    assert normalized.test_cases[0].steps == case.steps
+    assert normalized.test_cases[0].expected_results[0].statement == case.expected_results[0].statement
+    assert normalized.test_cases[0].execution_spec.verifications == case.execution_spec.verifications
+    again, second_changes = _normalize_agent2_live_design(normalized)
+    assert again == normalized and not second_changes
+
+
+@pytest.mark.parametrize("fault", ["wording", "value", "ambiguous"])
+def test_live_reference_normalization_does_not_guess(fault):
+    from qa_pipeline_agent2 import _normalize_agent2_live_design
+    case, _ = mapped_tc_fixture("setTemp", 28, 22)
+    if fault == "ambiguous":
+        case.steps.append("  ".join(case.steps[0].split()))
+        case.expected_results[0].verify_after_step = "\t" + case.steps[0]
+    elif fault == "value":
+        case.expected_results[0].verify_after_step = case.steps[0].replace("22", "23")
+    else:
+        case.expected_results[0].verify_after_step = case.steps[-1] + " 완료"
+    design = cp2_valid_design().model_copy(update={"test_cases": [case]})
+    normalized, changes = _normalize_agent2_live_design(design)
+    assert not changes and normalized == design
+    assert pipeline.tc_execution_spec_errors(normalized.test_cases[0])
+
+
 def essential_cp2(design):
     return evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements(),
         **pipeline_execution._agent2_checkpoint_options(pipeline_execution._current_agent2_contract()))
@@ -198,7 +388,11 @@ def test_boundary_execution_definition_does_not_require_redundant_metadata(field
 def test_tc_execution_alignment_manifest_is_version_bound(fault):
     manifest = pipeline_execution._current_agent2_contract()
     assert pipeline_execution._agent2_checkpoint_options(manifest)["align_tc_execution"]
-    old = {**manifest, "prompt_version": "agent2-2.54"}
+    old = {**manifest, "prompt_version": "agent2-2.54", "double_assert_timing_contract": "1.0"}
+    old.pop("baseline_capture_order_contract")
+    old.pop("focused_design_review_contract")
+    old.pop("human_judgment_examples_contract", None)
+    old.pop("design_review_contract")
     old.pop("tc_execution_alignment_contract")
     old.pop("essential_validation_contract")
     assert not pipeline_execution._agent2_checkpoint_options(old)["align_tc_execution"]
@@ -224,6 +418,9 @@ def test_agent2_exact_connection_catalog_initial_and_rewrite(rewrite):
     raw = text.split("[실행 연결표의 정확한 항목 목록]\n", 1)[1]
     options = json.JSONDecoder().raw_decode(raw)[0]
     catalog = controller_connection_catalog()
+    explanation = options.pop("temperature_interface")
+    assert "입력칸이 아니라 증가·감소 버튼과 표시창" in explanation
+    assert "기대값·확인 시점은 요청/SRS" in explanation
     assert options == {
         "actions": {k: v[0] for k, v in catalog["actions"].items()},
         "readers": {k: list(v) for k, v in catalog["readers"].items()},
@@ -231,6 +428,9 @@ def test_agent2_exact_connection_catalog_initial_and_rewrite(rewrite):
     }
     assert {k for k in options["preconditions"] if k.startswith("context.")} == {
         "context.target_device_visible", "context.error_free", "context.unlocked", "context.online"}
+    assert options["readers"]["temperature.increase"] == ["UI_ENABLED_EQUALS"]
+    assert options["readers"]["temperature.decrease"] == ["UI_ENABLED_EQUALS"]
+    assert "UI_ENABLED_EQUALS" not in options["readers"]["temperature.display"]
     assert "context.target_device_visible/error_free/unlocked/online" not in AGENT2_SYSTEM_INSTRUCTIONS
     assert "unsupported.<요청 항목명>" in AGENT2_SYSTEM_INSTRUCTIONS
     encoded = json.dumps(options)
@@ -868,7 +1068,11 @@ def test_trace_source_count_is_not_new_semantic_authority(version, mutation):
         expected.source_condition_ids.append("COND-999")
     if mutation == "lost_condition":
         design.test_cases[0].source_condition_ids.remove(condition.condition_id)
-    historical = {**_current_agent2_contract(), "contract_version": version, "prompt_version": "agent2-2.44"}
+    historical = {**_current_agent2_contract(), "design_review_contract": None, "contract_version": version, "prompt_version": "agent2-2.44",
+                  "double_assert_timing_contract": "1.0"}
+    historical.pop("baseline_capture_order_contract")
+    historical.pop("focused_design_review_contract")
+    historical.pop("human_judgment_examples_contract", None)
     historical.pop("review_responsibility_contract")
     historical.pop("output_tolerance_contract")
     historical.pop("task_boundary_contract")
@@ -1226,7 +1430,7 @@ def test_agent2_sends_approved_procedures_on_initial_and_rewrite_calls():
         assert "근거 개수와 검증 사실 개수는 다릅니다" in instructions
         assert "유지 조건이라는 이유로 이번 요청에 필요한 검사를 생략" in instructions
         assert "후보와 기존 TC를 합친 실제 검사 범위" in instructions
-        assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-56"
+        assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-62-baseline-1"
         assert "기존 TC는 전체 단위로 실행" in instructions
         assert "명시적 제외와 충돌하는 검사가 포함돼 있으면 선택하지 않고" in instructions
         assert "기존 assertion을 삭제하지 않습니다" in instructions
@@ -1374,6 +1578,60 @@ def test_request_diff_treats_mapping_or_order_change_as_changed_without_explicit
     assert swapped_mapping.change_role == ConditionChangeRole.CHANGED
     assert _is_unchanged_condition_for_request(swapped_mapping, request) is False
 
+@pytest.mark.parametrize("rewrite", [False, True])
+def test_agent2_writer_and_rewriter_receive_same_baseline_order_guidance(rewrite):
+    from qa_pipeline_contracts import QA_CONTROLLER_BASELINE_GUIDANCE
+    responses = Agent2FakeResponses()
+    source = agent2_design()
+    before = source.model_dump(mode="json")
+    options = {"previous_design": source, "checkpoint_feedback": ["기록 시점과 조작 순서를 대조하세요."]} if rewrite else {}
+    OpenAIAgent2(model="offline", client=SimpleNamespace(responses=responses)).design(
+        cp1_request(), cp2_analysis(), cp2_requirements(), **options)
+    prompt = responses.kwargs["input"][1]["content"]
+    assert "[대상 선택·원래값 기록 순서]" in prompt
+    assert prompt.count(QA_CONTROLLER_BASELINE_GUIDANCE) == 1
+    assert responses.kwargs["input"][0]["content"] == AGENT2_SYSTEM_INSTRUCTIONS
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-62-baseline-1"
+    assert source.model_dump(mode="json") == before
+    if rewrite:
+        assert "기록 시점과 조작 순서를 대조하세요." in prompt
+
+
+def test_agent2_baseline_order_manifest_marker_is_opt_in_for_historical_runs():
+    from qa_pipeline_execution import _agent2_baseline_order_policy
+    current = pipeline_execution._current_agent2_contract()
+    assert current["baseline_capture_order_contract"] == "1.0"
+    assert _agent2_baseline_order_policy(current)
+    current_options = pipeline_execution._agent2_checkpoint_options(current)
+    assert "baseline_capture_order" not in current_options  # CP2 rules are unchanged.
+    historical = dict(current)
+    historical.pop("baseline_capture_order_contract")
+    assert not _agent2_baseline_order_policy(historical)
+    assert pipeline_execution._agent2_checkpoint_options(historical) == current_options
+    historical["baseline_capture_order_contract"] = None
+    assert not _agent2_baseline_order_policy(historical)
+    historical["prompt_version"] = "agent2-2.61"
+    assert not _agent2_baseline_order_policy(historical)
+
+
+@pytest.mark.parametrize("fault", ["unknown", "old_prompt", "old_contract", "missing_alignment"])
+def test_agent2_baseline_order_marker_rejects_incompatible_contracts(fault):
+    from qa_pipeline_execution import _agent2_baseline_order_policy
+    manifest = pipeline_execution._current_agent2_contract()
+    if fault == "unknown":
+        manifest["baseline_capture_order_contract"] = "9.0"
+    elif fault == "old_prompt":
+        manifest["prompt_version"] = "agent2-2.61"
+    elif fault == "old_contract":
+        manifest["contract_version"] = "3.12"
+    else:
+        manifest.pop("tc_execution_alignment_contract")
+    with pytest.raises(ValueError):
+        _agent2_baseline_order_policy(manifest)
+    with pytest.raises(ValueError):
+        pipeline_execution._agent2_checkpoint_options(manifest)
+
+
 def test_agent2_uses_structured_responses_api() -> None:
     responses = Agent2FakeResponses()
     agent = OpenAIAgent2(
@@ -1410,9 +1668,9 @@ def test_agent2_uses_structured_responses_api() -> None:
 
     assert response.response_id == "resp_agent2"
     assert response.usage["total_tokens"] == 300
-    assert responses.kwargs["text_format"] is pipeline.LiveAgent2TestDesign
+    assert responses.kwargs["text_format"] is pipeline.Agent2TransportDesign
     assert responses.kwargs["store"] is False
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-56"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-62-baseline-1"
     agent2_input = responses.kwargs["input"][1]["content"]
     assert "[기존 사람 작성·자동화 TC 카탈로그]" in agent2_input
     assert '[코드로 확인한 SRS 개정 범위]' in agent2_input

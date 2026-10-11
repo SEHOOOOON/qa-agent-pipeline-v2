@@ -368,7 +368,7 @@ AGENT3_SYSTEM_INSTRUCTIONS += "\n" + QA_TASK_BOUNDARIES
 
 class OpenAIAgent3:
     def __init__(self, *, model: str | None = None, client: Any | None = None) -> None:
-        self.model = model or os.getenv("OPENAI_MODEL", "gpt-5.6-terra")
+        self.model = model or os.getenv("OPENAI_MODEL", "gpt-6.1-sol")
         if client is None:
             if not os.getenv("OPENAI_API_KEY"):
                 raise Agent3Error(
@@ -900,6 +900,8 @@ def controller_connection_catalog():
     readers["panel.setTemp"]["UI_TEMPERATURE"] = "#det-temp-display"
     readers["internal.setTemp"]["INTERNAL_SET_TEMP"] = "window.__vccs.devices"
     readers["temperature.controls"] = {"CONTROLS_DISABLED": "#det-temp-down-btn"}
+    for direction in ("increase", "decrease"):
+        readers[f"temperature.{direction}"] = {"UI_ENABLED_EQUALS": _TEMPERATURE_CONTROLS[direction]}
     readers["temperature.display"] = {"DISABLED_TEMPERATURE_TEXT": "#det-temp-display"}
     readers["notification.toast"] = {kind: "#global-toast" for kind in ("TOAST_VISIBLE", "TOAST_BLOCKING", "UI_TEXT_CONTAINS")}
     preconditions = {f"{location}.{field}": ("CONTROLLER_UI_FIELD", f"{location}.{field}")
@@ -1089,14 +1091,42 @@ def controller_recovery_plan_facts(test_case, plan):
     }
 
 
-def controller_recovery_tc_facts(test_case):
+def controller_baseline_order_facts(test_case, plan):
+    """Describe the compiler's target selection/capture boundary, not trial success."""
+    if (not controller_recovery_plan_facts(test_case, plan)
+            or _state_restoration_plan_errors(test_case, plan)):
+        return None
+    actions = [a for a in plan.actions if a.phase != AutomationPhase.RESTORE]
+    first_write = next((i for i, a in enumerate(actions)
+                        if a.action_type != AutomationActionType.SELECT_DEVICE), None)
+    if first_write is None or first_write == 0:
+        return None
+    selections = actions[:first_write]
+    if any(a.value not in (None, plan.target_device_id)
+           or a.selector != f"#device-card-{plan.target_device_id} .card-body-split"
+           for a in selections):
+        return None
+    return {
+        "contract": "1.0", "target_device_id": plan.target_device_id,
+        "after_selection_action_ids": [a.action_id for a in selections],
+        "before_action_id": actions[first_write].action_id,
+        "sequence": list(CONTROLLER_BASELINE_CAPTURE_SEQUENCE),
+        "meaning": CONTROLLER_BASELINE_CAPTURE_MEANING,
+        "trial_success_proved": False,
+    }
+
+
+def controller_recovery_tc_facts(test_case, *, include_baseline_order=False):
     """Use the same binding/restoration validators as execution; no UI/run claim."""
     try:
         bindings = resolve_controller_bindings(test_case)
         plan = assemble_tc_bindings(test_case, bindings)
         if _state_restoration_plan_errors(test_case, plan):
             return None
-        return controller_recovery_plan_facts(test_case, plan)
+        recovery = controller_recovery_plan_facts(test_case, plan)
+        if recovery is not None and include_baseline_order:
+            recovery["baseline_capture_order"] = controller_baseline_order_facts(test_case, plan)
+        return recovery
     except (Agent3Error, ValueError):
         return None
 
@@ -1945,8 +1975,33 @@ def _assertion_reader_facts(assertion: AutomationAssertion, device_id: int) -> d
         "comparison": comparison, "effective_expected": expected, "behavior": behavior}
 
 
-def execution_interface_facts(plan: Agent3AutomationPlan, observation: UiObservation) -> dict:
+def _controller_ui_decoding_facts(assertion: AutomationAssertion, *, consistent_lock=False) -> dict:
+    """Describe the existing DOM reader, never infer observations from expected values."""
+    if assertion.strategy != AssertionStrategy.CONTROLLER_UI_FIELDS_EQUALS:
+        return {}
+    if assertion.selector == ".detail-panel":
+        return {"source": "DOM", "location": "panel",
+            "selected_buttons": {field: [{"value": value, "selector": selector} for value, selector in choices.items()]
+                                 for field, choices in _CONTROLLER_BUTTONS.items()},
+            "selection": "active 클래스가 정확히 하나인 버튼의 값을 읽습니다. 없거나 여러 개이면 null입니다.",
+            "temperature": "#det-temp-display에서 숫자를 읽습니다. 숫자가 없으면 null입니다."}
+    return {"source": "DOM", "location": "card", "selector": assertion.selector,
+        "status_classes": {"state-run": "OPERATION", "state-stop": "STOP"},
+        "status": "상태 클래스가 정확히 하나인 경우만 값을 읽고 나머지는 null입니다.",
+        "mode_labels": {"냉방": "COOL", "난방": "HEAT", "송풍": "FAN", "제습": "DRY", "자동": "AUTO"},
+        "mode": ".card-mode-text의 끝 문구와 mode-<소문자 값> 클래스가 함께 맞아야 합니다.",
+        "fan_labels": {"약풍": "LOW", "중풍": "MED", "강풍": "HIGH", "A 자동": "AUTO", "자동": "AUTO"},
+        "fan": ".fan-speed-indicator의 공백을 정리한 전체 문구를 매핑합니다. 미등록 문구는 null입니다.",
+        "temperature": ".card-set-temp에서 숫자를 읽습니다. 숫자가 없으면 null입니다.",
+        "locked": ("locked 클래스와 .card-lock-indicator 표시가 모두 있으면 true, 모두 없으면 false, 서로 다르면 null입니다. null은 잠금 해제가 아닙니다."
+                   if consistent_lock else "locked 클래스와 .card-lock-indicator의 실제 표시를 함께 확인합니다."),
+        "comparison": "읽은 DOM 값을 expected_fields와 비교합니다. 내부 장비 값이나 기대값으로 화면 관찰을 대신하지 않습니다."}
+
+
+def execution_interface_facts(plan: Agent3AutomationPlan, observation: UiObservation, *, contract="1.0") -> dict:
     """Describe emitted adapters, not successful execution or product expectations."""
+    if contract not in {"1.0", "1.1", "1.2"}:
+        raise ValueError("지원하지 않는 실행 인터페이스 설명 계약입니다.")
     elements = {e.selector: e for e in observation.elements}
     adapters = []
     for action in plan.actions:
@@ -1962,12 +2017,22 @@ def execution_interface_facts(plan: Agent3AutomationPlan, observation: UiObserva
                     "action_hint": elements[selector].action_hint if selector in elements else None}
                     for selector in _TEMPERATURE_CONTROLS.values()]})
     readers = [_assertion_reader_facts(a, plan.target_device_id) for a in plan.assertions]
-    return {"contract": "1.0", "trial_success_proved": False,
+    decoders = {}
+    if contract in {"1.1", "1.2"}:
+        for reader, assertion in zip(readers, plan.assertions):
+            decoding = _controller_ui_decoding_facts(assertion, consistent_lock=contract == "1.2")
+            if decoding:
+                decoders[assertion.selector] = decoding
+                reader["ui_decoding_ref"] = assertion.selector
+    facts = {"contract": contract, "trial_success_proved": False,
         "actionability": "UI 목록의 visible/enabled는 수집 당시 상태입니다. 대상 선택·준비 후에는 달라질 수 있습니다. "
             "존재·유일성·조작 종류는 사전에 검사하고, 실제 조작 가능 여부는 각 동작 시 Playwright가 확인합니다. "
             "실행 불가 시 오류로 남기며 강제 클릭하거나 성공으로 건너뛰지 않습니다. "
             "TC에서 요구한 활성·비활성 기대결과 검사는 별도로 유지합니다.",
         "adapters": adapters, "readers": readers}
+    if contract in {"1.1", "1.2"}:
+        facts["ui_decoders"] = decoders
+    return facts
 
 
 def evaluate_checkpoint3_plan(
@@ -2870,6 +2935,7 @@ def compile_automation_candidate(
     *,
     explicit_expectations_only: bool = False,
     typed_values: bool = False,
+    consistent_card_lock: bool = False,
 ) -> str:
     """Compile a constrained plan; historical callers retain their verdict policy."""
     def different(actual: str, expected: str) -> str:
@@ -3070,6 +3136,11 @@ def compile_automation_candidate(
     if uses_controller_helpers:
         lines.append(f'_CONTROLLER_BUTTONS = {_py_literal(_CONTROLLER_BUTTONS)}')
         restore_helpers = _CONTROLLER_RESTORE_HELPERS
+        if consistent_card_lock:
+            # Preserve historical compiled bytes; only new interface 1.2 opts in.
+            restore_helpers = restore_helpers.replace(
+                "'locked': 'locked' in classes and ui['card_locked'],",
+                "'locked': ui['card_locked'] if ('locked' in classes) == ui['card_locked'] else None,")
         if typed_values:
             restore_helpers = restore_helpers.replace("if current == target:", "if _qa_values_equal(current, target):")
         lines.extend(restore_helpers.splitlines())
@@ -3459,6 +3530,7 @@ def compile_automation_candidate(
         lines.extend(
             [
                 "            restore_mismatches = []",
+                "            restore_comparison_completed = False",
                 "            try:",
             ]
         )
@@ -3611,6 +3683,7 @@ def compile_automation_candidate(
         restore_block = lines[restore_observation_start:]
         del lines[restore_observation_start:]
         append_observation_group([restore_block], "                ", "restore_mismatches")
+        lines.append("                restore_comparison_completed = True")
         if state_policy:
             # Snapshot differences determine cleanup, not product expectations.
             # Historical candidates retain their implicit blocked-state verdict.
@@ -3685,7 +3758,7 @@ def compile_automation_candidate(
             lines.append("            print('RESTORE_STATUS: NOT_REQUIRED')")
     if restore_actions and plan.restore_confirmations:
         lines.extend([
-            "            if not restore_mismatches and test_completed:",
+            "            if restore_comparison_completed and not restore_mismatches" + (" and test_state_started" if state_policy else "") + ":",
             "                print('RESTORE_CONFIRMATIONS_VERIFIED: ' + "
             + _py_literal(",".join(sorted({result_id for item in plan.restore_confirmations for result_id in item.result_ids}))) + ")",
             "",

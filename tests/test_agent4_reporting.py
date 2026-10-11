@@ -3,6 +3,33 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("candidate_status,notice", [
+    ("REVISION_REQUIRED", "검토 실패로 시험 미실행"),
+    ("NOT_AUTOMATABLE", "자동화 제외로 시험 미실행"),
+])
+def test_external_reports_include_unexecuted_without_product_fail(tmp_path, monkeypatch, candidate_status, notice):
+    exclusion = pipeline.AutomationExclusion(tc_id="TC-CAND-009",
+        candidate_status=candidate_status, reason="선택 전 기록과 선택 후 기록의 순서 충돌")
+    run, run_id = _write_agent4_inputs(tmp_path, automation_exclusions=[exclusion])
+    assert pipeline.run_agent4(SimpleNamespace(run_id=run_id, runs_root=str(tmp_path/'runs'))) == 0
+    report = pipeline.FinalReport.model_validate_json((run/'final_report.json').read_text(encoding='utf-8'))
+    bundle = pipeline.ValidationExecutionBundle.model_validate_json((run/'validation_execution.json').read_text(encoding='utf-8'))
+    records = pipeline_reporting._notion_report_records(bundle, report, run)
+    assert len({r['tc_id'] for r in records}) == len(records)
+    excluded = next(r for r in records if r['tc_id']=='TC-CAND-009')
+    assert excluded['result']=='NOT_EXECUTED' and not excluded['evidence_complete']
+    assert notice in excluded['execution_notice']
+    assert pipeline_reporting._notion_status_name(excluded['result'])=='Review Needed'
+    assert pipeline_reporting._notion_status_name('ASSERTION_FAILED')=='Fail'
+    assert '제품 PASS/FAIL 판정 없음' in json.dumps(pipeline_reporting._notion_tc_blocks(excluded),ensure_ascii=False)
+    monkeypatch.setattr(pipeline_reporting,'build_run_test_rows',lambda _: [dict(
+        tc_id='TC-CAND-009',source='신규·수정 후보',title='난방',status='NOT_EXECUTED',
+        expected_results=[],evidence_files=[])])
+    slack = json.dumps(pipeline_reporting._slack_report_payload(report,run),ensure_ascii=False)
+    assert ('검토 실패로 시험 미실행' in slack) == (candidate_status=='REVISION_REQUIRED')
+    assert '기대결과 불일치' not in slack
+
+
 @pytest.mark.parametrize('failed_destination', ['SLACK', 'NOTION'])
 @pytest.mark.parametrize('failure', ['http', 'response_lost'])
 def test_partial_delivery_failure_stays_separate_from_product_pass(tmp_path, monkeypatch, failed_destination, failure):
@@ -222,7 +249,7 @@ def test_notion_detail_preserves_saved_steps_results_and_restore(tmp_path):
     assert row["expected_result_details"][0]["result_id"] == tc.expected_results[0].result_id
     bundle = pipeline.ValidationExecutionBundle.model_validate_json((run_dir / "validation_execution.json").read_text(encoding="utf-8"))
     # Record rendering is separate from the CLI's upstream integrity gate.
-    report = SimpleNamespace(findings=[], run_id=run_id, recommendation=pipeline.FinalRecommendation.HUMAN_REVIEW,
+    report = SimpleNamespace(findings=[], automation_exclusions=[], run_id=run_id, recommendation=pipeline.FinalRecommendation.HUMAN_REVIEW,
                              model_dump=lambda **kwargs: {})
     records = pipeline_reporting._notion_report_records(bundle, report, run_dir)
     record = next(item for item in records if item["tc_id"] == tc.tc_id)

@@ -1,0 +1,60 @@
+{
+  "checked_at_kst": "2026-10-11T17:37:01.762213+09:00",
+  "api_calls": 0,
+  "testcase_sha256": "d3e08099f4c6a41ecaf0449e1b7c7b4b8e1a45fbe4c2fda6bf3cf7a4e06419cb",
+  "automation_sha256": "f7904f2cfcdef3998abb171460aa13840e41d827414a09abc527a739238a554e",
+  "plan_sha256": "6fddd8eef73c20ba46ebcb3b6793c0379b65789174f2f9ff7064fe0a3c8025b6",
+  "product_sha256": "66a7170dd4b0ea6c7ee1394df0bc5263054367da5ccd2b5de4c892430a7d1320",
+  "rows": [
+    {
+      "case": "normal",
+      "expected_behavior_verified": true,
+      "exception": null,
+      "evidence_sha256": {
+        "stdout.txt": "936c96b06ad2c9db726ef22b27bce50954587dc04f2ab839b5d5228829037a8a",
+        "trial-final.png": "8cca921717cb8666edbac0d47f2cd89d27c64f07a18fa8e2b542a29574f9c0c9",
+        "trial-trace.zip": "a82edbd6045ad5a987e6d802bc1cfa4951d85a8e471d69b96dfa86fd34a32870"
+      }
+    },
+    {
+      "case": "different_original",
+      "expected_behavior_verified": true,
+      "exception": null,
+      "evidence_sha256": {
+        "stdout.txt": "70e142a75d8cb572d91777d69681a8ed086035c888bf1d446418e2d632a411b9",
+        "trial-final.png": "22f2138d505325ddaf8ed5af04811a2326f72c58d1ba88bbfa4b0fddf1e57969",
+        "trial-trace.zip": "a6184b3b592696460f6991751cdbb0ff79fb1331623273fdcb842c3e424e74bc"
+      }
+    },
+    {
+      "case": "offline_observation",
+      "expected_behavior_verified": true,
+      "exception": {
+        "type": "AssertionError",
+        "message": "PRECONDITION_NOT_MET: check 6 expected=True actual=False"
+      },
+      "evidence_sha256": {
+        "stdout.txt": "3199cf86de832c6ecc302e26b497d4418aca5a096ed75d058ba9c9df4fc8b78d",
+        "trial-final.png": "7dd559c0e463727d4d22c4ec655ad1fa6a76c397ce3f5fba94948666b864112d",
+        "trial-trace.zip": "d335f32b87d1316867722000026e31fcd311346923f046422adfc6ec37c839da"
+      }
+    },
+    {
+      "case": "restore_internal_fault",
+      "expected_behavior_verified": true,
+      "exception": {
+        "type": "AssertionError",
+        "message": "RESTORE_MISMATCH: controller original={'state': {'status': 'STOP', 'mode': 'COOL', 'fanSpeed': 'LOW', 'setTemp': 24, 'locked': False}, 'ui': {'status': {'#det-power-on-btn': False, '#det-power-off-btn': True}, 'mode': {'#det-mode-auto': False, '#det-mode-cool': True, '#det-mode-heat': False, '#det-mode-fan': False, '#det-mode-dry': False}, 'fanSpeed': {'#det-fan-low': True, '#det-fan-med': False, '#det-fan-high': False, '#det-fan-auto': False}, 'locked': {'#det-lock-on-btn': False, '#det-lock-off-btn': True}, 'temperature': '24.0°C', 'temperature_enabled': [True, True], 'card_classes': ['ac-device-card', 'mode-cool', 'state-stop'], 'card_values': ['❄️ 냉방', '약풍', '24.0°C'], 'card_locked': False}}, actual={'state': {'status': 'STOP', 'mode': 'COOL', 'fanSpeed': 'HIGH', 'setTemp': 24, 'locked': False}, 'ui': {'status': {'#det-power-on-btn': False, '#det-power-off-btn': True}, 'mode': {'#det-mode-auto': False, '#det-mode-cool': True, '#det-mode-heat': False, '#det-mode-fan': False, '#det-mode-dry': False}, 'fanSpeed': {'#det-fan-low': True, '#det-fan-med': False, '#det-fan-high': False, '#det-fan-auto': False}, 'locked': {'#det-lock-on-btn': False, '#det-lock-off-btn': True}, 'temperature': '24.0°C', 'temperature_enabled': [True, True], 'card_classes': ['ac-device-card', 'mode-cool', 'state-stop'], 'card_values': ['❄️ 냉방', '약풍', '24.0°C'], 'card_locked': False}} | window.__vccs.devices baseline={'fanSpeed': 'LOW'}, actual={'fanSpeed': 'HIGH'}"
+      },
+      "evidence_sha256": {
+        "stdout.txt": "f8b070655b872417e617fff8818bcb5a01230bf9cf33babb1bee62e1da7fb6a3",
+        "trial-final.png": "cad6fdc77eb8e805bd8d853de97f40b1f755cfc10f730b18a12d9308b6f2d4a5",
+        "trial-trace.zip": "015a6d77f9ff767444739406d904ae6270f8582a97ef721491ab0d6a0192bfca"
+      }
+    }
+  ],
+  "protected_files_unchanged": true,
+  "originals_preserved": true,
+  "limitations": "Headless local virtual product; offline observation injected without disconnecting actual page. Predicate also tested directly for OFFLINE/missing target. No API accuracy claim.",
+  "evidence_location": "C:\\Users\\훈\\.gemini\\antigravity\\scratch\\industrial-qa\\qa-agent-pipeline-v2\\runs\\manual_checks\\fan-connectivity-20261011"
+}

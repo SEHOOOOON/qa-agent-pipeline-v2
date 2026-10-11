@@ -479,6 +479,10 @@ def run_pipeline(args: argparse.Namespace) -> int:
                 break
 
         successful_entries = [item for item in run_entries if item["exit_code"] == 0]
+        trial_entries = [
+            item for item in run_entries
+            if item["exit_code"] == 0 or _entry_has_candidate_trial(item)
+        ]
         automation_exclusions = [
             *prefiltered_exclusions,
             *[
@@ -493,14 +497,14 @@ def run_pipeline(args: argparse.Namespace) -> int:
             *[
                 _automation_exclusion_from_run_entry(item)
                 for item in run_entries
-                if item["exit_code"] != 0
+                if item["exit_code"] != 0 and not _entry_has_candidate_trial(item)
             ],
         ]
         run_status = (
             "PASS"
-            if successful_entries and not automation_exclusions
+            if successful_entries and not automation_exclusions and len(successful_entries) == len(run_entries)
             else "PARTIAL"
-            if automation_exclusions
+            if automation_exclusions or len(successful_entries) != len(run_entries)
             else "PASS"
         )
         if internal_errors:
@@ -518,7 +522,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
                 "planned_tc_ids": planned_tc_ids,
                 "unselected_tc_ids": unselected_tc_ids,
                 "selected_tc_ids": selected_tc_ids,
-                "executed_tc_ids": [item["tc_id"] for item in successful_entries],
+                "executed_tc_ids": [item["tc_id"] for item in trial_entries],
                 "entries": run_entries,
                 "자동화_제외_TC": automation_exclusions,
                 "target_file": target_html.name,
@@ -540,6 +544,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
         )
         print(f"Orchestrator status: {status}")
         print(f"Agent 3 completed candidates: {len(successful_entries)}")
+        print(f"Agent 3 recorded candidate trials: {len(trial_entries)}")
         print(f"Agent 3 excluded candidates: {len(automation_exclusions)}")
         print(f"Orchestrator manifest: {run_dir / 'orchestrator_manifest.json'}")
         return agent3_exit
@@ -573,7 +578,7 @@ def build_parser() -> argparse.ArgumentParser:
     agent1.add_argument(
         "--model",
         default=None,
-        help="OpenAI 모델 ID. 미지정 시 OPENAI_MODEL 또는 gpt-5.6-terra",
+        help="OpenAI 모델 ID. 미지정 시 OPENAI_MODEL 또는 gpt-6.1-sol",
     )
     agent1.set_defaults(handler=run_agent1)
 
@@ -585,8 +590,9 @@ def build_parser() -> argparse.ArgumentParser:
     agent2.add_argument(
         "--model",
         default=None,
-        help="OpenAI 모델 ID. 미지정 시 OPENAI_MODEL 또는 gpt-5.6-terra",
+        help="OpenAI 모델 ID. 미지정 시 OPENAI_MODEL 또는 gpt-6.1-sol",
     )
+    agent2.add_argument("--no-rewrite", action="store_true", help="반려 사유를 저장하고 추가 재작성 호출 없이 중단")
     agent2.set_defaults(handler=run_agent2)
 
     agent3 = subparsers.add_parser("agent3", help="Run Agent 3, CP3, and the isolated trial")

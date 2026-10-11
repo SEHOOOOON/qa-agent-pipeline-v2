@@ -4,6 +4,103 @@ from pipeline_test_support import *
 from pydantic import ValidationError
 
 
+@pytest.mark.parametrize("preparation", [
+    "시험 준비 상태는 냉방 26°C입니다.",
+    "시험 준비 상태는 운전·난방·27°C·중풍입니다.",
+    "시험 준비 상태는 약풍입니다.",
+])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_scope_quote_keeps_preparation_context_and_requested_authority(preparation, reverse):
+    request, analysis, requirements = cp1_scope_case(direct=True, requirement_id="REQ-STATE-001")
+    request.before_value = analysis.before_condition = preparation
+    analysis.requirement_effects[0].relation = RequirementRelation.VERIFY
+    condition = analysis.confirmed_conditions[-1]
+    parts = [preparation, condition.source_text]
+    condition.source_text = " | ".join(reversed(parts) if reverse else parts)
+    original = analysis.model_dump()
+    options = dict(legacy_wording_checks=False, allow_srs_quote_parts=True,
+                   review_range_semantics="1.3", review_scope_semantics=True)
+    historical = evaluate_checkpoint1(request, analysis, requirements, **options)
+    current = evaluate_checkpoint1(request, analysis, requirements, align_request_roles=True, **options)
+    assert cp1_check(historical, "CP1-011").status == CheckStatus.FAIL
+    assert current.status == CheckStatus.PASS
+    assert analysis.model_dump() == original
+    # Structural acceptance does not substitute for semantic review.
+    import qa_pipeline_grounding as grounding
+    payload = grounding.build_grounding_input("AGENT1", request, requirements, analysis,
+        include_task_boundaries="1.3", review_scope_semantics=True)
+    rejected = grounding.check_review_record(payload, fake_grounding_record(payload, verdict="UNSUPPORTED"))
+    assert grounding.attach_grounding_check(current, rejected).handoff_status != HandoffStatus.CONTINUE
+
+
+@pytest.mark.parametrize("mutation,rule", [
+    ("preparation_only", "CP1-011"), ("reason", "CP1-011"),
+    ("excluded", "CP1-011"), ("invented", "CP1-007"),
+    ("wrong_number", "CP1-007"), ("wrong_link", "CP1-011"),
+    ("unknown_id", "CP1-011"), ("policy_change", "CP1-007"),
+])
+def test_scope_context_alignment_does_not_authorize_unrequested_checks(mutation, rule):
+    request, analysis, requirements = cp1_scope_case(direct=True, requirement_id="REQ-STATE-001")
+    request.before_value = analysis.before_condition = "준비 온도는 26°C입니다."
+    request.reason = "운영자의 반복 조작을 줄이려는 목적입니다."
+    analysis.requirement_effects[0].relation = RequirementRelation.VERIFY
+    condition = analysis.confirmed_conditions[-1]
+    condition.source_text = request.before_value + " | " + condition.source_text
+    effect = next(e for e in analysis.requirement_effects if e.requirement_id == "REQ-STATE-001")
+    if mutation == "preparation_only":
+        condition.source_text = request.before_value
+    elif mutation == "reason":
+        condition.source_text += " | " + request.reason
+    elif mutation == "excluded":
+        request.out_of_scope = ["추가 장비 시험은 제외합니다."]
+        analysis.excluded_scope = request.out_of_scope.copy()
+        condition.source_text = request.before_value + " | " + request.out_of_scope[0]
+    elif mutation == "invented":
+        condition.source_text += " | 원문에 없는 조건입니다."
+    elif mutation == "wrong_number":
+        condition.statement = "온도는 99°C여야 합니다."
+    elif mutation == "wrong_link":
+        condition.requirement_ids = [request.target_requirement_id]
+    elif mutation == "unknown_id":
+        effect.scope_evidence.request_condition_ids = ["COND-999"]
+    else:
+        analysis.requirement_effects[0].relation = RequirementRelation.MODIFIED
+    result = evaluate_checkpoint1(request, analysis, requirements,
+        legacy_wording_checks=False, allow_srs_quote_parts=True,
+        review_range_semantics="1.3", review_scope_semantics=True, align_request_roles=True)
+    assert cp1_check(result, rule).status == CheckStatus.FAIL
+    assert result.handoff_status == HandoffStatus.BLOCKED
+
+
+@pytest.mark.parametrize("mutation", ["waiting", "missing_gap", "missing_question", "partial"])
+def test_waiting_gap_is_preserved_without_becoming_excluded_scope(mutation):
+    request, analysis = cp1_request(), cp1_valid_analysis()
+    note = "새로 허용할 명령과 조건은 미정입니다."
+    request.acceptance_notes.append(note)
+    analysis.decision = AnalysisDecision.WAITING_FOR_USER
+    analysis.information_gaps = [note]
+    analysis.user_questions = ["어떤 명령을 어떤 조건에서 허용합니까?"]
+    analysis.excluded_information_gaps = []
+    if mutation == "missing_gap":
+        analysis.information_gaps = []
+    elif mutation == "missing_question":
+        analysis.user_questions = []
+    elif mutation == "partial":
+        analysis.decision = AnalysisDecision.PARTIAL_PROCEED
+    options = dict(legacy_wording_checks=False, review_range_semantics="1.3", review_scope_semantics=True)
+    historical = evaluate_checkpoint1(request, analysis, cp1_requirements(), **options)
+    current = evaluate_checkpoint1(request, analysis, cp1_requirements(), align_request_roles=True, **options)
+    assert cp1_check(historical, "CP1-008").status == CheckStatus.FAIL
+    if mutation == "waiting":
+        assert current.status == CheckStatus.PASS
+        assert current.handoff_status == HandoffStatus.PAUSE
+        assert note not in analysis.excluded_scope
+    else:
+        rule = "CP1-010" if mutation == "missing_question" else "CP1-008"
+        assert cp1_check(current, rule).status != CheckStatus.PASS
+        assert current.handoff_status != HandoffStatus.CONTINUE
+
+
 @pytest.mark.parametrize("requirement_id", [
     "REQ-POWER-001", "REQ-MODE-001", "REQ-TEMP-001", "REQ-FAN-001", "REQ-LOCK-001"])
 def test_single_requirement_map_is_inverted_without_control_specific_rules(requirement_id):
@@ -1014,7 +1111,7 @@ def test_agent1_uses_structured_responses_api() -> None:
     assert result.response_id == "resp_test"
     assert result.usage["total_tokens"] == 150
     assert responses.kwargs["text_format"] is pipeline.Agent1AnalysisDraft
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent1-2-24"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent1-2-25"
     assert responses.kwargs["store"] is False
     instructions = responses.kwargs["input"][0]["content"]
     assert "현재 SRS는 제품 기능과 허용 조건" in instructions
@@ -1028,6 +1125,9 @@ def test_agent1_uses_structured_responses_api() -> None:
     assert "MODIFIED, UPDATE_REQUIRED 또는 VERIFY로 분류한 모든 Requirement" in instructions
     assert "검증 조건 원문을 찾지 못하면" in instructions
     assert "테스트 절차나 Playwright 코드는 작성하지 않습니다" in instructions
+    assert "PARTIAL_PROCEED할 때만" in instructions
+    assert "WAITING_FOR_USER이면 그 조건은 확인할 대상이지 제외 범위가 아닙니다" in instructions
+    assert "원문 전체를 information_gaps, 제외된_정보_부족, excluded_scope에 동일하게" not in instructions
 
 def test_agent1_missing_api_key_fails_before_network(monkeypatch) -> None:
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)

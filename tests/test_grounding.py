@@ -1,6 +1,390 @@
 """Transport/contract/branch tests. Scripted judgments do not measure model accuracy."""
 from pipeline_test_support import *
 
+def focused_agent2_payload(design=None, **overrides):
+    options = dict(analysis=cp2_analysis(), include_condition_coverage=True,
+        include_tc_execution_alignment=True, include_task_boundaries="1.3",
+        essential_checks=True, shared_design_review=True, focused_design_review=True)
+    options.update(overrides)
+    return grounding.build_grounding_input("AGENT2", cp1_request(), cp2_requirements(),
+        design or cp2_valid_design(), **options)
+
+
+def test_focused_review_consolidates_prose_but_preserves_full_design_and_conditions():
+    design = cp2_valid_design()
+    design.coverage_notes = ["표현이 어색한 참고 설명"]
+    payload = focused_agent2_payload(design)
+    legacy = focused_agent2_payload(design, focused_design_review=False)
+    ids = {i["item_id"] for i in payload["items"]}
+    assert len(payload["items"]) < len(legacy["items"])
+    assert "coverage_notes/0" not in ids
+    assert payload["context"]["advisory_coverage_notes"] == design.coverage_notes
+    assert "coverage_summary" in ids  # False completion claims remain reviewable.
+    assert "PROCEDURE/ALL" in ids
+    assert {i["item_id"] for i in payload["items"] if i["kind"] == "CONDITION_COVERAGE"} == {
+        "CONDITION/" + c.condition_id for c in cp2_analysis().confirmed_conditions}
+    for n, tc in enumerate(design.test_cases):
+        item = next(i for i in payload["items"] if i["item_id"] == f"TC/{n}/design")
+        assert item["content"] == tc.model_dump(mode="json")
+        assert not any(x.startswith(f"TC/{n}/ER/") or x.startswith(f"TC/{n}/steps/") for x in ids)
+    assert [d for d in payload["source_documents"] if d["source_id"] != "FOCUSED_DESIGN_REVIEW"] == legacy["source_documents"]
+    with pytest.raises(ValueError, match="해시"):
+        grounding.check_review_record(payload, fake_grounding_record(legacy))
+    assert grounding.check_review_record(legacy, fake_grounding_record(legacy)).status == CheckStatus.PASS
+
+
+@pytest.mark.parametrize("category", ["CONDITION_COVERAGE", "TC_DESIGN", "PROCEDURE_COVERAGE", "coverage_summary"])
+@pytest.mark.parametrize("verdict,status", [("SUPPORTED", "PASS"), ("UNSUPPORTED", "FAIL"), ("UNCERTAIN", "REVIEW")])
+def test_focused_review_keeps_essential_verdicts_blocking(category, verdict, status):
+    # Scripted verdict handling, not the AI's ability to detect these defects.
+    payload = focused_agent2_payload()
+    record = fake_grounding_record(payload)
+    target = next(i["item_id"] for i in payload["items"] if i["kind"] == category or i["item_id"] == category)
+    item = next(i for i in record["review"]["items"] if i["item_id"] == target)
+    item.update(verdict=verdict, reason="준비한 대역 판정: 대상·값·조작 후 관찰 연결 확인")
+    assert grounding.check_review_record(payload, record).status.value == status
+
+
+@pytest.mark.parametrize("defect", ["missing_item", "duplicate_item", "invalid_source", "changed_input"])
+def test_focused_review_does_not_bypass_review_integrity(defect):
+    payload = focused_agent2_payload()
+    record = fake_grounding_record(payload)
+    items = record["review"]["items"]
+    if defect == "missing_item":
+        items.pop()
+    elif defect == "duplicate_item":
+        items.append(dict(items[0]))
+    elif defect == "invalid_source":
+        items[0]["citations"][0]["source_id"] = "UNKNOWN"
+    else:
+        record["input_sha256"] = "0" * 64
+    with pytest.raises(ValueError):
+        grounding.check_review_record(payload, record)
+
+
+def test_focused_review_uses_short_stage_specific_instructions_and_pins_them():
+    payload = focused_agent2_payload()
+    sent = []
+    def parse(**kwargs):
+        sent.append(kwargs)
+        return SimpleNamespace(output_parsed=None)
+    with pytest.raises(ValueError, match="구조화 응답"):
+        grounding.OpenAIGroundingReviewer(model="fake", client=SimpleNamespace(
+            responses=SimpleNamespace(parse=parse))).review(payload)
+    instructions = sent[0]["input"][0]["content"]
+    assert instructions == grounding.FOCUSED_AGENT2_REVIEW_INSTRUCTIONS
+    assert len(instructions) < len(grounding.REVIEW_INSTRUCTIONS)
+    assert "조작보다 앞선 확인" in instructions and "후속 관찰" in instructions
+    assert "AGENT3:" not in instructions and "AGENT1:" not in instructions
+    assert sent[0]["prompt_cache_key"] == "qa-v2-grounding-1-19"
+    assert sent[0]["store"] is False
+    assert next(d["text"] for d in payload["source_documents"]
+                if d["source_id"] == "FOCUSED_DESIGN_REVIEW") == instructions
+
+
+@pytest.mark.parametrize("field,initial,target", [
+    ("status", "OPERATION", "STOP"), ("mode", "COOL", "HEAT"),
+    ("fanSpeed", "HIGH", "LOW"), ("setTemp", 29, 22), ("locked", False, True)])
+@pytest.mark.parametrize("variant", ["normal", "wrong_value", "wrong_target", "early_observation", "missing_check"])
+def test_focused_review_preserves_control_variants_without_silently_repairing(field, initial, target, variant):
+    from qa_pipeline_agent2 import _normalize_agent2_live_design
+    case = repeated_restoration_fixture(field, initial, target)
+    design, _ = _normalize_agent2_live_design(cp2_valid_design().model_copy(update={"test_cases": [case]}))
+    case = design.test_cases[0]
+    check = case.execution_spec.verifications[0]
+    if variant == "wrong_value":
+        check.expected_fields[0].expected_value = "UNAPPROVED"
+    elif variant == "wrong_target":
+        check.target = "internal.unrelated"
+    elif variant == "early_observation":
+        check.after_action_id = case.execution_spec.operations[0].action_id
+    elif variant == "missing_check":
+        case.execution_spec.verifications.pop()
+    before = design.model_dump(mode="json")
+    payload = focused_agent2_payload(design)
+    assert next(i["content"] for i in payload["items"] if i["kind"] == "TC_DESIGN") == before["test_cases"][0]
+    assert design.model_dump(mode="json") == before
+    # Input preservation does NOT assert that an actual AI detects the fault.
+
+
+def test_focused_review_keeps_conditions_when_no_new_test_covers_them():
+    design = cp2_valid_design().model_copy(update={"test_cases": [], "related_existing_tests": []})
+    payload = focused_agent2_payload(design)
+    conditions = [i for i in payload["items"] if i["kind"] == "CONDITION_COVERAGE"]
+    assert len(conditions) == len(cp2_analysis().confirmed_conditions)
+    assert all(i["content"]["candidate_tests"] == [] for i in conditions)
+    assert all(i["content"]["existing_selections"] == [] for i in conditions)
+
+
+@pytest.mark.parametrize("change", ["missing_marker", "unknown_marker", "old_version"])
+def test_focused_review_manifest_cannot_silently_disable_or_upgrade(change):
+    manifest = pipeline_execution._current_agent2_contract()
+    manifest.pop("baseline_capture_order_contract")  # Isolate the historical review contract.
+    assert manifest["prompt_version"] == "agent2-2.62"
+    assert manifest["focused_design_review_contract"] == "1.1"
+    pipeline_execution._agent2_checkpoint_options(manifest)
+    if change == "missing_marker":
+        manifest.pop("focused_design_review_contract")
+        manifest.pop("human_judgment_examples_contract", None)
+    elif change == "unknown_marker":
+        manifest["focused_design_review_contract"] = "9.0"
+    else:
+        manifest["prompt_version"] = "agent2-2.59"
+    with pytest.raises(ValueError, match="집중"):
+        pipeline_execution._agent2_checkpoint_options(manifest)
+    manifest["prompt_version"] = "agent2-2.59"
+    manifest.pop("focused_design_review_contract", None)
+    manifest.pop("human_judgment_examples_contract", None)
+    pipeline_execution._agent2_checkpoint_options(manifest)
+
+
+@pytest.mark.parametrize("rewrite", [False, True])
+def test_human_examples_same_reference_reaches_writer_rewriter_and_reviewer(rewrite):
+    from qa_pipeline_agent2 import OpenAIAgent2, Agent2Error
+    from qa_pipeline_contracts import QA_HUMAN_JUDGMENT_EXAMPLES
+    sent = []
+    def parse(**kwargs):
+        sent.append(kwargs)
+        return SimpleNamespace(output_parsed=None)
+    client = SimpleNamespace(responses=SimpleNamespace(parse=parse))
+    with pytest.raises(Agent2Error):
+        OpenAIAgent2(model="fake", client=client).design(cp1_request(), cp2_analysis(), cp2_requirements(),
+            previous_design=cp2_valid_design() if rewrite else None,
+            checkpoint_feedback=["필수 관찰 누락"] if rewrite else None)
+    payload = focused_agent2_payload(human_judgment_examples=True)
+    with pytest.raises(ValueError, match="구조화 응답"):
+        grounding.OpenAIGroundingReviewer(model="fake", client=client).review(payload)
+    assert len(sent) == 2
+    for call in sent:
+        assert QA_HUMAN_JUDGMENT_EXAMPLES in call["input"][0]["content"]
+    assert payload["context"]["human_judgment_examples"] == QA_HUMAN_JUDGMENT_EXAMPLES
+    assert sent[0]["prompt_cache_key"] == "qa-v2-agent2-2-62-baseline-1"
+    assert sent[1]["prompt_cache_key"] == "qa-v2-grounding-1-20"
+
+
+def test_human_examples_are_hash_bound_context_not_citable_evidence():
+    old = focused_agent2_payload()
+    new = focused_agent2_payload(human_judgment_examples=True)
+    assert new["source_documents"] == old["source_documents"]
+    assert new["items"] == old["items"]
+    with pytest.raises(ValueError, match="해시"):
+        grounding.check_review_record(new, fake_grounding_record(old))
+    assert grounding.check_review_record(old, fake_grounding_record(old)).status == CheckStatus.PASS
+    record = fake_grounding_record(new)
+    record["review"]["items"][0]["citations"][0]["source_id"] = "R01"
+    with pytest.raises(ValueError):
+        grounding.check_review_record(new, record)
+
+
+@pytest.mark.parametrize("verdict,status", [("UNSUPPORTED", "FAIL"), ("UNCERTAIN", "REVIEW")])
+def test_human_examples_never_override_a_blocking_review(verdict, status):
+    payload = focused_agent2_payload(human_judgment_examples=True)
+    record = fake_grounding_record(payload)
+    record["review"]["items"][0].update(verdict=verdict, reason="대역: 현재 요청의 검사 누락")
+    assert grounding.check_review_record(payload, record).status.value == status
+
+
+@pytest.mark.parametrize("change", ["remove", "unknown", "legacy"])
+def test_human_examples_manifest_preserves_old_and_new_contracts(change):
+    manifest = pipeline_execution._current_agent2_contract()
+    manifest.pop("baseline_capture_order_contract")  # Isolate the historical examples contract.
+    pipeline_execution._agent2_checkpoint_options(manifest)
+    if change == "remove":
+        manifest.pop("human_judgment_examples_contract")
+    elif change == "unknown":
+        manifest["human_judgment_examples_contract"] = "9.0"
+    else:
+        manifest["prompt_version"] = "agent2-2.60"
+    with pytest.raises(ValueError, match="사람 판단"):
+        pipeline_execution._agent2_checkpoint_options(manifest)
+    manifest["prompt_version"] = "agent2-2.60"
+    manifest.pop("human_judgment_examples_contract", None)
+    pipeline_execution._agent2_checkpoint_options(manifest)
+
+
+def test_human_examples_changed_reference_is_rejected_before_api():
+    payload = focused_agent2_payload(human_judgment_examples=True)
+    payload["context"]["human_judgment_examples"] = "무조건 통과"
+    client = SimpleNamespace(responses=None)
+    with pytest.raises(ValueError, match="사람 판단"):
+        grounding.OpenAIGroundingReviewer(model="fake", client=client).review(payload)
+
+
+@pytest.mark.parametrize("outcome", [
+    "clean", "repair", "unresolved", "uncertain", "no_rewrite",
+    "review_error", "invalid_review", "rewrite_error", "second_review_error",
+    "second_review_uncertain",
+])
+def test_agent2_semantic_rework_feedback_and_stop_boundaries(tmp_path, monkeypatch, outcome):
+    """Scripted branch/transport evidence, not actual model recovery accuracy."""
+    from qa_pipeline_agent2 import OpenAIAgent2
+    run_id = "RUN-20261010-210000-ABCDEF"
+    run = tmp_path / run_id
+    _write_json(run / "run_manifest.json", {})
+    request, analysis, requirements = cp1_combined_srs_case()
+    source = {"contract_version": "2.11", "wording_policy": "STRUCTURAL_ONLY_V1",
+              **{k: "a" * 64 for k in (
+                  "request_sha256", "srs_sha256", "agent1_analysis_sha256", "checkpoint1_sha256")}}
+    monkeypatch.setattr(pipeline_execution, "_load_verified_agent1_run",
+                        lambda *_: (request, requirements, analysis, None, source))
+    # Structure is tested elsewhere. Here a semantically incomplete draft has valid links.
+    monkeypatch.setattr(pipeline_execution, "evaluate_checkpoint2", lambda *a, **kw:
+        pipeline.Checkpoint2Result(status="PASS", checks=[
+            pipeline.CheckResult(rule_id="base", status="PASS", message="scripted structural pass")]))
+    reason = "시험 조작 이후 적용과 화면·내부값 확인이 빠졌습니다. 이전 적용의 확인으로 대체하지 마세요."
+    generated, reviews, sent, events = [], [], [], []
+    original = cp2_valid_design()
+    class Capture:
+        def parse(self, **kw):
+            sent.append(kw)
+            raise RuntimeError("offline capture only")
+    def design(req, a1, srs, **kwargs):
+        events.append("generate")
+        generated.append(kwargs)
+        if len(generated) == 2:
+            assert kwargs["previous_design"] == original
+            assert any(reason in line for line in kwargs["checkpoint_feedback"])
+            assert any("base PASS" in line for line in kwargs["checkpoint_feedback"])
+            # Exercise the real prompt assembly up to an offline transport boundary.
+            with pytest.raises(Exception, match="모델 호출"):
+                OpenAIAgent2(model="offline", client=SimpleNamespace(responses=Capture())).design(
+                    req, a1, srs, **kwargs)
+            message = sent[-1]["input"][1]["content"]
+            assert reason in message and "이전 TC 후보" in message
+            assert req.after_value in message
+            assert "전체 test_cases와 관련_기존_TC" in message
+            if outcome == "rewrite_error":
+                raise RuntimeError("scripted generation transport error")
+        result = original.model_copy(deep=True)
+        if len(generated) == 2:
+            result.coverage_summary = "scripted revised draft, not actual model correction"
+        return pipeline.Agent2Response(design=result, model="offline", response_id="scripted",
+            usage={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15})
+    def review(payload):
+        events.append("review")
+        reviews.append(payload)
+        if outcome == "review_error" or (outcome == "second_review_error" and len(reviews) == 2):
+            raise RuntimeError("scripted reviewer transport error")
+        record = fake_grounding_record(payload)
+        record["usage"] = {"input_tokens": 4, "output_tokens": 2, "total_tokens": 6}
+        if outcome == "invalid_review":
+            record["review"]["items"].pop()
+            return record
+        target = next((x for x in payload["items"] if x["kind"] == "CONDITION_COVERAGE"), payload["items"][0])
+        item = next(x for x in record["review"]["items"] if x["item_id"] == target["item_id"])
+        if outcome == "uncertain" or (outcome == "second_review_uncertain" and len(reviews) == 2):
+            item.update(verdict="UNCERTAIN", reason="필요한 정책의 뜻을 확정할 수 없음")
+        elif outcome != "clean" and (len(reviews) == 1 or outcome == "unresolved"):
+            item.update(verdict="UNSUPPORTED", reason=reason)
+        return record
+    monkeypatch.setattr(pipeline_execution, "OpenAIAgent2",
+                        lambda **kw: SimpleNamespace(design=design))
+    monkeypatch.setattr(pipeline_execution, "OpenAIGroundingReviewer",
+                        lambda **kw: SimpleNamespace(review=review))
+    error = outcome in {"review_error", "invalid_review", "rewrite_error", "second_review_error"}
+    success = outcome in {"clean", "repair"}
+    assert pipeline.run_agent2(SimpleNamespace(
+        run_id=run_id, runs_root=str(tmp_path), model="offline",
+        approved_assets_root=str(tmp_path / "empty-approved"),
+        no_rewrite=outcome == "no_rewrite")) == (1 if error else 0 if success else 2)
+    expected_generations = 2 if outcome in {
+        "repair", "unresolved", "rewrite_error", "second_review_error", "second_review_uncertain"} else 1
+    assert len(generated) == expected_generations
+    assert len(reviews) == expected_generations - (outcome == "rewrite_error")
+    assert events == (["generate", "review"] * expected_generations)[:len(events)]
+    first = pipeline._read_json_payload(run / "agent2_test_design_attempt_1.json")
+    assert pipeline.Agent2TestDesign.model_validate(first) == original
+    if expected_generations == 2:
+        rejected = pipeline._read_json_payload(run / "checkpoint2_attempt_1.json")
+        assert rejected["status"] == "FAIL"
+        assert any(reason in x["message"] for x in rejected["checks"])
+        initial_review = pipeline._read_json_payload(run / "agent2_grounding_review_attempt_1.json")
+        assert any(x["verdict"] == "UNSUPPORTED" for x in initial_review["review"]["items"])
+    if error:
+        assert (run / "agent2_error.json").exists()
+        assert not (run / "agent2_manifest.json").exists()
+        assert (run / "agent2_in_progress.json").exists()
+        return
+    manifest = pipeline._read_json_payload(run / "agent2_manifest.json")
+    assert len(manifest["attempts"]) == expected_generations
+    assert manifest["usage"]["total_tokens"] == 21 * expected_generations
+    assert manifest["rewrite_policy"] == ("NONE" if outcome == "no_rewrite" else "ONCE_ON_FAIL")
+    assert not (run / "agent2_in_progress.json").exists()
+    assert not (run / "agent2_error.json").exists()
+    final = pipeline._read_json_payload(run / "checkpoint2.json")
+    assert final["status"] == ("PASS" if success else "REVIEW" if "uncertain" in outcome else "FAIL")
+    if expected_generations == 2:
+        assert manifest["attempts"][0]["status"] == "FAIL"
+        assert reviews[0] != reviews[1], "Rewritten draft must receive a fresh review input"
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_shared_design_review_guidance_is_identical_and_versioned(enabled):
+    from qa_pipeline_contracts import QA_DESIGN_REVIEW_GUIDANCE
+    from qa_pipeline_agent2 import AGENT2_SYSTEM_INSTRUCTIONS
+    payload = grounding.build_grounding_input("AGENT2", cp1_request(), cp2_requirements(),
+        cp2_valid_design(), analysis=cp2_analysis(), include_tc_execution_alignment=True,
+        essential_checks=True, shared_design_review=enabled)
+    captured = []
+    def parse(**kwargs):
+        captured.append(kwargs)
+        return SimpleNamespace(output_parsed=None)
+    with pytest.raises(ValueError, match="구조화 응답"):
+        grounding.OpenAIGroundingReviewer(model="fake", client=SimpleNamespace(
+            responses=SimpleNamespace(parse=parse))).review(payload)
+    assert QA_DESIGN_REVIEW_GUIDANCE in AGENT2_SYSTEM_INSTRUCTIONS
+    assert (QA_DESIGN_REVIEW_GUIDANCE in captured[0]["input"][0]["content"]) == enabled
+    assert captured[0]["prompt_cache_key"] == ("qa-v2-grounding-1-18" if enabled else "qa-v2-grounding-1-17")
+    docs = {d["source_id"]: d["text"] for d in payload["source_documents"]}
+    assert ("DESIGN_REVIEW_GUIDANCE" in docs) == enabled
+    if enabled:
+        assert docs["DESIGN_REVIEW_GUIDANCE"] == QA_DESIGN_REVIEW_GUIDANCE
+    record = fake_grounding_record(payload)
+    altered = dict(payload, design_review_contract="9.0")
+    with pytest.raises(ValueError):
+        grounding.check_review_record(altered, record)
+
+
+@pytest.mark.parametrize("control", ["power", "mode", "temperature", "fan", "lock"])
+@pytest.mark.parametrize("verdict,expected", [("SUPPORTED", "PASS"), ("UNSUPPORTED", "FAIL"), ("UNCERTAIN", "REVIEW")])
+def test_shared_guidance_does_not_override_semantic_verdict(control, verdict, expected):
+    # Scripted verdict preservation across labels, not model accuracy.
+    request = cp1_request().model_copy(update={"reason": "검증 관제점: " + control})
+    payload = grounding.build_grounding_input("AGENT2", request, cp2_requirements(),
+        cp2_valid_design(), analysis=cp2_analysis(), include_tc_execution_alignment=True,
+        essential_checks=True, shared_design_review=True)
+    record = fake_grounding_record(payload, verdict=verdict)
+    assert grounding.check_review_record(payload, record).status.value == expected
+
+
+@pytest.mark.parametrize("mutation", ["missing", "unknown", "downgrade"])
+def test_shared_design_contract_cannot_reuse_historical_review(mutation):
+    import qa_pipeline_execution as ex
+    manifest = ex._current_agent2_contract()
+    manifest.pop("baseline_capture_order_contract")
+    if mutation == "missing":
+        manifest.pop("design_review_contract")
+    elif mutation == "unknown":
+        manifest["design_review_contract"] = "9.0"
+    else:
+        manifest["prompt_version"] = "agent2-2.57"
+        manifest.pop("focused_design_review_contract")
+        manifest.pop("human_judgment_examples_contract", None)
+    with pytest.raises(ValueError, match="설계·검토 공통"):
+        ex._agent2_checkpoint_options(manifest)
+
+
+def test_old_observation_contract_remains_valid_without_shared_guidance():
+    import qa_pipeline_execution as ex
+    manifest = ex._current_agent2_contract()
+    manifest.pop("baseline_capture_order_contract")
+    manifest["prompt_version"] = "agent2-2.57"
+    manifest.pop("design_review_contract")
+    manifest.pop("focused_design_review_contract")
+    manifest.pop("human_judgment_examples_contract", None)
+    assert ex._agent2_checkpoint_options(manifest)["pair_observation_anchors"]
+
+
 @pytest.mark.parametrize("enabled", [False, True])
 def test_essential_review_policy_reaches_model_instructions(enabled):
     payload = grounding.build_grounding_input("AGENT2", cp1_request(), cp2_requirements(),
@@ -182,6 +566,104 @@ def test_agent2_recovery_facts_are_not_fabricated(fault):
     assert controller_recovery_tc_facts(case) is None
 
 
+@pytest.mark.parametrize("field,initial,target", [
+    ("setTemp", 29, 22), ("fanSpeed", "HIGH", "LOW"), ("mode", "HEAT", "COOL"),
+    ("status", "STOP", "OPERATION"), ("locked", True, False)])
+@pytest.mark.parametrize("wording", ["original", "explicit_before_selection"])
+def test_agent2_baseline_order_is_shared_fact_not_a_tc_rewrite(field, initial, target, wording):
+    from qa_pipeline_agent3 import (assemble_tc_bindings, controller_baseline_order_facts,
+                                   controller_recovery_tc_facts, resolve_controller_bindings)
+    from qa_pipeline_contracts import QA_CONTROLLER_BASELINE_GUIDANCE
+    case, _ = mapped_tc_fixture(field, initial, target)
+    if wording == "explicit_before_selection":
+        # Reproduce the observed contradiction without repairing it or declaring
+        # it acceptable: the semantic reviewer must still judge this prose.
+        case.preconditions.insert(0, "장비 선택과 준비 조작 전에 원래 화면과 내부값을 기록한다.")
+    before = case.model_dump(mode="json")
+    design = cp2_valid_design().model_copy(update={"test_cases": [case]})
+    old = focused_agent2_payload(design, include_execution_contract=True)
+    old_false = focused_agent2_payload(design, include_execution_contract=True, baseline_capture_order=False)
+    new = focused_agent2_payload(design, include_execution_contract=True, baseline_capture_order=True)
+    assert json.dumps(old, ensure_ascii=False) == json.dumps(old_false, ensure_ascii=False)
+    old_facts = old["context"]["compiler_recovery_facts"]["TC/0"]["controller_recovery"]
+    facts = new["context"]["compiler_recovery_facts"]["TC/0"]["controller_recovery"]
+    assert "baseline_capture_order" not in old_facts
+    assert {k: v for k, v in facts.items() if k != "baseline_capture_order"} == old_facts
+    plan = assemble_tc_bindings(case, resolve_controller_bindings(case))
+    order = facts["baseline_capture_order"]
+    assert order == controller_baseline_order_facts(case, plan)
+    assert facts == controller_recovery_tc_facts(case, include_baseline_order=True)
+    assert order["target_device_id"] == plan.target_device_id
+    assert order["after_selection_action_ids"] == [plan.actions[0].action_id]
+    assert order["before_action_id"] == plan.actions[1].action_id
+    assert order["sequence"] == ["SELECT_TARGET_AND_WAIT_FOR_SELECTED_ID", "CAPTURE_ORIGINAL_READERS",
+                                 "PREPARE_AND_TEST", "RESTORE_AND_COMPARE_SAME_READERS"]
+    assert order["meaning"] == (
+        "BEFORE_SETUP means after the leading target-selection actions and their selectedUnitId waits, "
+        "before the first non-selection action. The initial UI Inventory panel may show another device; "
+        "it is not the captured baseline. This describes compiler order only, not a successful trial "
+        "or permission to use another target/reader.")
+    assert not order["trial_success_proved"]
+    assert any(d["text"] == QA_CONTROLLER_BASELINE_GUIDANCE for d in new["source_documents"])
+    assert not any(d["text"] == QA_CONTROLLER_BASELINE_GUIDANCE for d in old["source_documents"])
+    assert old["items"] == new["items"]
+    assert old["artifact_sha256"] == new["artifact_sha256"]
+    assert grounding._review_digest(old) != grounding._review_digest(new)
+    assert case.model_dump(mode="json") == before
+    old_failure = fake_grounding_record(old, verdict="UNSUPPORTED")
+    preserved = json.dumps(old_failure, ensure_ascii=False)
+    assert grounding.check_review_record(old, old_failure).status == CheckStatus.FAIL
+    with pytest.raises(ValueError, match="해시"):
+        grounding.check_review_record(new, old_failure)
+    # A deterministic test of retained failure routing, not AI semantic accuracy.
+    assert grounding.check_review_record(new, fake_grounding_record(new, verdict="UNSUPPORTED")).status == CheckStatus.FAIL
+    assert json.dumps(old_failure, ensure_ascii=False) == preserved
+
+
+@pytest.mark.parametrize("fault", ["missing_select", "late_select", "wrong_target", "unsupported_select", "missing_restore"])
+def test_agent2_baseline_order_never_promises_invalid_selection_or_recovery(fault):
+    from qa_pipeline_agent3 import controller_recovery_tc_facts
+    case, _ = mapped_tc_fixture("setTemp", 28, 23)
+    operations = case.execution_spec.operations
+    if fault == "missing_select":
+        operations.pop(0)
+    elif fault == "late_select":
+        operations[0], operations[1] = operations[1], operations[0]
+    elif fault == "wrong_target":
+        operations[0].value = 4
+    elif fault == "unsupported_select":
+        operations[0].target = "unsupported.other_device"
+    else:
+        operations.pop()
+    before = case.model_dump(mode="json")
+    facts = controller_recovery_tc_facts(case, include_baseline_order=True)
+    assert facts is None or facts.get("baseline_capture_order") is None
+    design = cp2_valid_design().model_copy(update={"test_cases": [case]})
+    payload = focused_agent2_payload(design, include_execution_contract=True, baseline_capture_order=True)
+    recovery = payload["context"].get("compiler_recovery_facts", {}).get("TC/0", {}).get("controller_recovery")
+    assert recovery is None or recovery.get("baseline_capture_order") is None
+    assert case.model_dump(mode="json") == before
+
+
+@pytest.mark.parametrize("fault", ["unknown_marker", "missing_guidance", "changed_guidance", "missing_alignment"])
+def test_agent2_baseline_order_review_rejects_changed_or_incomplete_contract(fault):
+    case, _ = mapped_tc_fixture("fanSpeed", "HIGH", "MED")
+    design = cp2_valid_design().model_copy(update={"test_cases": [case]})
+    payload = focused_agent2_payload(design, include_execution_contract=True, baseline_capture_order=True)
+    if fault == "unknown_marker":
+        payload["baseline_capture_order_contract"] = "9.0"
+    elif fault == "missing_guidance":
+        payload["source_documents"] = [d for d in payload["source_documents"]
+                                       if d["source_id"] != "CONTROLLER_BASELINE_ORDER"]
+    elif fault == "changed_guidance":
+        next(d for d in payload["source_documents"]
+             if d["source_id"] == "CONTROLLER_BASELINE_ORDER")["text"] = "대상 선택 전에 기록한다."
+    else:
+        payload.pop("tc_execution_alignment_contract")
+    with pytest.raises(ValueError, match="캡처 순서"):
+        grounding.check_review_record(payload, fake_grounding_record(payload))
+
+
 def test_alignment_does_not_bypass_meaning_review_or_reuse_old_judgment():
     request, analysis, design, catalog = compound_reuse_fixture()
     analysis.confirmed_conditions[0].change_role = ConditionChangeRole.UNCHANGED
@@ -246,7 +728,7 @@ def test_live_source_schema_strict_sdk_enum_limits_and_complete_ids(count):
             single_fact=True, source_ids=[source_id], reason="test")]))
 
 
-@pytest.mark.parametrize("invalid", ["empty", "duplicate", "blank", "count", "characters"])
+@pytest.mark.parametrize("invalid", ["empty", "duplicate", "blank", "characters"])
 def test_live_source_schema_invalid_or_oversized_catalog_stops_before_call(invalid):
     documents = [dict(source_id="A", text="original")]
     if invalid == "empty":
@@ -255,8 +737,6 @@ def test_live_source_schema_invalid_or_oversized_catalog_stops_before_call(inval
         documents *= 2
     elif invalid == "blank":
         documents[0]["source_id"] = " "
-    elif invalid == "count":
-        documents = [dict(source_id=str(i), text="original") for i in range(998)]
     else:
         documents[0]["source_id"] = "x" * 120001
     calls = []
@@ -394,6 +874,160 @@ def test_source_id_invalid_selection_retains_response_and_usage():
         grounding.check_review_record(payload, result)
 
 
+def indexed_test_payload(stage="AGENT3", count=1005):
+    payload = review_payload(stage)
+    payload["task_boundary_contract"] = "1.3"
+    payload["source_documents"] = [dict(source_id=f"SRS/TEST/{n}", text=f" 原文 {n}·16~30°C\n")
+                                   for n in range(count)]
+    return payload
+
+
+def indexed_test_record(payload, verdict="SUPPORTED", indices=None):
+    selection = grounding.GroundingIndexSelection(items=[grounding.ReviewIndexSelection(
+        item_id=item["item_id"], verdict=verdict, single_fact=True,
+        source_indices=[0, len(payload["source_documents"]) - 1] if indices is None else indices,
+        reason="scripted transport test, not semantic judgment") for item in payload["items"]])
+    sdk = SimpleNamespace(responses=SimpleNamespace(parse=lambda **kwargs: SimpleNamespace(
+        output_parsed=selection, id="local-indexed", usage=SimpleNamespace(
+            input_tokens=7, output_tokens=3, total_tokens=10))))
+    return grounding.OpenAIGroundingReviewer(model="test", client=sdk).review(payload)
+
+
+@pytest.mark.parametrize("count", [997, 998, 1005, 1200])
+def test_indexed_transport_preserves_every_document_and_request_local_mapping(count):
+    from openai.lib._pydantic import to_strict_json_schema
+    payload = indexed_test_payload(count=count)
+    before = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    wire, model = grounding.indexed_review_transport(payload)
+    for n, (source, sent) in enumerate(zip(payload["source_documents"], wire["source_documents"])):
+        assert sent == dict(source, source_index=n)
+    assert len(wire["source_documents"]) == count
+    restored = json.loads(json.dumps(wire))
+    restored.pop("source_selection_transport")
+    for doc in restored["source_documents"]:
+        doc.pop("source_index")
+    assert restored == payload
+    schema = to_strict_json_schema(model)
+    field = schema["$defs"]["BoundReviewIndexSelection"]["properties"]["source_indices"]["items"]
+    assert field["type"] == "integer" and field["minimum"] == 0 and field["maximum"] == count - 1
+    assert "SRS/TEST/" not in json.dumps(schema)
+    data = dict(items=[dict(item_id="ER/0", verdict="SUPPORTED", single_fact=True,
+                           source_indices=list(range(count)), reason="all original citations")])
+    bound = grounding.bind_review_sources(payload, grounding.bind_review_indices(payload, model.model_validate(data)))
+    assert [c.model_dump() for c in bound.items[0].citations] == [
+        dict(source_id=d["source_id"], quote=d["text"]) for d in payload["source_documents"]]
+    assert json.dumps(payload, ensure_ascii=False, sort_keys=True) == before
+
+
+@pytest.mark.parametrize("bad", [-1, 1005, True, 1.0, "1", None])
+def test_indexed_transport_rejects_invalid_number_without_coercion(bad):
+    payload = indexed_test_payload()
+    _, model = grounding.indexed_review_transport(payload)
+    item = dict(item_id="ER/0", verdict="SUPPORTED", single_fact=True,
+                source_indices=[bad], reason="invalid index")
+    with pytest.raises(ValueError):
+        model.model_validate(dict(items=[item]))
+    # The binding guard also rejects invalid objects bypassing model validation.
+    raw = SimpleNamespace(items=[SimpleNamespace(source_indices=[bad])])
+    with pytest.raises(ValueError):
+        grounding.bind_review_indices(payload, raw)
+
+
+@pytest.mark.parametrize("stage", ["AGENT1", "AGENT2", "AGENT3"])
+@pytest.mark.parametrize("count", [997, 998, 1005])
+def test_indexed_transport_actual_sdk_wire_and_legacy_threshold(stage, count):
+    import httpx
+    payload = indexed_test_payload(stage, count)
+    indexed = count > 997
+    field = "source_indices" if indexed else "source_ids"
+    selected = [0, count - 1] if indexed else [d["source_id"] for d in payload["source_documents"][::count-1]]
+    data = dict(items=[dict(item_id=i["item_id"], verdict="SUPPORTED", single_fact=True,
+                           **{field: selected}, reason="local SDK test") for i in payload["items"]])
+    sent = []
+    def transport(request):
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json=dict(id="resp_local", object="response", created_at=0,
+            status="completed", model="test", output=[dict(id="msg_local", type="message",
+            role="assistant", status="completed", content=[dict(type="output_text",
+            text=json.dumps(data), annotations=[])])],
+            usage=dict(input_tokens=7, output_tokens=3, total_tokens=10)))
+    with grounding.OpenAI(api_key="local-test-not-a-secret", max_retries=0,
+            http_client=httpx.Client(transport=httpx.MockTransport(transport))) as client:
+        result = grounding.OpenAIGroundingReviewer(model="test", client=client).review(payload)
+    assert len(sent) == 1 and sent[0]["store"] is False
+    assert sent[0]["text"]["format"]["strict"] is True
+    wire = json.loads(sent[0]["input"][1]["content"])
+    assert wire == (grounding.indexed_review_transport(payload)[0] if indexed else payload)
+    assert ("source_indices" in sent[0]["input"][0]["content"]) == indexed
+    assert result["citation_binding_contract"] == ("source-index-1.0" if indexed else "source-id-1.0")
+    assert grounding.check_review_record(payload, result).status == CheckStatus.PASS
+    assert result["usage"]["total_tokens"] == 10
+
+
+@pytest.mark.parametrize("verdict,status", [("SUPPORTED", CheckStatus.PASS),
+    ("UNSUPPORTED", CheckStatus.FAIL), ("UNCERTAIN", CheckStatus.REVIEW)])
+def test_indexed_transport_keeps_verdict_and_empty_evidence_rules(verdict, status):
+    payload = indexed_test_payload()
+    assert grounding.check_review_record(payload, indexed_test_record(payload, verdict)).status == status
+    record = indexed_test_record(payload, verdict, indices=[])
+    if verdict == "UNCERTAIN":
+        assert grounding.check_review_record(payload, record).status == CheckStatus.REVIEW
+    else:
+        with pytest.raises(ValueError):
+            grounding.check_review_record(payload, record)
+
+
+@pytest.mark.parametrize("mutation", ["index", "duplicate_index", "out_of_range", "source_id", "quote",
+    "verdict", "wire_hash", "input_text", "input_order", "missing_document", "missing_marker",
+    "unknown_marker", "missing_selection", "missing_item", "duplicate_item"])
+def test_indexed_saved_review_detects_tampering_and_missing_review(mutation):
+    payload = indexed_test_payload()
+    record = indexed_test_record(payload)
+    item = record["index_selection"]["items"][0]
+    if mutation == "index": item["source_indices"][0] = 1
+    elif mutation == "duplicate_index": item["source_indices"] = [0, 0]
+    elif mutation == "out_of_range": item["source_indices"] = [1005]
+    elif mutation == "source_id": record["source_selection"]["items"][0]["source_ids"][0] = "UNKNOWN"
+    elif mutation == "quote": record["review"]["items"][0]["citations"][0]["quote"] += "."
+    elif mutation == "verdict": record["review"]["items"][0]["verdict"] = "UNSUPPORTED"
+    elif mutation == "wire_hash": record["wire_input_sha256"] = "0" * 64
+    elif mutation == "input_text": payload["source_documents"][0]["text"] += "wrong"
+    elif mutation == "input_order": payload["source_documents"].reverse()
+    elif mutation == "missing_document": payload["source_documents"].pop()
+    elif mutation == "missing_marker": record.pop("citation_binding_contract")
+    elif mutation == "unknown_marker": record["citation_binding_contract"] = "unknown"
+    elif mutation == "missing_selection": record.pop("index_selection")
+    elif mutation == "missing_item":
+        for field in ("index_selection", "source_selection", "review"): record[field]["items"].pop()
+    elif mutation == "duplicate_item":
+        for field in ("index_selection", "source_selection", "review"):
+            record[field]["items"].append(record[field]["items"][0])
+    with pytest.raises(ValueError):
+        grounding.check_review_record(payload, record)
+
+
+def test_indexed_invalid_selection_retains_raw_response_and_usage():
+    payload = indexed_test_payload()
+    record = indexed_test_record(payload, indices=[0, 0])
+    assert record["index_selection"]["items"][0]["source_indices"] == [0, 0]
+    assert record["response_id"] == "local-indexed" and record["usage"]["total_tokens"] == 10
+    assert record["review"] is None
+    with pytest.raises(ValueError): grounding.check_review_record(payload, record)
+
+
+@pytest.mark.parametrize("focused", [False, True])
+def test_indexed_instructions_only_change_citation_addressing(focused):
+    original = grounding.FOCUSED_AGENT2_REVIEW_INSTRUCTIONS if focused else grounding.REVIEW_INSTRUCTIONS
+    updated = grounding._indexed_review_instructions(original)
+    assert "source_indices" in updated
+    assert "정확한 source_id를 선택" not in updated and "source_id를 source_ids에" not in updated
+    assert "SUPPORTED / UNSUPPORTED / UNCERTAIN" in updated
+    # Non-addressing paragraphs must remain intact.
+    for paragraph in original.split("\n"):
+        if not any(token in paragraph for token in ("source_id", "source_ids")):
+            assert paragraph in updated
+
+
 def test_source_id_duplicate_documents_never_pick_one_silently():
     payload = review_payload()
     record = source_selected_review_record(payload)
@@ -489,12 +1123,31 @@ def test_new_scope_and_terminal_policies_cannot_silently_downgrade(stage, mutati
     if mutation == "unknown": manifest[marker] = "unknown"
     if mutation.startswith("historical"): manifest["prompt_version"] = historical_prompt
     if mutation.startswith("historical") and stage == "AGENT2":
+        manifest.pop("baseline_capture_order_contract")
+        manifest.pop("focused_design_review_contract")
+        manifest.pop("human_judgment_examples_contract", None)
+        manifest.pop("design_review_contract")
+        manifest["double_assert_timing_contract"] = "1.0"
         manifest.pop("tc_execution_alignment_contract")
         manifest.pop("essential_validation_contract")
     if mutation in {"none", "historical"}:
         assert reader(manifest)[option] == (mutation == "none")
     else:
         with pytest.raises(ValueError): reader(manifest)
+
+
+def test_pair_observation_policy_is_reviewed_and_hash_bound():
+    args = dict(analysis=cp2_analysis(), include_tc_execution_alignment=True)
+    old = grounding.build_grounding_input("AGENT2", cp1_request(), cp2_requirements(),
+                                         cp2_valid_design(), **args)
+    new = grounding.build_grounding_input("AGENT2", cp1_request(), cp2_requirements(),
+                                         cp2_valid_design(), pair_observation_anchors=True, **args)
+    assert old["items"] == new["items"]
+    assert "double_assert_timing_contract" not in old
+    assert new["double_assert_timing_contract"] == "2.0"
+    with pytest.raises(ValueError):
+        grounding.check_review_record(new, fake_grounding_record(old))
+    assert grounding.check_review_record(new, fake_grounding_record(new)).status == CheckStatus.PASS
 
 
 def test_terminal_observation_policy_is_reviewed_and_hash_bound():

@@ -2,6 +2,8 @@
 
 from pipeline_test_support import *
 
+pytestmark = pytest.mark.usefixtures("isolated_ui_srs")
+
 
 @pytest.mark.parametrize("decision,mode", [("APPROVE", "ADD"), ("APPROVE", "REPLACE"),
                                          ("DECLINE", "ADD"), ("HOLD", "ADD")])
@@ -482,7 +484,7 @@ def test_tc_comparison_browser_http_replace_and_decline(tmp_path, monkeypatch):
             page.locator("#qa-live-approve-btn").click()
             expect(page.locator("#qa-live-approval-status")).to_contain_text("대체 대상: TC-TEMP-001")
             assert not (assets / "registry.json").exists()
-            evidence = REPO_ROOT / "runs/asset-comparison-20261004"
+            evidence = tmp_path / "asset-comparison-evidence"
             evidence.mkdir(parents=True, exist_ok=True)
             page.locator("#qa-live-tc-comparison").screenshot(path=str(evidence / "comparison.png"))
             page.locator("#qa-live-approve-btn").click()

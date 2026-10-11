@@ -2,6 +2,111 @@
 
 from pipeline_test_support import *
 
+@pytest.mark.parametrize('field,initial,target', [
+    ('status','OPERATION','STOP'), ('mode','COOL','HEAT'),
+    ('fanSpeed','LOW','HIGH'), ('setTemp',24,26), ('locked',False,True)])
+def test_baseline_order_facts_match_compiler_across_controls(field,initial,target,controller_observation):
+    import qa_pipeline_grounding as grounding
+    from qa_pipeline_agent3 import controller_baseline_order_facts
+    case,plan=controller_lifecycle_fixture(field,initial,target)
+    obs=controller_observation
+    facts=controller_baseline_order_facts(case,plan)
+    assert facts and facts['target_device_id']==plan.target_device_id
+    assert not facts['trial_success_proved']
+    code=compile_automation_candidate('RUN-20261011-120000-ABCDEF',case,plan)
+    assert code.index('selectedUnitId === 1') < code.index('controller_original = _controller_baseline(page, 1)')
+    assert code.index('controller_original = _controller_baseline(page, 1)') < code.index('state_change_started = True')
+    old=grounding.build_grounding_input('AGENT3',None,{},plan,test_case=case,observation=obs,
+        include_review_responsibilities=True,include_task_boundaries='1.3')
+    new=grounding.build_grounding_input('AGENT3',None,{},plan,test_case=case,observation=obs,
+        include_review_responsibilities=True,include_task_boundaries='1.3',baseline_capture_order=True)
+    assert 'baseline_capture_order' not in old['context']['compiler_plan_facts']
+    assert new['context']['compiler_plan_facts']['baseline_capture_order']==facts
+    assert old['items']==new['items']  # No review target removed or verdict changed.
+    plan.actions[0].value=None  # Controller-map selection is bound by selector/plan ID.
+    assert controller_baseline_order_facts(case,plan)==facts
+
+@pytest.mark.parametrize('fault',['missing_select','wrong_target','wrong_selector','late_select','missing_restore'])
+def test_baseline_order_facts_do_not_claim_safe_order_for_invalid_plan(fault,controller_observation):
+    from qa_pipeline_agent3 import controller_baseline_order_facts
+    case,plan=controller_lifecycle_fixture('setTemp',24,26)
+    obs=controller_observation
+    if fault=='missing_select':plan.actions.pop(0)
+    elif fault=='wrong_target':plan.actions[0].value=4
+    elif fault=='wrong_selector':plan.actions[0].selector='#device-card-4 .card-body-split'
+    elif fault=='late_select':plan.actions[0],plan.actions[1]=plan.actions[1],plan.actions[0]
+    else:plan.actions=[a for a in plan.actions if a.phase.value!='RESTORE']
+    assert controller_baseline_order_facts(case,plan) is None
+    cp=pipeline.evaluate_checkpoint3_plan(case,plan,obs,require_assertion_target_identity=True)
+    assert cp.status==CheckStatus.FAIL
+
+
+@pytest.mark.parametrize("product_failure", [False, True])
+@pytest.mark.parametrize("restore_failure", [False, True])
+def test_restore_confirmation_independent_of_product_verdict(tmp_path, monkeypatch, capsys, product_failure, restore_failure):
+    case, plan, _ = _restoration_detail_fixture()
+    line = "복원 후 새 제어 스위치와 내부 enabled 값을 시험 전 관찰한 상태와 비교해 일치하는지 확인한다."
+    case.restore_steps.append(line)
+    plan.restore_confirmations = [pipeline.RestoreConfirmation(source_text=line,
+        result_ids=[r.result_id for r in case.expected_results])]
+    code = compile_automation_candidate("LOCAL-RESTORE-RECORD", case, plan)
+    target = tmp_path / "switch.html"
+    target.write_text('''<!doctype html><input id="new-feature-toggle" type="checkbox"
+        onchange="window.__vccs.feature.enabled=this.checked"><script>
+        window.__vccs={feature:{enabled:false}};</script>''', encoding="utf-8")
+    monkeypatch.setenv("QA_TARGET_URL", target.as_uri())
+    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
+    namespace = {}
+    exec(compile(code, "restoration_record", "exec"), namespace)
+    original_wait = namespace["_wait_for_observations"]
+    calls = []
+    def wait(page, observe):
+        result = original_wait(page, observe)
+        calls.append(1)
+        if len(calls) == 2 and product_failure:
+            return result + ["local product mismatch injection"]
+        if len(calls) == 3 and restore_failure:
+            return result + ["local restore mismatch injection"]
+        return result
+    namespace["_wait_for_observations"] = wait
+    if product_failure or restore_failure:
+        with pytest.raises(AssertionError, match="PRODUCT_MISMATCH" if product_failure else "RESTORE_MISMATCH"):
+            namespace["test_tc_cand_090"]()
+    else:
+        namespace["test_tc_cand_090"]()
+    output = capsys.readouterr().out
+    assert len(calls) == 3  # precondition, product assertions, restoration
+    assert ("RESTORE_CONFIRMATIONS_VERIFIED:" in output) is not restore_failure
+    assert ("RESTORE_MISMATCH:" in output) is restore_failure
+
+
+@pytest.mark.parametrize("field,initial,target", [
+    ("status", "OPERATION", "STOP"), ("mode", "COOL", "HEAT"),
+    ("fanSpeed", "HIGH", "LOW"), ("setTemp", 29, 22), ("locked", False, True)])
+@pytest.mark.parametrize("fault", [None, "missing_reader", "wrong_device", "wrong_value", "wrong_basis", "missing_restore"])
+def test_normalized_restoration_reaches_cp3_without_losing_protection(controller_observation, field, initial, target, fault):
+    from qa_pipeline_agent2 import _normalize_agent2_live_design
+    from qa_pipeline_agent3 import ControllerMapAgent3
+    case = repeated_restoration_fixture(field, initial, target)
+    design, _ = _normalize_agent2_live_design(cp2_valid_design().model_copy(update={"test_cases": [case]}))
+    case = design.test_cases[0]
+    plan = ControllerMapAgent3().plan(case, controller_observation, {}).plan
+    if fault == "missing_reader":
+        plan.assertions.pop()
+    elif fault == "wrong_device":
+        plan.target_device_id = 2
+    elif fault == "wrong_value":
+        plan.assertions[0].expected_fields[0].expected_value = "UNAPPROVED"
+    elif fault == "wrong_basis":
+        plan.restore_confirmations[0].comparisons[0].basis = pipeline.RestoreComparisonBasis.PROVED_INITIAL
+    elif fault == "missing_restore":
+        plan.actions = [a for a in plan.actions if a.phase != AutomationPhase.RESTORE]
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation, legacy_wording_checks=False)
+    assert cp.status == (CheckStatus.PASS if fault is None else CheckStatus.FAIL), cp.model_dump()
+    if fault is None:
+        code = compile_automation_candidate("FORMAT-LOCAL", case, plan)
+        assert "RESTORE_CONFIRMATIONS_VERIFIED" in code
+
 def test_saved_dry_tc_executes_unchanged_and_restores(controller_observation, tmp_path, monkeypatch, capsys):
     """Replay the real rejected draft, not a hand-corrected replacement or AI review."""
     from qa_pipeline_agent3 import assemble_tc_bindings, resolve_controller_bindings, tc_plan_handoff_errors
@@ -1114,13 +1219,13 @@ def test_execution_interface_saved_handoff_preserves_results_and_integrity(
     assert original_case == restored_case.model_dump_json() == case.model_dump_json()
     assert manifest["prompt_version"] == ("agent3-3.46" if mapped else "agent3-3.47")
     assert manifest["value_comparison_contract"] == "1.0"
-    assert manifest["execution_interface_contract"] == "1.0"
+    assert manifest["execution_interface_contract"] == "1.2"
 
     # A later read must reject changed policy, review, code and evidence without API.
     manifest_file = run / "agent3_manifest.json"
     for marker in (None, "unknown"):
         pipeline._write_json(manifest_file, {**manifest, "execution_interface_contract": marker})
-        with pytest.raises(ValueError, match="실행 인터페이스 계약"):
+        with pytest.raises(ValueError, match="실행 인터페이스 계약|원래값 캡처 순서 설명 계약"):
             pipeline._candidate_execution_record(run, run_id, product)
     pipeline._write_json(manifest_file, manifest)
     for marker in (None, "unknown"):
@@ -1163,7 +1268,7 @@ def test_frozen_tc_agent3_orchestration_saves_binding_and_shared_review(tmp_path
     assert calls == ["binding", "trial"]
     manifest = pipeline._read_json_payload(run / "agent3_manifest.json")
     assert manifest["prompt_version"] == "agent3-3.46"
-    assert manifest["execution_interface_contract"] == "1.0"
+    assert manifest["execution_interface_contract"] == "1.2"
     pipeline_execution._agent3_review_options(manifest)
     pipeline_execution._verify_agent3_plan_value_formats(run, manifest, observation, plan, case)
     payload = pipeline._read_json_payload(run / "agent3_grounding_input_attempt_1.json")
@@ -1826,7 +1931,8 @@ def test_plan_value_format_pipeline_uses_same_plan_for_review_and_compile(tmp_pa
     original_compile = pipeline_execution.compile_automation_candidate
     def compile_plan(run_id, tc, plan, **kwargs):
         assert plan == canonical
-        assert kwargs == {"explicit_expectations_only": True, "typed_values": True}
+        assert kwargs == {"explicit_expectations_only": True, "typed_values": True,
+                          "consistent_card_lock": True}
         return original_compile(run_id, tc, plan, **kwargs)
     monkeypatch.setattr(pipeline_execution, "compile_automation_candidate", compile_plan)
     monkeypatch.setattr(pipeline_execution, "run_candidate_trial", lambda *a, **kw: _trial(TrialOutcome.PASS))

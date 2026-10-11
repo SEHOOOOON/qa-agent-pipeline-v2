@@ -1,5 +1,41 @@
 # 자동 테스트 카탈로그
 
+`tests/test_grounding.py`의 indexed 검사는 근거 997/998개 경계·1,005/1,200개 입력의 원문 전체 보존, 정수 번호의 원문 연결, 실제 SDK의 로컬 대역 전송, 범위 밖/중복/문자·실수·불리언 번호 거부, 번호표·인용·판정 변조 차단을 확인합니다. 원래 ID 응답과 PASS/FAIL/REVIEW·필수 근거/항목 검사를 유지합니다. 로컬 SDK 대역은 실제 서버 수용이나 AI의 올바른 근거 선택을 증명하지 않습니다. 저장 실행 자료 재검사와 검증 횟수는 인계 문서에 기록합니다.
+
+`tests/test_lock_input_regressions.py`는 카드 클래스/잠금 아이콘의 네 조합, 실제 DOM에서의 모순 표시와 내부값 비의존, 잠금/해제의 본시험·복원, 과거 컴파일 동작 보존을 확인합니다. 검토 입력의 TC 참조를 펼쳐 원문·항목·자료형을 대조하고, 모호하거나 다른 TC는 자동 병합하지 않으며, 새 입력에 과거 검토를 재사용하지 못하는지 확인합니다. 대역 판정과 실제 모델 품질은 구분합니다.
+
+`tests/test_srs_agent1.py`의 `scope_quote_keeps_preparation_context`, `scope_context_alignment`, `waiting_gap` 검사는 준비 원문과 요청 조건의 복합 인용, 인용 순서·준비값 변형, 준비값만 있는 근거·없는 원문·잘못된 값/ID/연결의 차단을 확인합니다. 대기의 정보 부족 보존과 인계 PAUSE, 질문/정보 누락 반려, 기존 부분 진행 보호 및 실제 전송 지침의 조건부 적용도 확인합니다. `tests/test_integrity_cli.py`의 `request_role_alignment_live_rewrite_and_handoff`는 대역 모델로 신규 생성·재작성·검토 반려·대기·인계 재검사와 버전 혼용 차단을 확인합니다. 실제 모델의 이해도 검증은 아닙니다.
+
+`test_external_reports_include_unexecuted_without_product_fail`은 검토 반려/자동화 불가를 제품 FAIL과 구분하여 Slack·Notion에 표시하고, 미실행 레코드/상세 안내/TC ID 중복 방지 및 실제 ASSERTION_FAILED의 Fail 표시 유지를 확인합니다. 기존 외부 전송·응답 유실·본문 보존 회귀와 함께 실행합니다.
+
+`tests/test_agent3.py`의 baseline_order 검사는 다섯 관제점에서 대상 선택→원래값 캡처→준비 변경 순서가 생성 코드와 같은지, 선택 value 생략이 허용되는 연결표 계획도 같은 설명을 받는지 확인합니다. 잘못된 ID/selector·선택 누락/지연·복원 누락 반례는 사실 제공 제외 및 기존 CP3 FAIL을 확인합니다. 검토 대상 목록은 줄이지 않고 과거 payload에는 새 설명을 넣지 않습니다. 모델 오판 개선 측정이 아닌 로컬 계약 검사입니다.
+
+`tests/test_agent2.py`·`tests/test_grounding.py`의 baseline_order 검사는 작성·재작성·검토에 같은 순서 설명 전달, 다섯 관제점과 다른 표현에서도 실제 계획의 경계 연결, 잘못된 대상/복원 누락에 대한 보장 금지, TC 원문·반려 보존 및 과거 표식 없는 계약의 호환을 확인합니다. 대역 검토의 판정 보존이지 새 AI의 판단 개선 측정은 아닙니다.
+
+`tests/test_orchestration_execution.py`의 실패 trial 인계 검사는 자동화/환경 오류·시간 초과·복원 실패를 미실행 제외와 구분하고, 실제 Agent 4와 Slack·Notion 미리보기까지 오류 증거가 유지되는지 확인합니다. Manifest·시험·증거 변조는 차단하며, 보고 목적의 암묵적 재시험과 과거 증거 덮어쓰기를 금지합니다. 외부 발송·새 모델 실행은 포함하지 않습니다.
+
+같은 파일의 `test_candidate_summary_pin_*`은 통합 실행 요약의 원래 해시 누락·잘못된 형식·변경, Run/단계 불일치, 실행/제외 항목 삭제 및 요약 삭제 후 단일 후보 우회를 차단하는지 확인합니다. 정상 pin·Orchestrator 없는 수동 요약·기존 단일 CLI 호환과 저장 파일 불변도 확인합니다. 모델·제품 시험은 대역이며 기존 저장 자료의 보호 범위를 검증합니다.
+
+UI 승인·되돌리기 검사는 `isolated_ui_srs`가 별도 임시 SRS를 기본 경로로 제공하며, 명시적인 시험용 SRS는 유지합니다. 저장 실패·승인 차단 검사를 위해 저장소의 실제 SRS에 복구 파일을 쓰지 않습니다. 시험 종료 시 원본 바이트 불변을 확인하고, 브라우저 캡처도 시험 임시 폴더에 저장합니다. 운영 코드의 승인·복구 정책을 대역으로 바꾸는 처리가 아닙니다.
+
+`tests/test_srs_source_materialization.py`: 새 모델 응답/저장 양식 분리, 원문 연결과 변경안 불변, 잘못된 ID 거부, 생성/재작성 전달, 과거 계약 호환, 승인 전 SRS 변경 거부, 원응답·연결 기록 보존을 확인합니다. 실제 API 품질 개선은 별도 검증합니다.
+
+`test_restore_confirmation_independent_of_product_verdict`는 제품 정상/불일치와 복원 정상/불일치의 네 조합을 헤드리스 화면·대역 오류 주입으로 확인합니다. 복원 완료 메시지의 조건과 제품 실패 보존을 확인하며 실제 AI 실행이 아닙니다. `test_controller_recovers_before_test_starts`의 준비 중단 복구와 완료 주장 금지도 함께 확인합니다.
+
+`test_human_examples_*`는 작성/재작성/검토에 같은 참고 전문 전달, 현재 요청/산출물 불변, 인용 가능한 원문과 예시 분리, 입력 해시와 버전 연결, 과거 기록 재사용 경계, 반려·불확실 판정 보존을 확인합니다. 대역 SDK로 검사하며 예시를 본 실제 AI의 정확도·새 요청 성공을 측정하지 않습니다.
+
+`tests/test_model_defaults.py`는 P1 생성·검토 클라이언트의 6.1 SOL 기본값, 환경변수/명시 모델 우선순위와 과거 Terra 명시 사용 호환성을 네트워크 없이 확인합니다. 모델의 실제 판단 정확도는 이 검사에 포함되지 않습니다.
+
+`test_focused_review_*`는 TC별 검토 통합 후 원문·실행 정의·모든 조건·절차·완료 범위 판단의 보존, 참고 설명의 단독 심사 제외, 필수 반려/불확실의 차단, 검토 항목 누락·잘못된 인용·입력 해시 불일치 차단을 확인합니다. 다섯 관제점의 정상·다른 값/대상/시점·검사 누락 자료가 조용히 보정되지 않고 전달되는지 검사합니다. 대역 판정의 FAIL/REVIEW 보존은 실제 모델의 오류 발견 능력과 구분합니다. CLI 인계 검사는 최초/재작성/저장 로더가 같은 집중 검토 계약을 적용하고 과거 계약에 새 표식이 섞이지 않는지 확인합니다.
+
+`test_agent2_semantic_rework_feedback_and_stop_boundaries`는 유효한 의미 반려 사유·이전 전체 TC의 실제 프롬프트 전달, 재작성본의 새 검토, 최초 FAIL 보존, 한 번 재작성 한도와 REVIEW·검토 오류·통신 오류의 중단을 확인합니다. 대역 생성/검토를 사용한 연결 검사이며 실제 AI 복구 성공률을 측정하지 않습니다.
+
+`test_live_restoration_layout_*`는 새 Agent 2 출력의 복원 확인을 ER별로 나누거나 묶은 구성, 같은 설명을 여러 대상에 연결한 구성, 비교 배열 순서를 대조한다. 정리 전후 대상·기대값·실행 조작·각 ER 비교 연결의 불변과 반복 정리의 멱등성을 확인하며, 누락·중복·알 수 없는 ID·잘못된 비교 기준·출처 불일치는 고치지 않고 반려되는지 확인한다. `test_normalized_restoration_reaches_cp3_without_losing_protection`는 다섯 관제점에서 후속 계획과 컴파일 연결, 검사 누락·장비 혼동·값 변경·복원 삭제 차단을 확인한다. 준비된 fixture 검사이며 새 AI의 의미 판단을 검증한 것은 아니다.
+
+`test_shared_design_review_*`는 작성·검토의 동일 지침 전달, 신규/과거 입력 분리, 판정/해시 보존을 확인합니다. 관제점 라벨별 대역 판정은 실제 AI 의미 정확도 검증이 아닙니다. CLI 인계 검사는 기존 재작성과 `--no-rewrite`의 구조 반려·의미 반려·정상 경로, 최종 기록·후속 실행 차단을 대조합니다.
+
+`test_double_assert_execution_anchors`는 다섯 관제점에서 필수 이중 확인·추가 패널 관찰·관찰 전용 문장 분리와 조건 번호가 나뉜 이중 확인 및 잘못된 조작 시점·계층 누락을 대조한다. `test_double_assert_anchor_contract_is_version_bound`와 `test_pair_observation_policy_is_reviewed_and_hash_bound`는 새 계약 누락/다운그레이드 및 과거 검토 입력 혼입을 차단한다. `test_live_reference_*`는 공백만 다른 참조의 유일 연결·원본/기대값 보존·반복 정규화와 다른 단어/값·모호한 연결 거부를 확인한다. CLI 인계 검사는 원본·정규화 기록과 의미 검토 입력 보존을 함께 확인한다. 실제 모델 판단 정확도는 이 대역 회귀로 입증하지 않는다.
+
 `test_validation_execution_checks_handoff_before_any_trial`는 신규/재사용/제외 요약과 설계 변조·Manifest 누락·Checkpoint 변조를 조합해 제품 시험 전 차단을 확인한다. 실제 인계 로더를 사용하며 모델·브라우저는 호출하지 않는다. `uses_verified_design_for_selection`은 검증된 설계를 재사용하는 순서를 확인하는 대역 단위 검사다. 기존 실행 집계 단위 검사는 인계를 명시적으로 대역 처리하므로 전체 인계 검증 수로 세지 않는다.
 
 `test_error_capture_preserves_original_error_and_restoration`는 조작 오류 시 캡처 생성과 캡처 실패 주입을 비교한다. 캡처 오류가 원래 실행 오류를 가리지 않고 원상 복원과 trace를 보존하는지 확인한다.
@@ -21,6 +57,8 @@
 `test_srs_agent1.py`의 single_requirement_map 검사는 단일 연결 입력·여러 관제점 ID·누락/위조/범위 확대 방어·Agent 2와 의미 검토의 동일 분석 전달을 확인한다. `test_integrity_cli.py`에서는 모델 원본 해시·재계산 비교·계약 누락·잘못된 원본 경로를 확인한다. 연결표 검사는 합성 입력이며 해당 관제점의 실제 모델·제품 성공을 의미하지 않는다.
 
 `test_grounding.py`의 reader 관련 검사는 지원 전략 전체의 설명 누락, 고정 기대값, 계획 보존, 잘못된 값·대상·확인 시점의 차단 유지를 확인한다. 설명 자료의 존재는 실제 모델 검토 성공을 의미하지 않는다.
+
+`test_interface_regressions.py`는 모드 전환 후 개별 온도 버튼의 활성/비활성과 준비 전 복원, 각 버튼의 반대 기대값 검출, 표시창 오연결·장비 혼동·검사 누락·잘못된 자료형을 확인합니다. 기존 DOM 읽기 함수를 직접 실행해 중풍/MED 등 라벨 대응과 미등록 문구·불일치 상태의 null 처리를 대조합니다. 실행 인터페이스 1.0 입력 보존, 1.1의 검토 항목/TC 보존, 이전 검토 재사용 차단 및 PASS/FAIL/REVIEW 정책 유지를 확인합니다. 준비한 TC와 대역 판정의 로컬 회귀이며 새 AI 성공률은 아닙니다.
 
 같은 파일의 `test_grounding_coverage_evidence_and_decisions`와 `test_saved_review_missing_identity_reports_cause_before_reading_verdict`는 Agent 1~3의 저장 검토에 대해 계약 형식·단계·입력 해시 오류를 구분하고, 누락된 식별 정보로 판정을 읽거나 재사용하지 않는지 확인한다. 오류 안내만 구분하며 기존 PASS/FAIL/REVIEW와 해시 보호는 유지한다.
 
