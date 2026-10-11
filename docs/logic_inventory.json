@@ -86849,22 +86849,22 @@
       "coverage": "Inline JavaScript and event handlers parsed only; external script dependencies not included."
     },
     "project.html": {
-      "sha256": "227089705555fb9346845c00bbaf6d468605ccaa031bc051ccf3abb5b5540342",
+      "sha256": "8dd28cbedee1b5590a19dcf75ac82047a87d148d841888d074607b4697c9d683",
       "script_spans": [
         {
-          "line": 1013,
+          "line": 1031,
           "attributes": {},
-          "end_line": 1040
+          "end_line": 1058
         },
         {
-          "line": 1042,
+          "line": 1060,
           "attributes": {},
-          "end_line": 1068
+          "end_line": 1086
         },
         {
-          "line": 1069,
+          "line": 1087,
           "attributes": {},
-          "end_line": 1110
+          "end_line": 1128
         }
       ],
       "event_handlers": [],
@@ -86874,699 +86874,699 @@
         "node_version": "v24.19.0",
         "blocks": [
           {
-            "line": 1013,
+            "line": 1031,
             "handler": false,
             "definitions": [
               {
-                "line": 1014,
-                "column": 1,
-                "end_line": 1039,
-                "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:1014:1>"
-              },
-              {
-                "line": 1016,
-                "column": 1,
-                "end_line": 1025,
-                "kind": "FunctionDeclaration",
-                "name": "<script>.<anonymous:1014:1>.select"
-              },
-              {
-                "line": 1017,
-                "column": 15,
-                "end_line": 1023,
-                "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:1014:1>.select.<anonymous:1017:15>"
-              },
-              {
-                "line": 1026,
-                "column": 14,
-                "end_line": 1037,
-                "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:1014:1>.<anonymous:1026:14>"
-              },
-              {
-                "line": 1027,
-                "column": 31,
-                "end_line": 1027,
-                "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:1014:1>.<anonymous:1026:14>.<anonymous:1027:31>"
-              },
-              {
-                "line": 1028,
-                "column": 33,
-                "end_line": 1036,
-                "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:1014:1>.<anonymous:1026:14>.<anonymous:1028:33>"
-              }
-            ],
-            "control_nodes": [
-              {
-                "line": 1021,
-                "column": 17,
-                "end_line": 1021,
-                "kind": "ConditionalExpression",
-                "scope": "<script>.<anonymous:1014:1>.select.<anonymous:1017:15>",
-                "condition_or_value": "active",
-                "guards": []
-              },
-              {
-                "line": 1024,
-                "column": 2,
-                "end_line": 1024,
-                "kind": "IfStatement",
-                "scope": "<script>.<anonymous:1014:1>.select",
-                "condition_or_value": "focus",
-                "guards": []
-              },
-              {
-                "line": 1030,
-                "column": 3,
-                "end_line": 1034,
-                "kind": "IfStatement",
-                "scope": "<script>.<anonymous:1014:1>.<anonymous:1026:14>.<anonymous:1028:33>",
-                "condition_or_value": "event.key==='ArrowRight'",
-                "guards": []
-              },
-              {
-                "line": 1031,
-                "column": 8,
-                "end_line": 1034,
-                "kind": "IfStatement",
-                "scope": "<script>.<anonymous:1014:1>.<anonymous:1026:14>.<anonymous:1028:33>",
-                "condition_or_value": "event.key==='ArrowLeft'",
-                "guards": [
-                  "L1030 FALSE: event.key==='ArrowRight'"
-                ]
-              },
-              {
                 "line": 1032,
-                "column": 8,
-                "end_line": 1034,
-                "kind": "IfStatement",
-                "scope": "<script>.<anonymous:1014:1>.<anonymous:1026:14>.<anonymous:1028:33>",
-                "condition_or_value": "event.key==='Home'",
-                "guards": [
-                  "L1030 FALSE: event.key==='ArrowRight'",
-                  "L1031 FALSE: event.key==='ArrowLeft'"
-                ]
-              },
-              {
-                "line": 1033,
-                "column": 8,
-                "end_line": 1034,
-                "kind": "IfStatement",
-                "scope": "<script>.<anonymous:1014:1>.<anonymous:1026:14>.<anonymous:1028:33>",
-                "condition_or_value": "event.key==='End'",
-                "guards": [
-                  "L1030 FALSE: event.key==='ArrowRight'",
-                  "L1031 FALSE: event.key==='ArrowLeft'",
-                  "L1032 FALSE: event.key==='Home'"
-                ]
+                "column": 1,
+                "end_line": 1057,
+                "kind": "ArrowFunctionExpression",
+                "name": "<script>.<anonymous:1032:1>"
               },
               {
                 "line": 1034,
-                "column": 8,
-                "end_line": 1034,
-                "kind": "ReturnStatement",
-                "scope": "<script>.<anonymous:1014:1>.<anonymous:1026:14>.<anonymous:1028:33>",
-                "condition_or_value": null,
-                "guards": [
-                  "L1030 FALSE: event.key==='ArrowRight'",
-                  "L1031 FALSE: event.key==='ArrowLeft'",
-                  "L1032 FALSE: event.key==='Home'",
-                  "L1033 FALSE: event.key==='End'"
-                ]
-              }
-            ],
-            "declarations": [
-              {
-                "line": 1015,
                 "column": 1,
-                "end_line": 1015,
-                "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:1014:1>",
-                "declaration": "const tabs=[...document.querySelectorAll('.arch-step')];"
+                "end_line": 1043,
+                "kind": "FunctionDeclaration",
+                "name": "<script>.<anonymous:1032:1>.select"
               },
               {
-                "line": 1018,
-                "column": 3,
-                "end_line": 1018,
-                "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:1014:1>.select.<anonymous:1017:15>",
-                "declaration": "const active=item===tab;"
-              },
-              {
-                "line": 1029,
-                "column": 3,
-                "end_line": 1029,
-                "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:1014:1>.<anonymous:1026:14>.<anonymous:1028:33>",
-                "declaration": "let next;"
-              }
-            ]
-          },
-          {
-            "line": 1042,
-            "handler": false,
-            "definitions": [
-              {
-                "line": 1043,
-                "column": 1,
-                "end_line": 1067,
+                "line": 1035,
+                "column": 15,
+                "end_line": 1041,
                 "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:1043:1>"
+                "name": "<script>.<anonymous:1032:1>.select.<anonymous:1035:15>"
+              },
+              {
+                "line": 1044,
+                "column": 14,
+                "end_line": 1055,
+                "kind": "ArrowFunctionExpression",
+                "name": "<script>.<anonymous:1032:1>.<anonymous:1044:14>"
               },
               {
                 "line": 1045,
-                "column": 1,
-                "end_line": 1053,
-                "kind": "FunctionDeclaration",
-                "name": "<script>.<anonymous:1043:1>.select"
+                "column": 31,
+                "end_line": 1045,
+                "kind": "ArrowFunctionExpression",
+                "name": "<script>.<anonymous:1032:1>.<anonymous:1044:14>.<anonymous:1045:31>"
               },
               {
                 "line": 1046,
-                "column": 15,
-                "end_line": 1051,
-                "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:1043:1>.select.<anonymous:1046:15>"
-              },
-              {
-                "line": 1054,
-                "column": 14,
-                "end_line": 1065,
-                "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:1043:1>.<anonymous:1054:14>"
-              },
-              {
-                "line": 1055,
-                "column": 31,
-                "end_line": 1055,
-                "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:1043:1>.<anonymous:1054:14>.<anonymous:1055:31>"
-              },
-              {
-                "line": 1056,
                 "column": 33,
-                "end_line": 1064,
+                "end_line": 1054,
                 "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:1043:1>.<anonymous:1054:14>.<anonymous:1056:33>"
+                "name": "<script>.<anonymous:1032:1>.<anonymous:1044:14>.<anonymous:1046:33>"
               }
             ],
             "control_nodes": [
               {
-                "line": 1049,
+                "line": 1039,
                 "column": 17,
-                "end_line": 1049,
+                "end_line": 1039,
                 "kind": "ConditionalExpression",
-                "scope": "<script>.<anonymous:1043:1>.select.<anonymous:1046:15>",
+                "scope": "<script>.<anonymous:1032:1>.select.<anonymous:1035:15>",
                 "condition_or_value": "active",
                 "guards": []
               },
               {
-                "line": 1052,
+                "line": 1042,
                 "column": 2,
-                "end_line": 1052,
+                "end_line": 1042,
                 "kind": "IfStatement",
-                "scope": "<script>.<anonymous:1043:1>.select",
+                "scope": "<script>.<anonymous:1032:1>.select",
                 "condition_or_value": "focus",
                 "guards": []
               },
               {
-                "line": 1058,
+                "line": 1048,
                 "column": 3,
-                "end_line": 1062,
+                "end_line": 1052,
                 "kind": "IfStatement",
-                "scope": "<script>.<anonymous:1043:1>.<anonymous:1054:14>.<anonymous:1056:33>",
+                "scope": "<script>.<anonymous:1032:1>.<anonymous:1044:14>.<anonymous:1046:33>",
                 "condition_or_value": "event.key==='ArrowRight'",
                 "guards": []
               },
               {
-                "line": 1059,
+                "line": 1049,
                 "column": 8,
-                "end_line": 1062,
+                "end_line": 1052,
                 "kind": "IfStatement",
-                "scope": "<script>.<anonymous:1043:1>.<anonymous:1054:14>.<anonymous:1056:33>",
+                "scope": "<script>.<anonymous:1032:1>.<anonymous:1044:14>.<anonymous:1046:33>",
                 "condition_or_value": "event.key==='ArrowLeft'",
                 "guards": [
-                  "L1058 FALSE: event.key==='ArrowRight'"
+                  "L1048 FALSE: event.key==='ArrowRight'"
                 ]
               },
               {
-                "line": 1060,
+                "line": 1050,
                 "column": 8,
-                "end_line": 1062,
+                "end_line": 1052,
                 "kind": "IfStatement",
-                "scope": "<script>.<anonymous:1043:1>.<anonymous:1054:14>.<anonymous:1056:33>",
+                "scope": "<script>.<anonymous:1032:1>.<anonymous:1044:14>.<anonymous:1046:33>",
                 "condition_or_value": "event.key==='Home'",
                 "guards": [
-                  "L1058 FALSE: event.key==='ArrowRight'",
-                  "L1059 FALSE: event.key==='ArrowLeft'"
+                  "L1048 FALSE: event.key==='ArrowRight'",
+                  "L1049 FALSE: event.key==='ArrowLeft'"
                 ]
               },
               {
-                "line": 1061,
+                "line": 1051,
                 "column": 8,
-                "end_line": 1062,
+                "end_line": 1052,
                 "kind": "IfStatement",
-                "scope": "<script>.<anonymous:1043:1>.<anonymous:1054:14>.<anonymous:1056:33>",
+                "scope": "<script>.<anonymous:1032:1>.<anonymous:1044:14>.<anonymous:1046:33>",
                 "condition_or_value": "event.key==='End'",
                 "guards": [
-                  "L1058 FALSE: event.key==='ArrowRight'",
-                  "L1059 FALSE: event.key==='ArrowLeft'",
-                  "L1060 FALSE: event.key==='Home'"
+                  "L1048 FALSE: event.key==='ArrowRight'",
+                  "L1049 FALSE: event.key==='ArrowLeft'",
+                  "L1050 FALSE: event.key==='Home'"
                 ]
               },
               {
-                "line": 1062,
+                "line": 1052,
                 "column": 8,
-                "end_line": 1062,
+                "end_line": 1052,
                 "kind": "ReturnStatement",
-                "scope": "<script>.<anonymous:1043:1>.<anonymous:1054:14>.<anonymous:1056:33>",
+                "scope": "<script>.<anonymous:1032:1>.<anonymous:1044:14>.<anonymous:1046:33>",
                 "condition_or_value": null,
                 "guards": [
-                  "L1058 FALSE: event.key==='ArrowRight'",
-                  "L1059 FALSE: event.key==='ArrowLeft'",
-                  "L1060 FALSE: event.key==='Home'",
-                  "L1061 FALSE: event.key==='End'"
+                  "L1048 FALSE: event.key==='ArrowRight'",
+                  "L1049 FALSE: event.key==='ArrowLeft'",
+                  "L1050 FALSE: event.key==='Home'",
+                  "L1051 FALSE: event.key==='End'"
                 ]
-              },
-              {
-                "line": 1066,
-                "column": 1,
-                "end_line": 1066,
-                "kind": "IfStatement",
-                "scope": "<script>.<anonymous:1043:1>",
-                "condition_or_value": "tabs.length",
-                "guards": []
               }
             ],
             "declarations": [
               {
-                "line": 1044,
+                "line": 1033,
                 "column": 1,
-                "end_line": 1044,
+                "end_line": 1033,
                 "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:1043:1>",
-                "declaration": "const tabs=[...document.querySelectorAll('#execution .artifact-tabs [role=\"tab\"]')];"
+                "scope": "<script>.<anonymous:1032:1>",
+                "declaration": "const tabs=[...document.querySelectorAll('.arch-step')];"
+              },
+              {
+                "line": 1036,
+                "column": 3,
+                "end_line": 1036,
+                "kind": "VariableDeclaration",
+                "scope": "<script>.<anonymous:1032:1>.select.<anonymous:1035:15>",
+                "declaration": "const active=item===tab;"
               },
               {
                 "line": 1047,
                 "column": 3,
                 "end_line": 1047,
                 "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:1043:1>.select.<anonymous:1046:15>",
-                "declaration": "const active=item===tab;"
-              },
-              {
-                "line": 1057,
-                "column": 3,
-                "end_line": 1057,
-                "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:1043:1>.<anonymous:1054:14>.<anonymous:1056:33>",
+                "scope": "<script>.<anonymous:1032:1>.<anonymous:1044:14>.<anonymous:1046:33>",
                 "declaration": "let next;"
               }
             ]
           },
           {
-            "line": 1069,
+            "line": 1060,
             "handler": false,
             "definitions": [
               {
-                "line": 1070,
+                "line": 1061,
                 "column": 1,
-                "end_line": 1109,
+                "end_line": 1085,
                 "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:1070:1>"
+                "name": "<script>.<anonymous:1061:1>"
+              },
+              {
+                "line": 1063,
+                "column": 1,
+                "end_line": 1071,
+                "kind": "FunctionDeclaration",
+                "name": "<script>.<anonymous:1061:1>.select"
+              },
+              {
+                "line": 1064,
+                "column": 15,
+                "end_line": 1069,
+                "kind": "ArrowFunctionExpression",
+                "name": "<script>.<anonymous:1061:1>.select.<anonymous:1064:15>"
               },
               {
                 "line": 1072,
-                "column": 1,
-                "end_line": 1094,
-                "kind": "FunctionDeclaration",
-                "name": "<script>.<anonymous:1070:1>.reveal"
+                "column": 14,
+                "end_line": 1083,
+                "kind": "ArrowFunctionExpression",
+                "name": "<script>.<anonymous:1061:1>.<anonymous:1072:14>"
               },
               {
-                "line": 1085,
-                "column": 24,
-                "end_line": 1093,
+                "line": 1073,
+                "column": 31,
+                "end_line": 1073,
                 "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:1070:1>.reveal.<anonymous:1085:24>"
+                "name": "<script>.<anonymous:1061:1>.<anonymous:1072:14>.<anonymous:1073:31>"
               },
               {
-                "line": 1095,
-                "column": 36,
-                "end_line": 1106,
+                "line": 1074,
+                "column": 33,
+                "end_line": 1082,
                 "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:1070:1>.<anonymous:1095:36>"
-              },
-              {
-                "line": 1107,
-                "column": 39,
-                "end_line": 1107,
-                "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:1070:1>.<anonymous:1107:39>"
+                "name": "<script>.<anonymous:1061:1>.<anonymous:1072:14>.<anonymous:1074:33>"
               }
             ],
             "control_nodes": [
               {
-                "line": 1074,
+                "line": 1067,
+                "column": 17,
+                "end_line": 1067,
+                "kind": "ConditionalExpression",
+                "scope": "<script>.<anonymous:1061:1>.select.<anonymous:1064:15>",
+                "condition_or_value": "active",
+                "guards": []
+              },
+              {
+                "line": 1070,
                 "column": 2,
-                "end_line": 1074,
-                "kind": "TryStatement",
-                "scope": "<script>.<anonymous:1070:1>.reveal",
-                "condition_or_value": null,
-                "guards": []
-              },
-              {
-                "line": 1074,
-                "column": 50,
-                "end_line": 1074,
-                "kind": "CatchClause",
-                "scope": "<script>.<anonymous:1070:1>.reveal",
-                "condition_or_value": null,
-                "guards": []
-              },
-              {
-                "line": 1074,
-                "column": 58,
-                "end_line": 1074,
-                "kind": "ReturnStatement",
-                "scope": "<script>.<anonymous:1070:1>.reveal",
-                "condition_or_value": null,
-                "guards": []
-              },
-              {
-                "line": 1076,
-                "column": 2,
-                "end_line": 1076,
+                "end_line": 1070,
                 "kind": "IfStatement",
-                "scope": "<script>.<anonymous:1070:1>.reveal",
-                "condition_or_value": "!target",
-                "guards": []
-              },
-              {
-                "line": 1076,
-                "column": 15,
-                "end_line": 1076,
-                "kind": "ReturnStatement",
-                "scope": "<script>.<anonymous:1070:1>.reveal",
-                "condition_or_value": null,
-                "guards": [
-                  "L1076 TRUE: !target"
-                ]
-              },
-              {
-                "line": 1077,
-                "column": 2,
-                "end_line": 1079,
-                "kind": "ForStatement",
-                "scope": "<script>.<anonymous:1070:1>.reveal",
-                "condition_or_value": "node",
-                "guards": []
-              },
-              {
-                "line": 1078,
-                "column": 3,
-                "end_line": 1078,
-                "kind": "IfStatement",
-                "scope": "<script>.<anonymous:1070:1>.reveal",
-                "condition_or_value": "node.tagName === 'DETAILS'",
-                "guards": []
-              },
-              {
-                "line": 1081,
-                "column": 2,
-                "end_line": 1084,
-                "kind": "IfStatement",
-                "scope": "<script>.<anonymous:1070:1>.reveal",
-                "condition_or_value": "tabPanel",
-                "guards": []
-              },
-              {
-                "line": 1083,
-                "column": 3,
-                "end_line": 1083,
-                "kind": "IfStatement",
-                "scope": "<script>.<anonymous:1070:1>.reveal",
-                "condition_or_value": "tab",
-                "guards": [
-                  "L1081 TRUE: tabPanel"
-                ]
-              },
-              {
-                "line": 1087,
-                "column": 3,
-                "end_line": 1092,
-                "kind": "IfStatement",
-                "scope": "<script>.<anonymous:1070:1>.reveal.<anonymous:1085:24>",
+                "scope": "<script>.<anonymous:1061:1>.select",
                 "condition_or_value": "focus",
                 "guards": []
               },
               {
-                "line": 1088,
-                "column": 20,
-                "end_line": 1088,
-                "kind": "ConditionalExpression",
-                "scope": "<script>.<anonymous:1070:1>.reveal.<anonymous:1085:24>",
-                "condition_or_value": "target.matches('details')",
-                "guards": [
-                  "L1087 TRUE: focus"
-                ]
-              },
-              {
-                "line": 1089,
-                "column": 4,
-                "end_line": 1090,
+                "line": 1076,
+                "column": 3,
+                "end_line": 1080,
                 "kind": "IfStatement",
-                "scope": "<script>.<anonymous:1070:1>.reveal.<anonymous:1085:24>",
-                "condition_or_value": "!control.matches('summary,a[href],button,input,select,textarea,[tabindex]') &&\n        !control.isContentEditable",
-                "guards": [
-                  "L1087 TRUE: focus"
-                ]
+                "scope": "<script>.<anonymous:1061:1>.<anonymous:1072:14>.<anonymous:1074:33>",
+                "condition_or_value": "event.key==='ArrowRight'",
+                "guards": []
               },
               {
-                "line": 1089,
+                "line": 1077,
                 "column": 8,
-                "end_line": 1090,
-                "kind": "LogicalExpression",
-                "scope": "<script>.<anonymous:1070:1>.reveal.<anonymous:1085:24>",
-                "condition_or_value": "!control.matches('summary,a[href],button,input,select,textarea,[tabindex]') &&\n        !control.isContentEditable",
+                "end_line": 1080,
+                "kind": "IfStatement",
+                "scope": "<script>.<anonymous:1061:1>.<anonymous:1072:14>.<anonymous:1074:33>",
+                "condition_or_value": "event.key==='ArrowLeft'",
                 "guards": [
-                  "L1087 TRUE: focus"
+                  "L1076 FALSE: event.key==='ArrowRight'"
                 ]
               },
               {
-                "line": 1097,
-                "column": 2,
-                "end_line": 1098,
+                "line": 1078,
+                "column": 8,
+                "end_line": 1080,
                 "kind": "IfStatement",
-                "scope": "<script>.<anonymous:1070:1>.<anonymous:1095:36>",
-                "condition_or_value": "!link || event.defaultPrevented || event.button !== 0 ||\n      event.ctrlKey || event.metaKey || event.shiftKey || event.altKey",
-                "guards": []
+                "scope": "<script>.<anonymous:1061:1>.<anonymous:1072:14>.<anonymous:1074:33>",
+                "condition_or_value": "event.key==='Home'",
+                "guards": [
+                  "L1076 FALSE: event.key==='ArrowRight'",
+                  "L1077 FALSE: event.key==='ArrowLeft'"
+                ]
               },
               {
-                "line": 1097,
-                "column": 6,
-                "end_line": 1098,
-                "kind": "LogicalExpression",
-                "scope": "<script>.<anonymous:1070:1>.<anonymous:1095:36>",
-                "condition_or_value": "!link || event.defaultPrevented || event.button !== 0 ||\n      event.ctrlKey || event.metaKey || event.shiftKey || event.altKey",
-                "guards": []
+                "line": 1079,
+                "column": 8,
+                "end_line": 1080,
+                "kind": "IfStatement",
+                "scope": "<script>.<anonymous:1061:1>.<anonymous:1072:14>.<anonymous:1074:33>",
+                "condition_or_value": "event.key==='End'",
+                "guards": [
+                  "L1076 FALSE: event.key==='ArrowRight'",
+                  "L1077 FALSE: event.key==='ArrowLeft'",
+                  "L1078 FALSE: event.key==='Home'"
+                ]
               },
               {
-                "line": 1097,
-                "column": 6,
-                "end_line": 1098,
-                "kind": "LogicalExpression",
-                "scope": "<script>.<anonymous:1070:1>.<anonymous:1095:36>",
-                "condition_or_value": "!link || event.defaultPrevented || event.button !== 0 ||\n      event.ctrlKey || event.metaKey || event.shiftKey",
-                "guards": []
-              },
-              {
-                "line": 1097,
-                "column": 6,
-                "end_line": 1098,
-                "kind": "LogicalExpression",
-                "scope": "<script>.<anonymous:1070:1>.<anonymous:1095:36>",
-                "condition_or_value": "!link || event.defaultPrevented || event.button !== 0 ||\n      event.ctrlKey || event.metaKey",
-                "guards": []
-              },
-              {
-                "line": 1097,
-                "column": 6,
-                "end_line": 1098,
-                "kind": "LogicalExpression",
-                "scope": "<script>.<anonymous:1070:1>.<anonymous:1095:36>",
-                "condition_or_value": "!link || event.defaultPrevented || event.button !== 0 ||\n      event.ctrlKey",
-                "guards": []
-              },
-              {
-                "line": 1097,
-                "column": 6,
-                "end_line": 1097,
-                "kind": "LogicalExpression",
-                "scope": "<script>.<anonymous:1070:1>.<anonymous:1095:36>",
-                "condition_or_value": "!link || event.defaultPrevented || event.button !== 0",
-                "guards": []
-              },
-              {
-                "line": 1097,
-                "column": 6,
-                "end_line": 1097,
-                "kind": "LogicalExpression",
-                "scope": "<script>.<anonymous:1070:1>.<anonymous:1095:36>",
-                "condition_or_value": "!link || event.defaultPrevented",
-                "guards": []
-              },
-              {
-                "line": 1098,
-                "column": 72,
-                "end_line": 1098,
+                "line": 1080,
+                "column": 8,
+                "end_line": 1080,
                 "kind": "ReturnStatement",
-                "scope": "<script>.<anonymous:1070:1>.<anonymous:1095:36>",
+                "scope": "<script>.<anonymous:1061:1>.<anonymous:1072:14>.<anonymous:1074:33>",
                 "condition_or_value": null,
                 "guards": [
-                  "L1097 TRUE: !link || event.defaultPrevented || event.button !== 0 ||\n      event.ctrlKey || event.metaKey || event.shiftKey || event.altKey"
+                  "L1076 FALSE: event.key==='ArrowRight'",
+                  "L1077 FALSE: event.key==='ArrowLeft'",
+                  "L1078 FALSE: event.key==='Home'",
+                  "L1079 FALSE: event.key==='End'"
                 ]
               },
               {
-                "line": 1101,
+                "line": 1084,
+                "column": 1,
+                "end_line": 1084,
+                "kind": "IfStatement",
+                "scope": "<script>.<anonymous:1061:1>",
+                "condition_or_value": "tabs.length",
+                "guards": []
+              }
+            ],
+            "declarations": [
+              {
+                "line": 1062,
+                "column": 1,
+                "end_line": 1062,
+                "kind": "VariableDeclaration",
+                "scope": "<script>.<anonymous:1061:1>",
+                "declaration": "const tabs=[...document.querySelectorAll('#execution .artifact-tabs [role=\"tab\"]')];"
+              },
+              {
+                "line": 1065,
+                "column": 3,
+                "end_line": 1065,
+                "kind": "VariableDeclaration",
+                "scope": "<script>.<anonymous:1061:1>.select.<anonymous:1064:15>",
+                "declaration": "const active=item===tab;"
+              },
+              {
+                "line": 1075,
+                "column": 3,
+                "end_line": 1075,
+                "kind": "VariableDeclaration",
+                "scope": "<script>.<anonymous:1061:1>.<anonymous:1072:14>.<anonymous:1074:33>",
+                "declaration": "let next;"
+              }
+            ]
+          },
+          {
+            "line": 1087,
+            "handler": false,
+            "definitions": [
+              {
+                "line": 1088,
+                "column": 1,
+                "end_line": 1127,
+                "kind": "ArrowFunctionExpression",
+                "name": "<script>.<anonymous:1088:1>"
+              },
+              {
+                "line": 1090,
+                "column": 1,
+                "end_line": 1112,
+                "kind": "FunctionDeclaration",
+                "name": "<script>.<anonymous:1088:1>.reveal"
+              },
+              {
+                "line": 1103,
+                "column": 24,
+                "end_line": 1111,
+                "kind": "ArrowFunctionExpression",
+                "name": "<script>.<anonymous:1088:1>.reveal.<anonymous:1103:24>"
+              },
+              {
+                "line": 1113,
+                "column": 36,
+                "end_line": 1124,
+                "kind": "ArrowFunctionExpression",
+                "name": "<script>.<anonymous:1088:1>.<anonymous:1113:36>"
+              },
+              {
+                "line": 1125,
+                "column": 39,
+                "end_line": 1125,
+                "kind": "ArrowFunctionExpression",
+                "name": "<script>.<anonymous:1088:1>.<anonymous:1125:39>"
+              }
+            ],
+            "control_nodes": [
+              {
+                "line": 1092,
                 "column": 2,
-                "end_line": 1101,
+                "end_line": 1092,
                 "kind": "TryStatement",
-                "scope": "<script>.<anonymous:1070:1>.<anonymous:1095:36>",
+                "scope": "<script>.<anonymous:1088:1>.reveal",
                 "condition_or_value": null,
                 "guards": []
               },
               {
-                "line": 1101,
-                "column": 79,
-                "end_line": 1101,
+                "line": 1092,
+                "column": 50,
+                "end_line": 1092,
                 "kind": "CatchClause",
-                "scope": "<script>.<anonymous:1070:1>.<anonymous:1095:36>",
+                "scope": "<script>.<anonymous:1088:1>.reveal",
                 "condition_or_value": null,
                 "guards": []
               },
               {
-                "line": 1101,
-                "column": 87,
-                "end_line": 1101,
+                "line": 1092,
+                "column": 58,
+                "end_line": 1092,
                 "kind": "ReturnStatement",
-                "scope": "<script>.<anonymous:1070:1>.<anonymous:1095:36>",
+                "scope": "<script>.<anonymous:1088:1>.reveal",
                 "condition_or_value": null,
                 "guards": []
               },
               {
-                "line": 1102,
+                "line": 1094,
                 "column": 2,
-                "end_line": 1102,
+                "end_line": 1094,
                 "kind": "IfStatement",
-                "scope": "<script>.<anonymous:1070:1>.<anonymous:1095:36>",
+                "scope": "<script>.<anonymous:1088:1>.reveal",
                 "condition_or_value": "!target",
                 "guards": []
               },
               {
-                "line": 1102,
+                "line": 1094,
                 "column": 15,
-                "end_line": 1102,
+                "end_line": 1094,
                 "kind": "ReturnStatement",
-                "scope": "<script>.<anonymous:1070:1>.<anonymous:1095:36>",
+                "scope": "<script>.<anonymous:1088:1>.reveal",
                 "condition_or_value": null,
                 "guards": [
-                  "L1102 TRUE: !target"
+                  "L1094 TRUE: !target"
                 ]
               },
               {
-                "line": 1104,
+                "line": 1095,
                 "column": 2,
-                "end_line": 1104,
+                "end_line": 1097,
+                "kind": "ForStatement",
+                "scope": "<script>.<anonymous:1088:1>.reveal",
+                "condition_or_value": "node",
+                "guards": []
+              },
+              {
+                "line": 1096,
+                "column": 3,
+                "end_line": 1096,
                 "kind": "IfStatement",
-                "scope": "<script>.<anonymous:1070:1>.<anonymous:1095:36>",
+                "scope": "<script>.<anonymous:1088:1>.reveal",
+                "condition_or_value": "node.tagName === 'DETAILS'",
+                "guards": []
+              },
+              {
+                "line": 1099,
+                "column": 2,
+                "end_line": 1102,
+                "kind": "IfStatement",
+                "scope": "<script>.<anonymous:1088:1>.reveal",
+                "condition_or_value": "tabPanel",
+                "guards": []
+              },
+              {
+                "line": 1101,
+                "column": 3,
+                "end_line": 1101,
+                "kind": "IfStatement",
+                "scope": "<script>.<anonymous:1088:1>.reveal",
+                "condition_or_value": "tab",
+                "guards": [
+                  "L1099 TRUE: tabPanel"
+                ]
+              },
+              {
+                "line": 1105,
+                "column": 3,
+                "end_line": 1110,
+                "kind": "IfStatement",
+                "scope": "<script>.<anonymous:1088:1>.reveal.<anonymous:1103:24>",
+                "condition_or_value": "focus",
+                "guards": []
+              },
+              {
+                "line": 1106,
+                "column": 20,
+                "end_line": 1106,
+                "kind": "ConditionalExpression",
+                "scope": "<script>.<anonymous:1088:1>.reveal.<anonymous:1103:24>",
+                "condition_or_value": "target.matches('details')",
+                "guards": [
+                  "L1105 TRUE: focus"
+                ]
+              },
+              {
+                "line": 1107,
+                "column": 4,
+                "end_line": 1108,
+                "kind": "IfStatement",
+                "scope": "<script>.<anonymous:1088:1>.reveal.<anonymous:1103:24>",
+                "condition_or_value": "!control.matches('summary,a[href],button,input,select,textarea,[tabindex]') &&\n        !control.isContentEditable",
+                "guards": [
+                  "L1105 TRUE: focus"
+                ]
+              },
+              {
+                "line": 1107,
+                "column": 8,
+                "end_line": 1108,
+                "kind": "LogicalExpression",
+                "scope": "<script>.<anonymous:1088:1>.reveal.<anonymous:1103:24>",
+                "condition_or_value": "!control.matches('summary,a[href],button,input,select,textarea,[tabindex]') &&\n        !control.isContentEditable",
+                "guards": [
+                  "L1105 TRUE: focus"
+                ]
+              },
+              {
+                "line": 1115,
+                "column": 2,
+                "end_line": 1116,
+                "kind": "IfStatement",
+                "scope": "<script>.<anonymous:1088:1>.<anonymous:1113:36>",
+                "condition_or_value": "!link || event.defaultPrevented || event.button !== 0 ||\n      event.ctrlKey || event.metaKey || event.shiftKey || event.altKey",
+                "guards": []
+              },
+              {
+                "line": 1115,
+                "column": 6,
+                "end_line": 1116,
+                "kind": "LogicalExpression",
+                "scope": "<script>.<anonymous:1088:1>.<anonymous:1113:36>",
+                "condition_or_value": "!link || event.defaultPrevented || event.button !== 0 ||\n      event.ctrlKey || event.metaKey || event.shiftKey || event.altKey",
+                "guards": []
+              },
+              {
+                "line": 1115,
+                "column": 6,
+                "end_line": 1116,
+                "kind": "LogicalExpression",
+                "scope": "<script>.<anonymous:1088:1>.<anonymous:1113:36>",
+                "condition_or_value": "!link || event.defaultPrevented || event.button !== 0 ||\n      event.ctrlKey || event.metaKey || event.shiftKey",
+                "guards": []
+              },
+              {
+                "line": 1115,
+                "column": 6,
+                "end_line": 1116,
+                "kind": "LogicalExpression",
+                "scope": "<script>.<anonymous:1088:1>.<anonymous:1113:36>",
+                "condition_or_value": "!link || event.defaultPrevented || event.button !== 0 ||\n      event.ctrlKey || event.metaKey",
+                "guards": []
+              },
+              {
+                "line": 1115,
+                "column": 6,
+                "end_line": 1116,
+                "kind": "LogicalExpression",
+                "scope": "<script>.<anonymous:1088:1>.<anonymous:1113:36>",
+                "condition_or_value": "!link || event.defaultPrevented || event.button !== 0 ||\n      event.ctrlKey",
+                "guards": []
+              },
+              {
+                "line": 1115,
+                "column": 6,
+                "end_line": 1115,
+                "kind": "LogicalExpression",
+                "scope": "<script>.<anonymous:1088:1>.<anonymous:1113:36>",
+                "condition_or_value": "!link || event.defaultPrevented || event.button !== 0",
+                "guards": []
+              },
+              {
+                "line": 1115,
+                "column": 6,
+                "end_line": 1115,
+                "kind": "LogicalExpression",
+                "scope": "<script>.<anonymous:1088:1>.<anonymous:1113:36>",
+                "condition_or_value": "!link || event.defaultPrevented",
+                "guards": []
+              },
+              {
+                "line": 1116,
+                "column": 72,
+                "end_line": 1116,
+                "kind": "ReturnStatement",
+                "scope": "<script>.<anonymous:1088:1>.<anonymous:1113:36>",
+                "condition_or_value": null,
+                "guards": [
+                  "L1115 TRUE: !link || event.defaultPrevented || event.button !== 0 ||\n      event.ctrlKey || event.metaKey || event.shiftKey || event.altKey"
+                ]
+              },
+              {
+                "line": 1119,
+                "column": 2,
+                "end_line": 1119,
+                "kind": "TryStatement",
+                "scope": "<script>.<anonymous:1088:1>.<anonymous:1113:36>",
+                "condition_or_value": null,
+                "guards": []
+              },
+              {
+                "line": 1119,
+                "column": 79,
+                "end_line": 1119,
+                "kind": "CatchClause",
+                "scope": "<script>.<anonymous:1088:1>.<anonymous:1113:36>",
+                "condition_or_value": null,
+                "guards": []
+              },
+              {
+                "line": 1119,
+                "column": 87,
+                "end_line": 1119,
+                "kind": "ReturnStatement",
+                "scope": "<script>.<anonymous:1088:1>.<anonymous:1113:36>",
+                "condition_or_value": null,
+                "guards": []
+              },
+              {
+                "line": 1120,
+                "column": 2,
+                "end_line": 1120,
+                "kind": "IfStatement",
+                "scope": "<script>.<anonymous:1088:1>.<anonymous:1113:36>",
+                "condition_or_value": "!target",
+                "guards": []
+              },
+              {
+                "line": 1120,
+                "column": 15,
+                "end_line": 1120,
+                "kind": "ReturnStatement",
+                "scope": "<script>.<anonymous:1088:1>.<anonymous:1113:36>",
+                "condition_or_value": null,
+                "guards": [
+                  "L1120 TRUE: !target"
+                ]
+              },
+              {
+                "line": 1122,
+                "column": 2,
+                "end_line": 1122,
+                "kind": "IfStatement",
+                "scope": "<script>.<anonymous:1088:1>.<anonymous:1113:36>",
                 "condition_or_value": "location.hash !== hash",
                 "guards": []
               },
               {
-                "line": 1108,
+                "line": 1126,
                 "column": 1,
-                "end_line": 1108,
+                "end_line": 1126,
                 "kind": "IfStatement",
-                "scope": "<script>.<anonymous:1070:1>",
+                "scope": "<script>.<anonymous:1088:1>",
                 "condition_or_value": "location.hash",
                 "guards": []
               }
             ],
             "declarations": [
               {
-                "line": 1073,
+                "line": 1091,
                 "column": 2,
-                "end_line": 1073,
+                "end_line": 1091,
                 "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:1070:1>.reveal",
+                "scope": "<script>.<anonymous:1088:1>.reveal",
                 "declaration": "let id;"
               },
               {
-                "line": 1075,
+                "line": 1093,
                 "column": 2,
-                "end_line": 1075,
+                "end_line": 1093,
                 "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:1070:1>.reveal",
+                "scope": "<script>.<anonymous:1088:1>.reveal",
                 "declaration": "const target = document.getElementById(id);"
               },
               {
-                "line": 1077,
+                "line": 1095,
                 "column": 7,
-                "end_line": 1077,
+                "end_line": 1095,
                 "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:1070:1>.reveal",
+                "scope": "<script>.<anonymous:1088:1>.reveal",
                 "declaration": "let node = target"
               },
               {
-                "line": 1080,
+                "line": 1098,
                 "column": 2,
-                "end_line": 1080,
+                "end_line": 1098,
                 "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:1070:1>.reveal",
+                "scope": "<script>.<anonymous:1088:1>.reveal",
                 "declaration": "const tabPanel = target.closest('[role=\"tabpanel\"]');"
               },
               {
-                "line": 1082,
+                "line": 1100,
                 "column": 3,
-                "end_line": 1082,
+                "end_line": 1100,
                 "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:1070:1>.reveal",
+                "scope": "<script>.<anonymous:1088:1>.reveal",
                 "declaration": "const tab = document.getElementById(tabPanel.getAttribute('aria-labelledby'));"
               },
               {
-                "line": 1088,
+                "line": 1106,
                 "column": 4,
-                "end_line": 1088,
+                "end_line": 1106,
                 "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:1070:1>.reveal.<anonymous:1085:24>",
+                "scope": "<script>.<anonymous:1088:1>.reveal.<anonymous:1103:24>",
                 "declaration": "const control = target.matches('details') ? target.querySelector('summary') : target;"
               },
               {
-                "line": 1096,
+                "line": 1114,
                 "column": 2,
-                "end_line": 1096,
+                "end_line": 1114,
                 "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:1070:1>.<anonymous:1095:36>",
+                "scope": "<script>.<anonymous:1088:1>.<anonymous:1113:36>",
                 "declaration": "const link = event.target.closest('a[href^=\"#\"]');"
               },
               {
-                "line": 1099,
+                "line": 1117,
                 "column": 2,
-                "end_line": 1099,
+                "end_line": 1117,
                 "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:1070:1>.<anonymous:1095:36>",
+                "scope": "<script>.<anonymous:1088:1>.<anonymous:1113:36>",
                 "declaration": "const hash = link.getAttribute('href');"
               },
               {
-                "line": 1100,
+                "line": 1118,
                 "column": 2,
-                "end_line": 1100,
+                "end_line": 1118,
                 "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:1070:1>.<anonymous:1095:36>",
+                "scope": "<script>.<anonymous:1088:1>.<anonymous:1113:36>",
                 "declaration": "let target;"
               }
             ]
