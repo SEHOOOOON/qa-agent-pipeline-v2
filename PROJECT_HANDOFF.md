@@ -5,7 +5,7 @@
 - 수정 전: 대표 요청 실제 실행(RUN-20261015-110609-8E2600)의 A2 TC를 사람이 대조해 오답 3개를 찾음 — 냉방 31°C 차단 시험 없음, 냉방 20°C 적용을 준비 단계에서만 하고 별도 기대결과 없음, 난방 17°C→냉방 전환 동작을 질문하지 않음. CP2 근거 검토 AI와 P2 채점은 모두 통과시켰다. 기존 지침은 "변경 후 하한과 상한 확인"만 있었고 사람 판단 예시(R01~R08)는 하한만 다뤘다.
 - 수정 후: `src/qa_pipeline_contracts.py` `QA_RANGE_CHANGE_RULES`(T-1, T-2, T-5, T-7, T-8, C-3, C-9, 값 없는 L·U 표기)를 Agent 2 작성 지침과 CP2 근거 검토에 추가. 새 Run Manifest에 `range_change_rules_contract=1.0`, 검토 입력 문서 `RANGE_CHANGE_RULES`, 캐시 키 `qa-v2-agent2-2-62-range-1`/`qa-v2-grounding-1-21`. 표시가 없는 과거 2.62 Run은 이전 입력·해시 그대로 재검증한다(기존 baseline_capture_order와 같은 방식, prompt_version 문자열은 그대로).
 - 새 예시 요청(**미실행**): `examples/change_request.heat-range-narrowing.json`(난방 18~28°C, 양쪽 경계), `examples/change_request.auto-fan-label.json`(AUTO 풍량 카드 라벨). 요청 형식 검사만 통과.
-- 검증일 2026-10-15 KST(로컬): 새 시험 7개(새 Run에만 전달·과거 해시 유지·변조/버전 불일치 거부), 과거 계약을 흉내 내는 기존 시험은 새 표시도 함께 빼도록 조정. 전체 결과는 아래 줄에 기록.
+- 검증일 2026-10-15 KST(로컬): 새 시험 7개(새 Run에만 전달·과거 해시 유지·변조/버전 불일치 거부), 과거 계약을 흉내 내는 기존 시험은 새 표시도 함께 빼도록 조정. 전체 1회차(32분): 3211 PASS / 15 FAIL / 20 SKIP. FAIL 13개는 과거 Manifest를 현재 계약에서 만들던 시험 2종(`test_integrity_cli` 12, `test_srs_source_materialization` 1)이 새 표시를 지우지 않아 생긴 것으로, 같은 방식으로 시험 쪽을 고친 뒤 관련 4개 파일 1332 PASS. 나머지 FAIL 2개는 아래 환경 원인이며 링크 후 PASS. 수정 후 전체 재실행은 하지 않았다. 20 SKIP은 기존과 같은 과거 원본 Run 미확보.
 - 환경 메모: 클라우드 컨테이너에서는 P1 시험 하위 프로세스가 `PLAYWRIGHT_BROWSERS_PATH`를 전달하지 않아 브라우저를 못 찾고 `ENVIRONMENT_ERROR`가 난다(수정 전 코드에서도 같은 2건 실패). 컨테이너에 기본 위치 링크를 만들어 확인했고 저장소 코드는 바꾸지 않았다. 사용자 PC(기본 위치)에는 해당 없음.
 - 미검증: 규칙 반영 후 실제 AI가 누락을 막는지(유료 호출 필요), 새 예시 요청의 실제 실행. P2 쪽 정답지·코드 대조는 P2 IMP-009.
 

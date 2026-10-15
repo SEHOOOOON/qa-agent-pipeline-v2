@@ -55,6 +55,7 @@ def test_old_contract_remains_accepted():
     from qa_pipeline_execution import _current_agent2_contract, _agent2_checkpoint_options
     current=_current_agent2_contract(); old=dict(current,prompt_version='agent2-2.61')
     old.pop('baseline_capture_order_contract')
+    old.pop('range_change_rules_contract', None)  # Newer layer than the baseline marker.
     assert _agent2_checkpoint_options(current)==_agent2_checkpoint_options(old)
 
 def test_approval_still_rejects_changed_srs(tmp_path):
