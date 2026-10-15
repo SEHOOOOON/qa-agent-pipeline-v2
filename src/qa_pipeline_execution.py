@@ -1138,9 +1138,10 @@ def run_candidate_trial(
                 timeout_seconds=timeout_seconds,
             )
             exit_code = completed.returncode
-            stdout = redact_output(completed.stdout[-20000:], temp_root, target_html, evidence_dir)
-            stderr = redact_output(completed.stderr[-20000:], temp_root, target_html, evidence_dir)
-            combined = stdout + "\n" + stderr
+            stdout = redact_output(_trial_output_tail(completed.stdout), temp_root, target_html, evidence_dir)
+            stderr = redact_output(_trial_output_tail(completed.stderr), temp_root, target_html, evidence_dir)
+            # Classify from the complete output; only the saved log keeps the tail.
+            combined = (completed.stdout or "") + "\n" + (completed.stderr or "")
             if exit_code == 0:
                 outcome = TrialOutcome.PASS
             elif re.search(r"^[ \t]*(?:E[ \t]+)?AssertionError:[ \t]*PRECONDITION_NOT_MET:", combined, re.M):
@@ -1160,8 +1161,8 @@ def run_candidate_trial(
             else:
                 outcome = TrialOutcome.AUTOMATION_ERROR
         except subprocess.TimeoutExpired as exc:
-            stdout = redact_output((exc.stdout or "")[-20000:], temp_root, target_html, evidence_dir) if isinstance(exc.stdout, str) else ""
-            stderr = redact_output((exc.stderr or "")[-20000:], temp_root, target_html, evidence_dir) if isinstance(exc.stderr, str) else ""
+            stdout = redact_output(_trial_output_tail(exc.stdout or ""), temp_root, target_html, evidence_dir) if isinstance(exc.stdout, str) else ""
+            stderr = redact_output(_trial_output_tail(exc.stderr or ""), temp_root, target_html, evidence_dir) if isinstance(exc.stderr, str) else ""
             outcome = TrialOutcome.TIMEOUT
     _write_text_atomic(stdout_file, stdout)
     _write_text_atomic(stderr_file, stderr)
@@ -1228,6 +1229,23 @@ def _terminate_trial_process_tree(process: subprocess.Popen[str]) -> None:
         except psutil.NoSuchProcess:
             continue
     psutil.wait_procs(alive, timeout=3)
+
+
+TRIAL_OUTPUT_CHAR_LIMIT = 200_000
+TRIAL_OUTPUT_TRUNCATED_PREFIX = "QA_OUTPUT_TRUNCATED: "
+
+
+def _trial_output_tail(text: str) -> str:
+    """Keep the log tail like before, but mark it when the head was dropped.
+
+    The former silent 20,000-character tail could remove early structured
+    observation lines. Consumers must treat a marked log as partial evidence.
+    """
+
+    if len(text) <= TRIAL_OUTPUT_CHAR_LIMIT:
+        return text
+    return (f"{TRIAL_OUTPUT_TRUNCATED_PREFIX}kept last {TRIAL_OUTPUT_CHAR_LIMIT} "
+            f"of {len(text)} characters\n" + text[-TRIAL_OUTPUT_CHAR_LIMIT:])
 
 
 def _run_trial_subprocess(
@@ -2247,7 +2265,7 @@ def run_existing_regression(
             )
             exit_code = completed.returncode
             stdout = redact(
-                completed.stdout[-20000:],
+                _trial_output_tail(completed.stdout),
                 temp_root,
                 baseline_test_file,
                 target_html,
@@ -2255,14 +2273,15 @@ def run_existing_regression(
                 Path.home(),
             )
             stderr = redact(
-                completed.stderr[-20000:],
+                _trial_output_tail(completed.stderr),
                 temp_root,
                 baseline_test_file,
                 target_html,
                 evidence_dir,
                 Path.home(),
             )
-            combined = stdout + "\n" + stderr
+            # Classify from the complete output; only the saved log keeps the tail.
+            combined = (completed.stdout or "") + "\n" + (completed.stderr or "")
             if exit_code == 0 and re.search(r"(?m)^\s*(?:=+\s*)?(?:\d+ (?:passed|deselected|warnings?)(?:, )?\s*)*\d+ skipped(?:,|\s+in\s+|\s*=*$)", stdout):
                 status = NeutralExecutionStatus.SKIPPED
                 source_outcome = "PYTEST_SKIPPED"
@@ -2280,7 +2299,7 @@ def run_existing_regression(
                 source_outcome = "PYTEST_ERROR"
         except subprocess.TimeoutExpired as exc:
             stdout = redact(
-                (exc.stdout or "")[-20000:] if isinstance(exc.stdout, str) else "",
+                _trial_output_tail(exc.stdout or "") if isinstance(exc.stdout, str) else "",
                 temp_root,
                 baseline_test_file,
                 target_html,
@@ -2288,7 +2307,7 @@ def run_existing_regression(
                 Path.home(),
             )
             stderr = redact(
-                (exc.stderr or "")[-20000:] if isinstance(exc.stderr, str) else "",
+                _trial_output_tail(exc.stderr or "") if isinstance(exc.stderr, str) else "",
                 temp_root,
                 baseline_test_file,
                 target_html,

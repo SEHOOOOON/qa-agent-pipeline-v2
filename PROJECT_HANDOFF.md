@@ -1,5 +1,12 @@
 # 현재 상태와 마무리 작업
 
+## 2026-10-15 · 시험 로그 잘림 표시와 전체 출력 판정 (미커밋)
+
+- 수정 전: 후보 시험·기존 회귀 로그를 표시 없이 마지막 20,000자로 저장하고, 판정도 잘린 로그로 했다. 앞부분이 잘리면 "제품 불일치"가 "실행 오류"로 분류될 수 있음을 테스트로 재현했다.
+- 수정 후: `src/qa_pipeline_execution.py`가 200,000자까지 보존하고 잘릴 때 첫 줄에 `QA_OUTPUT_TRUNCATED:` 표시를 남긴다. 판정은 자르기 전 전체 출력으로 한다. Checkpoint 메시지·판정 규칙·저장 실행 기록은 변경하지 않았다.
+- 검증일 2026-10-15 KST: 관련 테스트 추가, P1 전체 3239 PASS / 0 FAIL / 0 SKIP(기존 3236 + 신규 3). 실제 제품 시험·API 실행은 미검증. P2 대응 처리는 P2 IMP-008.
+- 문서의 개인 PC 절대경로 1곳을 상대경로로 바꿨다. 브랜치 claude/fixes-20261015, 커밋·푸시 없음.
+
 ## 2026-10-11 · 최신 포폴을 작업 브랜치에 보존
 
 - 사용자가 포폴 4페이지의 브랜치 업로드를 별도로 승인했다. 앞선 로직 커밋에서 제외한 `project.html`과 해당 정적 목록만 반영하며 오늘 편집한 문구·디자인을 추가 변경하지 않는다. 실행 코드·공식 자산·평가 점수는 불변이다.
@@ -970,7 +977,7 @@ README·PROJECT_GUIDE·테스트 카탈로그·결정 기록·분기 색인을 �
 - 요약 pin 보완 후 인계·보고·승인 선택 회귀 989 PASS / 18 SKIP(신규 15건 포함). 전체 검사의 SKIP 20건은 특정 과거 로컬 원본 부재이며 실행한 것으로 세지 않는다. 두 회귀에서 외부 Python 연결 0·검사 중 보호 파일 변경 0. 정적 코드 색인 재생성/대조와 git diff --check 통과. 포폴·제품·SRS·공식 자산 변경 없음.
 - 추적 저장 오류와 동일한 오류/종료 코드의 대역은 실행 오류→Agent4 HOLD를 확인했으며, 종료 finally는 context/browser 종료를 시도하고 오류를 전파한다. 관련 기존 회귀 30건 PASS를 대조했다. 실제 실패 당시 임시 폴더는 없어 그 실행의 복원 성공까지 확정하지 않는다. 원인 미확정의 증거 저장/환경 위험이며 단독 통과를 해결로 표시하지 않는다.
 - 현재 구현 범위에서 추가 기능 개발을 중단하고 동결하는 방안을 권장한다. 대표 다섯 요청의 새 AI 무개입 전체 완료, 새 요청의 반복 안정성, 수동 대비 효율은 여전히 미검증이며 목표 달성으로 바꾸지 않는다. 추가 API는 별도 승인 전 실행하지 않는다. 실제 전송·공식 승인·커밋/푸시 없음. 바깥 이전 런타임은 동기화하지 않았다.
-- 시연은 최신 worktree에서 `python src/qa_pipeline_ui.py --runs-root "C:/Users/훈/.gemini/antigravity/scratch/industrial-qa/qa-agent-pipeline-v2/runs/srs-report-1011"`로 저장 기록을 읽는다. 8765는 실행 서버이고 8081은 정적 포폴/저장 데모다. 설치형 `python -m qa_pipeline_ui`는 현재 바깥 이전 소스로 연결되므로 사용하지 않는다. 이 명령은 새 API 실행·공식 승인 권한을 활성화하지 않는다.
+- 시연은 최신 worktree에서 `python src/qa_pipeline_ui.py --runs-root "../qa-agent-pipeline-v2/runs/srs-report-1011"`로 저장 기록을 읽는다. 8765는 실행 서버이고 8081은 정적 포폴/저장 데모다. 설치형 `python -m qa_pipeline_ui`는 현재 바깥 이전 소스로 연결되므로 사용하지 않는다. 이 명령은 새 API 실행·공식 승인 권한을 활성화하지 않는다.
 - 마감 근거: 바깥 P1 `runs/manual_checks/release-closeout-20261011/REPORT.txt`, SUMMARY_PIN_POSTFIX_VERIFICATION.json과 최신 worktree `runs/offline/20261011-141830-efcf35`(전체), `20261011-150247-5ae9f2`(선택). 최초 실패·검증 제외·검사 도구의 제한을 함께 기록했다.
 - 근거: 바깥 P1 `runs/manual_checks/logic-closeout-20261011/REPORT.txt`, saved-compat.json 및 최종 검사 XML. 보고서에 수정 소스·포폴 해시, 실패 이력, 검증 범위와 제한이 있다. 결정은 DECISION_LOG의 같은 날짜 항목을 따른다.
 

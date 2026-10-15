@@ -546,6 +546,35 @@ def test_regression_skip_uses_result_summary_not_warning(tmp_path, monkeypatch, 
     assert result.status.value == status
 
 
+def test_trial_output_tail_marks_only_when_the_head_is_dropped():
+    limit = pipeline_execution.TRIAL_OUTPUT_CHAR_LIMIT
+    # 30,000 characters were silently cut under the former 20,000 tail.
+    for size in (0, 30_000, limit):
+        text = "x" * size
+        assert pipeline_execution._trial_output_tail(text) == text
+    text = "HEAD-LINE\n" + "y" * limit
+    kept = pipeline_execution._trial_output_tail(text)
+    first, rest = kept.split("\n", 1)
+    assert first == f"QA_OUTPUT_TRUNCATED: kept last {limit} of {len(text)} characters"
+    assert rest == text[-limit:] and "HEAD-LINE" not in kept
+
+
+@pytest.mark.parametrize("size,marked", [(30_000, False), (250_000, True)])
+def test_regression_log_keeps_long_output_and_marks_cut_head(tmp_path, monkeypatch, size, marked):
+    from dataclasses import replace
+    stdout = "E   AssertionError: PRODUCT_MISMATCH: early classification line\n" + "z" * size + "\n1 failed\n"
+    monkeypatch.setattr(pipeline_execution, "_run_trial_subprocess",
+        lambda *a, **kw: SimpleNamespace(returncode=1, stdout=stdout, stderr=""))
+    result = pipeline.run_existing_regression(replace(pipeline.EXISTING_REGRESSION_CATALOG[0], recovery_contract=None),
+        REPO_ROOT / "product_baseline/tests/test_controller.py",
+        REPO_ROOT / "product_baseline/virtual-controller.html", tmp_path / "evidence", timeout_seconds=10)
+    saved = (tmp_path / result.stdout_file).read_text(encoding="utf-8")
+    assert saved.startswith("QA_OUTPUT_TRUNCATED: ") is marked
+    assert ("early classification line" in saved) is (not marked)
+    assert saved.endswith("1 failed\n")
+    assert result.status == pipeline.NeutralExecutionStatus.ASSERTION_FAILED
+
+
 def test_regression_timeout_uses_process_tree_cleanup(tmp_path, monkeypatch):
     calls = []
     process = SimpleNamespace(returncode=None)
