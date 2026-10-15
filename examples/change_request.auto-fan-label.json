@@ -1,0 +1,20 @@
+{
+  "request_id": "CR-20261015-AUTO-FAN-LABEL",
+  "change_type": "MODIFIED",
+  "target_requirement_id": "REQ-FAN-001",
+  "before_value": "LOW·MED·HIGH·AUTO 풍량을 선택할 수 있어야 합니다. 적용 후 내부 fanSpeed는 선택한 코드와 같고, MED는 장비 카드에 사용자용 한글 라벨 중풍으로, HIGH는 강풍으로 표시됩니다.",
+  "after_value": "AUTO 풍량을 적용하면 장비 카드에는 사용자용 한글 라벨 자동풍이 표시되고 내부 fanSpeed는 AUTO로 유지되어야 합니다. MED·HIGH의 기존 한글 라벨 표시는 유지합니다.",
+  "description": "AUTO 풍량의 카드 표시만 한글 라벨로 바꾸고 내부 상태 코드는 바꾸지 않습니다.",
+  "reason": "HIGH·MED 과거 사례와 다른 값으로 표시 라벨 변경 요청의 일반화를 확인하기 위한 예시 요청입니다.",
+  "acceptance_notes": [
+    "연결되어 있고 오류와 잠금이 없는 단일 장비 IDU-00을 대상으로 합니다.",
+    "AUTO 풍량을 선택하고 적용한 직후 대상 장비 카드에 자동풍이 표시되어야 합니다.",
+    "같은 시점에 대상 장비의 내부 fanSpeed는 AUTO여야 합니다.",
+    "각 시험의 준비 전에 원래 상태를 기록하고, 시험 후 준비 전 상태로 복원하여 화면·내부값을 확인합니다."
+  ],
+  "out_of_scope": [
+    "복수 장비 풍량 적용",
+    "LOW 풍량의 표시 라벨 정책",
+    "실제 장비 통신"
+  ]
+}

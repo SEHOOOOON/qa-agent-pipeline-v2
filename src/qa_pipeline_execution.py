@@ -586,6 +586,7 @@ def _current_agent2_contract() -> dict[str, str]:
         "essential_validation_contract": "1.0",
         "tc_execution_alignment_contract": "1.0",
         "baseline_capture_order_contract": "1.0",
+        "range_change_rules_contract": "1.0",
         "scope_guard_contract": "1.2",
         "task_boundary_contract": "1.3",
         "output_tolerance_contract": "1.0",
@@ -613,6 +614,17 @@ def _agent2_baseline_order_policy(manifest: dict[str, Any]) -> bool:
     return marker == "1.0"
 
 
+def _agent2_range_rules_policy(manifest: dict[str, Any]) -> bool:
+    """Opt-in 2026-10-15 rules; 2.62 runs without the marker keep their review hash."""
+    marker = manifest.get("range_change_rules_contract")
+    if marker not in {None, "1.0"} or (marker is not None and (
+            manifest.get("prompt_version") != "agent2-2.62"
+            or manifest.get("baseline_capture_order_contract") != "1.0"
+            or manifest.get("human_judgment_examples_contract") != "1.0")):
+        raise ValueError("지원하지 않는 Agent 2 범위 변경 확정 규칙 계약입니다.")
+    return marker == "1.0"
+
+
 def _agent2_checkpoint_options(manifest: dict[str, Any]) -> dict[str, bool]:
     """Map a manifest to CP2 options; loaders validate version/marker pairs first.
 
@@ -620,6 +632,7 @@ def _agent2_checkpoint_options(manifest: dict[str, Any]) -> dict[str, bool]:
     (3.10 is newer than 3.9), and do not silently enable new checks on old runs.
     """
     _agent2_baseline_order_policy(manifest)
+    _agent2_range_rules_policy(manifest)
     focused = manifest.get("focused_design_review_contract")
     if focused not in {None, "1.0", "1.1"} or ((focused is not None) != (manifest.get("prompt_version") in {"agent2-2.60", "agent2-2.61", "agent2-2.62"})):
         raise ValueError("지원하지 않거나 누락된 집중 설계 검토 계약입니다.")
@@ -802,7 +815,7 @@ def run_agent2(args: argparse.Namespace) -> int:
                                   analysis=analysis, catalog=existing_catalog, include_condition_coverage=True,
                                   include_procedure_coverage=True, include_execution_contract=True, include_review_responsibilities=True,
                                   allow_output_tolerance=True, include_task_boundaries="1.3", review_scope_semantics=True,
-                                  include_tc_execution_alignment=True, essential_checks=True, pair_observation_anchors=True, shared_design_review=True, focused_design_review="1.1", human_judgment_examples=True, baseline_capture_order=True),
+                                  include_tc_execution_alignment=True, essential_checks=True, pair_observation_anchors=True, shared_design_review=True, focused_design_review="1.1", human_judgment_examples=True, baseline_capture_order=True, range_change_rules=True),
             checkpoint2, args.model, grounding_records)
         attempts[-1]["status"] = checkpoint2.status.value
         if checkpoint2.status == CheckStatus.FAIL and not getattr(args, "no_rewrite", False):
@@ -865,7 +878,7 @@ def run_agent2(args: argparse.Namespace) -> int:
                                       analysis=analysis, catalog=existing_catalog, include_condition_coverage=True,
                                       include_procedure_coverage=True, include_execution_contract=True, include_review_responsibilities=True,
                                       allow_output_tolerance=True, include_task_boundaries="1.3", review_scope_semantics=True,
-                                      include_tc_execution_alignment=True, essential_checks=True, pair_observation_anchors=True, shared_design_review=True, focused_design_review="1.1", human_judgment_examples=True, baseline_capture_order=True),
+                                      include_tc_execution_alignment=True, essential_checks=True, pair_observation_anchors=True, shared_design_review=True, focused_design_review="1.1", human_judgment_examples=True, baseline_capture_order=True, range_change_rules=True),
                 checkpoint2, args.model, grounding_records)
             attempts.append(
                 {
@@ -1069,7 +1082,8 @@ def _load_verified_agent2_run(
                               shared_design_review=manifest.get("design_review_contract") == "1.0",
                               focused_design_review=manifest.get("focused_design_review_contract") or False,
                               human_judgment_examples=manifest.get("human_judgment_examples_contract") == "1.0",
-                              baseline_capture_order=_agent2_baseline_order_policy(manifest)), recomputed)
+                              baseline_capture_order=_agent2_baseline_order_policy(manifest),
+                              range_change_rules=_agent2_range_rules_policy(manifest)), recomputed)
     if not _checkpoint_revalidation_matches(checkpoint, recomputed, legacy=legacy_wording):
         raise ValueError("Stored Checkpoint 2 differs from the current CP2 rules.")
     if checkpoint.status != CheckStatus.PASS:

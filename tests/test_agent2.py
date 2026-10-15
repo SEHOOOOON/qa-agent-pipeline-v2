@@ -130,6 +130,7 @@ def test_double_assert_execution_anchors(field, initial, target, variant, valid)
 def test_double_assert_anchor_contract_is_version_bound(fault):
     manifest = pipeline_execution._current_agent2_contract()
     manifest.pop("baseline_capture_order_contract")
+    manifest.pop("range_change_rules_contract", None)  # Newer layer than the baseline marker.
     assert pipeline_execution._agent2_checkpoint_options(manifest)["pair_observation_anchors"]
     if fault == "missing":
         manifest.pop("double_assert_timing_contract")
@@ -150,6 +151,7 @@ def test_double_assert_anchor_contract_is_version_bound(fault):
     manifest.pop("human_judgment_examples_contract", None)
     manifest.update(prompt_version="agent2-2.56", double_assert_timing_contract="1.0")
     manifest.pop("baseline_capture_order_contract")
+    manifest.pop("range_change_rules_contract", None)  # Newer layer than the baseline marker.
     assert not pipeline_execution._agent2_checkpoint_options(manifest)["pair_observation_anchors"]
 
 
@@ -390,6 +392,7 @@ def test_tc_execution_alignment_manifest_is_version_bound(fault):
     assert pipeline_execution._agent2_checkpoint_options(manifest)["align_tc_execution"]
     old = {**manifest, "prompt_version": "agent2-2.54", "double_assert_timing_contract": "1.0"}
     old.pop("baseline_capture_order_contract")
+    old.pop("range_change_rules_contract", None)  # Newer layer than the baseline marker.
     old.pop("focused_design_review_contract")
     old.pop("human_judgment_examples_contract", None)
     old.pop("design_review_contract")
@@ -1071,6 +1074,7 @@ def test_trace_source_count_is_not_new_semantic_authority(version, mutation):
     historical = {**_current_agent2_contract(), "design_review_contract": None, "contract_version": version, "prompt_version": "agent2-2.44",
                   "double_assert_timing_contract": "1.0"}
     historical.pop("baseline_capture_order_contract")
+    historical.pop("range_change_rules_contract", None)  # Newer layer than the baseline marker.
     historical.pop("focused_design_review_contract")
     historical.pop("human_judgment_examples_contract", None)
     historical.pop("review_responsibility_contract")
@@ -1430,7 +1434,7 @@ def test_agent2_sends_approved_procedures_on_initial_and_rewrite_calls():
         assert "근거 개수와 검증 사실 개수는 다릅니다" in instructions
         assert "유지 조건이라는 이유로 이번 요청에 필요한 검사를 생략" in instructions
         assert "후보와 기존 TC를 합친 실제 검사 범위" in instructions
-        assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-62-baseline-1"
+        assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-62-range-1"
         assert "기존 TC는 전체 단위로 실행" in instructions
         assert "명시적 제외와 충돌하는 검사가 포함돼 있으면 선택하지 않고" in instructions
         assert "기존 assertion을 삭제하지 않습니다" in instructions
@@ -1591,7 +1595,7 @@ def test_agent2_writer_and_rewriter_receive_same_baseline_order_guidance(rewrite
     assert "[대상 선택·원래값 기록 순서]" in prompt
     assert prompt.count(QA_CONTROLLER_BASELINE_GUIDANCE) == 1
     assert responses.kwargs["input"][0]["content"] == AGENT2_SYSTEM_INSTRUCTIONS
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-62-baseline-1"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-62-range-1"
     assert source.model_dump(mode="json") == before
     if rewrite:
         assert "기록 시점과 조작 순서를 대조하세요." in prompt
@@ -1606,6 +1610,7 @@ def test_agent2_baseline_order_manifest_marker_is_opt_in_for_historical_runs():
     assert "baseline_capture_order" not in current_options  # CP2 rules are unchanged.
     historical = dict(current)
     historical.pop("baseline_capture_order_contract")
+    historical.pop("range_change_rules_contract", None)  # Newer layer than the baseline marker.
     assert not _agent2_baseline_order_policy(historical)
     assert pipeline_execution._agent2_checkpoint_options(historical) == current_options
     historical["baseline_capture_order_contract"] = None
@@ -1670,7 +1675,7 @@ def test_agent2_uses_structured_responses_api() -> None:
     assert response.usage["total_tokens"] == 300
     assert responses.kwargs["text_format"] is pipeline.Agent2TransportDesign
     assert responses.kwargs["store"] is False
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-62-baseline-1"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-62-range-1"
     agent2_input = responses.kwargs["input"][1]["content"]
     assert "[기존 사람 작성·자동화 TC 카탈로그]" in agent2_input
     assert '[코드로 확인한 SRS 개정 범위]' in agent2_input

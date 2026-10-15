@@ -9,6 +9,8 @@
 | [기본 요청](change_request.example.json) | 요청 JSON 작성 형식 참고. 현재 SRS·제품과 대조한 뒤 사용 |
 | [HIGH 요청](change_request.success-fan-speed.json) | 과거 강풍 표시 변경 입력. 관련 공식 TC-V2-001은 이미 등록됨 |
 | [MED 요청](change_request.success-medium-fan.json) | 과거 중풍 변경·기존 강풍 유지 입력. 관련 공식 TC-V2-002는 이미 등록됨 |
+| [난방 범위 요청](change_request.heat-range-narrowing.json) | 2026-10-15 추가. 대표 온도 요청·참고 사례 R01~R08과 다른 모드·양쪽 경계 변경. **미실행**, 제품 미변경이라 실행하면 경계 시험은 불일치 후보가 예상됨 |
+| [AUTO 풍량 표시 요청](change_request.auto-fan-label.json) | 2026-10-15 추가. HIGH·MED와 다른 값의 표시 라벨 변경. **미실행** |
 
 HIGH·MED 파일의 과거 변경 전 문구를 현재 SRS라고 간주하지 않습니다. 새로운 변경·등록 시연에는 현재 기준과 실제로 달라지는 요청을 별도로 준비합니다. 기존 요청 파일과 승인 자산은 재현 근거로 보존합니다.
 

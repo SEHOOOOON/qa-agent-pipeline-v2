@@ -120,6 +120,7 @@ def test_focused_review_keeps_conditions_when_no_new_test_covers_them():
 def test_focused_review_manifest_cannot_silently_disable_or_upgrade(change):
     manifest = pipeline_execution._current_agent2_contract()
     manifest.pop("baseline_capture_order_contract")  # Isolate the historical review contract.
+    manifest.pop("range_change_rules_contract", None)  # Newer layer than the baseline marker.
     assert manifest["prompt_version"] == "agent2-2.62"
     assert manifest["focused_design_review_contract"] == "1.1"
     pipeline_execution._agent2_checkpoint_options(manifest)
@@ -158,7 +159,7 @@ def test_human_examples_same_reference_reaches_writer_rewriter_and_reviewer(rewr
     for call in sent:
         assert QA_HUMAN_JUDGMENT_EXAMPLES in call["input"][0]["content"]
     assert payload["context"]["human_judgment_examples"] == QA_HUMAN_JUDGMENT_EXAMPLES
-    assert sent[0]["prompt_cache_key"] == "qa-v2-agent2-2-62-baseline-1"
+    assert sent[0]["prompt_cache_key"] == "qa-v2-agent2-2-62-range-1"
     assert sent[1]["prompt_cache_key"] == "qa-v2-grounding-1-20"
 
 
@@ -188,6 +189,7 @@ def test_human_examples_never_override_a_blocking_review(verdict, status):
 def test_human_examples_manifest_preserves_old_and_new_contracts(change):
     manifest = pipeline_execution._current_agent2_contract()
     manifest.pop("baseline_capture_order_contract")  # Isolate the historical examples contract.
+    manifest.pop("range_change_rules_contract", None)  # Newer layer than the baseline marker.
     pipeline_execution._agent2_checkpoint_options(manifest)
     if change == "remove":
         manifest.pop("human_judgment_examples_contract")
@@ -362,6 +364,7 @@ def test_shared_design_contract_cannot_reuse_historical_review(mutation):
     import qa_pipeline_execution as ex
     manifest = ex._current_agent2_contract()
     manifest.pop("baseline_capture_order_contract")
+    manifest.pop("range_change_rules_contract", None)  # Newer layer than the baseline marker.
     if mutation == "missing":
         manifest.pop("design_review_contract")
     elif mutation == "unknown":
@@ -378,6 +381,7 @@ def test_old_observation_contract_remains_valid_without_shared_guidance():
     import qa_pipeline_execution as ex
     manifest = ex._current_agent2_contract()
     manifest.pop("baseline_capture_order_contract")
+    manifest.pop("range_change_rules_contract", None)  # Newer layer than the baseline marker.
     manifest["prompt_version"] = "agent2-2.57"
     manifest.pop("design_review_contract")
     manifest.pop("focused_design_review_contract")
@@ -1124,6 +1128,7 @@ def test_new_scope_and_terminal_policies_cannot_silently_downgrade(stage, mutati
     if mutation.startswith("historical"): manifest["prompt_version"] = historical_prompt
     if mutation.startswith("historical") and stage == "AGENT2":
         manifest.pop("baseline_capture_order_contract")
+        manifest.pop("range_change_rules_contract", None)  # Newer layer than the baseline marker.
         manifest.pop("focused_design_review_contract")
         manifest.pop("human_judgment_examples_contract", None)
         manifest.pop("design_review_contract")
@@ -2123,3 +2128,74 @@ def test_invalid_review_record_still_preserves_received_usage(tmp_path, monkeypa
         pipeline_execution._run_grounding_review(tmp_path, "AGENT1", 1, payload, checkpoint, "fake", [])
     receipt = pipeline._read_json_payload(tmp_path / "agent1_review_usage_attempt_1.json")
     assert receipt["usage"]["total_tokens"] == 30
+
+
+def test_range_rules_reach_writer_and_reviewer_only_for_new_runs():
+    """2026-10-15 human-confirmed rules (T-1/T-2/T-5/T-7/T-8/C-3/C-9).
+
+    The 10-15 live temperature run passed review while missing the upper+1 block,
+    a separate apply ER for the new lower bound, and a question about a mode switch
+    whose current value falls outside the new range. These rules are general text,
+    not values for that scenario, and only manifests carrying the marker use them.
+    """
+    from qa_pipeline_agent2 import AGENT2_SYSTEM_INSTRUCTIONS
+    from qa_pipeline_contracts import QA_RANGE_CHANGE_RULES
+    for rule in ("T-1", "T-2", "T-5", "T-7", "T-8", "C-3", "C-9"):
+        assert rule in QA_RANGE_CHANGE_RULES
+    assert not any(value in QA_RANGE_CHANGE_RULES for value in ("°C", "냉방", "난방", "IDU"))
+    assert QA_RANGE_CHANGE_RULES in AGENT2_SYSTEM_INSTRUCTIONS
+    assert pipeline_execution._current_agent2_contract()["range_change_rules_contract"] == "1.0"
+
+    old = focused_agent2_payload(human_judgment_examples=True)
+    new = focused_agent2_payload(human_judgment_examples=True, range_change_rules=True)
+    assert "range_change_rules_contract" not in old
+    assert not any(d["source_id"] == "RANGE_CHANGE_RULES" for d in old["source_documents"])
+    assert new["range_change_rules_contract"] == "1.0"
+    assert new["items"] == old["items"]
+    # Historical reviews keep their hash; a new review cannot reuse an old record.
+    assert grounding.check_review_record(old, fake_grounding_record(old)).status == CheckStatus.PASS
+    with pytest.raises(ValueError, match="해시"):
+        grounding.check_review_record(new, fake_grounding_record(old))
+    assert grounding.check_review_record(new, fake_grounding_record(new)).status == CheckStatus.PASS
+
+    sent = []
+    def parse(**kwargs):
+        sent.append(kwargs)
+        return SimpleNamespace(output_parsed=None)
+    client = SimpleNamespace(responses=SimpleNamespace(parse=parse))
+    for payload in (old, new):
+        with pytest.raises(ValueError, match="구조화 응답"):
+            grounding.OpenAIGroundingReviewer(model="fake", client=client).review(payload)
+    assert QA_RANGE_CHANGE_RULES not in sent[0]["input"][0]["content"]
+    assert QA_RANGE_CHANGE_RULES in sent[1]["input"][0]["content"]
+    assert (sent[0]["prompt_cache_key"], sent[1]["prompt_cache_key"]) == ("qa-v2-grounding-1-20", "qa-v2-grounding-1-21")
+
+
+@pytest.mark.parametrize("change", ["tampered_text", "unknown_marker", "without_examples"])
+def test_range_rules_contract_cannot_be_altered_or_detached(change):
+    if change == "without_examples":
+        with pytest.raises(ValueError, match="범위 변경"):
+            focused_agent2_payload(range_change_rules=True)
+        return
+    payload = focused_agent2_payload(human_judgment_examples=True, range_change_rules=True)
+    if change == "tampered_text":
+        doc = next(d for d in payload["source_documents"] if d["source_id"] == "RANGE_CHANGE_RULES")
+        doc["text"] = doc["text"].replace("T-2", "T-2(선택)")
+    else:
+        payload["range_change_rules_contract"] = "9.0"
+    with pytest.raises(ValueError, match="범위 변경"):
+        grounding.evaluate_grounding_review(payload, fake_grounding_record(payload)["review"])
+
+
+@pytest.mark.parametrize("change", ["old_prompt", "unknown", "no_examples"])
+def test_range_rules_manifest_marker_is_version_bound(change):
+    manifest = pipeline_execution._current_agent2_contract()
+    pipeline_execution._agent2_checkpoint_options(manifest)
+    if change == "old_prompt":
+        manifest["prompt_version"] = "agent2-2.61"
+    elif change == "unknown":
+        manifest["range_change_rules_contract"] = "9.0"
+    else:
+        manifest.pop("human_judgment_examples_contract")
+    with pytest.raises(ValueError, match="범위 변경"):
+        pipeline_execution._agent2_range_rules_policy(manifest)

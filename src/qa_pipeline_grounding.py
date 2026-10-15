@@ -19,7 +19,7 @@ from qa_pipeline_contracts import (
     AutomationCandidateStatus, Agent3PlanningStatus,
     QA_EXECUTION_CONTRACT, QA_REVIEW_RESPONSIBILITIES, QA_TASK_BOUNDARIES,
     QA_PRODUCT_VERDICT_CONTRACT, QA_EXPECTATION_SCOPE_GUIDANCE, QA_DESIGN_REVIEW_GUIDANCE,
-    QA_HUMAN_JUDGMENT_EXAMPLES, QA_CONTROLLER_BASELINE_GUIDANCE,
+    QA_HUMAN_JUDGMENT_EXAMPLES, QA_CONTROLLER_BASELINE_GUIDANCE, QA_RANGE_CHANGE_RULES,
 )
 from qa_pipeline_agent1 import _response_usage_summary
 
@@ -312,7 +312,8 @@ def build_grounding_input(stage, request, requirements, artifact, *, analysis=No
                           allow_state_change_terminal_observation=False, explicit_expectations_only=False,
                           include_tc_execution_alignment=False, execution_interface=False, essential_checks=False,
                           pair_observation_anchors=False, shared_design_review=False, focused_design_review=False,
-                          human_judgment_examples=False, baseline_capture_order=False):
+                          human_judgment_examples=False, baseline_capture_order=False,
+                          range_change_rules=False):
     """Host enumerates review targets; the reviewer cannot choose a smaller scope."""
     if focused_design_review not in {False, True, "1.0", "1.1"}:
         raise ValueError("지원하지 않는 집중 설계 검토 계약입니다.")
@@ -325,6 +326,8 @@ def build_grounding_input(stage, request, requirements, artifact, *, analysis=No
     if baseline_capture_order and stage == "AGENT2" and not (
             include_tc_execution_alignment and include_execution_contract):
         raise ValueError("Agent 2 원래값 기록 순서는 실행 계약·TC 연결 근거와 함께 제공합니다.")
+    if range_change_rules and not (stage == "AGENT2" and focused_design_review and human_judgment_examples):
+        raise ValueError("범위 변경 확정 규칙은 사람 판단 사례를 쓰는 Agent 2 집중 검토에만 적용합니다.")
     def doc(source_id, value):
         # Cite original field values, not JSON-escaped encodings of their text.
         if isinstance(value, dict):
@@ -559,6 +562,10 @@ def build_grounding_input(stage, request, requirements, artifact, *, analysis=No
     if baseline_capture_order and stage == "AGENT2":
         payload["baseline_capture_order_contract"] = "1.0"
         doc("CONTROLLER_BASELINE_ORDER", QA_CONTROLLER_BASELINE_GUIDANCE)
+    if range_change_rules:
+        # Opt-in: reviews without the marker keep their historical hash.
+        payload["range_change_rules_contract"] = "1.0"
+        doc("RANGE_CHANGE_RULES", QA_RANGE_CHANGE_RULES)
     if execution_interface:
         if stage != "AGENT3" or not explicit_expectations_only:
             raise ValueError("실행 인터페이스 계약은 명시적 제품 판정 계약의 Agent 3에만 적용합니다.")
@@ -647,6 +654,12 @@ def evaluate_grounding_review(payload, review):
                        and doc["text"] == QA_CONTROLLER_BASELINE_GUIDANCE
                        for doc in payload["source_documents"]))):
         raise ValueError("지원하지 않는 Agent 2 원래값 캡처 순서 설명 계약입니다.")
+    range_rules = payload.get("range_change_rules_contract")
+    if range_rules not in {None, "1.0"} or (range_rules is not None and (
+            payload["stage"] != "AGENT2" or payload.get("human_judgment_examples_contract") != "1.0"
+            or not any(doc["source_id"] == "RANGE_CHANGE_RULES" and doc["text"] == QA_RANGE_CHANGE_RULES
+                       for doc in payload["source_documents"]))):
+        raise ValueError("지원하지 않는 범위 변경 확정 규칙 계약입니다.")
     essential = payload.get("essential_validation_contract")
     focused = payload.get("focused_design_review_contract")
     if focused not in {None, "1.0", "1.1"} or (focused is not None and
@@ -757,6 +770,11 @@ class OpenAIGroundingReviewer:
                     or payload.get("context", {}).get("human_judgment_examples") != QA_HUMAN_JUDGMENT_EXAMPLES):
                 raise ValueError("사람 판단 참고 사례 계약 또는 본문이 일치하지 않습니다.")
             instructions += "\n" + QA_HUMAN_JUDGMENT_EXAMPLES
+        range_rules = payload.get("range_change_rules_contract")
+        if range_rules is not None:
+            if range_rules != "1.0" or examples != "1.0":
+                raise ValueError("범위 변경 확정 규칙 계약이 일치하지 않습니다.")
+            instructions += "\n" + QA_RANGE_CHANGE_RULES
         if not focused and payload.get("essential_validation_contract") == "1.0":
             instructions += (
                 "\n이번 AGENT2 검토는 호스트의 ESSENTIAL_VALIDATION 계약을 적용합니다. "
@@ -767,7 +785,7 @@ class OpenAIGroundingReviewer:
         if indexed:
             instructions = _indexed_review_instructions(instructions)
         response = self.client.responses.parse(model=self.model, reasoning={"effort": "medium"},
-            store=False, prompt_cache_key=("qa-v2-grounding-1-20" if examples else "qa-v2-grounding-1-19" if focused else "qa-v2-grounding-1-18" if payload.get("design_review_contract") == "1.0" else "qa-v2-grounding-1-17"),
+            store=False, prompt_cache_key=("qa-v2-grounding-1-21" if payload.get("range_change_rules_contract") else "qa-v2-grounding-1-20" if examples else "qa-v2-grounding-1-19" if focused else "qa-v2-grounding-1-18" if payload.get("design_review_contract") == "1.0" else "qa-v2-grounding-1-17"),
             input=[{"role": "system", "content": instructions},
                    {"role": "user", "content": json.dumps(wire_payload, ensure_ascii=False)}],
             text_format=response_schema)
