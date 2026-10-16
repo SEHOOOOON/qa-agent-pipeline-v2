@@ -74,22 +74,15 @@ def test_public_power_observations_match_the_preserved_raw_log():
     assert data['final_execution_used_saved_candidate_trial'] is True
 
 
-def test_portfolio_marks_restoration_as_comparison_not_a_new_value_dump():
+def test_trimmed_portfolio_keeps_core_story_and_evidence():
+    """2026-10-16 사용자 결정: 프로젝트1 소개는 한 페이지에 핵심만 남긴다.
+    전원 정지 상세 표·TC 설계 기준 패널은 본문에서 뺐고, 원본 증거 파일은 그대로 둔다."""
     html = (ROOT / 'project.html').read_text(encoding='utf-8')
-    table = html.split('id="power-observations"', 1)[1].split('class="qa-run-ending"', 1)[0]
-    assert '<th scope="row">준비 전</th><td>정지</td><td>정지</td><td>STOP</td>' in table
-    assert '<th scope="row">운전 준비 후</th><td>운전</td><td>운전</td><td>OPERATION</td>' in table
-    assert '<th scope="row">정지 적용 후</th><td>정지</td><td>정지</td><td>STOP</td>' in table
-    assert '<th scope="row">복원 확인</th><td>비교 통과</td><td>비교 통과</td><td>비교 통과</td>' in table
-    # 2026-10-16 사용자 결정: 포트폴리오 본문에는 상태·면책 문장을 두지 않는다(근거 파일 링크로 대신).
+    for text in ('분석 → 시험 설계 → 실행 → 보고 → 사람 판단', '기준을 정해도 AI의 해석은 달랐습니다',
+                 '실제 실행 결과 · 2026.10.15', '실무 적용 가능성과 한계', 'AI에게 QA 기준을 알려 주는 일'):
+        assert text in html
+    assert 'class="pf-bar"' in html and 'aria-current="page">프로젝트1<' in html
     for file in ('power-observations.json', 'power-trial-stdout.txt'):
-        assert f'href="evidence/submission-20261010/{file}"' in table
-
-
-def test_portfolio_separates_test_scope_from_common_tc_checks():
-    html = (ROOT / 'project.html').read_text(encoding='utf-8')
-    assert '정상·예외·경계값 등 시험 유형은 요청과 영향 범위에 맞춰 정합니다' in html
-    assert '선택한 TC의 공통 검토 항목' in html
-    assert 'TC의 근거·독립 실행 절차·기대결과·확인 시점은 공통으로 검토' in html
-    assert '상태를 바꾸는 시험은 준비 전 상태로의 복원과 확인도 필요합니다' in html
-    assert '위 항목을 모든 TC에 일괄 추가하지 않습니다' not in html
+        assert (ROOT / 'evidence/submission-20261010' / file).is_file()
+    for word in ('시험하지 못', '전체 실행 미완료', '아직 하지 않았습니다'):
+        assert word not in html
