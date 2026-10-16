@@ -438,6 +438,70 @@ def _execution_failure_observations(
     return observations
 
 
+def _assertion_observations(
+    run_dir: Path, result: NeutralExecutionResult, run_id: str
+) -> dict[str, list[dict[str, Any]]]:
+    """ER별 QA_ASSERTION_OBSERVED 기록(해시가 일치하는 stdout, 같은 Run·TC만)."""
+    observed: dict[str, list[dict[str, Any]]] = {}
+    relative_name = result.stdout_file
+    if not relative_name:
+        return observed
+    candidate = (run_dir / relative_name).resolve()
+    try:
+        candidate.relative_to(run_dir.resolve())
+    except ValueError:
+        return observed
+    if (
+        not candidate.is_file()
+        or relative_name not in result.evidence_files
+        or _sha256_file(candidate) != result.evidence_sha256.get(relative_name)
+    ):
+        return observed
+    text = candidate.read_text(encoding="utf-8", errors="replace")
+    for line in re.findall(r"^QA_ASSERTION_OBSERVED: (\{[^\r\n]*\})$", text, flags=re.MULTILINE):
+        try:
+            item = json.loads(line)
+        except ValueError:
+            continue
+        assertion = item.get("assertion") if isinstance(item, dict) else None
+        if (
+            not isinstance(assertion, dict)
+            or item.get("run_id") != run_id
+            or item.get("tc_id") != result.test_id
+            or not isinstance(item.get("matched"), bool)
+            or not isinstance(assertion.get("result_id"), str)
+        ):
+            continue
+        observed.setdefault(assertion["result_id"], []).append(item)
+    return observed
+
+
+def _expected_result_summary(
+    expected_ids: list[str],
+    observed: dict[str, list[dict[str, Any]]],
+    mismatch_result_ids: set[str],
+) -> list[str]:
+    """실패한 TC 안에서 ER별 관찰 기록을 통과/불일치/미확인으로 나눕니다."""
+    lines = []
+    for result_id in expected_ids:
+        records = observed.get(result_id, [])
+        verdicts = {record["matched"] for record in records}
+        actual = ", ".join(
+            dict.fromkeys(_markdown_text(json.dumps(record.get("actual"), ensure_ascii=False))[:80] for record in records)
+        )
+        if verdicts == {True}:
+            lines.append(f"- `{result_id}`: 관찰 기록상 통과 (관찰값 {actual})")
+        elif verdicts == {False}:
+            lines.append(f"- `{result_id}`: 관찰 기록상 불일치 (관찰값 {actual})")
+        elif verdicts:
+            lines.append(f"- `{result_id}`: 관찰 기록이 서로 다릅니다 (관찰값 {actual}). 원본 실행 증거를 확인해 주세요.")
+        elif result_id not in mismatch_result_ids:
+            lines.append(
+                f"- `{result_id}`: 이 요약에서 개별 판정이 확인되지 않습니다. 원본 실행 증거를 확인해 주세요."
+            )
+    return lines
+
+
 def _human_review_observation(
     run_dir: Path, result: NeutralExecutionResult | None
 ) -> str:
@@ -589,11 +653,14 @@ def _human_review_markdown(
             and result.status == NeutralExecutionStatus.ASSERTION_FAILED
         ):
             mismatch_result_ids = set(re.findall(r"ER-\d{3}", observation_detail))
-            lines.extend(
-                f"- `{expected['result_id']}`: 이 요약에서 개별 판정이 확인되지 않습니다. 원본 실행 증거를 확인해 주세요."
-                for expected in test_case.get("expected_results", [])
-                if expected["result_id"] not in mismatch_result_ids
-            )
+            observed = _assertion_observations(run_dir, result, report.run_id)
+            if observed:
+                lines.extend(["", "#### 기대 결과별 관찰 (QA_ASSERTION_OBSERVED)", ""])
+            lines.extend(_expected_result_summary(
+                [expected["result_id"] for expected in test_case.get("expected_results", [])],
+                observed,
+                mismatch_result_ids,
+            ))
         lines.extend(["", "#### 실행 증거", ""])
         evidence_files = finding.evidence_files or (
             result.evidence_files if result is not None else []

@@ -1226,3 +1226,49 @@ def test_agent4_parser_exposes_rules_only_report_command() -> None:
     )
     assert human_review.handler is pipeline.run_human_review_document
     assert human_review.refresh is False
+
+
+def _observation_line(result_id, matched, actual, *, run_id="RUN-20260817-030000-ABCDEF", tc_id="TC-CAND-003"):
+    payload = dict(version="assertion-observations-1.0", run_id=run_id, tc_id=tc_id,
+                   target_device_id="device-1", assertion={"result_id": result_id}, actual=actual, matched=matched)
+    return "QA_ASSERTION_OBSERVED: " + json.dumps(payload, ensure_ascii=True)
+
+
+def test_human_review_lists_expected_results_that_passed_inside_a_failed_tc(tmp_path: Path) -> None:
+    """2026-10-16: an ER that passed inside an ASSERTION_FAILED TC was shown as
+    "개별 판정이 확인되지 않습니다" although its observation record said matched."""
+    stdout = "\n".join([
+        _observation_line("ER-005", True, 30),
+        _observation_line("ER-006", False, 19),
+        _observation_line("ER-007", True, 30, run_id="RUN-OTHER"),      # other Run: ignored
+        _observation_line("ER-007", True, 30, tc_id="TC-OTHER"),        # other TC: ignored
+        "QA_ASSERTION_OBSERVED: {not json}",
+        "    print('QA_ASSERTION_OBSERVED: ' + json.dumps(observation))",  # source text: ignored
+    ]) + "\n"
+    run_dir, run_id = _write_agent4_inputs(
+        tmp_path, candidate_status=pipeline.NeutralExecutionStatus.ASSERTION_FAILED, candidate_stdout=stdout)
+    assert pipeline.run_agent4(SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))) == 0
+    review_text = (run_dir / "사람_최종_검토.md").read_text(encoding="utf-8")
+    assert "#### 기대 결과별 관찰 (QA_ASSERTION_OBSERVED)" in review_text
+    assert "- `ER-005`: 관찰 기록상 통과 (관찰값 30)" in review_text
+    assert "- `ER-006`: 관찰 기록상 불일치 (관찰값 19)" in review_text
+    assert "- `ER-007`: 이 요약에서 개별 판정이 확인되지 않습니다" in review_text
+    assert review_text.count("개별 판정이 확인되지 않습니다") == 1
+
+
+def test_assertion_summary_marks_conflicting_records() -> None:
+    observed = {"ER-001": [{"matched": True, "actual": 20}, {"matched": False, "actual": 19}]}
+    lines = pipeline_reporting._expected_result_summary(["ER-001", "ER-002"], observed, {"ER-002"})
+    assert lines == ["- `ER-001`: 관찰 기록이 서로 다릅니다 (관찰값 20, 19). 원본 실행 증거를 확인해 주세요."]
+
+
+def test_assertion_observations_require_matching_log_hash(tmp_path: Path) -> None:
+    stdout = _observation_line("ER-005", True, 30) + "\n"
+    run_dir, run_id = _write_agent4_inputs(
+        tmp_path, candidate_status=pipeline.NeutralExecutionStatus.ASSERTION_FAILED, candidate_stdout=stdout)
+    bundle = pipeline.ValidationExecutionBundle.model_validate_json(
+        (run_dir / "validation_execution.json").read_text(encoding="utf-8"))
+    result = bundle.candidate_result
+    assert pipeline_reporting._assertion_observations(run_dir, result, run_id)["ER-005"][0]["actual"] == 30
+    (run_dir / result.stdout_file).write_text(_observation_line("ER-005", False, 19) + "\n", encoding="utf-8")
+    assert pipeline_reporting._assertion_observations(run_dir, result, run_id) == {}
