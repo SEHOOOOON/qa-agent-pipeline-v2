@@ -6,7 +6,7 @@
 - 수정 후: `src/qa_pipeline_reporting.py` `_assertion_observations`·`_expected_result_summary`. 해시가 일치하는 stdout 로그에서 **같은 Run·같은 TC**의 `QA_ASSERTION_OBSERVED` 줄만 읽어 ER별로 "관찰 기록상 통과 (관찰값 30)" / "관찰 기록상 불일치 (관찰값 19)" / 기록끼리 다르면 "관찰 기록이 서로 다릅니다"로 표시한다. 기록이 없는 ER만 기존 문구를 유지한다. 판정·권고·보고 JSON·Checkpoint는 바꾸지 않았다(검토서 Markdown만).
 - 유지한 보호 장치: "불일치가 기록되지 않았으니 통과" 같은 추정은 여전히 하지 않는다(통과 표시는 `matched: true` 기록이 있을 때만). 소스 코드 안의 `print(...QA_ASSERTION_OBSERVED...)` 문장, 다른 Run·TC 기록, 깨진 JSON, 해시가 다른 로그는 무시한다.
 - 저장 Run 영향: 저장된 검토서와 Manifest 해시는 그대로다(자동 재생성 없음). 다만 관찰 기록이 있는 **과거 실패 Run**에 `human-review` 명령을 다시 실행하면 새 문구 때문에 "기존 문서와 현재 생성 결과가 다릅니다"로 멈춘다(기존 설계대로). 사람이 고치지 않은 문서라면 `--refresh`로 갱신할 수 있다. P2는 저장된 문서를 Manifest 해시로만 읽으므로 과거 FLOW 재검사에 영향 없음. 검토서가 ER 수만큼 몇 줄 길어지며 P2의 24,000바이트 읽기 한도에 가까운 큰 문서는 주의.
-- 검증일 2026-10-16 KST(로컬): 새 시험 3개(실패 TC 안 통과·불일치·미확인 구분과 다른 Run/TC/깨진 줄 무시, 기록 충돌 표시, 로그 해시 불일치 시 무시). `tests/test_agent4_reporting.py` 전체 PASS. P1 전체 결과는 아래 줄 참조. 실제 저장 Run(10-15)으로 재생성 비교는 PC에서 미검증.
+- 검증일 2026-10-16 KST(로컬): 새 시험 3개(실패 TC 안 통과·불일치·미확인 구분과 다른 Run/TC/깨진 줄 무시, 기록 충돌 표시, 로그 해시 불일치 시 무시). `tests/test_agent4_reporting.py` 전체 PASS. P1 전체(클라우드, 24분, 72366f5와 같은 코드): 3249개 중 3227 PASS / 2 FAIL / 20 SKIP. FAIL 2개(`test_agent3.py::test_temperature_unreachable_trial_is_execution_error_not_product_failure[18-29.5]`, `[29.5-16.5]`)는 컨테이너 브라우저 기본 위치 링크를 만들기 전에 실행된 시험이며 링크 후 단독 재실행 2/2 PASS(환경 원인, 2026-10-15 메모와 같음). SKIP 20개는 배포하지 않는 로컬 실제 API 저장 증거가 없어서(PC에서는 실행됨). 실제 저장 Run(10-15)으로 재생성 비교는 PC에서 미검증.
 - 브랜치 `claude/fixes-20261015-le3mg5`(bf02cf5 다음). P2 기록: P2 `PROJECT_HANDOFF.md` 2026-10-16(2차).
 
 ## 2026-10-15 · 사람 확정 범위 변경 규칙 반영과 새 예시 요청 (클라우드 작업, API 없음)
