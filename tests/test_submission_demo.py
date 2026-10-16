@@ -81,8 +81,7 @@ def test_portfolio_marks_restoration_as_comparison_not_a_new_value_dump():
     assert '<th scope="row">운전 준비 후</th><td>운전</td><td>운전</td><td>OPERATION</td>' in table
     assert '<th scope="row">정지 적용 후</th><td>정지</td><td>정지</td><td>STOP</td>' in table
     assert '<th scope="row">복원 확인</th><td>비교 통과</td><td>비교 통과</td><td>비교 통과</td>' in table
-    assert '복원 후 값 자체는 로그에 별도로 출력되지 않아' in table
-    assert '새로 실행한 결과는 아닙니다' in table
+    # 2026-10-16 사용자 결정: 포트폴리오 본문에는 상태·면책 문장을 두지 않는다(근거 파일 링크로 대신).
     for file in ('power-observations.json', 'power-trial-stdout.txt'):
         assert f'href="evidence/submission-20261010/{file}"' in table
 
