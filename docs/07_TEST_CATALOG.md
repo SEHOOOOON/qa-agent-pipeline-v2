@@ -162,3 +162,5 @@ V1 기준 제품 테스트는 [test_controller.py](../product_baseline/tests/tes
 `tests/test_grounding.py`의 range_rules 검사(2026-10-15)는 확정 규칙 문장이 작성·검토 지침에 들어가고 시나리오 값(°C·모드·장비 이름)을 담지 않는지, 표시가 있는 새 Run에만 검토 입력·지시문·캐시 키가 바뀌고 표시 없는 과거 검토 해시는 유지되는지, 규칙 문장 변조·알 수 없는 표시·버전 불일치·사람 판단 사례 없는 사용을 거부하는지 확인한다. 대역 검토이며 AI가 규칙을 지키는지는 측정하지 않는다.
 
 반려 등급 검사(2026-10-17): `tests/test_grounding.py`의 `test_review_severity_*`는 표시가 있는 Agent 1 검토에서 `[경고]`만 진행하고 `[치명]`·표시 없음은 FAIL인지, 같은 반려가 표시 없는 과거 검토에서는 그대로 FAIL인지, 지시문·캐시 키 전달과 Agent 3·범위 규칙 없는 Agent 2 사용 거부를 확인한다. `tests/test_srs_agent1.py`의 `test_severity_tiers_keep_source_integrity_but_record_scope_findings`는 CP1-011 범위 지적이 경고로 기록되고 CP1-006·CP1-007은 계속 멈추는지 확인한다. 대역 검토이며 AI가 등급을 맞게 나누는지는 측정하지 않는다.
+
+범위 필수 목록 검사(2026-10-17): `tests/test_agent2.py`의 `test_range_checklist_*`는 분명한 범위 문장만 읽고 범위 변경이 아닌·모드 둘·SRS 출처 문장은 건너뛰는지, 유지 모드가 새 범위 밖 값을 포함할 때만 전환 질문이 필수인지, 질문 누락·중단 확인 사항에만 둔 질문·상한 차단 누락·다른 기대값을 [치명] FAIL로 보고하는지, 표시 없는 과거 계약은 검사하지 않고 Agent 2 입력에는 목록이 주어질 때만 들어가는지 확인한다. AI가 목록을 지키는지는 측정하지 않는다.

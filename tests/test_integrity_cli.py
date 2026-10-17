@@ -1151,7 +1151,7 @@ def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
     _write_json(run_dir / "checkpoint2.json", historical_cp.model_dump(mode="json"))
     legacy = {**manifest, "design_review_contract": None, "contract_version": "3.1", "tc_detail_contract": "1.0", "srs_revision_contract": "1.0",
               "baseline_capture_order_contract": None, "range_change_rules_contract": None,
-              "review_severity_contract": None,
+              "review_severity_contract": None, "range_checklist_contract": None,
               "focused_design_review_contract": None, "human_judgment_examples_contract": None,
               "double_assert_timing_contract": "1.0",
                   "tc_execution_alignment_contract": None,

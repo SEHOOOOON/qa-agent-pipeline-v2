@@ -479,6 +479,24 @@ def _load_verified_agent1_run(run_dir: Path, run_id: str) -> tuple[
     return request, requirements, analysis, checkpoint, manifest
 
 
+def _range_checklist_policy(manifest: dict[str, Any]) -> bool:
+    """Opt-in 2026-10-17 code checklist for range changes; older Runs keep their CP2."""
+    marker = manifest.get("range_checklist_contract")
+    if marker not in {None, "1.0"} or (marker is not None and (
+            manifest.get("prompt_version") != "agent2-2.62"
+            or manifest.get("range_change_rules_contract") != "1.0")):
+        raise ValueError("지원하지 않는 범위 필수 목록 계약입니다.")
+    return marker == "1.0"
+
+
+def _attach_range_checklist(checkpoint, analysis, design, enabled: bool):
+    if not enabled:
+        return checkpoint
+    from qa_pipeline_range_checklist import range_checklist_check
+    check = range_checklist_check(analysis, design)
+    return checkpoint if check is None else attach_grounding_check(checkpoint, check)
+
+
 def _review_severity_policy(manifest: dict[str, Any], agent: str) -> bool:
     """Opt-in 2026-10-17 critical/warning tiers; runs without the marker keep their hash."""
     marker = manifest.get("review_severity_contract")
@@ -602,6 +620,7 @@ def _current_agent2_contract() -> dict[str, str]:
         "baseline_capture_order_contract": "1.0",
         "range_change_rules_contract": "1.0",
         "review_severity_contract": "1.0",
+        "range_checklist_contract": "1.0",
         "scope_guard_contract": "1.2",
         "task_boundary_contract": "1.3",
         "output_tolerance_contract": "1.0",
@@ -774,12 +793,16 @@ def run_agent2(args: argparse.Namespace) -> int:
 
     agent = OpenAIAgent2(model=args.model)
     grounding_records = []
+    from qa_pipeline_range_checklist import checklist as _range_rows, range_table as _range_table, render as _render_rows
+    _table = _range_table(analysis)
+    range_checklist_text = _render_rows(_range_rows(_table)) if _table else None
     try:
         response = agent.design(
             request,
             analysis,
             requirements,
             existing_catalog=existing_catalog,
+            required_checklist=range_checklist_text,
         )
         _save_received_usage(run_dir, "AGENT2", 1, "generation", response)
         _record_agent2_srs_source(run_dir, response, 1, source_manifest)
@@ -816,6 +839,7 @@ def run_agent2(args: argparse.Namespace) -> int:
             existing_catalog=existing_catalog,
             **_agent2_checkpoint_options(_current_agent2_contract()),
         )
+        checkpoint2 = _attach_range_checklist(checkpoint2, analysis, response.design, True)
         attempts = [
             {
                 "attempt": 1,
@@ -848,6 +872,7 @@ def run_agent2(args: argparse.Namespace) -> int:
                 requirements,
                 existing_catalog=existing_catalog,
                 previous_design=response.design,
+                required_checklist=range_checklist_text,
                 checkpoint_feedback=[
                     f"{item.rule_id} {item.status.value}: {item.message}"
                     for item in checkpoint2.checks
@@ -887,6 +912,7 @@ def run_agent2(args: argparse.Namespace) -> int:
                 existing_catalog=existing_catalog,
                 **_agent2_checkpoint_options(_current_agent2_contract()),
             )
+            checkpoint2 = _attach_range_checklist(checkpoint2, analysis, response.design, True)
             _write_json(run_dir / "agent2_test_design_attempt_2.json", response.design.model_dump(mode="json"))
             checkpoint2 = _run_grounding_review(run_dir, "AGENT2", 2,
                 build_grounding_input("AGENT2", request, requirements, response.design,
@@ -1082,6 +1108,7 @@ def _load_verified_agent2_run(
         **_agent2_checkpoint_options(manifest),
         existing_catalog=existing_catalog,
     )
+    recomputed = _attach_range_checklist(recomputed, analysis, design, _range_checklist_policy(manifest))
     recomputed = _load_grounding_review(run_dir, manifest, "AGENT2", ("3.11", "3.12", "3.13"),
         build_grounding_input("AGENT2", request, requirements, design, analysis=analysis, catalog=existing_catalog,
                               include_condition_coverage=manifest.get("contract_version") in {"3.12", "3.13"},

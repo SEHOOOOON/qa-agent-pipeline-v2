@@ -2856,3 +2856,97 @@ def test_playwright_code_is_rejected() -> None:
 
     assert result.status == CheckStatus.FAIL
     assert cp2_check(result, "CP2-009").status == CheckStatus.FAIL
+
+
+# --- range_checklist_contract 1.0 (2026-10-17) -------------------------------------------
+def _range_conditions(*rows):
+    return SimpleNamespace(confirmed_conditions=[
+        SimpleNamespace(change_role=role, source_type=source, statement=text) for role, source, text in rows])
+
+
+RANGE_ANALYSIS = _range_conditions(
+    ("변경", "CHANGE_REQUEST", "냉방(COOL)의 설정 온도 허용 범위는 하한 20°C와 상한 30°C를 포함하는 20~30°C로 변경된다."),
+    ("유지", "CHANGE_REQUEST", "난방(HEAT)의 설정 온도 허용 범위는 기존 16~30°C를 유지한다."),
+    ("변경", "CHANGE_REQUEST", "냉방에서 20°C를 적용한 상태로 감소 조작을 한 뒤 적용하면 내부 setTemp는 20°C이다."),
+)
+
+
+def _probe_tc(tc_id, start, op, attempted_expected):
+    ops = [dict(action_id="M", phase="SETUP", target="mode.cool"),
+           dict(action_id="S", phase="SETUP", target="temperature.set", value=start),
+           dict(action_id="T", phase="TEST", target=op)]
+    checks = [dict(after_action_id="T", target=f"{loc}.setTemp", expected_value=attempted_expected)
+              for loc in ("panel", "card", "internal")]
+    return dict(tc_id=tc_id, execution_spec=dict(operations=ops, verifications=checks))
+
+
+def _full_range_design(question=True, where="최종_확인_사항"):
+    design = {"test_cases": [
+        _probe_tc("T1", 21, "temperature.decrease", 20), _probe_tc("T2", 29, "temperature.increase", 30),
+        _probe_tc("T3", 20, "temperature.decrease", 20), _probe_tc("T4", 30, "temperature.increase", 30)],
+        "최종_확인_사항": [], "중단_확인_사항": []}
+    if question:
+        design[where] = ["난방 16~30°C 중 냉방 범위 밖 온도에서 냉방으로 바꿀 때 동작이 요청에 없습니다. 어떻게 처리하나요?"]
+    return design
+
+
+def test_range_checklist_reads_only_unambiguous_agent1_range_statements():
+    import qa_pipeline_range_checklist as rc
+    table = rc.range_table(RANGE_ANALYSIS)
+    assert table == {"changed": [dict(mode="COOL", lower=20, upper=30)], "kept": [dict(mode="HEAT", lower=16, upper=30)]}
+    ids = [row["id"] for row in rc.checklist(table)]
+    assert ids == ["T-1:APPLY:COOL:20", "T-1:APPLY:COOL:30", "T-2:BLOCK:COOL:19", "T-2:BLOCK:COOL:31", "T-5:QUESTION:COOL"]
+    # Not a range change, two modes in one sentence, or an SRS-sourced sentence: no checklist, no stop.
+    assert rc.range_table(_range_conditions(("변경", "CHANGE_REQUEST", "HIGH 풍량은 강풍으로 표시된다."))) is None
+    assert rc.range_table(_range_conditions(("변경", "CHANGE_REQUEST", "냉방과 난방의 허용 범위는 20~30°C로 변경된다."))) is None
+    assert rc.range_table(_range_conditions(("변경", "SRS", "냉방 허용 범위는 20~30°C로 변경된다."))) is None
+    assert rc.range_checklist_check(_range_conditions(("변경", "CHANGE_REQUEST", "HIGH 풍량은 강풍으로 표시된다.")), {}) is None
+    # No kept mode outside the new range: no switch question.
+    narrow = _range_conditions(("변경", "CHANGE_REQUEST", "냉방 허용 범위는 18~30°C로 변경된다."),
+                               ("유지", "CHANGE_REQUEST", "난방 허용 범위는 20~28°C를 유지한다."))
+    assert "T-5:QUESTION:COOL" not in [r["id"] for r in rc.checklist(rc.range_table(narrow))]
+
+
+@pytest.mark.parametrize("variant,status,missing", [
+    ("complete", CheckStatus.PASS, []),
+    ("no_question", CheckStatus.FAIL, ["T-5:QUESTION:COOL"]),
+    ("blocking_question", CheckStatus.FAIL, ["T-5:QUESTION:COOL"]),  # must not stop the run
+    ("no_upper_block", CheckStatus.FAIL, ["T-2:BLOCK:COOL:31"]),
+    ("wrong_value", CheckStatus.FAIL, ["T-2:BLOCK:COOL:19"]),
+])
+def test_range_checklist_marks_missing_items_as_critical(variant, status, missing):
+    import qa_pipeline_range_checklist as rc
+    design = _full_range_design(question=variant != "no_question",
+                                where="중단_확인_사항" if variant == "blocking_question" else "최종_확인_사항")
+    if variant == "no_upper_block":
+        design["test_cases"].pop()
+    if variant == "wrong_value":
+        design["test_cases"][2]["execution_spec"]["verifications"][2]["expected_value"] = 19
+    check = rc.range_checklist_check(RANGE_ANALYSIS, design)
+    assert check.rule_id == "CP2-RANGE-CHECKLIST" and check.status == status
+    assert [m for m in missing if m not in check.message] == []
+    if status == CheckStatus.FAIL:
+        assert check.message.startswith("[치명]")
+
+
+def test_range_checklist_contract_is_opt_in_and_reaches_the_writer():
+    from qa_pipeline_execution import _current_agent2_contract, _range_checklist_policy, _attach_range_checklist
+    current = _current_agent2_contract()
+    assert current["range_checklist_contract"] == "1.0" and _range_checklist_policy(current)
+    old = {k: v for k, v in current.items() if k != "range_checklist_contract"}
+    assert _range_checklist_policy(old) is False
+    with pytest.raises(ValueError, match="범위 필수 목록"):
+        _range_checklist_policy(dict(current, prompt_version="agent2-2.61"))
+    checkpoint = SimpleNamespace(marker="unchanged")
+    assert _attach_range_checklist(checkpoint, RANGE_ANALYSIS, {}, False) is checkpoint  # old Runs untouched
+    # The writer receives the computed list only when it is given.
+    sent = []
+    def parse(**kwargs):
+        sent.append(kwargs)
+        raise RuntimeError("stop after capture")
+    agent = OpenAIAgent2(model="test", client=SimpleNamespace(responses=SimpleNamespace(parse=parse)))
+    for checklist in (None, "- [T-5:QUESTION:COOL] 질문"):
+        with pytest.raises(Exception):
+            agent.design(cp1_request(), cp2_analysis(), cp2_requirements(), required_checklist=checklist)
+    assert "[코드가 계산한 필수 확인 목록" not in sent[0]["input"][1]["content"]
+    assert "[T-5:QUESTION:COOL]" in sent[1]["input"][1]["content"]

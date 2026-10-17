@@ -309,6 +309,7 @@ class OpenAIAgent2:
         existing_catalog: tuple[ExistingRegressionSpec, ...] = EXISTING_REGRESSION_CATALOG,
         previous_design: Agent2TestDesign | None = None,
         checkpoint_feedback: list[str] | None = None,
+        required_checklist: str | None = None,
     ) -> Agent2Response:
         procedure_notes = list(analysis.procedure_notes)
         # Import at call time: Agent 3 imports Agent 2 for the existing role boundary.
@@ -358,6 +359,15 @@ class OpenAIAgent2:
             "procedure_notes의 각 원문 의미·순서를 사전조건·조작·복원에 상세하게 반영하며 원문은 분석 기록에서 대조합니다. "
             "기존 TC만 재사용할 때는 해당 절차의 실제 수행 여부를 최종 검토로 남깁니다."
         )
+        if required_checklist:
+            # range_checklist_contract 1.0 (2026-10-17): computed by code from the CP1 conditions.
+            user_input += (
+                "\n\n[코드가 계산한 필수 확인 목록 — 모두 포함해야 CP2를 통과합니다]\n"
+                f"{required_checklist}\n"
+                "각 적용·차단 항목은 TEST 단계 조작과 같은 조작 직후의 패널·카드·내부 setTemp 기대결과로 작성합니다. "
+                "질문 항목은 실행을 멈추는 중단_확인_사항이 아니라 최종_확인_사항에 질문 문장으로 남기고, "
+                "질문 대상 동작의 기대값은 만들지 않습니다. 나머지 시험은 그대로 설계합니다."
+            )
         user_input += (
             "\n\n[실행 연결표의 정확한 항목 목록]\n"
             f"{json.dumps(connection_options, ensure_ascii=False, indent=2)}\n"
