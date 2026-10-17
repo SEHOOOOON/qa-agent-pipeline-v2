@@ -517,6 +517,7 @@ def evaluate_checkpoint1(
     review_range_semantics: bool = False,
     review_scope_semantics: bool = False,
     align_request_roles: bool = False,
+    severity_tiers: bool = False,
 ) -> Checkpoint1Result:
     # The default preserves historical callers. New runs explicitly disable
     # wording heuristics and record that policy in their immutable manifest.
@@ -1053,7 +1054,15 @@ def evaluate_checkpoint1(
             else:
                 scope_reviews.append(f"{label}: 요청 밖 간접 영향의 검사 필요성 확인 필요 — {effect.reason}")
         scope_review_required = bool(scope_reviews)
-        if scope_errors:
+        if scope_errors and severity_tiers:
+            # 2026-10-17 사용자 결정: 관련·공통 SRS를 범위에 넣은 것은 멈춤이 아니라 경고.
+            warning = "경고(진행, 사람 확인 권장): 범위 근거 보완 필요 — " + "; ".join(scope_errors)
+            if scope_reviews:
+                add("CP1-011", CheckStatus.REVIEW,
+                    "검사 범위를 자동 확정하지 않고 입력 보완을 기다립니다: " + "; ".join(scope_reviews) + " " + warning)
+            else:
+                add("CP1-011", CheckStatus.PASS, warning)
+        elif scope_errors:
             add("CP1-011", CheckStatus.FAIL,
                 "검사 범위 근거를 보완하세요. 근거 없이 추가한 범위는 확정 조건에서 제외하고 NO_IMPACT로 기록하세요: "
                 + "; ".join(scope_errors + scope_reviews))

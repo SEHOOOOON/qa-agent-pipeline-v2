@@ -494,8 +494,10 @@ def test_request_role_alignment_live_rewrite_and_handoff(tmp_path, monkeypatch, 
     if continuing:
         _load_verified_agent1_run(run_dir, run_dir.name)
         # Downgrading the version must not reinterpret a newly accepted quote.
-        _write_json(manifest_file, {**manifest, 'prompt_version':'agent1-2.24'})
-        with pytest.raises(ValueError, match='Checkpoint 1'):
+        # The 2026-10-17 severity marker belongs to 2.25 runs; a 2.24 fixture omits it.
+        _write_json(manifest_file, {**manifest, 'prompt_version':'agent1-2.24', 'review_severity_contract': None})
+        # Rejected either by the bound review hash or by the CP1 recomputation.
+        with pytest.raises(ValueError, match='Checkpoint 1|입력 해시'):
             _load_verified_agent1_run(run_dir, run_dir.name)
     else:
         assert manifest['handoff_status'] != 'CONTINUE'
@@ -551,21 +553,29 @@ def test_scope_gate_rewrite_and_pause_before_agent2(tmp_path, monkeypatch, outco
     args = SimpleNamespace(request=str(request_file),
         srs=str(REPO_ROOT / "docs/01_PRODUCT_SRS.md"),
         runs_root=str(tmp_path / "runs"), model=None)
-    assert pipeline.run_agent1(args) == (0 if outcome == "repair" else 2)
+    # 2026-10-17 사용자 결정(review_severity_contract 1.0): 범위 근거 부족은 경고로 기록하고 진행.
+    warned = outcome in {"repair", "unresolved"}
+    assert pipeline.run_agent1(args) == (0 if warned else 2)
     run_dir = next((tmp_path / "runs").iterdir())
     manifest = pipeline._read_json_payload(run_dir / "run_manifest.json")
     assert manifest["scope_guard_contract"] == "1.2"
     assert manifest["prompt_version"] == "agent1-2.25"
     assert manifest["task_boundary_contract"] == "1.3"
+    assert manifest["review_severity_contract"] == "1.0"
     if outcome == "scope_review":
         assert len(calls) == 1
         assert manifest["handoff_status"] == "PAUSE"
+    elif warned:
+        assert len(calls) == 1  # no rewrite for a warning
+        checkpoint = pipeline._read_json_payload(run_dir / "checkpoint1.json")
+        scope = next(c for c in checkpoint["checks"] if c["rule_id"] == "CP1-011")
+        assert scope["status"] == "PASS" and "경고(진행" in scope["message"]
     else:
         assert len(calls) == 2
         assert calls[1]["checkpoint_feedback"]
         if outcome != "scope_reject":
             assert any("검사 범위" in msg for msg in calls[1]["checkpoint_feedback"])
-    if outcome == "repair":
+    if warned:
         _load_verified_agent1_run(run_dir, run_dir.name)
     else:
         def forbidden_agent2(**kwargs):
@@ -1141,6 +1151,7 @@ def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
     _write_json(run_dir / "checkpoint2.json", historical_cp.model_dump(mode="json"))
     legacy = {**manifest, "design_review_contract": None, "contract_version": "3.1", "tc_detail_contract": "1.0", "srs_revision_contract": "1.0",
               "baseline_capture_order_contract": None, "range_change_rules_contract": None,
+              "review_severity_contract": None,
               "focused_design_review_contract": None, "human_judgment_examples_contract": None,
               "double_assert_timing_contract": "1.0",
                   "tc_execution_alignment_contract": None,

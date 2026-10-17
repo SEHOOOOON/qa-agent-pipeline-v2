@@ -273,10 +273,10 @@ def run_agent1(args: argparse.Namespace) -> int:
         response = agent.analyze(request, requirements)
         _save_received_usage(run_dir, "AGENT1", 1, "generation", response)
         link_source = _save_agent1_link_draft(run_dir, 1, response)
-        checkpoint = evaluate_checkpoint1(request, response.analysis, requirements, legacy_wording_checks=False, allow_background_range_paraphrase=True, allow_srs_quote_parts=True, review_range_semantics="1.3", review_scope_semantics=True, align_request_roles=True)
+        checkpoint = evaluate_checkpoint1(request, response.analysis, requirements, legacy_wording_checks=False, allow_background_range_paraphrase=True, allow_srs_quote_parts=True, review_range_semantics="1.3", review_scope_semantics=True, align_request_roles=True, severity_tiers=True)
         _write_json(run_dir / "agent1_change_analysis_attempt_1.json", response.analysis.model_dump(mode="json"))
         checkpoint = _run_grounding_review(run_dir, "AGENT1", 1,
-            build_grounding_input("AGENT1", request, requirements, response.analysis, allow_output_tolerance=True, include_task_boundaries="1.3", review_scope_semantics=True),
+            build_grounding_input("AGENT1", request, requirements, response.analysis, allow_output_tolerance=True, include_task_boundaries="1.3", review_scope_semantics=True, review_severity=True),
             checkpoint, args.model, grounding_records)
         attempts = [
             {
@@ -308,10 +308,10 @@ def run_agent1(args: argparse.Namespace) -> int:
             )
             _save_received_usage(run_dir, "AGENT1", 2, "generation", response)
             link_source = _save_agent1_link_draft(run_dir, 2, response)
-            checkpoint = evaluate_checkpoint1(request, response.analysis, requirements, legacy_wording_checks=False, allow_background_range_paraphrase=True, allow_srs_quote_parts=True, review_range_semantics="1.3", review_scope_semantics=True, align_request_roles=True)
+            checkpoint = evaluate_checkpoint1(request, response.analysis, requirements, legacy_wording_checks=False, allow_background_range_paraphrase=True, allow_srs_quote_parts=True, review_range_semantics="1.3", review_scope_semantics=True, align_request_roles=True, severity_tiers=True)
             _write_json(run_dir / "agent1_change_analysis_attempt_2.json", response.analysis.model_dump(mode="json"))
             checkpoint = _run_grounding_review(run_dir, "AGENT1", 2,
-                build_grounding_input("AGENT1", request, requirements, response.analysis, allow_output_tolerance=True, include_task_boundaries="1.3", review_scope_semantics=True),
+                build_grounding_input("AGENT1", request, requirements, response.analysis, allow_output_tolerance=True, include_task_boundaries="1.3", review_scope_semantics=True, review_severity=True),
                 checkpoint, args.model, grounding_records)
             attempts.append(
                 {
@@ -337,6 +337,7 @@ def run_agent1(args: argparse.Namespace) -> int:
                 "input_routing_contract": "1.0",
                 "meaning_guard_contract": "1.0",
                 "scope_guard_contract": "1.2",
+                "review_severity_contract": "1.0",
                 "prompt_version": "agent1-2.25",
                 "requirement_link_contract": "1.0",
                 "requirement_link_source": link_source,
@@ -463,17 +464,30 @@ def _load_verified_agent1_run(run_dir: Path, run_id: str) -> tuple[
         require_input_contract=input_contract == "1.0",
         require_meaning_guard=manifest.get("meaning_guard_contract") == "1.0",
         require_scope_guard=scope_contract in {"1.0", "1.1", "1.2"},
-        allow_request_trace=scope_contract in {"1.1", "1.2"})
+        allow_request_trace=scope_contract in {"1.1", "1.2"},
+        severity_tiers=_review_severity_policy(manifest, "agent1"))
     recomputed = _load_grounding_review(run_dir, manifest, "AGENT1", "2.11",
         build_grounding_input("AGENT1", request, requirements, analysis,
                               allow_output_tolerance=_output_tolerance_policy(manifest),
                               include_task_boundaries=_task_boundary_policy(manifest),
-                              review_scope_semantics=scope_contract == "1.2"), recomputed)
+                              review_scope_semantics=scope_contract == "1.2",
+                              review_severity=_review_severity_policy(manifest, "agent1")), recomputed)
     if not _checkpoint_revalidation_matches(checkpoint, recomputed, legacy=legacy_wording):
         raise ValueError("현재 CP1 규칙으로 재검증한 결과가 저장된 Checkpoint 1과 다릅니다.")
     if checkpoint.status not in {CheckStatus.PASS, CheckStatus.REVIEW} or checkpoint.handoff_status != HandoffStatus.CONTINUE:
         raise ValueError("Checkpoint 1이 Agent 2 실행을 허용하지 않습니다.")
     return request, requirements, analysis, checkpoint, manifest
+
+
+def _review_severity_policy(manifest: dict[str, Any], agent: str) -> bool:
+    """Opt-in 2026-10-17 critical/warning tiers; runs without the marker keep their hash."""
+    marker = manifest.get("review_severity_contract")
+    required = ({"prompt_version": "agent1-2.25", "contract_version": "2.11"} if agent == "agent1"
+                else {"prompt_version": "agent2-2.62", "range_change_rules_contract": "1.0"})
+    if marker not in {None, "1.0"} or (marker is not None and any(
+            manifest.get(key) != value for key, value in required.items())):
+        raise ValueError("지원하지 않는 반려 등급 계약입니다.")
+    return marker == "1.0"
 
 
 def _output_tolerance_policy(manifest: dict[str, Any]) -> bool:
@@ -587,6 +601,7 @@ def _current_agent2_contract() -> dict[str, str]:
         "tc_execution_alignment_contract": "1.0",
         "baseline_capture_order_contract": "1.0",
         "range_change_rules_contract": "1.0",
+        "review_severity_contract": "1.0",
         "scope_guard_contract": "1.2",
         "task_boundary_contract": "1.3",
         "output_tolerance_contract": "1.0",
@@ -815,7 +830,7 @@ def run_agent2(args: argparse.Namespace) -> int:
                                   analysis=analysis, catalog=existing_catalog, include_condition_coverage=True,
                                   include_procedure_coverage=True, include_execution_contract=True, include_review_responsibilities=True,
                                   allow_output_tolerance=True, include_task_boundaries="1.3", review_scope_semantics=True,
-                                  include_tc_execution_alignment=True, essential_checks=True, pair_observation_anchors=True, shared_design_review=True, focused_design_review="1.1", human_judgment_examples=True, baseline_capture_order=True, range_change_rules=True),
+                                  include_tc_execution_alignment=True, essential_checks=True, pair_observation_anchors=True, shared_design_review=True, focused_design_review="1.1", human_judgment_examples=True, baseline_capture_order=True, range_change_rules=True, review_severity=True),
             checkpoint2, args.model, grounding_records)
         attempts[-1]["status"] = checkpoint2.status.value
         if checkpoint2.status == CheckStatus.FAIL and not getattr(args, "no_rewrite", False):
@@ -878,7 +893,7 @@ def run_agent2(args: argparse.Namespace) -> int:
                                       analysis=analysis, catalog=existing_catalog, include_condition_coverage=True,
                                       include_procedure_coverage=True, include_execution_contract=True, include_review_responsibilities=True,
                                       allow_output_tolerance=True, include_task_boundaries="1.3", review_scope_semantics=True,
-                                      include_tc_execution_alignment=True, essential_checks=True, pair_observation_anchors=True, shared_design_review=True, focused_design_review="1.1", human_judgment_examples=True, baseline_capture_order=True, range_change_rules=True),
+                                      include_tc_execution_alignment=True, essential_checks=True, pair_observation_anchors=True, shared_design_review=True, focused_design_review="1.1", human_judgment_examples=True, baseline_capture_order=True, range_change_rules=True, review_severity=True),
                 checkpoint2, args.model, grounding_records)
             attempts.append(
                 {
@@ -1083,7 +1098,8 @@ def _load_verified_agent2_run(
                               focused_design_review=manifest.get("focused_design_review_contract") or False,
                               human_judgment_examples=manifest.get("human_judgment_examples_contract") == "1.0",
                               baseline_capture_order=_agent2_baseline_order_policy(manifest),
-                              range_change_rules=_agent2_range_rules_policy(manifest)), recomputed)
+                              range_change_rules=_agent2_range_rules_policy(manifest),
+                              review_severity=_review_severity_policy(manifest, "agent2")), recomputed)
     if not _checkpoint_revalidation_matches(checkpoint, recomputed, legacy=legacy_wording):
         raise ValueError("Stored Checkpoint 2 differs from the current CP2 rules.")
     if checkpoint.status != CheckStatus.PASS:

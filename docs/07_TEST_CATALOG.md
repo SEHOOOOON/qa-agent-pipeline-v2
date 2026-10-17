@@ -160,3 +160,5 @@ V1 기준 제품 테스트는 [test_controller.py](../product_baseline/tests/tes
 [정리 전 테스트 추가 이력](../archive/2026-09-28/07_TEST_CATALOG.md)은 과거 변경 근거입니다. 추가 N건을 모두 더해 현재 수량으로 사용하지 않습니다. 테스트 추가/삭제 시 이 문서의 역할·반례 범위와 인계 문서의 수집 상태를 함께 갱신합니다.
 
 `tests/test_grounding.py`의 range_rules 검사(2026-10-15)는 확정 규칙 문장이 작성·검토 지침에 들어가고 시나리오 값(°C·모드·장비 이름)을 담지 않는지, 표시가 있는 새 Run에만 검토 입력·지시문·캐시 키가 바뀌고 표시 없는 과거 검토 해시는 유지되는지, 규칙 문장 변조·알 수 없는 표시·버전 불일치·사람 판단 사례 없는 사용을 거부하는지 확인한다. 대역 검토이며 AI가 규칙을 지키는지는 측정하지 않는다.
+
+반려 등급 검사(2026-10-17): `tests/test_grounding.py`의 `test_review_severity_*`는 표시가 있는 Agent 1 검토에서 `[경고]`만 진행하고 `[치명]`·표시 없음은 FAIL인지, 같은 반려가 표시 없는 과거 검토에서는 그대로 FAIL인지, 지시문·캐시 키 전달과 Agent 3·범위 규칙 없는 Agent 2 사용 거부를 확인한다. `tests/test_srs_agent1.py`의 `test_severity_tiers_keep_source_integrity_but_record_scope_findings`는 CP1-011 범위 지적이 경고로 기록되고 CP1-006·CP1-007은 계속 멈추는지 확인한다. 대역 검토이며 AI가 등급을 맞게 나누는지는 측정하지 않는다.

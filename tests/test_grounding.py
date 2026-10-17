@@ -159,7 +159,7 @@ def test_human_examples_same_reference_reaches_writer_rewriter_and_reviewer(rewr
     for call in sent:
         assert QA_HUMAN_JUDGMENT_EXAMPLES in call["input"][0]["content"]
     assert payload["context"]["human_judgment_examples"] == QA_HUMAN_JUDGMENT_EXAMPLES
-    assert sent[0]["prompt_cache_key"] == "qa-v2-agent2-2-62-range-1"
+    assert sent[0]["prompt_cache_key"] == "qa-v2-agent2-2-62-rules-2"
     assert sent[1]["prompt_cache_key"] == "qa-v2-grounding-1-20"
 
 
@@ -2235,3 +2235,52 @@ def test_static_first_wire_only_reorders_transport_and_keeps_digest():
                  source_documents=[*docs[:1], dict(source_id="APPROVED_TC/tc_id", text="TC-2"), *docs[2:]])
     a, b = json.dumps(wire, ensure_ascii=False), json.dumps(grounding.static_first_wire(other), ensure_ascii=False)
     assert a[:a.index("APPROVED_TC")] == b[:b.index("APPROVED_TC")]
+
+
+@pytest.mark.parametrize("reason,status", [
+    ("[경고] 장비 선택 조작의 요청 근거 문장이 없습니다.", CheckStatus.PASS),
+    ("[치명] 준비로 바꾼 mode의 원래값 기록·복원이 없습니다.", CheckStatus.FAIL),
+    ("표시 없는 반려입니다.", CheckStatus.FAIL),  # untagged stays critical
+])
+def test_review_severity_stops_only_critical_findings(reason, status):
+    """2026-10-17 사용자 결정(저장 사례 8건): 치명만 멈추고 경고는 기록 후 진행."""
+    request, analysis, requirements = cp1_scope_case(direct=True)
+    payload = grounding.build_grounding_input("AGENT1", request, requirements, analysis,
+        include_task_boundaries="1.3", review_scope_semantics=True, review_severity=True)
+    assert payload["review_severity_contract"] == "1.0"
+    record = fake_grounding_record(payload)
+    record["review"]["items"][0].update(verdict="UNSUPPORTED", reason=reason)
+    result = grounding.check_review_record(payload, record)
+    assert result.status == status
+    if status == CheckStatus.PASS:
+        assert "경고(진행" in result.message and reason in result.message
+    # The same finding in a run without the marker keeps the historical stop.
+    legacy = grounding.build_grounding_input("AGENT1", request, requirements, analysis,
+        include_task_boundaries="1.3", review_scope_semantics=True)
+    assert "review_severity_contract" not in legacy
+    old = fake_grounding_record(legacy)
+    old["review"]["items"][0].update(verdict="UNSUPPORTED", reason=reason)
+    assert grounding.check_review_record(legacy, old).status == CheckStatus.FAIL
+
+
+def test_review_severity_reaches_reviewer_and_is_limited_to_agent1_and_agent2():
+    request, analysis, requirements = cp1_scope_case(direct=True)
+    payload = grounding.build_grounding_input("AGENT1", request, requirements, analysis,
+        include_task_boundaries="1.3", review_scope_semantics=True, review_severity=True)
+    calls = []
+    def parse(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(output_parsed=None)
+    with pytest.raises(ValueError, match="구조화 응답"):
+        grounding.OpenAIGroundingReviewer(model="test",
+            client=SimpleNamespace(responses=SimpleNamespace(parse=parse))).review(payload)
+    instructions = calls[0]["input"][0]["content"]
+    assert grounding.QA_REVIEW_SEVERITY_GUIDANCE in instructions
+    assert grounding.QA_CONFIRMED_RULES not in instructions  # Agent 2 design rules only
+    assert calls[0]["prompt_cache_key"] == "qa-v2-grounding-1-22"
+    tampered = dict(payload, stage="AGENT3")
+    with pytest.raises(ValueError, match="반려 등급"):
+        grounding.evaluate_grounding_review(tampered, grounding.GroundingReview(items=[]))
+    with pytest.raises(ValueError, match="반려 등급"):
+        grounding.build_grounding_input("AGENT2", request, requirements, cp2_valid_design(),
+            analysis=analysis, review_severity=True)

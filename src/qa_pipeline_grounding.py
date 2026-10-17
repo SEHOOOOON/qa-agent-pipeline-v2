@@ -20,6 +20,7 @@ from qa_pipeline_contracts import (
     QA_EXECUTION_CONTRACT, QA_REVIEW_RESPONSIBILITIES, QA_TASK_BOUNDARIES,
     QA_PRODUCT_VERDICT_CONTRACT, QA_EXPECTATION_SCOPE_GUIDANCE, QA_DESIGN_REVIEW_GUIDANCE,
     QA_HUMAN_JUDGMENT_EXAMPLES, QA_CONTROLLER_BASELINE_GUIDANCE, QA_RANGE_CHANGE_RULES,
+    QA_CONFIRMED_RULES, QA_REVIEW_SEVERITY_GUIDANCE,
 )
 from qa_pipeline_agent1 import _response_usage_summary
 
@@ -225,7 +226,7 @@ _FIXED_REVIEW_DOCUMENTS = frozenset({
     "TASK_BOUNDARIES", "EXECUTION_CONTRACT", "REVIEW_RESPONSIBILITIES", "PRODUCT_VERDICT_CONTRACT",
     "CONTROLLER_BASELINE_ORDER", "TC_EXECUTION_ALIGNMENT", "DESIGN_REVIEW_GUIDANCE",
     "FOCUSED_DESIGN_REVIEW", "OBSERVATION_PAIRING", "ESSENTIAL_VALIDATION", "REVIEW_INPUT_GUIDE",
-    "COMPILER_RECOVERY", "RANGE_CHANGE_RULES"})
+    "COMPILER_RECOVERY", "RANGE_CHANGE_RULES", "CONFIRMED_RULES"})
 _PRODUCT_REVIEW_DOCUMENTS = frozenset({"SRS", "CONTROLLER_ADAPTER", "UI_INVENTORY", "CATALOG"})
 
 
@@ -343,7 +344,7 @@ def build_grounding_input(stage, request, requirements, artifact, *, analysis=No
                           include_tc_execution_alignment=False, execution_interface=False, essential_checks=False,
                           pair_observation_anchors=False, shared_design_review=False, focused_design_review=False,
                           human_judgment_examples=False, baseline_capture_order=False,
-                          range_change_rules=False):
+                          range_change_rules=False, review_severity=False):
     """Host enumerates review targets; the reviewer cannot choose a smaller scope."""
     if focused_design_review not in {False, True, "1.0", "1.1"}:
         raise ValueError("지원하지 않는 집중 설계 검토 계약입니다.")
@@ -356,6 +357,10 @@ def build_grounding_input(stage, request, requirements, artifact, *, analysis=No
     if baseline_capture_order and stage == "AGENT2" and not (
             include_tc_execution_alignment and include_execution_contract):
         raise ValueError("Agent 2 원래값 기록 순서는 실행 계약·TC 연결 근거와 함께 제공합니다.")
+    if review_severity and stage not in {"AGENT1", "AGENT2"}:
+        raise ValueError("반려 등급 계약은 Agent 1·2 근거 검토에만 적용합니다.")
+    if review_severity and stage == "AGENT2" and not range_change_rules:
+        raise ValueError("Agent 2 반려 등급 계약은 범위 변경 확정 규칙과 함께 적용합니다.")
     if range_change_rules and not (stage == "AGENT2" and focused_design_review and human_judgment_examples):
         raise ValueError("범위 변경 확정 규칙은 사람 판단 사례를 쓰는 Agent 2 집중 검토에만 적용합니다.")
     def doc(source_id, value):
@@ -596,6 +601,11 @@ def build_grounding_input(stage, request, requirements, artifact, *, analysis=No
         # Opt-in: reviews without the marker keep their historical hash.
         payload["range_change_rules_contract"] = "1.0"
         doc("RANGE_CHANGE_RULES", QA_RANGE_CHANGE_RULES)
+    if review_severity:
+        # Opt-in 2026-10-17: only [치명] findings stop; reviews without the marker keep their hash.
+        payload["review_severity_contract"] = "1.0"
+        if stage == "AGENT2":
+            doc("CONFIRMED_RULES", QA_CONFIRMED_RULES)
     if execution_interface:
         if stage != "AGENT3" or not explicit_expectations_only:
             raise ValueError("실행 인터페이스 계약은 명시적 제품 판정 계약의 Agent 3에만 적용합니다.")
@@ -690,6 +700,14 @@ def evaluate_grounding_review(payload, review):
             or not any(doc["source_id"] == "RANGE_CHANGE_RULES" and doc["text"] == QA_RANGE_CHANGE_RULES
                        for doc in payload["source_documents"]))):
         raise ValueError("지원하지 않는 범위 변경 확정 규칙 계약입니다.")
+    severity = payload.get("review_severity_contract")
+    if severity not in {None, "1.0"} or (severity is not None and (
+            payload["stage"] not in {"AGENT1", "AGENT2"}
+            or (payload["stage"] == "AGENT2" and (
+                range_rules != "1.0"
+                or not any(doc["source_id"] == "CONFIRMED_RULES" and doc["text"] == QA_CONFIRMED_RULES
+                           for doc in payload["source_documents"]))))):
+        raise ValueError("지원하지 않는 반려 등급 계약입니다.")
     essential = payload.get("essential_validation_contract")
     focused = payload.get("focused_design_review_contract")
     if focused not in {None, "1.0", "1.1"} or (focused is not None and
@@ -705,7 +723,7 @@ def evaluate_grounding_review(payload, review):
     if payload.get("task_boundary_contract") not in {None, "1.0", "1.1", "1.2", "1.3"}:
         raise ValueError("지원하지 않는 작업 경계 계약입니다.")
     actual = [i.item_id for i in review.items]
-    problems, uncertain, invalid_review, resolved_citations = [], [], [], []
+    problems, uncertain, invalid_review, resolved_citations, warnings = [], [], [], [], []
     sources = {d["source_id"]: d["text"] for d in payload["source_documents"]}
     tolerance = payload.get("output_tolerance_contract")
     if tolerance not in {None, "1.0"}:
@@ -739,7 +757,10 @@ def evaluate_grounding_review(payload, review):
         if (essential is None and kinds.get(result.item_id) == "EXPECTED_RESULT" and not result.single_fact
                 and result.verdict != "UNCERTAIN"):
             problems.append(f"{result.item_id}: 독립된 기대결과를 분리하고 모든 검사를 보존해야 합니다: {result.reason}")
-        if result.verdict == "UNSUPPORTED":
+        if result.verdict == "UNSUPPORTED" and severity == "1.0" and result.reason.lstrip().startswith("[경고]"):
+            # 2026-10-17: recorded and carried forward, not a stop. Untagged findings stay critical.
+            warnings.append(f"{result.item_id}: {result.reason.strip()}")
+        elif result.verdict == "UNSUPPORTED":
             problems.append(f"{result.item_id}: 근거/검사 연결 부족: {result.reason}")
         elif result.verdict == "UNCERTAIN":
             uncertain.append(f"{result.item_id}: 사람 확인 필요: {result.reason}")
@@ -753,6 +774,8 @@ def evaluate_grounding_review(payload, review):
     status = CheckStatus.REVIEW if uncertain else CheckStatus.FAIL if problems else CheckStatus.PASS
     message = "; ".join(problems + uncertain) if problems or uncertain else (
         "전체 항목의 모델 근거 검토·인용 존재·연결 검사를 통과했습니다. 의미 정확성의 보장은 아닙니다.")
+    if warnings:
+        message += " 경고(진행, 사람 확인 권장): " + "; ".join(warnings)
     if resolved_citations:
         message += " 계약 인용 위치 보정(원본 응답 보존): " + "; ".join(resolved_citations)
     return CheckResult(rule_id=f"{payload['stage']}-GROUNDING", status=status, message=message)
@@ -806,6 +829,13 @@ class OpenAIGroundingReviewer:
             if range_rules != "1.0" or examples != "1.0":
                 raise ValueError("범위 변경 확정 규칙 계약이 일치하지 않습니다.")
             instructions += "\n" + QA_RANGE_CHANGE_RULES
+        severity = payload.get("review_severity_contract")
+        if severity is not None:
+            if severity != "1.0" or payload["stage"] not in {"AGENT1", "AGENT2"}:
+                raise ValueError("반려 등급 계약이 일치하지 않습니다.")
+            if payload["stage"] == "AGENT2":
+                instructions += "\n" + QA_CONFIRMED_RULES
+            instructions += "\n" + QA_REVIEW_SEVERITY_GUIDANCE
         if not focused and payload.get("essential_validation_contract") == "1.0":
             instructions += (
                 "\n이번 AGENT2 검토는 호스트의 ESSENTIAL_VALIDATION 계약을 적용합니다. "
@@ -816,7 +846,7 @@ class OpenAIGroundingReviewer:
         if indexed:
             instructions = _indexed_review_instructions(instructions)
         response = self.client.responses.parse(model=self.model, reasoning={"effort": "medium"},
-            store=False, prompt_cache_key=("qa-v2-grounding-1-21" if payload.get("range_change_rules_contract") else "qa-v2-grounding-1-20" if examples else "qa-v2-grounding-1-19" if focused else "qa-v2-grounding-1-18" if payload.get("design_review_contract") == "1.0" else "qa-v2-grounding-1-17"),
+            store=False, prompt_cache_key=("qa-v2-grounding-1-22" if payload.get("review_severity_contract") else "qa-v2-grounding-1-21" if payload.get("range_change_rules_contract") else "qa-v2-grounding-1-20" if examples else "qa-v2-grounding-1-19" if focused else "qa-v2-grounding-1-18" if payload.get("design_review_contract") == "1.0" else "qa-v2-grounding-1-17"),
             input=[{"role": "system", "content": instructions},
                    {"role": "user", "content": json.dumps(wire_payload, ensure_ascii=False)}],
             text_format=response_schema)

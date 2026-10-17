@@ -1494,3 +1494,38 @@ def test_proceed_with_open_question_is_recorded_for_final_review() -> None:
         "정보 부족 또는 질문이 있는데 PROCEED로 판정했습니다."
     ]
     assert cp1_check(result, "CP1-010").status == CheckStatus.REVIEW
+
+
+@pytest.mark.parametrize("mutation,rule,stops", [
+    ("unknown_id", "CP1-011", False),
+    ("wrong_link", "CP1-006", True),  # link integrity still stops; only its CP1-011 part is a warning
+    ("invented", "CP1-007", True), ("wrong_number", "CP1-007", True),
+])
+def test_severity_tiers_keep_source_integrity_but_record_scope_findings(mutation, rule, stops):
+    """2026-10-17 사용자 결정: 관련·공통 SRS 범위 포함은 경고, 원문에 없는 조건은 계속 멈춤."""
+    request, analysis, requirements = cp1_scope_case(direct=True, requirement_id="REQ-STATE-001")
+    request.before_value = analysis.before_condition = "준비 온도는 26°C입니다."
+    analysis.requirement_effects[0].relation = RequirementRelation.VERIFY
+    condition = analysis.confirmed_conditions[-1]
+    condition.source_text = request.before_value + " | " + condition.source_text
+    effect = next(e for e in analysis.requirement_effects if e.requirement_id == "REQ-STATE-001")
+    if mutation == "wrong_link":
+        condition.requirement_ids = [request.target_requirement_id]
+    elif mutation == "unknown_id":
+        effect.scope_evidence.request_condition_ids = ["COND-999"]
+    elif mutation == "invented":
+        condition.source_text += " | 원문에 없는 조건입니다."
+    else:
+        condition.statement = "온도는 99°C여야 합니다."
+    options = dict(legacy_wording_checks=False, allow_srs_quote_parts=True,
+                   review_range_semantics="1.3", review_scope_semantics=True, align_request_roles=True)
+    historical = evaluate_checkpoint1(request, analysis, requirements, **options)
+    tiered = evaluate_checkpoint1(request, analysis, requirements, severity_tiers=True, **options)
+    assert cp1_check(historical, rule).status == CheckStatus.FAIL  # old runs unchanged
+    if stops:
+        assert cp1_check(tiered, rule).status == CheckStatus.FAIL
+        assert tiered.handoff_status == HandoffStatus.BLOCKED
+    else:
+        check = cp1_check(tiered, rule)
+        assert check.status in {CheckStatus.PASS, CheckStatus.REVIEW} and "경고(진행" in check.message
+        assert tiered.status != CheckStatus.FAIL

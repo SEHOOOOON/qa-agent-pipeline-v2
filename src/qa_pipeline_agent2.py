@@ -149,6 +149,7 @@ AGENT2_SYSTEM_INSTRUCTIONS += "\n" + QA_EXECUTION_CONTRACT
 AGENT2_SYSTEM_INSTRUCTIONS += "\n" + QA_REVIEW_RESPONSIBILITIES
 AGENT2_SYSTEM_INSTRUCTIONS += "\n" + QA_TASK_BOUNDARIES
 AGENT2_SYSTEM_INSTRUCTIONS += "\n" + QA_RANGE_CHANGE_RULES
+AGENT2_SYSTEM_INSTRUCTIONS += "\n" + QA_CONFIRMED_RULES
 
 
 class Agent2Error(RuntimeError):
@@ -389,7 +390,7 @@ class OpenAIAgent2:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent2-2-62-range-1",
+                prompt_cache_key="qa-v2-agent2-2-62-rules-2",
                 input=[
                     {"role": "system", "content": AGENT2_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
