@@ -404,7 +404,13 @@ def test_essential_review_policy_reaches_model_instructions(enabled):
         reviewer.review(payload)
     instructions = calls[0]["input"][0]["content"]
     assert ("호스트의 ESSENTIAL_VALIDATION 계약" in instructions) == enabled
-    assert json.loads(calls[0]["input"][1]["content"]) == payload
+    sent = json.loads(calls[0]["input"][1]["content"])
+    # Same content, only the transport order differs (static-first-1.0).
+    assert sent == grounding.static_first_wire(payload)
+    assert sorted(sent["source_documents"], key=lambda d: d["source_id"]) == sorted(
+        payload["source_documents"], key=lambda d: d["source_id"])
+    assert {k: v for k, v in sent.items() if k != "source_documents"} == {
+        k: v for k, v in payload.items() if k != "source_documents"}
     if not enabled:
         assert instructions == grounding.REVIEW_INSTRUCTIONS
 
@@ -961,9 +967,14 @@ def test_indexed_transport_actual_sdk_wire_and_legacy_threshold(stage, count):
     assert len(sent) == 1 and sent[0]["store"] is False
     assert sent[0]["text"]["format"]["strict"] is True
     wire = json.loads(sent[0]["input"][1]["content"])
-    assert wire == (grounding.indexed_review_transport(payload)[0] if indexed else payload)
+    assert wire == (grounding.indexed_review_transport(payload)[0] if indexed
+                    else grounding.static_first_wire(payload))
+    if indexed:  # position-based numbers keep the original document order
+        assert [d["source_id"] for d in wire["source_documents"]] == [
+            d["source_id"] for d in payload["source_documents"]]
     assert ("source_indices" in sent[0]["input"][0]["content"]) == indexed
     assert result["citation_binding_contract"] == ("source-index-1.0" if indexed else "source-id-1.0")
+    assert result.get("wire_layout") == (None if indexed else "static-first-1.0")
     assert grounding.check_review_record(payload, result).status == CheckStatus.PASS
     assert result["usage"]["total_tokens"] == 10
 
@@ -2199,3 +2210,28 @@ def test_range_rules_manifest_marker_is_version_bound(change):
         manifest.pop("human_judgment_examples_contract")
     with pytest.raises(ValueError, match="범위 변경"):
         pipeline_execution._agent2_range_rules_policy(manifest)
+
+
+def test_static_first_wire_only_reorders_transport_and_keeps_digest():
+    # 2026-10-17: fixed guidance/product/request documents go first so repeated
+    # review calls share a cacheable prefix; the stored payload is unchanged.
+    docs = [dict(source_id=s, text=s) for s in (
+        "REQUEST/after_value", "APPROVED_TC/tc_id", "TASK_BOUNDARIES", "SRS/REQ-1/statement",
+        "COMPILER_PLAN_FACTS/0", "UI_INVENTORY/0", "EXECUTION_CONTRACT", "APPROVED_TC/title")]
+    payload = {"contract": "grounding-1.0", "stage": "AGENT3", "artifact_sha256": "a" * 64,
+               "source_documents": docs, "context": {"plan": 1}, "items": [{"item_id": "x"}],
+               "task_boundary_contract": "1.3"}
+    before = grounding._review_digest(payload)
+    wire = grounding.static_first_wire(payload)
+    assert [d["source_id"] for d in wire["source_documents"]] == [
+        "TASK_BOUNDARIES", "EXECUTION_CONTRACT", "SRS/REQ-1/statement", "UI_INVENTORY/0",
+        "REQUEST/after_value", "APPROVED_TC/tc_id", "COMPILER_PLAN_FACTS/0", "APPROVED_TC/title"]
+    assert list(wire)[:3] == ["contract", "stage", "task_boundary_contract"]
+    assert list(wire)[-1] == "artifact_sha256"
+    assert grounding._review_digest(payload) == before  # input not mutated
+    assert [d["source_id"] for d in payload["source_documents"]][0] == "REQUEST/after_value"
+    # Different artifacts of the same stage now share the fixed-document prefix.
+    other = dict(payload, artifact_sha256="b" * 64,
+                 source_documents=[*docs[:1], dict(source_id="APPROVED_TC/tc_id", text="TC-2"), *docs[2:]])
+    a, b = json.dumps(wire, ensure_ascii=False), json.dumps(grounding.static_first_wire(other), ensure_ascii=False)
+    assert a[:a.index("APPROVED_TC")] == b[:b.index("APPROVED_TC")]

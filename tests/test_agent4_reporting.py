@@ -1272,3 +1272,13 @@ def test_assertion_observations_require_matching_log_hash(tmp_path: Path) -> Non
     assert pipeline_reporting._assertion_observations(run_dir, result, run_id)["ER-005"][0]["actual"] == 30
     (run_dir / result.stdout_file).write_text(_observation_line("ER-005", False, 19) + "\n", encoding="utf-8")
     assert pipeline_reporting._assertion_observations(run_dir, result, run_id) == {}
+
+
+def test_observed_value_text_reads_like_the_expected_value():
+    # 2026-10-17: saved logs record {"setTemp": 19.0}; the review shows 19.
+    from qa_pipeline_reporting import _observed_value_text
+    assert _observed_value_text({"setTemp": 19.0}) == "19"
+    assert _observed_value_text({"setTemp": 30}) == "30"
+    assert _observed_value_text(19.5) == "19.5"
+    assert _observed_value_text({"setTemp": 20.0, "mode": "COOL"}) == "setTemp 20, mode COOL"
+    assert _observed_value_text(None) == "null" and _observed_value_text(True) == "true"

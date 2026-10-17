@@ -217,6 +217,36 @@ def indexed_review_transport(payload):
     return wire, schema
 
 
+# Sending order only (2026-10-17). The model gets the same documents; fixed
+# guidance and product material come first so repeated calls share a cacheable
+# prefix. The stored payload, its digest and re-verification are unchanged.
+STATIC_FIRST_WIRE_LAYOUT = "static-first-1.0"
+_FIXED_REVIEW_DOCUMENTS = frozenset({
+    "TASK_BOUNDARIES", "EXECUTION_CONTRACT", "REVIEW_RESPONSIBILITIES", "PRODUCT_VERDICT_CONTRACT",
+    "CONTROLLER_BASELINE_ORDER", "TC_EXECUTION_ALIGNMENT", "DESIGN_REVIEW_GUIDANCE",
+    "FOCUSED_DESIGN_REVIEW", "OBSERVATION_PAIRING", "ESSENTIAL_VALIDATION", "REVIEW_INPUT_GUIDE",
+    "COMPILER_RECOVERY", "RANGE_CHANGE_RULES"})
+_PRODUCT_REVIEW_DOCUMENTS = frozenset({"SRS", "CONTROLLER_ADAPTER", "UI_INVENTORY", "CATALOG"})
+
+
+def static_first_wire(payload):
+    """Reorder for transport: fixed text, product, request, then this artifact."""
+    def tier(document):
+        top = document["source_id"].split("/", 1)[0]
+        return (0 if top in _FIXED_REVIEW_DOCUMENTS else 1 if top in _PRODUCT_REVIEW_DOCUMENTS
+                else 2 if top == "REQUEST" else 3)
+    tail = ("source_documents", "context", "items", "artifact_sha256")
+    wire = {k: v for k, v in payload.items() if k not in tail}
+    for key in tail:
+        if key in payload:
+            wire[key] = payload[key]
+    if isinstance(wire.get("source_documents"), list):
+        # stable within a tier; malformed input is left for schema validation
+        wire["source_documents"] = sorted(wire["source_documents"], key=lambda d: (
+            tier(d) if isinstance(d, dict) and isinstance(d.get("source_id"), str) else 3))
+    return wire
+
+
 def bind_review_indices(payload, selection):
     """Resolve only exact indices from this immutable input; never infer an ID."""
     ids = _review_source_ids(payload)
@@ -754,8 +784,9 @@ class OpenAIGroundingReviewer:
 
     def review(self, payload):
         indexed = len(_review_source_ids(payload)) + 3 > 1000
+        # Index addressing depends on document position, so it keeps the original order.
         wire_payload, response_schema = (indexed_review_transport(payload) if indexed
-                                        else (payload, source_selection_schema(payload)))
+                                        else (static_first_wire(payload), source_selection_schema(payload)))
         instructions = REVIEW_INSTRUCTIONS
         focused = payload.get("focused_design_review_contract") in {"1.0", "1.1"}
         if focused:
@@ -807,6 +838,7 @@ class OpenAIGroundingReviewer:
                 "input_sha256": _review_digest(payload), "model": self.model,
                 "response_id": getattr(response, "id", None), "usage": _response_usage_summary(response),
                 "citation_binding_contract": "source-index-1.0" if indexed else "source-id-1.0",
+                **({} if indexed else {"wire_layout": STATIC_FIRST_WIRE_LAYOUT}),
                 **({"index_selection": index_selection.model_dump(mode="json"),
                     "wire_input_sha256": _review_digest(wire_payload)} if indexed else {}),
                 "source_selection": selection.model_dump(mode="json") if selection is not None else None,

@@ -476,6 +476,23 @@ def _assertion_observations(
     return observed
 
 
+def _observed_value_text(actual: Any) -> str:
+    """사람이 읽는 관찰값 표기. 19.0과 19는 같은 값으로, 값 하나뿐인 기록은 값만 보입니다."""
+
+    def plain(value: Any) -> str:
+        if isinstance(value, float) and value.is_integer():
+            return str(int(value))
+        if isinstance(value, (str, int, float)) and not isinstance(value, bool):
+            return str(value)
+        return json.dumps(value, ensure_ascii=False)
+
+    if isinstance(actual, dict) and actual:
+        if len(actual) == 1:
+            return plain(next(iter(actual.values())))
+        return ", ".join(f"{key} {plain(value)}" for key, value in actual.items())
+    return plain(actual)
+
+
 def _expected_result_summary(
     expected_ids: list[str],
     observed: dict[str, list[dict[str, Any]]],
@@ -487,7 +504,7 @@ def _expected_result_summary(
         records = observed.get(result_id, [])
         verdicts = {record["matched"] for record in records}
         actual = ", ".join(
-            dict.fromkeys(_markdown_text(json.dumps(record.get("actual"), ensure_ascii=False))[:80] for record in records)
+            dict.fromkeys(_markdown_text(_observed_value_text(record.get("actual")))[:80] for record in records)
         )
         if verdicts == {True}:
             lines.append(f"- `{result_id}`: 관찰 기록상 통과 (관찰값 {actual})")
