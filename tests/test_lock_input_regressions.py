@@ -110,7 +110,10 @@ def test_new_review_transport_sends_exact_compact_payload_and_guidance():
     with pytest.raises(ValueError, match='구조화 응답'):
         grounding.OpenAIGroundingReviewer(model='fake', client=SimpleNamespace(
             responses=SimpleNamespace(parse=parse))).review(payload)
-    assert json.loads(sent[0]['input'][1]['content']) == payload
+    # Exact content; only the transport order is static-first-1.0 (2026-10-17).
+    assert json.loads(sent[0]['input'][1]['content']) == grounding.static_first_wire(payload)
+    assert sorted(map(json.dumps, grounding.static_first_wire(payload)['source_documents'])) == sorted(
+        map(json.dumps, payload['source_documents']))
     assert grounding.COMPACT_REVIEW_GUIDANCE in sent[0]['input'][0]['content']
     assert sent[0]['store'] is False
 

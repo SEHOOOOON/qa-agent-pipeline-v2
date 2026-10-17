@@ -8,7 +8,7 @@
 - 검증 2026-10-17 KST(로컬·저장 자료): 저장 입력 공통 앞부분 A3 69 → 23,916자, 같은 요청 A1(1·2회차) 69 → 8,855자. 10-15 저장 검토 기록 5건 새 코드로 재검증 PASS. `tests/test_grounding.py` 전체 통과(새 시험 1개, 순서를 비교하던 시험 2개는 "같은 문서·정해진 순서" 확인으로 조정).
 - 남은 위험: 모델이 보는 문서 순서가 바뀌어 판정에 영향이 있는지와 실제 캐시 할인율은 실제 API 미검증.
 - 사람 최종 검토서 관찰값 표기: `{"setTemp": 19.0}` → `19`(값 하나면 값만, 19.0과 19는 같은 표기, 여러 값은 `이름 값`). `src/qa_pipeline_reporting.py` `_observed_value_text`, 새 시험 1개. 저장 Run 임시 사본 재생성에서 "관찰값 19/30"으로 확인. 판정·보고 JSON 변경 없음.
-- 전체 시험: (진행 중)
+- 전체 시험(2026-10-17 KST, 로컬, API 키 제거·dotenv 비활성, `427ae55` 상태): 3250개 중 3249 PASS / 1 FAIL / 0 SKIP. FAIL `test_lock_input_regressions.py::test_new_review_transport_sends_exact_compact_payload_and_guidance`는 보낸 입력을 원래 payload와 순서까지 비교하던 시험으로, 이번 전송 순서 변경의 의도된 결과 → `test_grounding.py`와 같은 방식(같은 문서·정해진 순서)으로 조정, 두 파일 재실행 통과(조정은 미커밋).
 - P2 기록: P2 `PROJECT_HANDOFF.md` 2026-10-17, IMP-012.
 
 ## 2026-10-16 · 포트폴리오 `project.html` 한 페이지 축약과 공통 상단바 (사용자 요청)
