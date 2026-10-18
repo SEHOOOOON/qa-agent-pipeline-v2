@@ -846,7 +846,7 @@ class OpenAIGroundingReviewer:
         if indexed:
             instructions = _indexed_review_instructions(instructions)
         response = self.client.responses.parse(model=self.model, reasoning={"effort": "medium"},
-            store=False, prompt_cache_key=("qa-v2-grounding-1-22" if payload.get("review_severity_contract") else "qa-v2-grounding-1-21" if payload.get("range_change_rules_contract") else "qa-v2-grounding-1-20" if examples else "qa-v2-grounding-1-19" if focused else "qa-v2-grounding-1-18" if payload.get("design_review_contract") == "1.0" else "qa-v2-grounding-1-17"),
+            store=False, prompt_cache_key=("qa-v2-grounding-1-23" if payload.get("review_severity_contract") else "qa-v2-grounding-1-21" if payload.get("range_change_rules_contract") else "qa-v2-grounding-1-20" if examples else "qa-v2-grounding-1-19" if focused else "qa-v2-grounding-1-18" if payload.get("design_review_contract") == "1.0" else "qa-v2-grounding-1-17"),
             input=[{"role": "system", "content": instructions},
                    {"role": "user", "content": json.dumps(wire_payload, ensure_ascii=False)}],
             text_format=response_schema)

@@ -401,7 +401,7 @@ class OpenAIAgent2:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent2-2-62-rules-4",
+                prompt_cache_key="qa-v2-agent2-2-62-rules-5",
                 input=[
                     {"role": "system", "content": AGENT2_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},

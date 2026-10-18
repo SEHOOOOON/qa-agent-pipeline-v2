@@ -1434,7 +1434,7 @@ def test_agent2_sends_approved_procedures_on_initial_and_rewrite_calls():
         assert "근거 개수와 검증 사실 개수는 다릅니다" in instructions
         assert "유지 조건이라는 이유로 이번 요청에 필요한 검사를 생략" in instructions
         assert "후보와 기존 TC를 합친 실제 검사 범위" in instructions
-        assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-62-rules-4"
+        assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-62-rules-5"
         assert "기존 TC는 전체 단위로 실행" in instructions
         assert "명시적 제외와 충돌하는 검사가 포함돼 있으면 선택하지 않고" in instructions
         assert "기존 assertion을 삭제하지 않습니다" in instructions
@@ -1595,7 +1595,7 @@ def test_agent2_writer_and_rewriter_receive_same_baseline_order_guidance(rewrite
     assert "[대상 선택·원래값 기록 순서]" in prompt
     assert prompt.count(QA_CONTROLLER_BASELINE_GUIDANCE) == 1
     assert responses.kwargs["input"][0]["content"] == AGENT2_SYSTEM_INSTRUCTIONS
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-62-rules-4"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-62-rules-5"
     assert source.model_dump(mode="json") == before
     if rewrite:
         assert "기록 시점과 조작 순서를 대조하세요." in prompt
@@ -1675,7 +1675,7 @@ def test_agent2_uses_structured_responses_api() -> None:
     assert response.usage["total_tokens"] == 300
     assert responses.kwargs["text_format"] is pipeline.Agent2TransportDesign
     assert responses.kwargs["store"] is False
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-62-rules-4"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-62-rules-5"
     agent2_input = responses.kwargs["input"][1]["content"]
     assert "[기존 사람 작성·자동화 TC 카탈로그]" in agent2_input
     assert '[코드로 확인한 SRS 개정 범위]' in agent2_input

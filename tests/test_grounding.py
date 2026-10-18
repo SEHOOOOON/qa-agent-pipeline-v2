@@ -159,7 +159,7 @@ def test_human_examples_same_reference_reaches_writer_rewriter_and_reviewer(rewr
     for call in sent:
         assert QA_HUMAN_JUDGMENT_EXAMPLES in call["input"][0]["content"]
     assert payload["context"]["human_judgment_examples"] == QA_HUMAN_JUDGMENT_EXAMPLES
-    assert sent[0]["prompt_cache_key"] == "qa-v2-agent2-2-62-rules-4"
+    assert sent[0]["prompt_cache_key"] == "qa-v2-agent2-2-62-rules-5"
     assert sent[1]["prompt_cache_key"] == "qa-v2-grounding-1-20"
 
 
@@ -2277,7 +2277,7 @@ def test_review_severity_reaches_reviewer_and_is_limited_to_agent1_and_agent2():
     instructions = calls[0]["input"][0]["content"]
     assert grounding.QA_REVIEW_SEVERITY_GUIDANCE in instructions
     assert grounding.QA_CONFIRMED_RULES not in instructions  # Agent 2 design rules only
-    assert calls[0]["prompt_cache_key"] == "qa-v2-grounding-1-22"
+    assert calls[0]["prompt_cache_key"] == "qa-v2-grounding-1-23"
     tampered = dict(payload, stage="AGENT3")
     with pytest.raises(ValueError, match="반려 등급"):
         grounding.evaluate_grounding_review(tampered, grounding.GroundingReview(items=[]))
