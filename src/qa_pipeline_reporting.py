@@ -546,6 +546,31 @@ def _human_review_observation(
     return _markdown_text(result.raw_message or result.source_outcome)
 
 
+REVIEW_WARNING_MARKER = " 경고(진행, 사람 확인 권장): "
+
+
+def _review_warning_lines(run_dir: Path) -> list[str]:
+    """Review-AI warnings that did not stop the Run (2026-10-17 tiers), shown to the person."""
+    rows = []
+    for name, stage in (("checkpoint1.json", "분석(Agent 1)"), ("checkpoint2.json", "시험 설계(Agent 2)")):
+        try:
+            checks = json.loads((run_dir / name).read_text(encoding="utf-8")).get("checks", [])
+        except (OSError, ValueError, AttributeError):
+            continue
+        for check in checks:
+            message = check.get("message") or "" if isinstance(check, dict) else ""
+            if REVIEW_WARNING_MARKER not in message:
+                continue
+            tail = message.split(REVIEW_WARNING_MARKER, 1)[1].split(" 계약 인용 위치 보정(원본 응답 보존): ", 1)[0]
+            rows += [(stage, item) for item in re.split(r"; (?=\S+: \[경고\])", tail) if item.strip()]
+    lines = ["## 2-1. 검토 AI 경고 (진행했지만 사람 확인 권장)", ""]
+    if not rows:
+        return lines + ["검토 AI가 남긴 경고는 없습니다.", ""]
+    lines += ["| 단계 | 경고 |", "|---|---|"]
+    lines += [f"| {stage} | {_markdown_text(item)} |" for stage, item in rows]
+    return lines + [""]
+
+
 def _human_review_markdown(
     run_dir: Path,
     bundle: ValidationExecutionBundle,
@@ -601,6 +626,7 @@ def _human_review_markdown(
         f"| 정보 부족으로 제외 | {len(report.excluded_information_gaps)}건 |",
         "| 공식 SRS·TC 승인 | 자동 실행 판정과 별개 · 현재 등록 상태는 승인 화면에서 확인 |",
         "",
+        *_review_warning_lines(run_dir),
         "## 3. 항목별 사람 판정",
         "",
     ]

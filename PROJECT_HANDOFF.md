@@ -1,5 +1,14 @@
 # 현재 상태와 마무리 작업
 
+## 2026-10-18 · H-4·H-5, 검토서 경고 표시, 남은 대표 요청 3개 추가 (PC 로컬, API 없음, 미커밋)
+
+- 옛 기록 호환 중지(AGENTS.md 2.1.2) 뒤 첫 수정. 계약 표시를 새로 만들지 않음.
+- H-4: Agent 2 지침 5-6에 "조작 문장에 확인 내용을 붙이지 않는다"(예: '제습을 적용하고 모드를 확인한다' 대신 '제습 모드를 적용한다' + 확인은 expected_results). 캐시 키 `qa-v2-agent2-2-62-rules-4`. 코드 검사는 추가하지 않음(P2 채점이 확인).
+- H-5: `examples/change_request.representative-temperature.json` 난방 시험을 "16°C에서 15°C 시도 → 16°C 유지"로 변경. 이전 실행과는 요청서가 다름.
+- 사람 최종 검토서에 "2-1. 검토 AI 경고" 절: checkpoint1·2의 경고(진행, 사람 확인 권장)를 표로 표시, 없으면 "없습니다".
+- 대표 요청 원문 3개(전원·풍량·잠금, `runs/manual_checks/representative-ai-20261010/requests/`)를 내용 그대로 `examples/change_request.representative-{power,fan,lock}.json`으로 추가.
+- 미검증: 실제 모델이 H-4대로 쓰는지, 경고 절이 실제 경고가 있는 실행에서 보기 좋은지.
+
 ## 2026-10-18 · 사람 대조 결정 H-2·H-3 반영 (PC 로컬, API 없음, 미커밋)
 
 - 근거: 2026-10-17 사람 대조(`industrial-qa/answer-key-drafts/HUMAN-COMPARISON-20261017.md`, 7개 중 5개 일치). P2 쪽 반영은 P2 `improvements/IMP-014`.

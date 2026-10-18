@@ -159,7 +159,7 @@ def test_human_examples_same_reference_reaches_writer_rewriter_and_reviewer(rewr
     for call in sent:
         assert QA_HUMAN_JUDGMENT_EXAMPLES in call["input"][0]["content"]
     assert payload["context"]["human_judgment_examples"] == QA_HUMAN_JUDGMENT_EXAMPLES
-    assert sent[0]["prompt_cache_key"] == "qa-v2-agent2-2-62-rules-3"
+    assert sent[0]["prompt_cache_key"] == "qa-v2-agent2-2-62-rules-4"
     assert sent[1]["prompt_cache_key"] == "qa-v2-grounding-1-20"
 
 

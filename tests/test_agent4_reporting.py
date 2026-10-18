@@ -1297,3 +1297,17 @@ def test_human_review_row_names_the_existing_tc_a_candidate_revises(tmp_path):
     path.write_text(json.dumps(design, ensure_ascii=False), encoding="utf-8")
     row = next(r for r in pipeline_reporting.build_run_test_rows(run) if r["tc_id"] == candidate)
     assert row["source"] == "TC-MODE-003 고쳐 쓰기 후보(교체는 사람 승인)"
+
+
+def test_human_review_lists_review_ai_warnings_that_did_not_stop_the_run(tmp_path):
+    """2026-10-18: warnings recorded at CP1/CP2 (severity tiers) are shown to the person."""
+    message = ("전체 항목의 모델 근거 검토·인용 존재·연결 검사를 통과했습니다. 의미 정확성의 보장은 아닙니다."
+               " 경고(진행, 사람 확인 권장): COND-002: [경고] 대상 선택 근거 문장이 약함;"
+               " TC-CAND-001/ER-003: [경고] 유지 조건 누락; 표현 보완 권장")
+    _write_json(tmp_path / "checkpoint2.json", {"checks": [{"rule_id": "AGENT2-GROUNDING", "status": "PASS",
+                                                           "message": message}]})
+    lines = pipeline_reporting._review_warning_lines(tmp_path)
+    assert lines[0] == "## 2-1. 검토 AI 경고 (진행했지만 사람 확인 권장)"
+    rows = [line for line in lines if line.startswith("| 시험 설계")]
+    assert len(rows) == 2 and "COND-002" in rows[0] and "표현 보완 권장" in rows[1]
+    assert "검토 AI가 남긴 경고는 없습니다." in pipeline_reporting._review_warning_lines(tmp_path / "none")
