@@ -1028,6 +1028,9 @@ def build_run_test_rows(run_dir: Path, *, approved_assets_root: Path = DEFAULT_A
     }
     types = {"NORMAL": "해피패스", "BOUNDARY": "엣지케이스", "EXCEPTION": "예외/결함", "STATE_CONSISTENCY": "상태 정합성"}
     selected = design.get("관련_기존_TC") or design.get("related_existing_tests") or []
+    # H-3 (2026-10-17): candidates declared as the revision of an existing TC.
+    revisions = {item["revised_by"]: item["tc_id"] for item in (
+        design.get("기존_TC_수정") or design.get("existing_tc_revisions") or [])}
     ids = list(dict.fromkeys([
         *(["TC-ENV-000"] if "TC-ENV-000" in results else []),
         *[item["tc_id"] for item in design.get("test_cases", [])],
@@ -1064,7 +1067,9 @@ def build_run_test_rows(run_dir: Path, *, approved_assets_root: Path = DEFAULT_A
                 for item in case.get("expected_results", [])
             ],
             "requirement_ids": case.get("requirement_ids") or result.get("requirement_ids") or (list(spec.requirement_ids) if spec else []),
-            "source": "환경 점검" if tc_id == "TC-ENV-000" else "신규·수정 후보" if tc_id.startswith("TC-CAND-") else "기존 TC",
+            "source": "환경 점검" if tc_id == "TC-ENV-000"
+                      else f"{revisions[tc_id]} 고쳐 쓰기 후보(교체는 사람 승인)" if tc_id in revisions
+                      else "신규·수정 후보" if tc_id.startswith("TC-CAND-") else "기존 TC",
             "executed_at": bundle.get("created_at") if result else None,
             "duration_ms": result.get("duration_ms"),
             "evidence_files": [name for name in result.get("evidence_files", []) if _safe_run_file(run_dir, name)],

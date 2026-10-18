@@ -1434,7 +1434,7 @@ def test_agent2_sends_approved_procedures_on_initial_and_rewrite_calls():
         assert "근거 개수와 검증 사실 개수는 다릅니다" in instructions
         assert "유지 조건이라는 이유로 이번 요청에 필요한 검사를 생략" in instructions
         assert "후보와 기존 TC를 합친 실제 검사 범위" in instructions
-        assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-62-rules-2"
+        assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-62-rules-3"
         assert "기존 TC는 전체 단위로 실행" in instructions
         assert "명시적 제외와 충돌하는 검사가 포함돼 있으면 선택하지 않고" in instructions
         assert "기존 assertion을 삭제하지 않습니다" in instructions
@@ -1595,7 +1595,7 @@ def test_agent2_writer_and_rewriter_receive_same_baseline_order_guidance(rewrite
     assert "[대상 선택·원래값 기록 순서]" in prompt
     assert prompt.count(QA_CONTROLLER_BASELINE_GUIDANCE) == 1
     assert responses.kwargs["input"][0]["content"] == AGENT2_SYSTEM_INSTRUCTIONS
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-62-rules-2"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-62-rules-3"
     assert source.model_dump(mode="json") == before
     if rewrite:
         assert "기록 시점과 조작 순서를 대조하세요." in prompt
@@ -1675,7 +1675,7 @@ def test_agent2_uses_structured_responses_api() -> None:
     assert response.usage["total_tokens"] == 300
     assert responses.kwargs["text_format"] is pipeline.Agent2TransportDesign
     assert responses.kwargs["store"] is False
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-62-rules-2"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-62-rules-3"
     agent2_input = responses.kwargs["input"][1]["content"]
     assert "[기존 사람 작성·자동화 TC 카탈로그]" in agent2_input
     assert '[코드로 확인한 SRS 개정 범위]' in agent2_input
@@ -2932,13 +2932,14 @@ def test_range_checklist_marks_missing_items_as_critical(variant, status, missin
 def test_range_checklist_contract_is_opt_in_and_reaches_the_writer():
     from qa_pipeline_execution import _current_agent2_contract, _range_checklist_policy, _attach_range_checklist
     current = _current_agent2_contract()
-    assert current["range_checklist_contract"] == "1.0" and _range_checklist_policy(current)
+    assert current["range_checklist_contract"] == "1.1" == _range_checklist_policy(current)
+    assert _range_checklist_policy(dict(current, range_checklist_contract="1.0")) == "1.0"
     old = {k: v for k, v in current.items() if k != "range_checklist_contract"}
-    assert _range_checklist_policy(old) is False
+    assert _range_checklist_policy(old) is None
     with pytest.raises(ValueError, match="범위 필수 목록"):
         _range_checklist_policy(dict(current, prompt_version="agent2-2.61"))
     checkpoint = SimpleNamespace(marker="unchanged")
-    assert _attach_range_checklist(checkpoint, RANGE_ANALYSIS, {}, False) is checkpoint  # old Runs untouched
+    assert _attach_range_checklist(checkpoint, RANGE_ANALYSIS, {}, None) is checkpoint  # old Runs untouched
     # The writer receives the computed list only when it is given.
     sent = []
     def parse(**kwargs):
@@ -2950,3 +2951,73 @@ def test_range_checklist_contract_is_opt_in_and_reaches_the_writer():
             agent.design(cp1_request(), cp2_analysis(), cp2_requirements(), required_checklist=checklist)
     assert "[코드가 계산한 필수 확인 목록" not in sent[0]["input"][1]["content"]
     assert "[T-5:QUESTION:COOL]" in sent[1]["input"][1]["content"]
+
+
+# --- range_checklist_contract 1.1 (2026-10-17 사람 대조 H-2) ------------------------------
+def _with_exclusions(*items):
+    return SimpleNamespace(confirmed_conditions=RANGE_ANALYSIS.confirmed_conditions, excluded_scope=list(items))
+
+
+def test_request_excluded_switch_policy_needs_no_question():
+    """Real temperature request: out_of_scope names the COOL entry policy from outside its range."""
+    import qa_pipeline_range_checklist as rc
+    analysis = _with_exclusions("새 냉방 범위 밖 온도를 가진 장비의 냉방 모드 진입 시 자동 보정 정책")
+    assert rc.excluded_switch_modes(analysis) == {"COOL"}
+    ids = [r["id"] for r in rc.checklist(rc.range_table(analysis), rc.excluded_switch_modes(analysis))]
+    assert "T-5:QUESTION:COOL" not in ids and len(ids) == 4
+    check = rc.range_checklist_check(analysis, _full_range_design(question=False))
+    assert check.status == CheckStatus.PASS and "4개" in check.message
+    # Asking anyway is still fine.
+    assert rc.range_checklist_check(analysis, _full_range_design()).status == CheckStatus.PASS
+    # A 1.0 Run is re-verified with its original list.
+    old = rc.range_checklist_check(analysis, _full_range_design(question=False), honor_exclusions=False)
+    assert old.status == CheckStatus.FAIL and "T-5:QUESTION:COOL" in old.message
+
+
+@pytest.mark.parametrize("item", [
+    "다중 장비 제어 및 실제 장비 통신",              # unrelated exclusion
+    "냉방 알림 문구 정책",                          # mode named, no switch/entry
+    "냉방·난방 전환 시 온도 보정",                  # two modes: ambiguous, keep the question
+])
+def test_unrelated_or_ambiguous_exclusion_keeps_the_question(item):
+    import qa_pipeline_range_checklist as rc
+    analysis = _with_exclusions(item)
+    check = rc.range_checklist_check(analysis, _full_range_design(question=False))
+    assert check.status == CheckStatus.FAIL and "T-5:QUESTION:COOL" in check.message
+
+
+# --- 기존 TC 고쳐 쓰기 (2026-10-17 사람 대조 H-3) ------------------------------------------
+def test_empty_revision_list_keeps_historical_design_serialization():
+    design = cp2_valid_design()
+    for by_alias in (True, False):
+        dumped = design.model_dump(mode="json", by_alias=by_alias)
+        assert "기존_TC_수정" not in dumped and "existing_tc_revisions" not in dumped
+    assert Agent2TestDesign.model_validate(design.model_dump(mode="json", by_alias=True)) == design
+    assert all(check.rule_id != "CP2-TC-REVISION" for check in
+               evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements()).checks)
+
+
+@pytest.mark.parametrize("revision,reuse,ok,message", [
+    (dict(tc_id="TC-MODE-003", revised_by="TC-CAND-001"), False, True, "사람 승인 전까지"),
+    (dict(tc_id="TC-NONE-999", revised_by="TC-CAND-001"), False, False, "기존 TC 목록에 없음"),
+    (dict(tc_id="TC-MODE-003", revised_by="TC-CAND-009"), False, False, "test_cases에 없음"),
+    (dict(tc_id="TC-TEMP-001", revised_by="TC-CAND-001"), True, False, "그대로 재사용할 수 없음"),
+])
+def test_existing_tc_revision_is_checked_against_catalog_and_candidates(revision, reuse, ok, message):
+    design = cp2_valid_design()
+    payload = design.model_dump(mode="json", by_alias=True)
+    payload["기존_TC_수정"] = [dict(revision, reason="같은 제습→냉방 전환에서 적용 버튼과 내부값 확인만 빠짐")]
+    if not reuse:
+        payload["관련_기존_TC"] = []
+    revised = Agent2TestDesign.model_validate(payload)
+    assert revised.model_dump(mode="json", by_alias=True)["기존_TC_수정"][0]["tc_id"] == revision["tc_id"]
+    check = cp2_check(evaluate_checkpoint2(cp1_request(), cp2_analysis(), revised, cp2_requirements()),
+                      "CP2-TC-REVISION")
+    assert (check.status == CheckStatus.PASS) is ok and message in check.message
+
+
+def test_revision_rule_reaches_the_writer_but_not_the_shared_review_rules():
+    from qa_pipeline_agent2 import AGENT2_SYSTEM_INSTRUCTIONS
+    from qa_pipeline_contracts import QA_CONFIRMED_RULES, QA_TC_REVISION_RULE
+    assert QA_TC_REVISION_RULE in AGENT2_SYSTEM_INSTRUCTIONS and "기존_TC_수정" in QA_TC_REVISION_RULE
+    assert "H-3" not in QA_CONFIRMED_RULES  # its stored text is bound to earlier review inputs

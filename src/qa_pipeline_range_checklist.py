@@ -9,17 +9,25 @@ Only unambiguous sentences are read (one mode name, one range, the words "허용
 a CHANGE_REQUEST source, 변경/유지 role). Anything else yields no checklist, so the
 check never blocks a request it cannot read. Operations and typed verifications are
 compared; prose is never parsed for expected values.
+
+1.1 (2026-10-17 사람 대조 H-2): 요청서가 '이번에 다루지 않는 것'(제외_범위)에 바뀐 모드로의
+전환·범위 밖 처리를 적어 두었으면 T-5 질문은 필수가 아니다. 1.0 Run은 예전 목록 그대로
+다시 검증한다.
 """
 from __future__ import annotations
 
 import re
 from typing import Any
 
-VERSION = "range-checklist-1.0"
+VERSION = "range-checklist-1.1"
 LOCATIONS = ("panel", "card", "internal")
 MODE_WORDS = {"COOL": ("COOL", "냉방"), "HEAT": ("HEAT", "난방"), "AUTO": ("AUTO", "자동"),
               "DRY": ("DRY", "제습"), "FAN": ("FAN", "송풍")}
 SWITCH_WORDS = ("전환", "바꾸", "바꿀", "바뀌", "바뀔", "범위 밖", "범위를 벗어")
+# An exclusion item about entering the changed mode from outside its range.
+EXCLUSION_WORDS = (*SWITCH_WORDS, "진입")
+# In exclusion prose "자동 보정" is not the AUTO mode; require the mode itself.
+EXCLUSION_MODE_WORDS = {**MODE_WORDS, "AUTO": ("AUTO", "자동 모드", "자동(")}
 _RANGE = re.compile(r"(\d+)\s*(?:°C|도)?\s*~\s*(\d+)\s*(?:°C|도)")
 
 
@@ -52,7 +60,21 @@ def range_table(analysis) -> dict[str, list[dict[str, Any]]] | None:
     return {"changed": as_rows(changed), "kept": as_rows(kept)}
 
 
-def checklist(table: dict) -> list[dict[str, Any]]:
+def excluded_switch_modes(analysis) -> set[str]:
+    """Modes whose switch behavior the request itself put out of scope (H-2).
+
+    Read from Agent 1's 제외_범위, which CP1 requires to keep every request
+    out_of_scope item. One item must name exactly one mode plus a switch/entry word.
+    """
+    modes = set()
+    for item in getattr(analysis, "excluded_scope", None) or []:
+        named = [m for m, words in EXCLUSION_MODE_WORDS.items() if any(w in str(item) for w in words)]
+        if len(named) == 1 and any(w in str(item) for w in EXCLUSION_WORDS):
+            modes.add(named[0])
+    return modes
+
+
+def checklist(table: dict, excluded_modes=()) -> list[dict[str, Any]]:
     rows = []
     for r in table["changed"]:
         mode, lo, up = r["mode"], r["lower"], r["upper"]
@@ -65,7 +87,7 @@ def checklist(table: dict) -> list[dict[str, Any]]:
                  dict(id=f"T-2:BLOCK:{mode}:{up + 1}", kind="BLOCK", mode=mode, attempted=up + 1, expected=up,
                       text=f"{mode} {up}°C에서 {up + 1}°C로 올리려 해도 패널·카드·내부값이 {up}°C 그대로인지 확인")]
         outside = [k for k in table["kept"] if k["lower"] < lo or k["upper"] > up]
-        if outside:
+        if outside and mode not in excluded_modes:
             ranges = ", ".join(f"{k['mode']} {k['lower']}~{k['upper']}°C" for k in outside)
             rows.append(dict(id=f"T-5:QUESTION:{mode}", kind="QUESTION", mode=mode,
                              kept_modes=[k["mode"] for k in outside],
@@ -186,13 +208,16 @@ def compare(rows, design: dict) -> list[dict[str, str]]:
     return problems
 
 
-def range_checklist_check(analysis, design):
-    """CP2 check for a new Run; None when the request is not a readable range change."""
+def range_checklist_check(analysis, design, honor_exclusions: bool = True):
+    """CP2 check for a new Run; None when the request is not a readable range change.
+
+    ``honor_exclusions=False`` reproduces range_checklist_contract 1.0 Runs.
+    """
     from qa_pipeline_contracts import CheckResult, CheckStatus
     table = range_table(analysis)
     if table is None:
         return None
-    rows = checklist(table)
+    rows = checklist(table, excluded_switch_modes(analysis) if honor_exclusions else ())
     data = design.model_dump(mode="json", by_alias=True) if hasattr(design, "model_dump") else design
     problems = compare(rows, data)
     if problems:

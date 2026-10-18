@@ -1282,3 +1282,18 @@ def test_observed_value_text_reads_like_the_expected_value():
     assert _observed_value_text(19.5) == "19.5"
     assert _observed_value_text({"setTemp": 20.0, "mode": "COOL"}) == "setTemp 20, mode COOL"
     assert _observed_value_text(None) == "null" and _observed_value_text(True) == "true"
+
+
+def test_human_review_row_names_the_existing_tc_a_candidate_revises(tmp_path):
+    """H-3 (2026-10-17): the person sees which existing TC the candidate would replace."""
+    run, run_id = _write_agent4_inputs(tmp_path, candidate_status=pipeline.NeutralExecutionStatus.ASSERTION_FAILED)
+    assert pipeline.run_agent4(SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))) == 0
+    path = run / "agent2_test_design.json"
+    design = json.loads(path.read_text(encoding="utf-8"))
+    candidate = design["test_cases"][0]["tc_id"]
+    before = next(r for r in pipeline_reporting.build_run_test_rows(run) if r["tc_id"] == candidate)
+    assert before["source"] == "신규·수정 후보"
+    design["기존_TC_수정"] = [dict(tc_id="TC-MODE-003", revised_by=candidate, reason="적용 버튼만 빠진 같은 전환 시험")]
+    path.write_text(json.dumps(design, ensure_ascii=False), encoding="utf-8")
+    row = next(r for r in pipeline_reporting.build_run_test_rows(run) if r["tc_id"] == candidate)
+    assert row["source"] == "TC-MODE-003 고쳐 쓰기 후보(교체는 사람 승인)"

@@ -487,6 +487,19 @@ class ExistingTestSelection(StrictModel):
     selection_reason: NonEmptyStr
 
 
+class ExistingTcRevision(StrictModel):
+    """New candidate written as the revised version of a nearly identical existing TC.
+
+    2026-10-17 사람 대조 H-3: 대상·조작이 거의 같고 일부 단계·확인만 빠진 기존 TC는
+    새로 만들지 않고 고쳐 쓴다. 기존 TC는 사람이 공식 대체(supersession)를 승인하기 전까지
+    그대로 남는다.
+    """
+
+    tc_id: Annotated[str, StringConstraints(pattern=r"^TC-[A-Z0-9]+-\d{3}$")]
+    revised_by: Annotated[str, StringConstraints(pattern=r"^TC-CAND-\d{3}$")]
+    reason: NonEmptyStr
+
+
 class SrsRevisionProposal(StrictModel):
     """Agent 2 proposal that a person must approve before the baseline SRS changes."""
 
@@ -551,6 +564,18 @@ class Agent2TestDesign(StrictModel):
     srs_revision_proposals: list[SrsRevisionProposal] = Field(
         default_factory=list, alias="SRS_개정_제안"
     )
+    existing_tc_revisions: list[ExistingTcRevision] = Field(
+        default_factory=list, alias="기존_TC_수정"
+    )
+
+    @model_serializer(mode="wrap")
+    def omit_empty_revisions(self, handler):
+        payload = handler(self)
+        # Do not change historical design digests by injecting an empty list.
+        if not self.existing_tc_revisions:
+            payload.pop("기존_TC_수정", None)
+            payload.pop("existing_tc_revisions", None)
+        return payload
 
 
 class Checkpoint2Result(StrictModel):
@@ -825,6 +850,14 @@ P-1 전원 변경은 적용 직후 패널·카드·내부 status 세 곳을 확�
 P-2 오류 장비의 전원 변경 차단은 값 유지와 함께 ERROR 표시·오류 코드가 계속 보이는지 확인합니다.
 유지되는 모드·기능의 경계·회귀 확인은 권장이며 필수로 확대하지 않습니다.
 이 규칙은 누락·추가를 판단하는 기준이며 제품 동작이나 실행 성공의 근거가 아닙니다.
+"""
+
+# 2026-10-17 사람 대조 H-3. Kept apart from QA_CONFIRMED_RULES, whose exact text is
+# bound into stored grounding inputs of earlier Runs.
+QA_TC_REVISION_RULE = """기존 TC 고쳐 쓰기 (H-3, 2026-10-17 사람 확정):
+기존 TC가 이번 요청과 대상 장비·모드 전환·조작 순서가 거의 같고 일부 단계(예: 적용 버튼)나 일부 확인(예: 내부값)만 빠졌다면 그 TC를 그대로 재사용(관련_기존_TC)하지도, 무관한 새 시험으로 따로 만들지도 않습니다.
+빠진 단계·확인을 보완한 후보를 test_cases에 작성하고, 기존_TC_수정에 {tc_id: 기존 TC ID, revised_by: 그 후보 TC-CAND ID, reason: 같은 점과 고친 점}을 기록합니다. 같은 기존 TC를 관련_기존_TC에 함께 넣지 않습니다.
+대상·목적·확인 범위가 실제로 다른 기존 TC는 고쳐 쓰기 대상이 아니며 coverage_notes에 미선택 이유만 남깁니다. 기존 TC 교체는 사람이 승인해야 하며 자동으로 대체됐다고 쓰지 않습니다.
 """
 
 # 2026-10-17 사용자 결정: 치명만 멈추고 나머지는 기록 후 진행한다(저장 사례 8건 판정).

@@ -479,21 +479,27 @@ def _load_verified_agent1_run(run_dir: Path, run_id: str) -> tuple[
     return request, requirements, analysis, checkpoint, manifest
 
 
-def _range_checklist_policy(manifest: dict[str, Any]) -> bool:
-    """Opt-in 2026-10-17 code checklist for range changes; older Runs keep their CP2."""
+RANGE_CHECKLIST_CONTRACT = "1.1"
+
+
+def _range_checklist_policy(manifest: dict[str, Any]) -> str | None:
+    """Opt-in 2026-10-17 code checklist for range changes; older Runs keep their CP2.
+
+    1.0: original list. 1.1: a T-5 switch the request excluded is not required (H-2).
+    """
     marker = manifest.get("range_checklist_contract")
-    if marker not in {None, "1.0"} or (marker is not None and (
+    if marker not in {None, "1.0", "1.1"} or (marker is not None and (
             manifest.get("prompt_version") != "agent2-2.62"
             or manifest.get("range_change_rules_contract") != "1.0")):
         raise ValueError("지원하지 않는 범위 필수 목록 계약입니다.")
-    return marker == "1.0"
+    return marker
 
 
-def _attach_range_checklist(checkpoint, analysis, design, enabled: bool):
-    if not enabled:
+def _attach_range_checklist(checkpoint, analysis, design, version: str | None):
+    if version is None:
         return checkpoint
     from qa_pipeline_range_checklist import range_checklist_check
-    check = range_checklist_check(analysis, design)
+    check = range_checklist_check(analysis, design, honor_exclusions=version != "1.0")
     return checkpoint if check is None else attach_grounding_check(checkpoint, check)
 
 
@@ -620,7 +626,7 @@ def _current_agent2_contract() -> dict[str, str]:
         "baseline_capture_order_contract": "1.0",
         "range_change_rules_contract": "1.0",
         "review_severity_contract": "1.0",
-        "range_checklist_contract": "1.0",
+        "range_checklist_contract": RANGE_CHECKLIST_CONTRACT,
         "scope_guard_contract": "1.2",
         "task_boundary_contract": "1.3",
         "output_tolerance_contract": "1.0",
@@ -793,9 +799,10 @@ def run_agent2(args: argparse.Namespace) -> int:
 
     agent = OpenAIAgent2(model=args.model)
     grounding_records = []
-    from qa_pipeline_range_checklist import checklist as _range_rows, range_table as _range_table, render as _render_rows
+    from qa_pipeline_range_checklist import (checklist as _range_rows, excluded_switch_modes as _excluded,
+                                             range_table as _range_table, render as _render_rows)
     _table = _range_table(analysis)
-    range_checklist_text = _render_rows(_range_rows(_table)) if _table else None
+    range_checklist_text = _render_rows(_range_rows(_table, _excluded(analysis))) if _table else None
     try:
         response = agent.design(
             request,
@@ -839,7 +846,7 @@ def run_agent2(args: argparse.Namespace) -> int:
             existing_catalog=existing_catalog,
             **_agent2_checkpoint_options(_current_agent2_contract()),
         )
-        checkpoint2 = _attach_range_checklist(checkpoint2, analysis, response.design, True)
+        checkpoint2 = _attach_range_checklist(checkpoint2, analysis, response.design, RANGE_CHECKLIST_CONTRACT)
         attempts = [
             {
                 "attempt": 1,
@@ -912,7 +919,7 @@ def run_agent2(args: argparse.Namespace) -> int:
                 existing_catalog=existing_catalog,
                 **_agent2_checkpoint_options(_current_agent2_contract()),
             )
-            checkpoint2 = _attach_range_checklist(checkpoint2, analysis, response.design, True)
+            checkpoint2 = _attach_range_checklist(checkpoint2, analysis, response.design, RANGE_CHECKLIST_CONTRACT)
             _write_json(run_dir / "agent2_test_design_attempt_2.json", response.design.model_dump(mode="json"))
             checkpoint2 = _run_grounding_review(run_dir, "AGENT2", 2,
                 build_grounding_input("AGENT2", request, requirements, response.design,

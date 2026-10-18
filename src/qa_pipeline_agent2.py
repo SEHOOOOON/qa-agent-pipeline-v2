@@ -150,6 +150,7 @@ AGENT2_SYSTEM_INSTRUCTIONS += "\n" + QA_REVIEW_RESPONSIBILITIES
 AGENT2_SYSTEM_INSTRUCTIONS += "\n" + QA_TASK_BOUNDARIES
 AGENT2_SYSTEM_INSTRUCTIONS += "\n" + QA_RANGE_CHANGE_RULES
 AGENT2_SYSTEM_INSTRUCTIONS += "\n" + QA_CONFIRMED_RULES
+AGENT2_SYSTEM_INSTRUCTIONS += "\n" + QA_TC_REVISION_RULE
 
 
 class Agent2Error(RuntimeError):
@@ -400,7 +401,7 @@ class OpenAIAgent2:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent2-2-62-rules-2",
+                prompt_cache_key="qa-v2-agent2-2-62-rules-3",
                 input=[
                     {"role": "system", "content": AGENT2_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
@@ -1971,6 +1972,27 @@ def evaluate_checkpoint2(
                   for error in _structured_restoration_errors(tc)]
         add("CP2-023", CheckStatus.FAIL if errors else CheckStatus.PASS,
             "; ".join(errors) if errors else "복원 조작·대상 ER·관찰 기준·확인 시점의 구조화 연결을 확인했습니다.")
+
+    if design.existing_tc_revisions:
+        # H-3 (2026-10-17). Added only when a revision is declared, so earlier
+        # Runs recompute the same checkpoint.
+        errors = []
+        candidates = set(tc_ids)
+        reused = {item.tc_id for item in design.related_existing_tests}
+        seen: set[str] = set()
+        for revision in design.existing_tc_revisions:
+            if revision.tc_id not in existing_by_id:
+                errors.append(f"{revision.tc_id}: 제공된 기존 TC 목록에 없음")
+            if revision.revised_by not in candidates:
+                errors.append(f"{revision.tc_id}: 고친 후보 {revision.revised_by}가 test_cases에 없음")
+            if revision.tc_id in reused:
+                errors.append(f"{revision.tc_id}: 고쳐 쓰는 TC를 관련_기존_TC로 그대로 재사용할 수 없음")
+            if revision.tc_id in seen:
+                errors.append(f"{revision.tc_id}: 고쳐 쓰기 기록 중복")
+            seen.add(revision.tc_id)
+        add("CP2-TC-REVISION", CheckStatus.FAIL if errors else CheckStatus.PASS,
+            "; ".join(errors) if errors else
+            "기존 TC 고쳐 쓰기 기록이 제공된 TC와 신규 후보에 연결됩니다. 교체는 사람 승인 전까지 확정되지 않습니다.")
 
     status = _aggregate_check_status(item.status for item in checks)
     return Checkpoint2Result(status=status, checks=checks)
