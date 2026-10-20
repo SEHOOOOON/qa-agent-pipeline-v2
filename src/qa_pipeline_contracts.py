@@ -852,6 +852,15 @@ P-2 오류 장비의 전원 변경 차단은 값 유지와 함께 ERROR 표시·
 이 규칙은 누락·추가를 판단하는 기준이며 제품 동작이나 실행 성공의 근거가 아닙니다.
 """
 
+# 2026-10-20: Agent 1 sees the confirmed rules only so that its scope statements do not
+# contradict them. The rules are applied by Agent 2; Agent 1 must not turn them into
+# conditions without source text (CP1 still rejects unsupported conditions).
+QA_AGENT1_RULES_NOTE = """아래 확정 규칙은 Agent 2가 시험을 설계할 때 적용하는 기준입니다(분석 단계 참고용):
+- 이 규칙이 요구하는 확인(예: 적용 직후 패널·카드·내부값 세 곳)을 영향 분석·이유·범위 설명에서 '확인하지 않는다', '별도 검사로 추가하지 않는다'처럼 제외하지 않습니다.
+- 규칙만을 근거로 confirmed_conditions를 새로 만들지 않습니다. 조건은 지금처럼 요청·SRS 원문에 근거합니다.
+- 요청·SRS가 규칙과 다르게 명시하면 원문을 따르고, 충돌이 판단에 필요하면 정보 부족으로 남깁니다.
+"""
+
 # 2026-10-17 사람 대조 H-3. Kept apart from QA_CONFIRMED_RULES, whose exact text is
 # bound into stored grounding inputs of earlier Runs.
 QA_TC_REVISION_RULE = """기존 TC 고쳐 쓰기 (H-3, 2026-10-17 사람 확정):

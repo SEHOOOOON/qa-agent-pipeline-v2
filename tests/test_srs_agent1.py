@@ -1111,7 +1111,7 @@ def test_agent1_uses_structured_responses_api() -> None:
     assert result.response_id == "resp_test"
     assert result.usage["total_tokens"] == 150
     assert responses.kwargs["text_format"] is pipeline.Agent1AnalysisDraft
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent1-2-25"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent1-2-25-rules-1"
     assert responses.kwargs["store"] is False
     instructions = responses.kwargs["input"][0]["content"]
     assert "현재 SRS는 제품 기능과 허용 조건" in instructions
@@ -1529,3 +1529,14 @@ def test_severity_tiers_keep_source_integrity_but_record_scope_findings(mutation
         check = cp1_check(tiered, rule)
         assert check.status in {CheckStatus.PASS, CheckStatus.REVIEW} and "경고(진행" in check.message
         assert tiered.status != CheckStatus.FAIL
+
+
+def test_agent1_sees_confirmed_rules_with_a_guard_against_contradicting_them():
+    """2026-10-20 fan run: Agent 1 wrote that panel re-display is not checked (F-1 says three places)."""
+    from qa_pipeline_agent1 import AGENT1_SYSTEM_INSTRUCTIONS
+    from qa_pipeline_contracts import QA_AGENT1_RULES_NOTE, QA_CONFIRMED_RULES
+    assert QA_CONFIRMED_RULES in AGENT1_SYSTEM_INSTRUCTIONS
+    assert AGENT1_SYSTEM_INSTRUCTIONS.index(QA_AGENT1_RULES_NOTE) < AGENT1_SYSTEM_INSTRUCTIONS.index(QA_CONFIRMED_RULES)
+    assert "제외하지 않습니다" in QA_AGENT1_RULES_NOTE and "confirmed_conditions를 새로 만들지 않습니다" in QA_AGENT1_RULES_NOTE
+    fan_rule = next(line for line in QA_CONFIRMED_RULES.splitlines() if line.startswith("F-1"))
+    assert "세 곳" in fan_rule

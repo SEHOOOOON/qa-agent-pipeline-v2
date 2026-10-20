@@ -82,6 +82,10 @@ AGENT1_SYSTEM_INSTRUCTIONS += """
 변경 후 기준은 원문 전체의 의미로 구분하세요. 이전/부정/제외된 범위와 실제 적용할 새 범위를 같은 필수 조건으로 만들지 않습니다. before/after와 인수 조건의 적용 대상·상하한·경계 포함 여부·허용/차단·기존값 유지를 보존하세요. after_value·description의 요구도 빠짐없이 조건 또는 해당 절차로 연결하고, 원문 인용은 자의적으로 바꾸지 않습니다. 불명확하면 정보 부족으로 남깁니다.
 """
 
+# 2026-10-20: the Agent 1 impact analysis once wrote "panel re-display is not checked
+# separately" for a fan request, contradicting confirmed rule F-1 that Agent 2 follows.
+AGENT1_SYSTEM_INSTRUCTIONS += "\n" + QA_AGENT1_RULES_NOTE + "\n" + QA_CONFIRMED_RULES
+
 
 class Agent1Error(RuntimeError):
     """Raised when Agent 1 cannot produce a validated structured response."""
@@ -188,7 +192,7 @@ class OpenAIAgent1:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent1-2-25",
+                prompt_cache_key="qa-v2-agent1-2-25-rules-1",
                 input=[
                     {"role": "system", "content": AGENT1_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
