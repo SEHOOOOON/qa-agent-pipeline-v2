@@ -1,29 +1,15 @@
 from __future__ import annotations
 
-import argparse
 import ast
 import hashlib
 import json
-import os
 import re
-import shutil
-import subprocess
-import sys
-import tempfile
-import time
-import urllib.error
-import urllib.request
-import uuid
-import zipfile
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, model_validator, model_serializer
-from qa_pipeline_trace import redact_playwright_trace as _redact_playwright_trace
 from qa_pipeline_io import *
 
 __version__ = "0.3.0"
@@ -1431,10 +1417,6 @@ EXISTING_REGRESSION_CATALOG = (
         ),
     ),
 )
-
-EXISTING_REGRESSION_BY_ID = {
-    item.tc_id: item for item in EXISTING_REGRESSION_CATALOG
-}
 
 
 def _existing_regression_by_id(

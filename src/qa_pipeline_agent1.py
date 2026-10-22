@@ -1,29 +1,12 @@
 from __future__ import annotations
 
-import argparse
-import ast
-import hashlib
 import json
 import os
 import re
-import shutil
-import subprocess
-import sys
-import tempfile
-import time
-import urllib.error
-import urllib.request
-import uuid
-import zipfile
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from enum import Enum
-from pathlib import Path
-from typing import Annotated, Any
+from typing import Any
 
 from openai import OpenAI
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, model_validator
-from qa_pipeline_trace import redact_playwright_trace as _redact_playwright_trace
 from qa_pipeline_io import *
 from qa_pipeline_contracts import *
 
@@ -324,20 +307,6 @@ def _terms(value: str) -> set[str]:
         for token in re.findall(r"[가-힣A-Za-z0-9°%._~+·-]{2,}", value)
     }
 
-
-def _has_textual_link(left: str, right: str) -> bool:
-    """Match a shared term while tolerating Korean particles and inflections."""
-    left_terms = _terms(left)
-    right_terms = _terms(right)
-    if left_terms & right_terms:
-        return True
-    left_normalized = _normalize(left)
-    right_normalized = _normalize(right)
-    return any(
-        len(term) >= 2 and term in right_normalized for term in left_terms
-    ) or any(
-        len(term) >= 2 and term in left_normalized for term in right_terms
-    )
 
 
 def _request_authority_text(request: ChangeRequest) -> str:

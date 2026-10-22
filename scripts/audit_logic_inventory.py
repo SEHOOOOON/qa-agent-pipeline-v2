@@ -228,7 +228,7 @@ def build_inventory():
                        "Prompt rules and dynamic generated code remain source spans, not all possible runtime variants.",
                        "Dependencies, ignored local scripts, historical Run files and project 2 are outside this inventory.",
                        "Guards describe lexical if/else nesting, not all execution preconditions.",
-                       "Counts include historical compatibility and presentation branches; not a count of business rules."],
+                       "Counts include presentation branches; not a count of business rules."],
             "python_files": files, "html_surfaces": surfaces}
 
 
@@ -284,7 +284,7 @@ def main():
     inventory = build_inventory()
     guide = (ROOT / "docs" / "PROJECT_GUIDE.md").read_text(encoding="utf-8")
     section = guide.split("### 전체 Checkpoint 규칙 목록", 1)[1].split("### 누락과 문서 노후화", 1)[0]
-    documented = set(re.findall(r"CP[1-4]-\d{3}[A-Z]?", section))
+    documented = set(re.findall(r"CP[1-4]-(?:\d{3}[A-Z]?|[A-Z]+(?:-[A-Z]+)*)", section))
     implemented = {r["rule_id"] for name, content in inventory["python_files"].items()
                    if name.startswith("src/") for r in content["checkpoint_occurrences"]}
     if documented != implemented:

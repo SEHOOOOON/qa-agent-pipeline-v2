@@ -1,30 +1,19 @@
 from __future__ import annotations
 
 import argparse
-import ast
 import hashlib
 import json
 import os
 import re
-import shutil
-import subprocess
-import sys
-import tempfile
-import time
 import urllib.error
 import urllib.request
 import urllib.parse
 import uuid
-import zipfile
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from enum import Enum
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Any
 
-from openai import OpenAI
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, model_validator
-from qa_pipeline_trace import redact_playwright_trace as _redact_playwright_trace
+from pydantic import ValidationError
 from qa_pipeline_io import *
 from qa_pipeline_contracts import *
 from qa_pipeline_agent1 import *

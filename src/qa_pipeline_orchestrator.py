@@ -1,29 +1,13 @@
 from __future__ import annotations
 
 import argparse
-import ast
-import hashlib
-import json
 import os
 import re
-import shutil
-import subprocess
 import sys
-import tempfile
-import time
-import urllib.error
-import urllib.request
-import uuid
-import zipfile
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from enum import Enum
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Any
 
-from openai import OpenAI
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, model_validator
-from qa_pipeline_trace import redact_playwright_trace as _redact_playwright_trace
 from qa_pipeline_io import *
 from qa_pipeline_contracts import *
 from qa_pipeline_agent1 import *
@@ -106,14 +90,6 @@ def _orchestrator_status(exit_code: int) -> str:
     return "STOPPED"
 
 
-def _select_agent3_tc(
-    design: Agent2TestDesign,
-) -> tuple[str | None, list[dict[str, Any]]]:
-    """Backward-compatible helper returning the first ordered Agent 3 TC."""
-    selected, summaries = _select_agent3_tcs(design)
-    return (selected[0] if selected else None), summaries
-
-
 def _select_agent3_tcs(
     design: Agent2TestDesign,
 ) -> tuple[list[str], list[dict[str, Any]]]:
@@ -185,15 +161,6 @@ def _select_agent3_tcs(
 
     selected = [item[0].tc_id for item in sorted(candidates, key=priority)]
     return selected, summaries
-
-
-def _select_agent3_tc_from_run(
-    run_dir: Path,
-    run_id: str,
-) -> tuple[str | None, list[dict[str, Any]]]:
-    """Compatibility entry point: retain old imports, share verified selection."""
-    selected, summaries = _select_agent3_tcs_from_run(run_dir, run_id)
-    return (selected[0] if selected else None), summaries
 
 
 def _select_agent3_tcs_from_run(

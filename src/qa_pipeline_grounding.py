@@ -10,7 +10,7 @@ import copy
 import json
 import os
 import re
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Literal, Union
 
 from openai import OpenAI
 from pydantic import Field, create_model, field_validator

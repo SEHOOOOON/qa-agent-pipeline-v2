@@ -288,7 +288,7 @@ def test_structured_candidate_routing_does_not_depend_on_purpose_label(field, in
 
 
 @pytest.mark.parametrize('blocked', [False, True])
-def test_single_tc_compatibility_wrapper_keeps_verified_loader(tmp_path, monkeypatch, blocked):
+def test_run_selection_uses_verified_loader(tmp_path, monkeypatch, blocked):
     design = cp2_valid_design()
     calls = []
     def verified(run_dir, run_id):
@@ -298,10 +298,9 @@ def test_single_tc_compatibility_wrapper_keeps_verified_loader(tmp_path, monkeyp
     monkeypatch.setattr(pipeline_orchestrator, '_load_verified_agent2_run', verified)
     if blocked:
         with pytest.raises(ValueError, match='integrity rejected'):
-            pipeline._select_agent3_tc_from_run(tmp_path, 'fixture')
+            pipeline._select_agent3_tcs_from_run(tmp_path, 'fixture')
     else:
-        selected, summaries = pipeline._select_agent3_tcs(design)
-        assert pipeline._select_agent3_tc_from_run(tmp_path, 'fixture') == (selected[0] if selected else None, summaries)
+        assert pipeline._select_agent3_tcs_from_run(tmp_path, 'fixture') == pipeline._select_agent3_tcs(design)
     assert calls == [(tmp_path, 'fixture')]
 
 @pytest.mark.parametrize("variant", ["normal", "empty", "tampered"])
@@ -671,24 +670,24 @@ def test_pipeline_parser_exposes_one_command_agent1_to_agent3() -> None:
             "target_role": "MULTIPLE_ALLOWED_TEST_DEVICES",
         }
     )
-    selected, summaries = pipeline._select_agent3_tc(
+    selected, summaries = pipeline._select_agent3_tcs(
         Agent2TestDesign(
             request_id="CR-TEST-001",
             test_cases=[unsupported, eligible],
             coverage_summary="Selection fixture",
         )
     )
-    assert selected == eligible.tc_id
+    assert selected[0] == eligible.tc_id
     assert len(summaries) == 2
     assert summaries[0]["status"] == "DISCOVERY_REQUIRED"
-    discovered, unsupported_summaries = pipeline._select_agent3_tc(
+    discovered, unsupported_summaries = pipeline._select_agent3_tcs(
         Agent2TestDesign(
             request_id="CR-TEST-001",
             test_cases=[unsupported],
             coverage_summary="No eligible candidate fixture",
         )
     )
-    assert discovered == unsupported.tc_id
+    assert discovered == [unsupported.tc_id]
     assert unsupported_summaries[0]["generic_discovery_required"] is True
     assert unsupported_summaries[0]["missing_capabilities"] == []
 
@@ -990,15 +989,11 @@ def test_pipeline_rejects_missing_target_before_any_model_stage(
     with pytest.raises(ValueError, match="target HTML does not exist"):
         pipeline.run_pipeline(args)
 
-def test_related_regression_selection_is_grounded_and_excludes_demo_cases() -> None:
-    selected = pipeline.select_existing_regressions(
-        ["REQ-TEMP-001", "REQ-CONTROL-001", "REQ-STATE-001"]
-    )
+def test_existing_regression_catalog_excludes_demo_cases() -> None:
+    catalog_ids = {item.tc_id for item in pipeline.EXISTING_REGRESSION_CATALOG}
 
-    assert [item.tc_id for item in selected] == ["TC-MODE-001", "TC-TEMP-001"]
-    assert "TC-INT-002" not in {item.tc_id for item in pipeline.EXISTING_REGRESSION_CATALOG}
-    assert all(not item.tc_id.startswith("TC-PIPE-") for item in selected)
-    assert all(item.tc_id != "TC-TEMP-002" for item in selected)
+    assert "TC-INT-002" not in catalog_ids
+    assert not any(tc_id.startswith("TC-PIPE-") for tc_id in catalog_ids)
 
 def test_checkpoint2_does_not_invent_regression_from_requirement_id_alone() -> None:
     analysis = agent1_analysis().model_copy(

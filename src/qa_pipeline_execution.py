@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import ast
-import hashlib
 import json
 import os
 import re
@@ -11,18 +9,14 @@ import subprocess
 import sys
 import tempfile
 import time
-import urllib.error
-import urllib.request
 import uuid
 import zipfile
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from enum import Enum
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Any
 
 from openai import OpenAI
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, model_validator
+from pydantic import ValidationError
 from qa_pipeline_trace import redact_playwright_trace as _redact_playwright_trace
 from qa_pipeline_io import *
 from qa_pipeline_contracts import *
@@ -536,7 +530,6 @@ def run_agent2(args: argparse.Namespace) -> int:
     approved_catalog, approved_snapshot = load_approved_regression_catalog(
         approved_assets_root
     )
-    retired = _retired_tc_ids(approved_snapshot)
     existing_catalog = _catalog_from_snapshot(approved_snapshot)
     try:
         with reservation_file.open("x", encoding="utf-8") as handle:
@@ -1326,18 +1319,6 @@ def run_agent3(args: argparse.Namespace) -> int:
     print(f"Artifacts: {artifact_dir}")
     return _agent3_cli_exit_code(checkpoint, trial)
 
-
-def select_existing_regressions(
-    requirement_ids: list[str] | set[str] | tuple[str, ...],
-    catalog: tuple[ExistingRegressionSpec, ...] = EXISTING_REGRESSION_CATALOG,
-) -> list[ExistingRegressionSpec]:
-    """Select only reusable baseline regressions related to the approved TC."""
-    approved = set(requirement_ids)
-    return [
-        spec
-        for spec in catalog
-        if approved.intersection(spec.requirement_ids)
-    ]
 
 
 def _safe_artifact_child(parent: Path, name: str, label: str) -> Path:

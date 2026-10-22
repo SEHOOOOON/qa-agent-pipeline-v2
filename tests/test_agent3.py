@@ -3780,14 +3780,6 @@ def test_agent3_non_hvac_mode_values_use_generic_discovery() -> None:
     assert "DISCOVER_GENERIC_UI" in eligibility.required_capabilities
     assert "SET_MODE" not in eligibility.required_capabilities
 
-def test_agent3_textual_link_tolerates_korean_particles() -> None:
-    assert pipeline._has_textual_link("적용", "적용을 실행한다.")
-    assert pipeline._has_textual_link(
-        "window vccs primaryTestDevice status",
-        "PRIMARY_TEST_DEVICE의 내부 status가 OPERATION으로 변경된다.",
-    )
-    assert not pipeline._has_textual_link("삭제 버튼", "적용을 실행한다.")
-
 def test_agent3_allows_dynamic_text_on_the_approved_target_device_card() -> None:
     test_case = ProductTestCaseCandidate.model_validate(
         {
