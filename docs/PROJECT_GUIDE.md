@@ -191,7 +191,7 @@ SRS 개정은 제품 기준이 실제 달라질 때 제안합니다. 기존 기�
 
 실행 인터페이스 계약은 `agent3-3.44/3.45`부터 적용합니다. 현재 새 실행은 실행 정의가 있으면 `agent3-3.46`, 과거 형식이면 `agent3-3.47`이며 `value_comparison_contract=1.0`도 기록합니다. 새 자동화의 동등 비교는 참/거짓과 숫자를 구분하되 숫자 21과 21.0은 같은 값으로 봅니다. 복합 내부값과 복원 비교에도 적용하고, 문장 의미나 문자열 대소문자를 새로 해석하지 않습니다.
 
-신규 실행·재작성·저장 결과 재검사·승인 재검사가 같은 버전 옵션을 사용합니다. 과거 Run은 당시 비교 방식과 입력 해시·판정을 보존하며 공식 자동화를 자동 교체하지 않습니다. 새 설명으로 과거 의미 검토를 통과시키지도 않습니다.
+신규 실행·재작성·저장 결과 재검사·승인 재검사가 같은 검사 함수와 검토 입력(`_recheck_agent3_candidate`, `_agent3_grounding_input`)을 사용합니다. 저장 실행은 계약 표시가 현재 계약과 같을 때만 다시 검증하며, 공식 자동화를 자동 교체하지 않습니다. 새 설명으로 과거 의미 검토를 통과시키지도 않습니다.
 
 UI Inventory는 실제 요소의 존재·표시·활성·단일성, 장비 식별과 필요한 내부값을 수집합니다. 조작 종류는 DOM 태그·역할·입력 종류와 요소에 직접 연결된 `onclick` 함수로 기록하며 버튼 설명 문구를 조작 코드로 비교하지 않습니다. 같은 판별 함수를 지정 요소 수집과 일반 탐색에 사용하고, 검토에도 그 결과를 전달합니다. 입력창·체크박스 등의 전용 조작을 클릭으로 바꾸지 않으며 함수 본문을 수집·전송하지 않습니다.
 
@@ -311,11 +311,11 @@ Slack·Notion은 기본 미리보기입니다. 실제 게시에는 별도 설정
 | 사람 검토 | 사람_최종_검토.md와 추적 Manifest |
 | 공식 자산 | approved_assets/registry.json, test_cases/, automation/, srs_revisions/ |
 
-완성 전까지는 과거 Run을 현재 코드로 다시 검증하는 호환을 새로 만들지 않습니다(AGENTS.md 2.1.2, 2026-10-18). 이미 코드에 있는 과거 계약 갈림길은 정리 단계에서 지울 예정이며, 저장된 실행 결과 파일은 비교 자료로 보존합니다.
+완성 전까지는 과거 Run을 현재 코드로 다시 검증하지 않습니다(AGENTS.md 2.1.2, 2026-10-18). 2026-10-21 정리로 과거 계약 갈림길(검사 스위치·버전 목록·정책 함수)을 지웠습니다. 저장 실행의 계약 표시가 현재 계약(`_current_agent1_contract`·`_current_agent2_contract`·`_current_agent3_contract`)과 다르면 "옛 형식 … 실행이라 지원하지 않습니다"로 멈춥니다. 저장된 실행 결과 파일은 지우거나 고치지 않고 비교 자료로 보존하며, 옛 코드가 필요하면 Git 태그 `v2-before-cleanup-20261020`에서 꺼냅니다.
 
 단일 Agent 3 CLI와 다중 후보의 파일 배치는 다를 수 있습니다. 저장 로더는 해당 계약과 해시를 확인합니다. 과거 판정·파일을 최신 계약에 맞춰 다시 쓰지 않습니다.
 
-공개 Python 진입점은 [qa_pipeline_v2.py](../src/qa_pipeline_v2.py)입니다. 역할별 구현은 agent1/agent2/agent3/execution/reporting/orchestrator와 공통 contracts/grounding/io/trace로 분리합니다. 호환 옵션은 과거 자료를 읽기 위한 것이며 신규 실행의 우회 기능이 아닙니다.
+공개 Python 진입점은 [qa_pipeline_v2.py](../src/qa_pipeline_v2.py)입니다. 역할별 구현은 agent1/agent2/agent3/execution/reporting/orchestrator와 공통 contracts/grounding/io/trace로 분리합니다. 검사 함수(CP1·CP2·CP3·근거 검토 입력·컴파일러)에는 과거 동작을 고르는 옵션이 없습니다. 데이터 모델의 선택 필드 처리(공식 승인 자산 읽기)는 남아 있습니다.
 
 ## 9. 시연과 공개 자료
 
@@ -515,8 +515,8 @@ CP4는 저장 결과를 검사하며 새 모델 호출/제품 재시험은 하�
 | 구조 계약 | 필수 필드·허용 상태값·MODIFIED·복원/계획 내부 정합성 위반 거부 | contracts의 StrictModel·validator·Enum |
 | 최초/후속 입력 | JSON·SRS·Run ID·TC ID·파일 존재·허용 경로·스냅샷 검증 | execution의 read/load/resolve 함수 |
 | 인계 | 버전·정책 필드·단계·해시·저장 CP와 재계산 CP 대조 | `_load_verified_agent1_run`, `_load_verified_agent2_run`, `_candidate_execution_record` |
-| 과거 호환 | 과거 계약별 검사 옵션. 이전 PASS 안내 문구만 제한적으로 비교 제외; 판정/실패 이유 유지 | `_legacy_wording_policy`, `_checkpoint_revalidation_matches` |
-| 새/과거 혼합 방지 | 새 필수 계약 누락·구버전으로 하향·수정 전 근거 검토 재사용 거부 | `_load_grounding_review` 및 버전 확인 |
+| 현재 계약 확인 | 저장 실행의 계약 표시가 현재 계약과 정확히 같아야 다시 검증. 다르면 "옛 형식 … 지원하지 않음"으로 멈춤. 재계산한 CP는 저장 CP와 전체 일치 | `_require_current_contract`, `_current_agent1_contract`·`_current_agent2_contract`·`_current_agent3_contract` |
+| 근거 검토 재사용 | 저장 검토 파일 해시와 재구성한 검토 입력 해시가 모두 일치할 때만 판정 재사용 | `_load_grounding_review`, `check_review_record` |
 | 생성 코드 | 허용 행동·Assertion·읽기/복원 방식만 생성, 런타임 사전조건·복원 로그 유지 | `compile_automation_candidate`와 관련 builder |
 | 공식 등록 자격 | 최종 PASS·CP3/CP4·실제 시험 PASS·필수 증거·후보 코드·현재 제품 해시 | `_candidate_approval_check` |
 | 현재 제품 변경 | 시험 뒤 HTML 변경이면 현재 제품에서 재시험 필요. 코드가 다르면 거부 | `revalidate_candidate_asset` |

@@ -965,7 +965,8 @@ def test_existing_only_procedure_notes_reach_final_human_review(tmp_path: Path, 
         "existing_procedure_review_contract": "1.0", "request_sha256": _sha256_file(run_dir / "request.json"),
     })
     question = "적용 완료 알림에 적용할 목표 색상을 지정해 주세요."
-    analysis = agent1_analysis().model_copy(update={"user_questions": [question]})
+    analysis = agent1_analysis().model_copy(update={"user_questions": [question],
+                                                    "procedure_notes": request.acceptance_notes})
     _write_json(run_dir / "agent1_change_analysis.json", analysis.model_dump(mode="json", by_alias=True))
     _write_json(run_dir / "run_manifest.json", {"agent1_analysis_sha256": _sha256_file(run_dir / "agent1_change_analysis.json")})
     notes = pipeline._final_review_notes_for_validation(run_dir)
@@ -985,8 +986,8 @@ def test_existing_only_procedure_notes_reach_final_human_review(tmp_path: Path, 
     review = (run_dir / "사람_최종_검토.md").read_text(encoding="utf-8")
     assert question in review
     assert all(note in review for note in request.acceptance_notes)
-    assert "자동 확정하지 않았습니다" in review
-    _write_json(run_dir / "request.json", cp1_request().model_dump(mode="json"))
+    assert "실제 수행 증거를 확인해 주세요" in review
+    _write_json(run_dir / "agent1_change_analysis.json", agent1_analysis().model_dump(mode="json", by_alias=True))
     with pytest.raises(ValueError, match="변경"):
         pipeline._final_review_notes_for_validation(run_dir)
 

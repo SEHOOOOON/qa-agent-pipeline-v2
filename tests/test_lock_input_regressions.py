@@ -25,9 +25,7 @@ def test_card_lock_reader_uses_consistent_dom_not_internal_value(class_locked, i
     monkeypatch.setenv('QA_TARGET_URL', 'about:blank')
     monkeypatch.setenv('QA_EVIDENCE_DIR', str(tmp_path))
     case, plan = controller_lifecycle_fixture('locked', True, False)
-    old_code = a3.compile_automation_candidate('LOCAL', case, plan, typed_values=True)
-    code = a3.compile_automation_candidate('LOCAL', case, plan, typed_values=True, consistent_card_lock=True)
-    assert code != old_code
+    code = a3.compile_automation_candidate('LOCAL', case, plan)
     ui = {'card_classes': ['state-stop', 'mode-heat'] + (['locked'] if class_locked else []),
           'card_values': ['난방', '중풍', '27°C'], 'card_locked': icon_locked}
     class Page:
@@ -40,9 +38,6 @@ def test_card_lock_reader_uses_consistent_dom_not_internal_value(class_locked, i
     if expected is None:
         assert not namespace['_qa_values_equal'](expected, False)
         assert not namespace['_qa_values_equal'](expected, True)
-    old = {}
-    exec(compile(old_code, 'old_candidate', 'exec'), old)
-    assert old['_controller_ui_fields'](Page(), 1)['locked'] is (class_locked and icon_locked)
 
 
 @pytest.mark.parametrize('initial,target', [(False, True), (True, False)])
@@ -53,8 +48,7 @@ def test_new_lock_candidate_executes_and_restores(initial, target, mapped_contro
     monkeypatch.setenv('QA_TARGET_URL', (REPO_ROOT / 'product_baseline/virtual-controller.html').as_uri())
     monkeypatch.setenv('QA_EVIDENCE_DIR', str(tmp_path / 'evidence'))
     namespace = {}
-    exec(compile(a3.compile_automation_candidate('LOCAL-LOCK', case, plan,
-        explicit_expectations_only=True, typed_values=True, consistent_card_lock=True), 'lock', 'exec'), namespace)
+    exec(compile(a3.compile_automation_candidate('LOCAL-LOCK', case, plan), 'lock', 'exec'), namespace)
     namespace['test_tc_cand_090']()
     output = capsys.readouterr().out
     assert 'RESTORE_STATUS: RESTORED' in output
@@ -62,19 +56,12 @@ def test_new_lock_candidate_executes_and_restores(initial, target, mapped_contro
 
 
 def test_compact_input_is_lossless_and_preserves_review_items_sources_and_verdicts():
-    old = focused_agent2_payload()
-    new = focused_agent2_payload(focused_design_review='1.1')
+    new = focused_agent2_payload()
     expanded = expand_tcs(new)
-    assert expanded['items'] == old['items']
-    assert new['context'] == old['context']
-    assert new['artifact_sha256'] == old['artifact_sha256']
-    assert new['source_documents'][:-1] == old['source_documents']
+    assert [i['item_id'] for i in expanded['items']] == [i['item_id'] for i in new['items']]
+    assert all('tc_ref' not in i['content'] for i in expanded['items'] if i['kind'] == 'TC_DESIGN')
     assert new['source_documents'][-1]['source_id'] == 'REVIEW_INPUT_GUIDE'
-    assert old == focused_agent2_payload(focused_design_review='1.0')
-    assert [i['item_id'] for i in new['items']] == [i['item_id'] for i in old['items']]
     assert any('tc_ref' in i['content'] for i in new['items'] if i['kind'] == 'TC_DESIGN')
-    with pytest.raises(ValueError, match='해시'):
-        grounding.check_review_record(new, fake_grounding_record(old))
     for verdict, status in [('SUPPORTED','PASS'),('UNSUPPORTED','FAIL'),('UNCERTAIN','REVIEW')]:
         record = fake_grounding_record(new)
         record['review']['items'][0]['verdict'] = verdict
@@ -102,7 +89,7 @@ def test_compaction_ambiguous_copies_empty_coverage_and_broken_body_stay_explici
 
 
 def test_new_review_transport_sends_exact_compact_payload_and_guidance():
-    payload = focused_agent2_payload(focused_design_review='1.1')
+    payload = focused_agent2_payload()
     sent = []
     def parse(**kwargs):
         sent.append(kwargs)
@@ -134,8 +121,7 @@ def test_lock_conflicting_display_in_real_dom(monkeypatch, tmp_path):
     monkeypatch.setenv('QA_EVIDENCE_DIR', str(tmp_path))
     case, plan = controller_lifecycle_fixture('locked', True, False)
     namespace = {}
-    exec(compile(a3.compile_automation_candidate('LOCAL-DOM', case, plan,
-        typed_values=True, consistent_card_lock=True), 'lock_dom', 'exec'), namespace)
+    exec(compile(a3.compile_automation_candidate('LOCAL-DOM', case, plan), 'lock_dom', 'exec'), namespace)
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
         page = browser.new_page()

@@ -336,33 +336,16 @@ def _review_digest(payload: dict) -> str:
 
 
 def build_grounding_input(stage, request, requirements, artifact, *, analysis=None,
-                          catalog=(), test_case=None, observation=None, include_condition_coverage=False,
-                          include_procedure_coverage=False, include_execution_contract=False,
-                          include_review_responsibilities=False, allow_output_tolerance=False,
-                          include_task_boundaries=False, review_scope_semantics=False,
-                          allow_state_change_terminal_observation=False, explicit_expectations_only=False,
-                          include_tc_execution_alignment=False, execution_interface=False, essential_checks=False,
-                          pair_observation_anchors=False, shared_design_review=False, focused_design_review=False,
-                          human_judgment_examples=False, baseline_capture_order=False,
-                          range_change_rules=False, review_severity=False):
-    """Host enumerates review targets; the reviewer cannot choose a smaller scope."""
-    if focused_design_review not in {False, True, "1.0", "1.1"}:
-        raise ValueError("지원하지 않는 집중 설계 검토 계약입니다.")
-    if focused_design_review and not (stage == "AGENT2" and essential_checks and shared_design_review
-            and include_condition_coverage and include_task_boundaries == "1.3"):
-        raise ValueError("집중 설계 검토는 조건별 검토·공통 기준을 사용하는 신규 Agent 2에만 적용합니다.")
+                          catalog=(), test_case=None, observation=None):
+    """Host enumerates review targets; the reviewer cannot choose a smaller scope.
+
+    Current contract only (2026-10-20 cleanup). The document order and contract
+    markers are part of the review input hash and must stay stable.
+    """
+    if stage not in {"AGENT1", "AGENT2", "AGENT3"}:
+        raise ValueError("Unknown grounding review stage")
     documents, items = [], []
-    if human_judgment_examples and not focused_design_review:
-        raise ValueError("사람 판단 참고 사례는 Agent 2 집중 검토에만 적용합니다.")
-    if baseline_capture_order and stage == "AGENT2" and not (
-            include_tc_execution_alignment and include_execution_contract):
-        raise ValueError("Agent 2 원래값 기록 순서는 실행 계약·TC 연결 근거와 함께 제공합니다.")
-    if review_severity and stage not in {"AGENT1", "AGENT2"}:
-        raise ValueError("반려 등급 계약은 Agent 1·2 근거 검토에만 적용합니다.")
-    if review_severity and stage == "AGENT2" and not range_change_rules:
-        raise ValueError("Agent 2 반려 등급 계약은 범위 변경 확정 규칙과 함께 적용합니다.")
-    if range_change_rules and not (stage == "AGENT2" and focused_design_review and human_judgment_examples):
-        raise ValueError("범위 변경 확정 규칙은 사람 판단 사례를 쓰는 Agent 2 집중 검토에만 적용합니다.")
+
     def doc(source_id, value):
         # Cite original field values, not JSON-escaped encodings of their text.
         if isinstance(value, dict):
@@ -374,6 +357,7 @@ def build_grounding_input(stage, request, requirements, artifact, *, analysis=No
         elif value is not None and str(value).strip():
             documents.append({"source_id": source_id, "text": value if isinstance(value, str)
                               else json.dumps(value, ensure_ascii=False)})
+
     def item(item_id, value, kind="CLAIM"):
         items.append({"item_id": item_id, "kind": kind,
                       "content": value if isinstance(value, str) else value.model_dump(mode="json")
@@ -386,25 +370,20 @@ def build_grounding_input(stage, request, requirements, artifact, *, analysis=No
             doc(f"SRS/{req_id}/statement", req.statement)
             doc(f"SRS/{req_id}/acceptance", req.acceptance_criteria)
     context = {}
-    if include_task_boundaries:
-        doc("TASK_BOUNDARIES", QA_TASK_BOUNDARIES)
-    if include_execution_contract and stage in {"AGENT2", "AGENT3"}:
+    doc("TASK_BOUNDARIES", QA_TASK_BOUNDARIES)
+    if stage in {"AGENT2", "AGENT3"}:
         doc("EXECUTION_CONTRACT", QA_EXECUTION_CONTRACT)
-    if include_review_responsibilities:
         doc("REVIEW_RESPONSIBILITIES", QA_REVIEW_RESPONSIBILITIES)
     if stage in {"AGENT1", "AGENT2"}:
         context["request_identity_not_behavior_evidence"] = {
             "request_id": request.request_id, "target_requirement_id": request.target_requirement_id}
     if stage == "AGENT1":
-        if include_task_boundaries:
-            # Enumerate from the request, not the generated conditions. Otherwise
-            # deleting a boundary could also delete the review of that boundary.
-            coverage_fields = ("before_value", "after_value", "description") if include_task_boundaries == "1.3" else (
-                "after_value", "description")
-            for key in coverage_fields:
-                item(f"REQUEST_COVERAGE/{key}", {
-                    "source_id": f"REQUEST/{key}", "source_text": getattr(request, key),
-                    "analysis": artifact.model_dump(mode="json")}, "REQUEST_COVERAGE")
+        # Enumerate from the request, not the generated conditions. Otherwise
+        # deleting a boundary could also delete the review of that boundary.
+        for key in ("before_value", "after_value", "description"):
+            item(f"REQUEST_COVERAGE/{key}", {
+                "source_id": f"REQUEST/{key}", "source_text": getattr(request, key),
+                "analysis": artifact.model_dump(mode="json")}, "REQUEST_COVERAGE")
         for key in ("change_summary", "before_condition", "after_condition", "decision"):
             item(key, getattr(artifact, key))
         for key in ("confirmed_conditions", "requirement_effects", "procedure_notes",
@@ -412,6 +391,7 @@ def build_grounding_input(stage, request, requirements, artifact, *, analysis=No
             for index, value in enumerate(getattr(artifact, key)):
                 item(f"{key}/{index}", value)
     elif stage == "AGENT2":
+        from qa_pipeline_agent3 import controller_recovery_tc_facts
         context["analysis_not_primary_evidence"] = analysis.model_dump(mode="json")
         context["catalog"] = [{"tc_id": c.tc_id, "requirement_ids": list(c.requirement_ids),
             "covered_behaviors": list(c.covered_behaviors),
@@ -420,40 +400,21 @@ def build_grounding_input(stage, request, requirements, artifact, *, analysis=No
         for index, tc in enumerate(artifact.test_cases):
             prefix = f"TC/{index}"
             context[prefix] = tc.model_dump(mode="json")
-            if include_tc_execution_alignment:
-                from qa_pipeline_agent3 import controller_recovery_tc_facts
-                recovery = controller_recovery_tc_facts(tc, include_baseline_order=baseline_capture_order)
-                if recovery is not None:
-                    fact = {"tc_id": tc.tc_id, "controller_recovery": recovery,
-                            "review_rule": "프로그램이 해당 TC 정의를 연결·검사해 확인한 복원 동작입니다. "
-                            "준비로 바꾼 관제점도 준비 전 상태와 비교하므로 제품 기대결과에 복원 검사를 추가하지 않습니다. "
-                            "요청·SRS의 제품 기대값 근거, 실제 화면 가용성 또는 실행 성공 증거는 아닙니다."}
-                    context.setdefault("compiler_recovery_facts", {})[prefix] = fact
-                    doc(f"COMPILER_RECOVERY/{index}", fact)
-            if focused_design_review:
-                # Review the complete TC once, not its prose/ERs as detached claims.
-                # Conditions and procedure coverage remain independent reverse checks.
-                item(f"{prefix}/design", tc, "TC_DESIGN")
-                continue
-            if tc.execution_spec is not None:
-                item(f"{prefix}/execution_spec", {
-                    "definition": tc.execution_spec.model_dump(mode="json"),
-                    "review_rule": "TC 원문·요청·SRS와 조작, 입력/기대값, 준비 상태, 대상과 시점이 같은지 확인합니다. "
-                                   "불필요한 조작·누락·범위 확대는 반려합니다. 이 정의를 Agent 3가 그대로 사용합니다."
-                }, "EXECUTION_SPEC")
-            item(f"{prefix}/scope", {"title": tc.title, "source_condition_ids": tc.source_condition_ids,
-                                    "requirement_ids": tc.requirement_ids, "test_data": tc.test_data.model_dump(mode="json")})
-            procedure_keys = ("steps",) if include_task_boundaries == "1.3" else (
-                "preconditions", "steps", "restore_steps", "intermediate_reset_steps")
-            for key in procedure_keys:
-                for n, line in enumerate(getattr(tc, key)):
-                    item(f"{prefix}/{key}/{n}", line)
-            for n, result in enumerate(tc.expected_results):
-                item(f"{prefix}/ER/{n}", result, "EXPECTED_RESULT")
+            recovery = controller_recovery_tc_facts(tc, include_baseline_order=True)
+            if recovery is not None:
+                fact = {"tc_id": tc.tc_id, "controller_recovery": recovery,
+                        "review_rule": "프로그램이 해당 TC 정의를 연결·검사해 확인한 복원 동작입니다. "
+                        "준비로 바꾼 관제점도 준비 전 상태와 비교하므로 제품 기대결과에 복원 검사를 추가하지 않습니다. "
+                        "요청·SRS의 제품 기대값 근거, 실제 화면 가용성 또는 실행 성공 증거는 아닙니다."}
+                context.setdefault("compiler_recovery_facts", {})[prefix] = fact
+                doc(f"COMPILER_RECOVERY/{index}", fact)
+            # Review the complete TC once, not its prose/ERs as detached claims.
+            # Conditions and procedure coverage remain independent reverse checks.
+            item(f"{prefix}/design", tc, "TC_DESIGN")
         # Include reuse-only designs and revisions; no candidate TC is not a bypass.
         data = artifact.model_dump(mode="json")
         for key, value in data.items():
-            if focused_design_review and key == "coverage_notes":
+            if key == "coverage_notes":
                 context["advisory_coverage_notes"] = value
                 continue
             if key not in {"test_cases", "request_id", "existing_tc_comparison_completed"}:
@@ -465,51 +426,41 @@ def build_grounding_input(stage, request, requirements, artifact, *, analysis=No
         # Catalog proves existing test behavior, but does not authorize new scope.
         for index, entry in enumerate(context["catalog"]):
             doc(f"CATALOG/{index}", entry)
-        if include_task_boundaries == "1.3":
-            # Keep original procedure coverage, but do not judge the same setup/
-            # cleanup separately in each prose field and then again per note.
-            for index, note in enumerate(analysis.procedure_notes):
-                doc(f"PROCEDURE_SOURCE/{index}", note)
-            item("PROCEDURE/ALL", {
-                "source_procedures": analysis.procedure_notes,
-                "candidate_procedures": [{
-                    "tc_id": tc.tc_id, "preconditions": tc.preconditions,
-                    "steps": tc.steps, "restore_steps": tc.restore_steps,
-                    "intermediate_reset_steps": tc.intermediate_reset_steps,
-                    "restoration": tc.restoration.model_dump(mode="json") if tc.restoration else None,
-                    "test_data": tc.test_data.model_dump(mode="json"),
-                    "condition_execution": tc.condition_execution.value,
-                } for tc in artifact.test_cases],
-                "existing_selections": [s.model_dump(mode="json") for s in artifact.related_existing_tests],
-            }, "PROCEDURE_COVERAGE")
-        elif include_procedure_coverage:
-            for index, note in enumerate(analysis.procedure_notes):
-                doc(f"PROCEDURE_SOURCE/{index}", note)
-                item(f"PROCEDURE/{index}", {"source_text": note,
-                    "candidate_procedures": [{"tc_id": tc.tc_id, "preconditions": tc.preconditions,
-                        "steps": tc.steps, "restore_steps": tc.restore_steps,
-                        "test_data": tc.test_data.model_dump(mode="json"),
-                        "condition_execution": tc.condition_execution.value} for tc in artifact.test_cases],
-                    "existing_selections": [s.model_dump(mode="json") for s in artifact.related_existing_tests]},
-                    "PROCEDURE_COVERAGE")
-        if include_condition_coverage:
-            # Enumerate from the input, so deleting an output cannot delete its review.
-            for condition in analysis.confirmed_conditions:
-                cid = condition.condition_id
-                selections = [s for s in artifact.related_existing_tests if cid in s.source_condition_ids]
-                selected_ids = {s.tc_id for s in selections}
-                item(f"CONDITION/{cid}", {
-                    "condition": condition.model_dump(mode="json"),
-                    "candidate_tests": [tc.model_dump(mode="json") for tc in artifact.test_cases
-                                        if cid in tc.source_condition_ids],
-                    "existing_selections": [s.model_dump(mode="json") for s in selections],
-                    "existing_behaviors": [entry for entry in context["catalog"] if entry["tc_id"] in selected_ids],
-                }, "CONDITION_COVERAGE")
-    elif stage == "AGENT3":
+        # Keep original procedure coverage, but do not judge the same setup/
+        # cleanup separately in each prose field and then again per note.
+        for index, note in enumerate(analysis.procedure_notes):
+            doc(f"PROCEDURE_SOURCE/{index}", note)
+        item("PROCEDURE/ALL", {
+            "source_procedures": analysis.procedure_notes,
+            "candidate_procedures": [{
+                "tc_id": tc.tc_id, "preconditions": tc.preconditions,
+                "steps": tc.steps, "restore_steps": tc.restore_steps,
+                "intermediate_reset_steps": tc.intermediate_reset_steps,
+                "restoration": tc.restoration.model_dump(mode="json") if tc.restoration else None,
+                "test_data": tc.test_data.model_dump(mode="json"),
+                "condition_execution": tc.condition_execution.value,
+            } for tc in artifact.test_cases],
+            "existing_selections": [s.model_dump(mode="json") for s in artifact.related_existing_tests],
+        }, "PROCEDURE_COVERAGE")
+        # Enumerate from the input, so deleting an output cannot delete its review.
+        for condition in analysis.confirmed_conditions:
+            cid = condition.condition_id
+            selections = [s for s in artifact.related_existing_tests if cid in s.source_condition_ids]
+            selected_ids = {s.tc_id for s in selections}
+            item(f"CONDITION/{cid}", {
+                "condition": condition.model_dump(mode="json"),
+                "candidate_tests": [tc.model_dump(mode="json") for tc in artifact.test_cases
+                                    if cid in tc.source_condition_ids],
+                "existing_selections": [s.model_dump(mode="json") for s in selections],
+                "existing_behaviors": [entry for entry in context["catalog"] if entry["tc_id"] in selected_ids],
+            }, "CONDITION_COVERAGE")
+    else:
+        from qa_pipeline_agent3 import (build_agent3_model_input, controller_baseline_order_facts,
+                                        controller_recovery_plan_facts, execution_interface_facts,
+                                        tc_plan_handoff_errors, _restoration_read_expression)
         doc("APPROVED_TC", test_case.model_dump(mode="json"))
         context["approved_tc"] = test_case.model_dump(mode="json")
         if test_case.execution_spec is not None:
-            from qa_pipeline_agent3 import tc_plan_handoff_errors
             doc("TC_EXECUTION_HANDOFF", {
                 "contract": "1.0",
                 "definition_preserved": artifact.planning_status == Agent3PlanningStatus.READY and not tc_plan_handoff_errors(test_case, artifact),
@@ -519,25 +470,17 @@ def build_grounding_input(stage, request, requirements, artifact, *, analysis=No
                     "준비·복원 구현은 실행기 계약을 사용합니다. 잘못 연결된 위치·장비·필드·없는 기능 대체는 계속 반려합니다."
             })
         # Deliberately omit file paths, target HTML and target hashes from API input.
-        from qa_pipeline_agent3 import build_agent3_model_input
-        model_input = build_agent3_model_input(test_case, observation, requirements,
-                                              shared_evidence=include_task_boundaries in {"1.2", "1.3"})
-        if include_task_boundaries in {"1.2", "1.3"}:
-            doc("CONTROLLER_ADAPTER", model_input["controller_evidence"])
-            context["controller_evidence"] = model_input["controller_evidence"]
+        model_input = build_agent3_model_input(test_case, observation, requirements, shared_evidence=True)
+        doc("CONTROLLER_ADAPTER", model_input["controller_evidence"])
+        context["controller_evidence"] = model_input["controller_evidence"]
         observed = model_input["ui_observation"]
-        if include_execution_contract:
-            context["precondition_context_bindings"] = model_input["precondition_context_bindings"]
+        context["precondition_context_bindings"] = model_input["precondition_context_bindings"]
         doc("UI_INVENTORY", {k: v for k, v in observed.items()
                              if k not in {"target_file", "target_sha256", "target_path"}})
         context["plan"] = artifact.model_dump(mode="json")
-        if execution_interface:
-            from qa_pipeline_agent3 import execution_interface_facts
-            context["execution_interface"] = execution_interface_facts(artifact, observation,
-                contract="1.0" if execution_interface is True else execution_interface)
-            doc("EXECUTION_INTERFACE", context["execution_interface"])
-        if include_review_responsibilities and artifact.planning_status == Agent3PlanningStatus.READY:
-            from qa_pipeline_agent3 import _restoration_read_expression
+        context["execution_interface"] = execution_interface_facts(artifact, observation, contract="1.2")
+        doc("EXECUTION_INTERFACE", context["execution_interface"])
+        if artifact.planning_status == Agent3PlanningStatus.READY:
             # Facts about emitted code, not proof that the trial has succeeded.
             captures = []
             if test_case.state_effect is not None and any(a.phase.value == "RESTORE" for a in artifact.actions):
@@ -560,12 +503,8 @@ def build_grounding_input(stage, request, requirements, artifact, *, analysis=No
                         "runtime_id_guard": True})
             context["compiler_plan_facts"] = {"automatic_baseline_captures": captures,
                 "indexed_internal_readers": indexed_readers, "trial_success_proved": False}
-            if include_task_boundaries:
-                from qa_pipeline_agent3 import controller_recovery_plan_facts
-                context["compiler_plan_facts"]["controller_recovery"] = controller_recovery_plan_facts(test_case, artifact)
-            if baseline_capture_order:
-                from qa_pipeline_agent3 import controller_baseline_order_facts
-                context["compiler_plan_facts"]["baseline_capture_order"] = controller_baseline_order_facts(test_case, artifact)
+            context["compiler_plan_facts"]["controller_recovery"] = controller_recovery_plan_facts(test_case, artifact)
+            context["compiler_plan_facts"]["baseline_capture_order"] = controller_baseline_order_facts(test_case, artifact)
             doc("COMPILER_PLAN_FACTS", context["compiler_plan_facts"])
             # Enumerate from the TC, never from checks which might omit a condition.
             for index, source in enumerate(test_case.preconditions):
@@ -583,64 +522,41 @@ def build_grounding_input(stage, request, requirements, artifact, *, analysis=No
                                if a.result_id == result.result_id]}, "EXPECTED_RESULT")
         # PRECONDITION_COVERAGE already contains every original source and its
         # checks. Do not judge those checks again as detached prose claims.
-        plan_keys = ("actions", "restore_confirmations") if (
-            include_task_boundaries == "1.3" and include_review_responsibilities
-        ) else ("actions", "precondition_checks", "restore_confirmations")
-        for key in plan_keys:
+        for key in ("actions", "restore_confirmations"):
             for index, value in enumerate(getattr(artifact, key)):
                 item(f"{key}/{index}", value)
-    else:
-        raise ValueError("Unknown grounding review stage")
     payload = {"contract": "grounding-1.0", "stage": stage,
             "artifact_sha256": _review_digest(artifact.model_dump(mode="json")),
             "source_documents": documents, "context": context, "items": items}
-    if baseline_capture_order and stage == "AGENT2":
+    # Stage contract markers and pinned guidance (order is part of the hash).
+    if stage == "AGENT2":
         payload["baseline_capture_order_contract"] = "1.0"
         doc("CONTROLLER_BASELINE_ORDER", QA_CONTROLLER_BASELINE_GUIDANCE)
-    if range_change_rules:
-        # Opt-in: reviews without the marker keep their historical hash.
         payload["range_change_rules_contract"] = "1.0"
         doc("RANGE_CHANGE_RULES", QA_RANGE_CHANGE_RULES)
-    if review_severity:
-        # Opt-in 2026-10-17: only [치명] findings stop; reviews without the marker keep their hash.
+    if stage in {"AGENT1", "AGENT2"}:
+        # Only [치명] findings stop (2026-10-17).
         payload["review_severity_contract"] = "1.0"
         if stage == "AGENT2":
             doc("CONFIRMED_RULES", QA_CONFIRMED_RULES)
-    if execution_interface:
-        if stage != "AGENT3" or not explicit_expectations_only:
-            raise ValueError("실행 인터페이스 계약은 명시적 제품 판정 계약의 Agent 3에만 적용합니다.")
-        payload["execution_interface_contract"] = "1.0" if execution_interface is True else execution_interface
-    if explicit_expectations_only:
-        if stage != "AGENT3":
-            raise ValueError("제품 판정 실행 계약은 Agent 3에만 적용합니다.")
+    if stage == "AGENT3":
+        payload["execution_interface_contract"] = "1.2"
         payload["product_verdict_contract"] = "1.0"
         doc("PRODUCT_VERDICT_CONTRACT", QA_PRODUCT_VERDICT_CONTRACT)
-    if include_tc_execution_alignment:
-        if stage != "AGENT2":
-            raise ValueError("TC 실행 정합 계약은 Agent 2에만 적용합니다.")
+    if stage == "AGENT2":
         payload["tc_execution_alignment_contract"] = "1.0"
         doc("TC_EXECUTION_ALIGNMENT", "기존 TC의 대상 조건은 변경·유지 모두 재사용 검토 대상입니다. "
             "보조 근거만 연결해서는 충분하지 않으며 실제 조작·값·필수 검사 범위를 대조해야 합니다. "
             "execution_spec에 상대 버튼 조작이 있으면 명시적인 입력 모드·온도가 없는 requested 필드는 비어 있어도 됩니다. "
             "유지될 기대값을 요청 입력으로 바꾸지 않습니다. compiler_recovery_facts는 프로그램 복원 동작의 "
             "근거이며 요청·SRS의 제품 기대값이나 실제 시험 성공의 근거가 아닙니다.")
-    if shared_design_review:
-        if stage != "AGENT2" or not essential_checks:
-            raise ValueError("설계·검토 공통 기준은 신규 Agent 2 핵심 검토에만 적용합니다.")
         payload["design_review_contract"] = "1.0"
         doc("DESIGN_REVIEW_GUIDANCE", QA_DESIGN_REVIEW_GUIDANCE)
-    if focused_design_review:
-        payload["focused_design_review_contract"] = "1.1" if focused_design_review == "1.1" else "1.0"
-        # Pin the exact new instructions to the review input/hash. Old payloads
-        # and their verdicts remain byte-for-byte on their historical path.
+        payload["focused_design_review_contract"] = "1.1"
         doc("FOCUSED_DESIGN_REVIEW", FOCUSED_AGENT2_REVIEW_INSTRUCTIONS)
-    if human_judgment_examples:
         # Hash-bound context, deliberately NOT selectable source evidence.
         payload["human_judgment_examples_contract"] = "1.0"
         payload["context"]["human_judgment_examples"] = QA_HUMAN_JUDGMENT_EXAMPLES
-    if pair_observation_anchors:
-        if stage != "AGENT2" or not include_tc_execution_alignment:
-            raise ValueError("관찰 시점 연결 계약은 실행 정의를 검토하는 Agent 2에만 적용합니다.")
         payload["double_assert_timing_contract"] = "2.0"
         doc("OBSERVATION_PAIRING", "필수 화면·내부값 확인이 갖춰지면 별도의 적용 전 패널 관찰을 허용합니다. "
             "관찰 전용 문장이 나뉘어도 사이에 조작이 없으면 같은 after_action_id에서 확인할 수 있습니다. "
@@ -649,9 +565,6 @@ def build_grounding_input(stage, request, requirements, artifact, *, analysis=No
             "필수 UI/내부 관찰의 누락·잘못된 짝·추가 관찰의 근거는 원문과 대조해 검토해야 합니다. "
             "예: 잠금의 내부 상태와 온도 버튼 비활성은 값·필드 이름이 달라도 요구사항이 정한 짝일 수 있습니다. "
             "조작이나 관찰을 삭제하거나 제품의 관찰값을 정답으로 바꿀 권한은 아닙니다.")
-    if essential_checks:
-        if stage != "AGENT2" or not include_tc_execution_alignment:
-            raise ValueError("핵심 검사 계약은 실행 정의를 검토하는 Agent 2에만 적용합니다.")
         payload["essential_validation_contract"] = "1.0"
         doc("ESSENTIAL_VALIDATION", "제목·purpose·test_type·grouping_reason은 설명이며 이름만으로 반려하거나 검사를 추가하지 않습니다. "
             "실제 범위·조작·입력/기대값·확인 시점·중간 초기화는 요청/SRS와 execution_spec을 대조합니다. "
@@ -661,19 +574,13 @@ def build_grounding_input(stage, request, requirements, artifact, *, analysis=No
             "다른 TC를 언급했다는 이유만으로 의존이라고 하지 않되, 실제로 다른 시험의 결과가 필요한 절차는 반려합니다. "
             "VERIFY/유지 분류만으로 신규 시험을 금지하지 않습니다. 기존 TC가 요청을 실제로 전부 확인하는지 대조하여 "
             "불필요한 복제와 검사 누락·범위 확대를 확인합니다. 한 시점에 여러 결과를 확인해도 되지만 요구된 중간 검사는 생략할 수 없습니다.")
-    if allow_output_tolerance:
-        payload["output_tolerance_contract"] = "1.0"
-    if include_task_boundaries:
-        payload["task_boundary_contract"] = "1.0" if include_task_boundaries is True else include_task_boundaries
-    if review_scope_semantics:
-        if stage not in {"AGENT1", "AGENT2"}:
-            raise ValueError("범위 의미 검토 계약은 Agent 1·2에만 적용합니다.")
+    payload["output_tolerance_contract"] = "1.0"
+    payload["task_boundary_contract"] = "1.3"
+    if stage in {"AGENT1", "AGENT2"}:
         payload["scope_guard_contract"] = "1.2"
-    if allow_state_change_terminal_observation:
-        if stage != "AGENT3":
-            raise ValueError("마지막 관찰 연결 계약은 Agent 3에만 적용합니다.")
+    if stage == "AGENT3":
         payload["terminal_observation_contract"] = "1.0"
-    if focused_design_review == "1.1":
+    if stage == "AGENT2":
         doc("REVIEW_INPUT_GUIDE", COMPACT_REVIEW_GUIDANCE)
         payload = compact_review_tcs(payload)
     return payload
@@ -681,67 +588,22 @@ def build_grounding_input(stage, request, requirements, artifact, *, analysis=No
 
 def evaluate_grounding_review(payload, review):
     """Check structural evidence, not semantic entailment of cited prose."""
+    stage = payload["stage"]
     expected = [i["item_id"] for i in payload["items"]]
-    interface = payload.get("execution_interface_contract")
-    if (interface not in {None, "1.0", "1.1", "1.2"} or (interface is not None
-            and (payload["stage"] != "AGENT3" or payload.get("product_verdict_contract") != "1.0"))):
-        raise ValueError("지원하지 않는 실행 인터페이스 계약입니다.")
-    alignment = payload.get("tc_execution_alignment_contract")
-    baseline_order = payload.get("baseline_capture_order_contract")
-    if baseline_order not in {None, "1.0"} or (baseline_order is not None and (
-            payload["stage"] != "AGENT2" or alignment != "1.0"
-            or not any(doc["source_id"] == "CONTROLLER_BASELINE_ORDER"
-                       and doc["text"] == QA_CONTROLLER_BASELINE_GUIDANCE
-                       for doc in payload["source_documents"]))):
-        raise ValueError("지원하지 않는 Agent 2 원래값 캡처 순서 설명 계약입니다.")
-    range_rules = payload.get("range_change_rules_contract")
-    if range_rules not in {None, "1.0"} or (range_rules is not None and (
-            payload["stage"] != "AGENT2" or payload.get("human_judgment_examples_contract") != "1.0"
-            or not any(doc["source_id"] == "RANGE_CHANGE_RULES" and doc["text"] == QA_RANGE_CHANGE_RULES
-                       for doc in payload["source_documents"]))):
-        raise ValueError("지원하지 않는 범위 변경 확정 규칙 계약입니다.")
-    severity = payload.get("review_severity_contract")
-    if severity not in {None, "1.0"} or (severity is not None and (
-            payload["stage"] not in {"AGENT1", "AGENT2"}
-            or (payload["stage"] == "AGENT2" and (
-                range_rules != "1.0"
-                or not any(doc["source_id"] == "CONFIRMED_RULES" and doc["text"] == QA_CONFIRMED_RULES
-                           for doc in payload["source_documents"]))))):
-        raise ValueError("지원하지 않는 반려 등급 계약입니다.")
-    essential = payload.get("essential_validation_contract")
-    focused = payload.get("focused_design_review_contract")
-    if focused not in {None, "1.0", "1.1"} or (focused is not None and
-            (payload["stage"] != "AGENT2" or essential != "1.0"
-             or payload.get("design_review_contract") != "1.0"
-             or payload.get("task_boundary_contract") != "1.3")):
-        raise ValueError("지원하지 않는 집중 설계 검토 계약입니다.")
-    if essential not in {None, "1.0"} or (essential is not None and
-            (payload["stage"] != "AGENT2" or alignment != "1.0")):
-        raise ValueError("지원하지 않는 핵심 검사 계약입니다.")
-    if alignment not in {None, "1.0"} or (alignment is not None and payload["stage"] != "AGENT2"):
-        raise ValueError("지원하지 않는 TC 실행 정합 계약입니다.")
-    if payload.get("task_boundary_contract") not in {None, "1.0", "1.1", "1.2", "1.3"}:
-        raise ValueError("지원하지 않는 작업 경계 계약입니다.")
     actual = [i.item_id for i in review.items]
     problems, uncertain, invalid_review, resolved_citations, warnings = [], [], [], [], []
     sources = {d["source_id"]: d["text"] for d in payload["source_documents"]}
-    tolerance = payload.get("output_tolerance_contract")
-    if tolerance not in {None, "1.0"}:
-        raise ValueError("지원하지 않는 출력 허용 계약입니다.")
-    mismatch = set(actual) != set(expected) if tolerance == "1.0" else actual != expected
-    if mismatch or len(set(actual)) != len(actual):
-        invalid_review.append("검토 대상 누락·중복 또는 ID 불일치" if tolerance == "1.0"
-                        else "검토 대상 누락·중복·순서 또는 ID 불일치")
+    if set(actual) != set(expected) or len(set(actual)) != len(actual):
+        invalid_review.append("검토 대상 누락·중복 또는 ID 불일치")
     kinds = {i["item_id"]: i["kind"] for i in payload["items"]}
+    host_ids = {"TASK_BOUNDARIES", "EXECUTION_CONTRACT", "REVIEW_RESPONSIBILITIES"}
     for result in review.items:
         for citation in result.citations:
             if citation.source_id not in sources or citation.quote not in sources[citation.source_id]:
                 # Only host-authored contract documents share this authority.
                 # Never move product/request evidence across source identities.
-                host_ids = {"TASK_BOUNDARIES", "EXECUTION_CONTRACT", "REVIEW_RESPONSIBILITIES"}
                 matches = [sid for sid, source in sources.items() if citation.quote in source]
-                if (payload.get("task_boundary_contract") == "1.3"
-                        and citation.source_id in host_ids and citation.source_id in sources
+                if (citation.source_id in host_ids and citation.source_id in sources
                         and len(matches) == 1 and matches[0] in host_ids
                         and citation.quote.strip() in [
                             sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+|\n", sources[matches[0]])
@@ -751,24 +613,23 @@ def evaluate_grounding_review(payload, review):
                     invalid_review.append(f"{result.item_id}: 실제 원문에 없는 인용")
         if result.verdict == "SUPPORTED" and not result.citations:
             invalid_review.append(f"{result.item_id}: 근거 없는 지지 판정")
-        if (payload.get("task_boundary_contract") in {"1.1", "1.2", "1.3"}
-                and result.verdict == "UNSUPPORTED" and not result.citations):
+        if result.verdict == "UNSUPPORTED" and not result.citations:
             invalid_review.append(f"{result.item_id}: 근거 없는 반려 판정")
-        if (essential is None and kinds.get(result.item_id) == "EXPECTED_RESULT" and not result.single_fact
+        if (stage != "AGENT2" and kinds.get(result.item_id) == "EXPECTED_RESULT" and not result.single_fact
                 and result.verdict != "UNCERTAIN"):
             problems.append(f"{result.item_id}: 독립된 기대결과를 분리하고 모든 검사를 보존해야 합니다: {result.reason}")
-        if result.verdict == "UNSUPPORTED" and severity == "1.0" and result.reason.lstrip().startswith("[경고]"):
+        if (result.verdict == "UNSUPPORTED" and stage in {"AGENT1", "AGENT2"}
+                and result.reason.lstrip().startswith("[경고]")):
             # 2026-10-17: recorded and carried forward, not a stop. Untagged findings stay critical.
             warnings.append(f"{result.item_id}: {result.reason.strip()}")
         elif result.verdict == "UNSUPPORTED":
             problems.append(f"{result.item_id}: 근거/검사 연결 부족: {result.reason}")
         elif result.verdict == "UNCERTAIN":
             uncertain.append(f"{result.item_id}: 사람 확인 필요: {result.reason}")
-    if invalid_review and payload.get("task_boundary_contract") in {"1.1", "1.2", "1.3"}:
+    if invalid_review:
         # A broken review is not a defect in the artifact. The existing error
         # path stops without rewriting generation or retrying the reviewer.
         raise ValueError("검토 응답 오류: " + "; ".join(invalid_review))
-    problems = invalid_review + problems  # Preserve historical recorded outcomes.
     # Any unresolved interpretation goes to a person, even alongside repairable
     # findings. Never ask a rewrite to guess the answer to an uncertain requirement.
     status = CheckStatus.REVIEW if uncertain else CheckStatus.FAIL if problems else CheckStatus.PASS
@@ -778,7 +639,7 @@ def evaluate_grounding_review(payload, review):
         message += " 경고(진행, 사람 확인 권장): " + "; ".join(warnings)
     if resolved_citations:
         message += " 계약 인용 위치 보정(원본 응답 보존): " + "; ".join(resolved_citations)
-    return CheckResult(rule_id=f"{payload['stage']}-GROUNDING", status=status, message=message)
+    return CheckResult(rule_id=f"{stage}-GROUNDING", status=status, message=message)
 
 
 def attach_grounding_check(checkpoint, check):
@@ -810,43 +671,23 @@ class OpenAIGroundingReviewer:
         # Index addressing depends on document position, so it keeps the original order.
         wire_payload, response_schema = (indexed_review_transport(payload) if indexed
                                         else (static_first_wire(payload), source_selection_schema(payload)))
-        instructions = REVIEW_INSTRUCTIONS
-        focused = payload.get("focused_design_review_contract") in {"1.0", "1.1"}
-        if focused:
-            instructions = FOCUSED_AGENT2_REVIEW_INSTRUCTIONS
-            if payload.get("focused_design_review_contract") == "1.1":
-                instructions += "\n" + COMPACT_REVIEW_GUIDANCE
-        elif payload.get("design_review_contract") == "1.0":
-            instructions += "\n" + QA_DESIGN_REVIEW_GUIDANCE
-        examples = payload.get("human_judgment_examples_contract")
-        if examples is not None:
-            if (examples != "1.0" or not focused or payload["stage"] != "AGENT2"
-                    or payload.get("context", {}).get("human_judgment_examples") != QA_HUMAN_JUDGMENT_EXAMPLES):
-                raise ValueError("사람 판단 참고 사례 계약 또는 본문이 일치하지 않습니다.")
-            instructions += "\n" + QA_HUMAN_JUDGMENT_EXAMPLES
-        range_rules = payload.get("range_change_rules_contract")
-        if range_rules is not None:
-            if range_rules != "1.0" or examples != "1.0":
-                raise ValueError("범위 변경 확정 규칙 계약이 일치하지 않습니다.")
-            instructions += "\n" + QA_RANGE_CHANGE_RULES
-        severity = payload.get("review_severity_contract")
-        if severity is not None:
-            if severity != "1.0" or payload["stage"] not in {"AGENT1", "AGENT2"}:
-                raise ValueError("반려 등급 계약이 일치하지 않습니다.")
-            if payload["stage"] == "AGENT2":
-                instructions += "\n" + QA_CONFIRMED_RULES
-            instructions += "\n" + QA_REVIEW_SEVERITY_GUIDANCE
-        if not focused and payload.get("essential_validation_contract") == "1.0":
-            instructions += (
-                "\n이번 AGENT2 검토는 호스트의 ESSENTIAL_VALIDATION 계약을 적용합니다. "
-                "제목·분류·선택 요약·묶음 설명·단순 TC 언급 때문에 반려하지 않습니다. "
-                "실제 조작·값·대상·시점·필수 확인·초기화는 요청/SRS와 execution_spec으로 대조하세요. "
-                "여러 필드가 있어 single_fact=false여도 필요한 검사가 모두 연결되면 그 사실만으로 UNSUPPORTED로 판단하지 않습니다. "
-                "값 충돌·누락·실제 의존·불필요 복제는 계속 지적하고 불확실하면 UNCERTAIN입니다.")
+        stage = payload["stage"]
+        if stage == "AGENT2":
+            context = payload.get("context", {})
+            if ("human_judgment_examples" in context
+                    and context["human_judgment_examples"] != QA_HUMAN_JUDGMENT_EXAMPLES):
+                raise ValueError("사람 판단 참고 사례 본문이 일치하지 않습니다.")
+            instructions = "\n".join([FOCUSED_AGENT2_REVIEW_INSTRUCTIONS, COMPACT_REVIEW_GUIDANCE,
+                                      QA_HUMAN_JUDGMENT_EXAMPLES, QA_RANGE_CHANGE_RULES, QA_CONFIRMED_RULES,
+                                      QA_REVIEW_SEVERITY_GUIDANCE])
+        elif stage == "AGENT1":
+            instructions = REVIEW_INSTRUCTIONS + "\n" + QA_REVIEW_SEVERITY_GUIDANCE
+        else:
+            instructions = REVIEW_INSTRUCTIONS
         if indexed:
             instructions = _indexed_review_instructions(instructions)
         response = self.client.responses.parse(model=self.model, reasoning={"effort": "medium"},
-            store=False, prompt_cache_key=("qa-v2-grounding-1-23" if payload.get("review_severity_contract") else "qa-v2-grounding-1-21" if payload.get("range_change_rules_contract") else "qa-v2-grounding-1-20" if examples else "qa-v2-grounding-1-19" if focused else "qa-v2-grounding-1-18" if payload.get("design_review_contract") == "1.0" else "qa-v2-grounding-1-17"),
+            store=False, prompt_cache_key=("qa-v2-grounding-1-17" if stage == "AGENT3" else "qa-v2-grounding-1-23"),
             input=[{"role": "system", "content": instructions},
                    {"role": "user", "content": json.dumps(wire_payload, ensure_ascii=False)}],
             text_format=response_schema)

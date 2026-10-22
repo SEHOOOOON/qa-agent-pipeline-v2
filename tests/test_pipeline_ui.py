@@ -41,6 +41,7 @@ def test_saved_single_run_asset_choices_preserve_sources(saved_single_approval_r
 def test_saved_single_run_approval_rejects_damaged_evidence(saved_single_approval_run, damage):
     runs, assets, target, run_id, tc_id, srs = saved_single_approval_run
     run = runs / run_id
+    candidate = run / 'agent3_candidates' / tc_id  # current multi-candidate layout
     path = run / 'validation_manifest.json'
     metadata = json.loads(path.read_text(encoding='utf-8'))
     source = metadata['source_agent3_artifacts'][0]
@@ -51,12 +52,12 @@ def test_saved_single_run_approval_rejects_damaged_evidence(saved_single_approva
     elif damage == 'duplicate': metadata['source_agent3_artifacts'].append(dict(source))
     elif damage == 'missing_source': metadata['source_agent3_artifacts'] = []
     elif damage == 'mixed_summary': _write_json(run / 'agent3_run_summary.json', {'entries': []})
-    elif damage == 'missing_trace': (run / 'evidence' / tc_id / 'trial-trace.zip').unlink()
+    elif damage == 'missing_trace': (candidate / 'evidence' / tc_id / 'trial-trace.zip').unlink()
     elif damage == 'changed_code':
-        code = next((run / 'candidates').glob('*.py'))
+        code = next((candidate / 'candidates').glob('*.py'))
         code.write_text(code.read_text(encoding='utf-8') + '\n# changed\n', encoding='utf-8')
     else:
-        mf = run / 'agent3_manifest.json'
+        mf = candidate / 'agent3_manifest.json'
         altered = json.loads(mf.read_text(encoding='utf-8'))
         altered['tc_id'] = 'TC-CAND-999'
         _write_json(mf, altered)
@@ -507,7 +508,7 @@ def test_approval_recheck_distinguishes_sequence_from_precondition(tmp_path, mon
     case, plan, observation = precondition_guard_fixture()
     request, analysis, requirements = cp1_combined_srs_case()
     design = cp2_valid_design().model_copy(update={'test_cases': [case]})
-    if mutation == 'precondition': plan.precondition_checks = []
+    if mutation == 'precondition': plan.precondition_checks[0].source_text = 'not an approved precondition'
     elif mutation == 'sequence':
         next(a for a in plan.actions if a.phase == pipeline.AutomationPhase.TEST).source_text = 'not in TC'
     run = tmp_path / 'RUN-20260924-000000-ABCDEF'
@@ -518,6 +519,8 @@ def test_approval_recheck_distinguishes_sequence_from_precondition(tmp_path, mon
     monkeypatch.setattr(pipeline_reporting, '_verify_final_report_sources', lambda *_: None)
     monkeypatch.setattr(pipeline_execution, '_load_verified_agent2_run', lambda *_: (request, requirements, analysis, design, None, pipeline_execution._current_agent2_contract()))
     monkeypatch.setattr(pipeline_execution, '_verify_sha256', lambda *_: None)
+    monkeypatch.setattr(pipeline_execution, '_require_current_contract', lambda *_: None)
+    monkeypatch.setattr(pipeline_execution, '_load_grounding_review', lambda d, m, s, p, checkpoint: checkpoint)
     def no_duplicate_cp2(*args, **kwargs):
         raise AssertionError('The verified Agent 2 loader owns the complete CP2 recheck')
     monkeypatch.setattr(a2, 'evaluate_checkpoint2', no_duplicate_cp2)
@@ -535,94 +538,6 @@ def test_approval_propagates_common_agent2_verification_failure(tmp_path, monkey
     monkeypatch.setattr(pipeline_execution, '_load_verified_agent2_run', reject)
     with pytest.raises(ValueError, match='source verification rejected'):
         pipeline_ui._verify_candidate_sources(tmp_path / 'RUN', 'TC-CAND-001')
-
-
-def test_old_approval_keeps_extra_expectation_guard(tmp_path, monkeypatch):
-    import qa_pipeline_agent2 as a2
-    request, analysis, requirements = cp1_combined_srs_case()
-    monkeypatch.setattr(pipeline_reporting, '_verify_final_report_sources', lambda *_: None)
-    monkeypatch.setattr(pipeline_execution, '_load_verified_agent2_run',
-        lambda *_: (request, requirements, analysis, cp2_valid_design(), None, {}))
-    monkeypatch.setattr(a2, 'evaluate_checkpoint2', lambda *a, **k: pipeline.Checkpoint2Result(
-        status=CheckStatus.FAIL, checks=[pipeline.CheckResult(rule_id='CP2-017', status=CheckStatus.FAIL, message='legacy guard')]))
-    with pytest.raises(ValueError, match='기대 결과가 현재 요구사항'):
-        pipeline_ui._verify_candidate_sources(tmp_path / 'RUN', 'TC-CAND-001')
-
-
-@pytest.mark.parametrize('new_policy', [False, True, 'output_tolerance', 'task_boundaries', 'value_roles', 'shared_evidence', 'scenario_review', 'terminal_observation', 'product_verdict', 'execution_interface'])
-@pytest.mark.parametrize('review_state', ['valid', 'missing', 'tampered'])
-def test_approval_reconstructs_same_agent3_review_policy(tmp_path, monkeypatch, new_policy, review_state):
-    import qa_pipeline_grounding as grounding
-    case, plan, observation = precondition_guard_fixture()
-    request, analysis, requirements = cp1_combined_srs_case()
-    design = cp2_valid_design().model_copy(update={'test_cases': [case]})
-    run = tmp_path / 'RUN-20260924-000000-ABCDEF'
-    folder = run / 'agent3_candidates' / case.tc_id
-    manifest = {'contract_version': '4.10', 'grounding_contract': '1.0',
-        'wording_policy': 'STRUCTURAL_ONLY_V1',
-        'prompt_version': 'agent3-3.36' if new_policy else 'agent3-3.35'}
-    if new_policy:
-        manifest['review_responsibility_contract'] = '1.0'
-    if new_policy in {'output_tolerance', 'task_boundaries', 'value_roles', 'shared_evidence', 'scenario_review', 'terminal_observation', 'product_verdict', 'execution_interface'}:
-        manifest['output_tolerance_contract'] = '1.0'
-    if new_policy == 'task_boundaries':
-        manifest['prompt_version'] = 'agent3-3.37'
-        manifest['task_boundary_contract'] = '1.0'
-    elif new_policy == 'value_roles':
-        manifest['prompt_version'] = 'agent3-3.38'
-        manifest['task_boundary_contract'] = '1.1'
-    elif new_policy == 'shared_evidence':
-        manifest['prompt_version'] = 'agent3-3.39'
-        manifest['task_boundary_contract'] = '1.2'
-    elif new_policy == 'scenario_review':
-        manifest['prompt_version'] = 'agent3-3.40'
-        manifest['task_boundary_contract'] = '1.3'
-    elif new_policy in {'terminal_observation', 'product_verdict', 'execution_interface'}:
-        manifest['prompt_version'] = 'agent3-3.42' if new_policy == 'product_verdict' else 'agent3-3.41'
-        manifest['task_boundary_contract'] = '1.3'
-        manifest['terminal_observation_contract'] = '1.0'
-        if new_policy in {'product_verdict', 'execution_interface'}:
-            manifest['product_verdict_contract'] = '1.0'
-        if new_policy == 'execution_interface':
-            manifest['prompt_version'] = 'agent3-3.45'
-            manifest['execution_interface_contract'] = '1.0'
-    payload = grounding.build_grounding_input('AGENT3', None, {}, plan, test_case=case, observation=observation,
-        include_execution_contract=True, include_review_responsibilities=bool(new_policy),
-        allow_output_tolerance=bool(manifest.get('output_tolerance_contract')),
-        include_task_boundaries=manifest.get('task_boundary_contract', False),
-        allow_state_change_terminal_observation=new_policy in {'terminal_observation', 'product_verdict', 'execution_interface'},
-        explicit_expectations_only=new_policy in {'product_verdict', 'execution_interface'},
-        execution_interface=new_policy == 'execution_interface')
-    _write_json(folder / 'agent3_manifest.json', manifest)
-    _write_json(folder / 'agent3_automation_plan.json', plan.model_dump(mode='json'))
-    _write_json(folder / 'agent3_ui_observation.json', observation.model_dump(mode='json'))
-    if review_state != 'missing':
-        record = fake_grounding_record(payload)
-        if new_policy == 'output_tolerance':
-            record['review']['items'].reverse()
-        if review_state == 'tampered':
-            record['input_sha256'] = '0' * 64
-        _write_json(folder / 'agent3_grounding_review.json', record)
-    monkeypatch.setattr(pipeline_reporting, '_verify_final_report_sources', lambda *_: None)
-    monkeypatch.setattr(pipeline_execution, '_load_verified_agent2_run', lambda *_: (request, requirements, analysis, design, None, pipeline_execution._current_agent2_contract()))
-    monkeypatch.setattr(pipeline_execution, '_verify_sha256', lambda *_: None)
-    # The payload/hash test alone would miss stale CP3 flags if that particular
-    # fixture happened to pass both rulesets. Check the selected policy too.
-    import qa_pipeline_agent3 as a3
-    evaluate = a3.evaluate_checkpoint3_plan
-    selected = []
-    def capture_policy(*args, **kwargs):
-        selected.append((kwargs['review_value_roles'], kwargs['shared_evidence'], kwargs['allow_state_change_terminal_observation'], kwargs['execution_interface']))
-        return evaluate(*args, **kwargs)
-    monkeypatch.setattr(a3, 'evaluate_checkpoint3_plan', capture_policy)
-    if review_state != 'valid':
-        with pytest.raises(ValueError, match='필수 모델 근거 검토' if review_state == 'missing' else '해시'):
-            pipeline_ui._verify_candidate_sources(run, case.tc_id)
-    else:
-        pipeline_ui._verify_candidate_sources(run, case.tc_id)
-    assert selected == [(new_policy in {'value_roles', 'shared_evidence', 'scenario_review', 'terminal_observation', 'product_verdict', 'execution_interface'},
-                         new_policy in {'shared_evidence', 'scenario_review', 'terminal_observation', 'product_verdict', 'execution_interface'},
-                         new_policy in {'terminal_observation', 'product_verdict', 'execution_interface'}, new_policy == 'execution_interface')]
 
 
 @pytest.mark.parametrize('value,required,limit', [(None, False, 10), (' ', True, 10), ('long', False, 2)])

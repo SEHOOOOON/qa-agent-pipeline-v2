@@ -51,13 +51,6 @@ def test_api_initial_and_rewrite_use_transport_and_keep_provenance(rewrite):
     assert 'current_acceptance_criteria' not in response.raw_model_output['SRS_개정_제안'][0]
     assert cp2_requirements()['REQ-TEMP-001'].acceptance_criteria in responses.kwargs['input'][1]['content']
 
-def test_old_contract_remains_accepted():
-    from qa_pipeline_execution import _current_agent2_contract, _agent2_checkpoint_options
-    current=_current_agent2_contract(); old=dict(current,prompt_version='agent2-2.61')
-    old.pop('baseline_capture_order_contract')
-    old.pop('range_change_rules_contract', None)  # Newer layer than the baseline marker.
-    assert _agent2_checkpoint_options(current)==_agent2_checkpoint_options(old)
-
 def test_approval_still_rejects_changed_srs(tmp_path):
     draft=draft_fixture(); requirements=cp2_requirements()
     result,_=materialize_srs_revision_sources(draft,requirements)

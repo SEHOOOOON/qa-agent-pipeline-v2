@@ -68,7 +68,7 @@ UI 승인·되돌리기 검사는 `isolated_ui_srs`가 별도 임시 SRS를 기�
 
 `test_approved_tc_refresh.py`는 유지보수한 승인 TC의 원본 파일·해시, 제품 기대 문구/번호/근거 보존, 저장 계획과 현재 실행 정의·복원 계약, 재사용 카탈로그 원문 전달을 확인합니다. 등록 코드는 Registry와 당시 유지보수 검증 해시로 고정하며 최신 컴파일러 출력과 바이트 일치를 요구하지 않습니다. 현재 코드 생성은 별도 계약 검사로 확인하고, TC/코드 사본의 바이트 변경은 계속 차단합니다. 실제 브라우저 및 고장 주입 검증 결과는 인계 문서에 따로 기록합니다.
 
-값 비교 계약: `test_typed_value_comparison_contract`와 `test_typed_compilation_uses_common_comparison_and_keeps_legacy`가 참/거짓·숫자·문자열·복합값과 다섯 관제점의 실제 생성 비교식을 확인합니다. 저장 인계 회귀에서는 새 비교 계약 누락/변조를 차단합니다. P2의 `test_p1_emitted_comparator_agrees_with_independent_p2_grader`는 두 저장소 비교 기준을 독립 대조합니다. 실행 수와 증거 위치는 인계 문서에 기록합니다.
+값 비교 계약: `test_typed_value_comparison_contract`와 `test_typed_compilation_uses_common_comparison`가 참/거짓·숫자·문자열·복합값과 다섯 관제점의 실제 생성 비교식을 확인합니다. 저장 인계 회귀에서는 새 비교 계약 누락/변조를 차단합니다. P2의 `test_p1_emitted_comparator_agrees_with_independent_p2_grader`는 두 저장소 비교 기준을 독립 대조합니다. 실행 수와 증거 위치는 인계 문서에 기록합니다.
 
 본시험 구조화 관찰 기록: `test_controller_common_lifecycle_on_unmodified_product`는 기존 다섯 관제점 조작·복원 검사에 더해 각 검사 정의·실제 값·일치 여부·완료 기록을 확인합니다. P2의 별도 로컬 대조 및 변조·누락·제품 불일치 반례는 P2 `test_execution_observations.py`에서 관리합니다. 실제 모델 채점 정확도와 구분합니다.
 
@@ -168,3 +168,5 @@ V1 기준 제품 테스트는 [test_controller.py](../product_baseline/tests/tes
 기존 TC 고쳐 쓰기 검사(2026-10-18): `tests/test_agent2.py`의 `test_empty_revision_list_keeps_historical_design_serialization`은 `기존_TC_수정`이 비어 있으면 저장 형태에 나타나지 않는지, `test_existing_tc_revision_is_checked_against_catalog_and_candidates`는 목록에 없는 TC·없는 후보·그대로 재사용한 TC를 CP2-TC-REVISION FAIL로 보고하는지, `test_revision_rule_reaches_the_writer_but_not_the_shared_review_rules`는 고쳐 쓰기 지침이 작성 AI에만 들어가는지 확인한다. `tests/test_agent4_reporting.py`의 `test_human_review_row_names_the_existing_tc_a_candidate_revises`는 사람 검토서 출처 표시를 확인한다. AI가 실제로 고쳐 쓰기를 선택하는지는 측정하지 않는다.
 
 절차 작성·검토서 경고 검사(2026-10-18): `test_writer_is_told_not_to_mix_operation_and_check_in_one_step`은 "조작 문장에 확인 내용을 붙이지 않는다" 지침이 작성 AI에 들어가는지, `test_human_review_lists_review_ai_warnings_that_did_not_stop_the_run`은 CP1·CP2의 `[경고]`가 사람 검토서 "2-1. 검토 AI 경고" 표로 나뉘어 나오고 없으면 "없습니다"로 표시되는지 확인한다.
+
+옛 실행 호환 정리(2026-10-21): 검사 함수(CP1·CP2·CP3·근거 검토 입력·컴파일러)에서 과거 동작을 고르는 옵션을 없애면서, 옛 옵션·옛 계약 표시 조합을 비교하던 시험 함수 101개를 지웠습니다(Git 태그 `v2-before-cleanup-20261020`에 보존). 남은 시험은 현재 동작만 확인합니다. 위 설명 중 "과거 기록·과거 입력·버전 연결·하향 거부"를 확인한다는 부분은 이제 `test_saved_run_with_a_non_current_contract_marker_is_rejected_as_old_format` 등 "계약 표시가 현재와 다르면 옛 형식으로 멈춤" 확인으로 대체됐습니다. 시험용 실행 자료(`build_verified_agent1_run`, `build_verified_agent2_run`, `current_agent3_fields`)는 현재 계약 표시·근거 연결 원본·대역 검토 기록을 갖습니다. 승인 화면 시험(`saved_single_approval_run`)은 옛 cont1007 대신 P2 `evaluation-runs/live-20261020`의 2026-10-20 풍량 실제 실행을 읽기 전용으로 풀어 사용하며, 증거가 없으면 건너뜁니다.

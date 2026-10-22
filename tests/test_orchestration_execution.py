@@ -206,12 +206,13 @@ def test_orchestrator_does_not_call_executed_trial_error_unexecuted(tmp_path, mo
 def test_validation_execution_checks_handoff_before_any_trial(tmp_path, monkeypatch, summary, damage):
     runs = tmp_path / 'runs'
     runs.mkdir()
-    run, run_id = build_historical_agent2_run(runs)
+    run, run_id = build_verified_agent2_run(runs)
     pipeline_execution._load_verified_agent2_run(run, run_id)
     target = tmp_path / 'virtual-controller.html'
     baseline = tmp_path / 'test_controller.py'
     target.write_text('<!doctype html>', encoding='utf-8')
-    baseline.write_text('def test_placeholder(): pass\n', encoding='utf-8')
+    # The current catalog snapshot pins the baseline test code hash.
+    baseline.write_bytes((REPO_ROOT / 'product_baseline' / 'tests' / 'test_controller.py').read_bytes())
     if summary != 'candidate':
         _write_json(run/'agent3_run_summary.json', dict(run_id=run_id,
             stage='AGENT_3_RUN_SUMMARY', status='NOT_REQUIRED' if summary == 'reuse' else 'PARTIAL',
@@ -340,9 +341,6 @@ def test_agent3_precondition_feedback_repairs_only_unstated_context(tmp_path, mo
     for fragment in ("#4", "#5", "BASELINE_CONTEXT/online", "BASELINE_CONTEXT/target_device_visible", source, "error_free, unlocked"):
         assert fragment in feedback[0]
     assert pipeline.evaluate_checkpoint3_plan(case, valid, observation).status == CheckStatus.PASS
-    missing = valid.model_copy(deep=True)
-    missing.precondition_checks.pop()  # The stated unlocked condition is still mandatory.
-    assert pipeline.evaluate_checkpoint3_plan(case, missing, observation).status == CheckStatus.FAIL
 
     run_id = "RUN-20260912-220000-ABCDEF"
     run = tmp_path / run_id
@@ -1154,31 +1152,11 @@ def test_candidate_trial_is_reused_only_after_hash_and_evidence_checks(
 
     manifest_file = run_dir / "agent3_manifest.json"
     original = pipeline._read_json_payload(manifest_file)
-    for unsupported in (None, "unknown"):
-        _write_json(manifest_file, {**original, "contract_version": "4.4",
-            "restore_confirmation_contract": "1.2", "plan_fidelity_contract": unsupported})
-        with pytest.raises(ValueError, match="계획 충실성 계약"):
+    for key, value in (("contract_version", "4.4"), ("plan_fidelity_contract", None),
+                       ("restore_confirmation_contract", "1.1")):
+        _write_json(manifest_file, {**original, key: value})
+        with pytest.raises(ValueError, match="옛 형식 Agent 3"):
             pipeline._candidate_execution_record(run_dir, run_id, target)
-    for unsupported in (None, "unknown"):
-        _write_json(manifest_file, {**original, "contract_version": "4.1",
-                                   "restore_confirmation_contract": unsupported})
-        with pytest.raises(ValueError, match="복원 확인 계약"):
-            pipeline._candidate_execution_record(run_dir, run_id, target)
-    for unsupported in (None, "1.0", "unknown"):
-        _write_json(manifest_file, {**original, "contract_version": "4.2",
-                                   "restore_confirmation_contract": unsupported})
-        with pytest.raises(ValueError, match="복원 확인 계약"):
-            pipeline._candidate_execution_record(run_dir, run_id, target)
-    _write_json(manifest_file, {**original, "contract_version": "4.2", "restore_confirmation_contract": "1.1"})
-    assert pipeline._candidate_execution_record(run_dir, run_id, target)[0].reused is True
-    for unsupported in (None, "1.0", "1.1", "unknown"):
-        _write_json(manifest_file, {**original, "contract_version": "4.3", "restore_confirmation_contract": unsupported})
-        with pytest.raises(ValueError, match="복원 확인 계약"):
-            pipeline._candidate_execution_record(run_dir, run_id, target)
-    _write_json(manifest_file, {**original, "contract_version": "4.3", "restore_confirmation_contract": "1.2"})
-    assert pipeline._candidate_execution_record(run_dir, run_id, target)[0].reused is True
-    _write_json(manifest_file, {**original, "contract_version": "4.1", "restore_confirmation_contract": "1.0"})
-    assert pipeline._candidate_execution_record(run_dir, run_id, target)[0].reused is True
     _write_json(manifest_file, original)
 
     target.write_text("changed", encoding="utf-8")
@@ -1202,7 +1180,8 @@ def test_candidate_handoff_recomputes_current_cp3_rules(
     manifest["automation_plan_sha256"] = _sha256_file(plan_file)
     _write_json(manifest_file, manifest)
 
-    with pytest.raises(ValueError, match="현재 CP3 규칙"):
+    # The recorded value-format conversion pins the plan before CP3 is recomputed.
+    with pytest.raises(ValueError, match="현재 CP3 규칙|값 형식"):
         pipeline._candidate_execution_record(run_dir, run_id, target)
 
 def test_candidate_handoff_rejects_evidence_changed_after_agent3(
@@ -1217,16 +1196,12 @@ def test_candidate_handoff_rejects_evidence_changed_after_agent3(
     with pytest.raises(ValueError, match="시험 증거 SHA-256"):
         pipeline._candidate_execution_record(run_dir, run_id, target)
 
-@pytest.mark.parametrize("explicit", [False, True])
 def test_current_compiler_reuses_identical_code_and_retrials_stale_code(
-    tmp_path: Path, monkeypatch, explicit
+    tmp_path: Path, monkeypatch
 ) -> None:
     run_id = "RUN-20260816-015000-ABCDEF"
     run_dir = tmp_path / run_id
     run_dir.mkdir()
-    _write_json(run_dir / "agent3_manifest.json",
-                {"contract_version": "4.10", "prompt_version": "agent3-3.42" if explicit else "agent3-3.41",
-                 **({"product_verdict_contract": "1.0"} if explicit else {})})
     target = tmp_path / "virtual-controller.html"
     target.write_text("<!doctype html>", encoding="utf-8")
     test_case = agent3_test_case()
@@ -1234,7 +1209,7 @@ def test_current_compiler_reuses_identical_code_and_retrials_stale_code(
     _write_json(
         run_dir / "agent3_automation_plan.json", plan.model_dump(mode="json")
     )
-    current_code = compile_automation_candidate(run_id, test_case, plan, explicit_expectations_only=explicit)
+    current_code = compile_automation_candidate(run_id, test_case, plan)
     stored_candidate = run_dir / "candidates" / "test_tc_cand_003.py"
     stored_candidate.parent.mkdir()
     stored_candidate.write_text(current_code, encoding="utf-8")

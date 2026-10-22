@@ -1511,26 +1511,26 @@ def _controller_precondition_target(selector):
     return None
 
 
-def _controller_ui_value_is_grounded(field, value, source, *, legacy_wording_checks):
+def _controller_ui_value_is_grounded(field, value, source):
     if _scalar_value_is_grounded(value, source):
         return True
     # A DOM-decoded enum (e.g. DRY) need not be the TC's display label.
-    # Under semantic review, validate the finite adapter value here; the shared
-    # execution contract lets the reviewer check its meaning against the TC.
-    return (not legacy_wording_checks and field in _CONTROLLER_BUTTONS
+    # Validate the finite adapter value here; the shared execution contract
+    # lets the mandatory reviewer check its meaning against the TC.
+    return (field in _CONTROLLER_BUTTONS
             and any(type(value) is type(choice) and value == choice for choice in _CONTROLLER_BUTTONS[field]))
 
 
-def _precondition_proof_errors(test_case, plan, observation, *, legacy_wording_checks: bool = True,
-                               review_precondition_coverage: bool = False,
-                               review_value_roles: bool = False, shared_evidence: bool = False) -> list[str]:
-    """Check explicit proof mappings, not general natural-language equivalence."""
+def _precondition_proof_errors(test_case, plan, observation) -> list[str]:
+    """Check explicit proof mappings, not general natural-language equivalence.
+
+    Complete coverage and value roles are owned by the mandatory grounding review.
+    """
     errors = []
     frozen = test_case.execution_spec is not None
     approved = set(test_case.preconditions)
     observed = {item.selector: item for item in observation.elements}
-    available_paths = build_agent3_model_input(test_case, observation, {}, shared_evidence=shared_evidence)["ui_observation"]["harness_values"]
-    grouped = {line: [] for line in test_case.preconditions}
+    available_paths = build_agent3_model_input(test_case, observation, {}, shared_evidence=True)["ui_observation"]["harness_values"]
     phases = {action.action_id: action.phase for action in plan.actions}
     if AutomationPhase.TEST not in phases.values():
         errors.append("precondition verification requires a distinct TEST phase")
@@ -1540,14 +1540,13 @@ def _precondition_proof_errors(test_case, plan, observation, *, legacy_wording_c
         if check.source_text not in approved:
             errors.append("proof source_text is not an exact approved precondition")
             continue
-        grouped[check.source_text].append(check)
         if check.read_kind == PreconditionReadKind.CONTROLLER_UI_FIELD:
             target = _controller_precondition_target(check.selector)
             if target is None or target[0] not in observed or observed[target[0]].match_count != 1 or plan.target_device_id != 1:
                 errors.append('unsupported or unobserved controller precondition reader')
             if target and target[2] in {'locked', 'selected'} and not isinstance(check.expected_value, bool):
                 errors.append('controller boolean precondition requires a boolean')
-            if not frozen and target and target[2] != 'selected' and not _controller_ui_value_is_grounded(target[2], check.expected_value, check.source_text, legacy_wording_checks=legacy_wording_checks):
+            if not frozen and target and target[2] != 'selected' and not _controller_ui_value_is_grounded(target[2], check.expected_value, check.source_text):
                 errors.append('controller precondition value is not grounded in its source')
             continue
         if check.read_kind == PreconditionReadKind.BASELINE_CONTEXT:
@@ -1572,8 +1571,8 @@ def _precondition_proof_errors(test_case, plan, observation, *, legacy_wording_c
                 errors.append(f"사전조건 확인 #{check_index} [BASELINE_CONTEXT/{check.selector}] 원문={check.source_text!r}: {reason}")
             continue
         value_grounded = (_controller_ui_value_is_grounded(check.selector.rsplit(".", 1)[-1],
-                            check.expected_value, check.source_text, legacy_wording_checks=False)
-                          if shared_evidence and check.read_kind == PreconditionReadKind.INTERNAL_VALUE
+                            check.expected_value, check.source_text)
+                          if check.read_kind == PreconditionReadKind.INTERNAL_VALUE
                           else _scalar_value_is_grounded(check.expected_value, check.source_text))
         if not frozen and not value_grounded:
             errors.append("precondition expected value is not grounded in its source")
@@ -1588,9 +1587,6 @@ def _precondition_proof_errors(test_case, plan, observation, *, legacy_wording_c
             if element is None or element.match_count != 1:
                 errors.append("precondition selector must have exactly one observed match")
                 continue
-            meaning = " ".join([element.text, element.accessible_name or "", element.selector, element.action_hint])
-            if legacy_wording_checks and not _has_textual_link(meaning, check.source_text):
-                errors.append("precondition UI target has no textual link to its source")
             if check.read_kind in {PreconditionReadKind.UI_CHECKED, PreconditionReadKind.UI_ENABLED} and not isinstance(check.expected_value, bool):
                 errors.append("precondition boolean observation requires a boolean value")
             if not frozen and check.read_kind == PreconditionReadKind.UI_ENABLED and _state_polarities(check.source_text, *_STATE_WORD_PAIRS[1]) != {check.expected_value}:
@@ -1604,23 +1600,6 @@ def _precondition_proof_errors(test_case, plan, observation, *, legacy_wording_c
                     state = _state_polarities(check.source_text, positive, negative)
                     if len(state) == 1 and _state_polarities(str(check.expected_value), positive, negative) != state:
                         errors.append("precondition text omits the required state")
-    for source, checks in grouped.items():
-        if not checks:
-            if not review_precondition_coverage:
-                errors.append("missing runtime proof for precondition: " + source)
-            continue
-        required = _explicit_behavior_values(source) - {"PRIMARY_TEST_DEVICE", "CENTRAL_COMMAND_ALLOWED_ROLE"}
-        proved = set().union(*(_explicit_behavior_values(json.dumps(check.expected_value, ensure_ascii=False)) for check in checks))
-        if not review_value_roles and required - proved:
-            errors.append("precondition proof omits explicit values: " + ",".join(sorted(required - proved)))
-        # The mandatory coverage review sees every reader for this source.
-        # Counting only context readers here rejects valid mixed-reader proofs.
-        # Keep the historical completeness rule when that review is not enabled.
-        if not review_precondition_coverage and any(check.read_kind == PreconditionReadKind.BASELINE_CONTEXT for check in checks):
-            covered_context = {check.selector for check in checks if check.read_kind == PreconditionReadKind.BASELINE_CONTEXT}
-            required_context = {key for key, (pattern, _) in _BASELINE_PRECONDITION_READS.items() if re.search(pattern, source, re.I)}
-            if required_context - covered_context:
-                errors.append("baseline proof omits a stated context fact: " + ",".join(sorted(required_context - covered_context)))
     return errors
 
 
@@ -2039,33 +2018,18 @@ def evaluate_checkpoint3_plan(
     test_case: ProductTestCaseCandidate,
     plan: Agent3AutomationPlan,
     observation: UiObservation,
-    *, require_precondition_proof: bool = True,
-    require_restore_confirmation_detail: bool = True,
-    require_restore_plan_links: bool = False,
-    require_restore_comparison_basis: bool = False,
-    require_plan_fidelity: bool = True,
-    legacy_wording_checks: bool = True,
-    allow_terminal_observation_anchor: bool = False,
-    allow_state_change_terminal_observation: bool = False,
-    require_assertion_target_identity: bool = False,
-    review_precondition_coverage: bool = False,
-    review_value_roles: bool = False,
-    shared_evidence: bool = False,
-    execution_interface: bool = False,
 ) -> Checkpoint3Result:
+    """Current CP3 only (2026-10-20 cleanup: no historical switches).
+
+    Wording links between plan and TC are not inferred; precondition coverage and
+    value roles are owned by the mandatory grounding review.
+    """
     frozen = test_case.execution_spec is not None
     handoff_errors = tc_plan_handoff_errors(test_case, plan)
     if handoff_errors:
         return Checkpoint3Result(status=CheckStatus.FAIL,
             candidate_status=AutomationCandidateStatus.REVISION_REQUIRED,
             checks=[CheckResult(rule_id="CP3-014", status=CheckStatus.FAIL, message=" / ".join(handoff_errors))])
-    if frozen:
-        # The accepted TC's typed definitions replace prose value inference.
-        # Interface/identity/runtime checks and semantic UI-binding review remain.
-        legacy_wording_checks = False
-        review_value_roles = True
-        review_precondition_coverage = True
-        shared_evidence = True
     if test_case.control_path != ControlPath.CENTRAL:
         return Checkpoint3Result(
             status=CheckStatus.FAIL,
@@ -2116,16 +2080,11 @@ def evaluate_checkpoint3_plan(
     def add(rule_id: str, status: CheckStatus, message: str) -> None:
         checks.append(CheckResult(rule_id=rule_id, status=status, message=message))
 
-    if require_precondition_proof or plan.precondition_checks:
-        proof_errors = _precondition_proof_errors(test_case, plan, observation, legacy_wording_checks=legacy_wording_checks,
-                                                  review_precondition_coverage=review_precondition_coverage,
-                                                  review_value_roles=review_value_roles, shared_evidence=shared_evidence)
-        # CP3-006A remains the historical action-sequence identifier. Saved
-        # checkpoints are not rewritten; fresh proof checks have their own ID.
-        add("CP3-006D", CheckStatus.FAIL if proof_errors else CheckStatus.PASS,
-            " / ".join(proof_errors) if proof_errors else
-            "Provided runtime checks are structurally valid; complete precondition coverage requires semantic review." if review_precondition_coverage else
-            "Every precondition has a grounded read-only runtime check before TEST.")
+    proof_errors = _precondition_proof_errors(test_case, plan, observation)
+    # CP3-006A is the action-sequence identifier; proof checks have their own ID.
+    add("CP3-006D", CheckStatus.FAIL if proof_errors else CheckStatus.PASS,
+        " / ".join(proof_errors) if proof_errors else
+        "Provided runtime checks are structurally valid; complete precondition coverage requires semantic review.")
 
     observed_selectors = {item.selector for item in observation.elements}
     observed_by_selector = {item.selector: item for item in observation.elements}
@@ -2204,11 +2163,8 @@ def evaluate_checkpoint3_plan(
             observed = observed_by_selector.get(item.selector)
             if observed is None:
                 continue
-            if not execution_interface and (not observed.visible or not observed.enabled):
-                action_errors.append(
-                    f"{item.action_id}: generic action target is not visible and enabled"
-                )
-            elif item.action_type == AutomationActionType.CLICK and observed.action_hint != "CLICK":
+            # Visibility/enablement at run time is checked by the execution interface.
+            if item.action_type == AutomationActionType.CLICK and observed.action_hint != "CLICK":
                 action_errors.append(f"{item.action_id}: observed element does not support CLICK")
             elif item.action_type == AutomationActionType.FILL and observed.action_hint != "FILL":
                 action_errors.append(f"{item.action_id}: observed element does not support FILL")
@@ -2222,20 +2178,6 @@ def evaluate_checkpoint3_plan(
             } and observed.action_hint != "CHECK_OR_UNCHECK":
                 action_errors.append(
                     f"{item.action_id}: observed element does not support checkbox or switch control"
-                )
-            observed_meaning = " ".join(
-                part
-                for part in (
-                    observed.selector.replace("-", " ").replace("_", " "),
-                    observed.text,
-                    observed.accessible_name or "",
-                    observed.action_hint,
-                )
-                if part
-            )
-            if legacy_wording_checks and not _has_textual_link(observed_meaning, item.source_text):
-                action_errors.append(
-                    f"{item.action_id}: observed element has no textual link to the approved TC step"
                 )
             if item.action_type in {
                 AutomationActionType.FILL,
@@ -2300,11 +2242,7 @@ def evaluate_checkpoint3_plan(
             )
         elif not frozen and _normalize(anchor.source_text) != _normalize(result.verify_after_step):
             terminal_read = (
-                allow_terminal_observation_anchor
-                and (allow_state_change_terminal_observation or (
-                    test_case.state_effect == TcStateEffect.READ_ONLY
-                    and all(a.action_type == AutomationActionType.SELECT_DEVICE for a in plan.actions)))
-                and _normalize(result.verify_after_step) in terminal_observations
+                _normalize(result.verify_after_step) in terminal_observations
                 and test_actions and anchor.action_id == test_actions[-1].action_id
             )
             if not terminal_read:
@@ -2390,7 +2328,7 @@ def evaluate_checkpoint3_plan(
                 )
             elif not frozen and not re.sub(r"표시|화면|상태|텍스트|확인|display|visible|text|state|\W", "", assertion.expected_text, flags=re.I):
                 fidelity_errors.append(f"{assertion.result_id}: expected text contains no product value or message")
-            elif not frozen and require_plan_fidelity and not _complete_text_value(result.statement, assertion.expected_text):
+            elif not frozen and not _complete_text_value(result.statement, assertion.expected_text):
                 fidelity_errors.append(f"{assertion.result_id}: expected text is only part of a product value or message")
             elif (
                 not frozen and result.observation_layer == ObservationLayer.NOTIFICATION
@@ -2417,8 +2355,8 @@ def evaluate_checkpoint3_plan(
             AssertionStrategy.INTERNAL_VALUE_EQUALS,
         }:
             value_grounded = (_controller_ui_value_is_grounded(assertion.selector.rsplit(".", 1)[-1],
-                                assertion.expected_value, result.statement, legacy_wording_checks=False)
-                              if shared_evidence and assertion.strategy == AssertionStrategy.INTERNAL_VALUE_EQUALS
+                                assertion.expected_value, result.statement)
+                              if assertion.strategy == AssertionStrategy.INTERNAL_VALUE_EQUALS
                               else _scalar_value_is_grounded(assertion.expected_value, result.statement))
             if not frozen and not value_grounded:
                 fidelity_errors.append(
@@ -2450,13 +2388,7 @@ def evaluate_checkpoint3_plan(
                     fidelity_errors.append(
                         f"{assertion.result_id}: target-device field was not observed: {field_name}"
                     )
-                if legacy_wording_checks and field_name not in result.statement:
-                    fidelity_errors.append(
-                        f"{assertion.result_id}: target-device field is not named in the Expected Result: {field_name}"
-                    )
-                value_grounded = (_controller_ui_value_is_grounded(field_name, expected_value, result.statement, legacy_wording_checks=legacy_wording_checks)
-                                  if assertion.strategy == AssertionStrategy.CONTROLLER_UI_FIELDS_EQUALS or shared_evidence
-                                  else _scalar_value_is_grounded(expected_value, result.statement))
+                value_grounded = _controller_ui_value_is_grounded(field_name, expected_value, result.statement)
                 if not frozen and not value_grounded:
                     fidelity_errors.append(
                         f"{assertion.result_id}: target-device field value is not grounded in the Expected Result: {field_name}"
@@ -2474,57 +2406,22 @@ def evaluate_checkpoint3_plan(
                     f"{assertion.result_id}: internal state path was not observed"
                 )
             device_prefix = re.match(r"window\.__vccs\.devices\[\d+\]", assertion.selector)
-            if (require_assertion_target_identity and device_prefix
+            if (device_prefix
                     and observation.harness_values.get(device_prefix.group() + ".id") != plan.target_device_id):
                 fidelity_errors.append(f"{assertion.result_id}: internal device index does not identify the observed target")
-            path_meaning = re.sub(r"[^가-힣A-Za-z0-9]+", " ", assertion.selector)
-            if legacy_wording_checks and not _has_textual_link(path_meaning, result.statement):
-                fidelity_errors.append(
-                    f"{assertion.result_id}: internal state path has no textual link to the Expected Result"
-                )
         elif assertion.selector != "window.__vccs.devices" and assertion.selector not in observed_selectors:
             fidelity_errors.append(f"{assertion.result_id}: selector was not observed")
         elif assertion.strategy in _GENERIC_ASSERTION_STRATEGIES:
             observed = observed_by_selector.get(assertion.selector)
-            if observed is not None:
-                if observed.match_count != 1:
-                    fidelity_errors.append(f"{assertion.result_id}: selector must match exactly one element")
-                observed_meaning = " ".join(
-                    part
-                    for part in (
-                        observed.selector.replace("-", " ").replace("_", " "),
-                        observed.text,
-                        observed.accessible_name or "",
-                        observed.action_hint,
-                    )
-                    if part
-                )
-                target_card_selector = f"#device-card-{plan.target_device_id}"
-                approved_target_card = (
-                    assertion.selector == target_card_selector
-                    and bool(
-                        re.search(
-                            r"(?:장비\s*카드|device\s*card)",
-                            result.statement,
-                            flags=re.IGNORECASE,
-                        )
-                    )
-                )
-                if legacy_wording_checks and not approved_target_card and not _has_textual_link(
-                    observed_meaning, result.statement
-                ):
-                    fidelity_errors.append(
-                        f"{assertion.result_id}: observed element has no textual link to the Expected Result"
-                    )
+            if observed is not None and observed.match_count != 1:
+                fidelity_errors.append(f"{assertion.result_id}: selector must match exactly one element")
     if fidelity_errors:
         add("CP3-004", CheckStatus.FAIL, " / ".join(fidelity_errors))
     else:
         add("CP3-004", CheckStatus.PASS,
-            "Observation layers and targets preserve the approved expectations." if legacy_wording_checks
-            else "Observation layers, available readers and grounded values checked; target semantics are not proved by wording.")
+            "Observation layers, available readers and grounded values checked; target semantics are not proved by wording.")
 
     data = test_case.test_data
-    plan_values = [item.value for item in plan.actions]
     value_errors: list[str] = []
     allowed_numbers = set(_tc_temperature_values(test_case))
     allowed_modes = {
@@ -2543,51 +2440,18 @@ def evaluate_checkpoint3_plan(
         if item.action_type == AutomationActionType.SET_MODE:
             if item.value not in allowed_modes:
                 value_errors.append(f"{item.action_id}: mode not present in TC: {item.value}")
-    for assertion in plan.assertions:
-        # Outputs need not equal inputs (e.g. a boundary clamp). CP3-004 checks
-        # each output against its ER; the mandatory shared-evidence review
-        # verifies its meaning. Retain the old input-membership rule for legacy.
-        if shared_evidence:
-            continue
-        if assertion.expected_number is not None and float(assertion.expected_number) not in {
-            float(value) for value in allowed_numbers
-        }:
-            value_errors.append(f"{assertion.result_id}: expected temperature not present in TC")
-        if assertion.strategy == AssertionStrategy.INTERNAL_DEVICE_FIELDS_EQUALS:
-            for expected_field in assertion.expected_fields:
-                field_name = expected_field.field_name
-                expected_value = expected_field.expected_value
-                if field_name == "mode" and expected_value not in allowed_modes:
-                    value_errors.append(
-                        f"{assertion.result_id}: expected mode not present in TC"
-                    )
-                if field_name == "setTemp" and (
-                    not isinstance(expected_value, (int, float))
-                    or float(expected_value) not in {
-                        float(value) for value in allowed_numbers
-                    }
-                ):
-                    value_errors.append(
-                        f"{assertion.result_id}: expected setTemp not present in TC"
-                    )
+    # Outputs need not equal inputs (e.g. a boundary clamp). CP3-004 checks each
+    # output against its ER; the mandatory shared-evidence review checks meaning.
     if value_errors:
         add("CP3-005", CheckStatus.FAIL, " / ".join(value_errors))
     else:
         add("CP3-005", CheckStatus.PASS, "Mode and temperature values are unchanged from the TC.")
 
     sequence_errors: list[str] = []
-    restore_confirmations, confirmation_errors = (
-        _restore_confirmation_coverage(test_case, plan,
-            require_plan_links=require_restore_plan_links or bool(plan.restore_confirmations),
-            require_comparison_basis=require_restore_comparison_basis)
-        if require_restore_confirmation_detail else (set(), [])
-    )
-    explicit_comparisons = require_restore_comparison_basis or any(item.comparisons for item in plan.restore_confirmations)
-    if explicit_comparisons:
-        add("CP3-006B", CheckStatus.FAIL if confirmation_errors else CheckStatus.PASS,
-            " / ".join(confirmation_errors) if confirmation_errors else "복원 대상별 원문·비교 기준·실제 비교 연결을 확인했습니다.")
-    else:
-        sequence_errors.extend(confirmation_errors)
+    restore_confirmations, confirmation_errors = _restore_confirmation_coverage(
+        test_case, plan, require_plan_links=True, require_comparison_basis=True)
+    add("CP3-006B", CheckStatus.FAIL if confirmation_errors else CheckStatus.PASS,
+        " / ".join(confirmation_errors) if confirmation_errors else "복원 대상별 원문·비교 기준·실제 비교 연결을 확인했습니다.")
     phase_rank = {AutomationPhase.PRECONDITION: 0, AutomationPhase.TEST: 1, AutomationPhase.RESTORE: 2}
     ranks = [phase_rank[item.phase] for item in plan.actions]
     if ranks != sorted(ranks):
@@ -2608,27 +2472,26 @@ def evaluate_checkpoint3_plan(
         and bool(tc_modes or allowed_numbers)
         and not (tc_modes - set(_MODE_SELECTOR))
     )
-    if require_plan_fidelity or not legacy_controller_flow:
-        for phase, lines in ([] if frozen else ((AutomationPhase.TEST, test_case.steps), (AutomationPhase.RESTORE, test_case.restore_steps))):
-            implemented = [_normalize(item.source_text) for item in plan.actions if item.phase == phase]
-            # A trailing read-only step is implemented by its mapped assertion,
-            # not by an invented click. Earlier observations still need ordering.
-            observation_steps = terminal_observations if phase == AutomationPhase.TEST else set()
-            required = [_normalize(line) for line in lines
-                        if _normalize(line) not in observation_steps
-                        and not (phase == AutomationPhase.RESTORE and _normalize(line) in restore_confirmations)]
-            if any(line not in implemented for line in required):
-                sequence_errors.append(f"{phase.value}: approved step is missing from the plan")
-            elif [required.index(line) for line in implemented if line in required] != sorted(
-                required.index(line) for line in implemented if line in required
-            ):
-                sequence_errors.append(f"{phase.value}: approved step order changed")
-        if not any(item.phase == AutomationPhase.TEST for item in plan.actions):
-            sequence_errors.append("generic plan has no TEST action")
-        if test_case.restore_required and not any(
-            item.phase == AutomationPhase.RESTORE for item in plan.actions
+    for phase, lines in ([] if frozen else ((AutomationPhase.TEST, test_case.steps), (AutomationPhase.RESTORE, test_case.restore_steps))):
+        implemented = [_normalize(item.source_text) for item in plan.actions if item.phase == phase]
+        # A trailing read-only step is implemented by its mapped assertion,
+        # not by an invented click. Earlier observations still need ordering.
+        observation_steps = terminal_observations if phase == AutomationPhase.TEST else set()
+        required = [_normalize(line) for line in lines
+                    if _normalize(line) not in observation_steps
+                    and not (phase == AutomationPhase.RESTORE and _normalize(line) in restore_confirmations)]
+        if any(line not in implemented for line in required):
+            sequence_errors.append(f"{phase.value}: approved step is missing from the plan")
+        elif [required.index(line) for line in implemented if line in required] != sorted(
+            required.index(line) for line in implemented if line in required
         ):
-            sequence_errors.append("generic plan is missing approved restore actions")
+            sequence_errors.append(f"{phase.value}: approved step order changed")
+    if not any(item.phase == AutomationPhase.TEST for item in plan.actions):
+        sequence_errors.append("generic plan has no TEST action")
+    if test_case.restore_required and not any(
+        item.phase == AutomationPhase.RESTORE for item in plan.actions
+    ):
+        sequence_errors.append("generic plan is missing approved restore actions")
     if legacy_controller_flow and not frozen:
         target_index = max(plan.target_device_id - 1, 0)
         observed_initial_mode = observation.harness_values.get(
@@ -2932,14 +2795,10 @@ def compile_automation_candidate(
     run_id: str,
     test_case: ProductTestCaseCandidate,
     plan: Agent3AutomationPlan,
-    *,
-    explicit_expectations_only: bool = False,
-    typed_values: bool = False,
-    consistent_card_lock: bool = False,
 ) -> str:
-    """Compile a constrained plan; historical callers retain their verdict policy."""
+    """Compile a constrained plan (explicit expectations, typed values, consistent card lock)."""
     def different(actual: str, expected: str) -> str:
-        return f"not _qa_values_equal({actual}, {expected})" if typed_values else f"{actual} != {expected}"
+        return f"not _qa_values_equal({actual}, {expected})"
     handoff_errors = tc_plan_handoff_errors(test_case, plan)
     if handoff_errors:
         raise Agent3Error("TC 실행 정의 인계 오류: " + " / ".join(handoff_errors))
@@ -3090,8 +2949,7 @@ def compile_automation_candidate(
             "",
         ]
     )
-    if typed_values:
-        lines.extend(_TYPED_VALUE_COMPARISON_HELPER.splitlines())
+    lines.extend(_TYPED_VALUE_COMPARISON_HELPER.splitlines())
     if needs_legacy_temperature_helpers:
         lines.extend(
             [
@@ -3136,13 +2994,10 @@ def compile_automation_candidate(
     if uses_controller_helpers:
         lines.append(f'_CONTROLLER_BUTTONS = {_py_literal(_CONTROLLER_BUTTONS)}')
         restore_helpers = _CONTROLLER_RESTORE_HELPERS
-        if consistent_card_lock:
-            # Preserve historical compiled bytes; only new interface 1.2 opts in.
-            restore_helpers = restore_helpers.replace(
-                "'locked': 'locked' in classes and ui['card_locked'],",
-                "'locked': ui['card_locked'] if ('locked' in classes) == ui['card_locked'] else None,")
-        if typed_values:
-            restore_helpers = restore_helpers.replace("if current == target:", "if _qa_values_equal(current, target):")
+        restore_helpers = restore_helpers.replace(
+            "'locked': 'locked' in classes and ui['card_locked'],",
+            "'locked': ui['card_locked'] if ('locked' in classes) == ui['card_locked'] else None,")
+        restore_helpers = restore_helpers.replace("if current == target:", "if _qa_values_equal(current, target):")
         lines.extend(restore_helpers.splitlines())
     lines.extend(
         [
@@ -3168,8 +3023,7 @@ def compile_automation_candidate(
         # navigation/precondition checks fail before any product action.
         marker = lines.index("        try:")
         lines[marker:marker] = ["        state_change_started = False", "        preparation_started = False",
-                               "        test_state_started = False"] + (
-                                   [] if explicit_expectations_only else ["        unexpected_state_change = False"])
+                               "        test_state_started = False"]
     if uses_dynamic_hvac_restore:
         lines.extend(
             [
@@ -3256,7 +3110,7 @@ def compile_automation_candidate(
         elif action.action_type == AutomationActionType.SET_MODE:
             lines.append(f"{indent}page.locator({_py_literal(action.selector)}).click()")
         elif action.action_type == AutomationActionType.SET_TEMPERATURE:
-            if (explicit_expectations_only and action.phase == AutomationPhase.TEST) or is_blocked_temperature_action(action):
+            if action.phase == AutomationPhase.TEST or is_blocked_temperature_action(action):
                 lines.append(f"{indent}_request_temperature(page, {float(action.value)})")
             else:
                 lines.append(f"{indent}_set_temperature(page, {float(action.value)})")
@@ -3696,12 +3550,6 @@ def compile_automation_candidate(
                 "                    changes = observe_restoration() if test_state_started else []",
             ])
             if test_case.state_effect == TcStateEffect.BLOCKED_CHANGE:
-                if not explicit_expectations_only:
-                    lines.extend([
-                        "                    if test_state_started and changes:",
-                        "                        unexpected_state_change = True",
-                        "                        print('PRODUCT_MISMATCH: blocked operation changed observed state: ' + ' | '.join(changes))",
-                    ])
                 lines.append("                    if preparation_started or changes:")
             action_indent = "        " if test_case.state_effect == TcStateEffect.BLOCKED_CHANGE else "    "
             lines.extend(action_indent + line for line in action_body)
@@ -3740,11 +3588,6 @@ def compile_automation_candidate(
                 "                print('RESTORE_STATUS: FAILED')",
                 "                print('ENVIRONMENT_RETIRED: restoration failed; browser context closed')",
             ]
-            if not explicit_expectations_only:
-                lines.extend([
-                    "            if unexpected_state_change and test_completed:",
-                    "                raise AssertionError('PRODUCT_MISMATCH: blocked operation changed observed state')",
-                ])
     else:
         lines.extend(
             [

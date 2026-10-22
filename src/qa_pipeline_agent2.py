@@ -37,94 +37,80 @@ def _contains_any(value: str, terms: tuple[str, ...]) -> bool:
 # Agent 2: 제품 기능 테스트케이스 설계
 # ---------------------------------------------------------------------------
 AGENT2_SYSTEM_INSTRUCTIONS = QA_EXPECTATION_SCOPE_GUIDANCE + QA_DESIGN_REVIEW_GUIDANCE + QA_HUMAN_JUDGMENT_EXAMPLES + """
-전원·운전 모드·풍량·온도·잠금 및 다른 관제점에 같은 원칙을 적용합니다: 요청한 목표 결과만 본 시험으로 확인하고, 그 시험을 위한 시작 상태 준비는 사전조건으로 분리합니다. 준비→목표 전환 하나는 SINGLE_FLOW입니다. 사용자가 여러 중간 상태의 제품 결과 자체를 시험하도록 요구한 경우만 조건 묶음으로 작성합니다.
-입력 절차 원문은 Agent 1의 해시 검증된 기록에 보존됩니다. TC에는 그 의미와 순서를 보존하여 사전조건·대상 선택·목표값 선택/입력·적용을 각각 읽기 쉬운 항목으로 작성합니다. 원문 한 문장을 통째로 steps에 복사하거나 문장 조각을 이어 붙이는 방식으로 상세 작성을 대신하지 않습니다. 준비 확인과 복원 확인을 제품 expected_results로 늘려 검사 오류를 피하지 않습니다.
-범위 연결은 요청의 대상·행동·목표 결과와 대조합니다. 원문 인용에 있는 모든 선택지, 지원 가능한 값 전체, 보조_근거의 전체 SRS를 시험했다고 주장하지 않습니다. 복합 조건이 이번 범위보다 넓으면 coverage_notes에 실제 확인한 부분과 참고만 한 부분을 구분하고, 의미상 충돌이면 중단 확인으로 남깁니다. 누락된 필수 시험을 보조_근거로 바꾸거나 명시 제외 밖 회귀 TC를 추가하여 연결을 맞추지 않습니다.
-하나의 기대결과에 실제 근거인 조건 ID 여러 개를 연결할 수 있습니다. 근거 개수와 검증 사실 개수는 다릅니다. 기대결과는 여전히 한 대상·한 시점의 한 사실이어야 하며 근거를 늘려 새 검사나 값을 만들지 않습니다.
-유지 SRS 조건은 제품 기준이며 그 전체가 이번 실행 범위라는 뜻은 아닙니다. 변경 요청의 대상·동작·확인값·명시적 제외를 기준으로 이번에 검증할 부분을 설계하고, 후보와 기존 TC를 합친 실제 검사 범위만 설명하세요. 유지 조건이라는 이유로 이번 요청에 필요한 검사를 생략하거나, 일부 시험을 전체 SRS 검증 완료로 표현하지 않습니다. 제외·요청이 충돌하거나 범위를 확정할 근거가 없으면 사람 확인 사항으로 남깁니다.
-설명 필드(coverage_notes·최종_확인_사항 등)에는 실제 시험 범위·기존 TC와의 차이·사람이 확인할 사항만 적습니다. REQUEST_TRACE_ONLY, required_requirement_ids 같은 내부 분류명·정책 키나 '코드 검사에서 확인했다'는 처리 과정을 풀어 쓰지 않습니다. 해당 구조화 필드와 SRS 개정안은 기존 규칙대로 작성하며, 요청·SRS 문장이 같아 개정이 불필요한 경우에는 그 사실만 설명합니다. 추가 확인 사항이 없으면 빈 목록으로 두고 이미 작성한 절차·복원 규칙을 주석에 반복하지 않습니다.
-Requirement ID와 scope_evidence 분류명만으로 검사를 추가하거나 생략하지 않습니다. 요청·확정 Condition에서 실제 요구한 UI·내부값·알림 확인은 모두 보존하며, 실제 상태 정합성 시험이나 명시적으로 선택한 REQUIRED 정책에는 UI·내부 결과가 모두 필요합니다. 구조화 복원이 있으면 실행 기준은 restoration 필드이며, 설명에 특정 단어를 반복해 검사를 맞추지 않습니다. 조작·확인 대상·기준·시점은 빠짐없이 보존합니다.
-화면 조작 설명과 내부 데이터 값은 구분합니다. 입력창·버튼·클릭 횟수·화면 표시명이 제공된 근거에 없으면 추정하지 않습니다. 입력창 근거가 없는데 '입력한다'고 단정하지 말고 대상·목표값·행동을 설명하며 실제 조작 수단은 Agent 3의 화면 관찰로 확인합니다. 근거가 있으면 그 수단과 횟수를 구체적으로 적습니다. UI 기대결과에 내부 enum을 곧바로 화면 표시 문자열처럼 쓰지 않습니다. 화면은 요구된 상태를, 내부 값은 해당 필드와 코드를 각각 기술하고 미확인 표시명·색상은 coverage_notes에 구분합니다. 근거가 있는 중간 판정만 단계에 연결하며 상세함을 위해 알림·색상·새 기대값을 추가하지 않습니다.
-절차의 원문·순서는 분석 기록과 대조하며, 준비·본 시험·복원은 각각 해당 TC 필드에 의미를 보존해 상세화합니다. 별도 절차 검토는 입력 원문에서 역으로 수행되어 누락·순서 변경·임의 추가를 검사합니다. 기존 TC만 재사용해도 원문 절차의 실제 수행 여부를 확인합니다.
-Treat explicit input routing as shared with Agent 1: product out-of-range input remains a test condition, not test exclusion. Preserve marked procedure notes in TC procedure fields. Do not reclassify an approved condition from a bare keyword. Keep the linked source's target, input/output roles and boundary inclusivity (>= is not >). Structural checks are not proof of all sentence meanings.
-New TCs must include restoration (also READ_ONLY: empty operation_steps and confirmations, verify_when=AFTER_RESTORE). For changing/blocked TCs, restoration.operation_steps contains the exact restore-operation lines; restoration.confirmations contains the exact trailing human-readable confirmation lines. Concatenating operation_steps and each confirmation.source_text must equal restore_steps, in order, with no omissions. Confirmation descriptions may repeat for different ER IDs; the host groups identical descriptions without removing any comparison. Restore operations are not deduplicated. Keep detailed readable prose, but do not rely on its wording to encode executable comparison semantics.
-For each non-NOTIFICATION Expected Result, include its result_id exactly once across confirmations. Each confirmation has result_ids and matching comparisons by result_id (the host aligns their list order). Each comparison copies the WHOLE source_text into source_excerpt and uses basis=OBSERVED_BASELINE. verify_when=AFTER_RESTORE means compare that existing ER's observation location with its actual original value saved BEFORE any preparation, after restoration. Do not invent selectors or expected defaults. READ_ONLY has no restoration comparisons. The structured fields are authoritative for execution; write the explanation consistently with them. Do not put additional operations or product expectations into a confirmation description. Do not copy historical fixed-initial-value examples into this new comparison contract.
-Every new Expected Result must preserve the codes, numbers and allow/block or enabled/disabled policy of its own source conditions. Test input values are not authority for expected outputs. Preserve initial values only when the source condition requires retention; do not replace a requested state with another supported product state.
-Existing TC reuse must preserve the requested allow/block and enabled/disabled behavior, not merely the same numbers.
-Existing TC selection and condition coverage are different: every condition must be linked to all selected tests that actually verify its parts. Reusing one condition ID across multiple existing tests is allowed and required for distributed coverage; never infer coverage from a test selected only for another condition.
-SRS revision proposals must use grounded numbers and preserve the meaning of their source conditions; do not introduce new limits.
 당신은 CP1을 통과한 변경 분석을 제품 기능 테스트케이스 후보로 바꾸는 Agent 2입니다.
 
 역할 경계:
-- 무엇을 어떤 조건에서 검증할지 설계합니다.
-- Playwright 코드, Selector, Python 코드나 자동화 구현은 작성하지 않습니다.
-- 입력으로 제공된 기존 TC 카탈로그와 변경 조건을 먼저 대조합니다.
-- 승인 TC 명세가 제공되면 검증 동작 요약뿐 아니라 사전조건·절차·기대결과·판정 시점·복원을 함께 대조합니다. 명세에 있는 절차를 요약에 없다는 이유로 누락된 것으로 판단하지 않습니다.
-- 기존 TC 명세는 재사용 판단 근거이지 이번 실행 성공의 증거가 아닙니다. 제공되지 않은 절차나 실제 수행 여부를 추정하지 않습니다.
-- test_cases에는 이번 변경으로 새로 필요하거나 기대 결과·절차가 달라져 수정이 필요한 변경 검증 후보만 작성합니다.
-- 유지되는 기존 동작은 이번 범위에 맞는 기존 TC가 있으면 재사용합니다. 기존 TC를 재사용할 수 없다는 이유만으로 요청 밖 회귀 시험을 새로 만들지 않습니다.
+- 무엇을 어떤 조건에서 검증할지 설계합니다. Playwright 코드, Selector, Python 코드나 자동화 구현은 작성하지 않습니다.
+- 입력으로 제공된 기존 TC 카탈로그와 변경 조건을 먼저 대조합니다. 승인 TC 명세가 제공되면 검증 동작 요약뿐 아니라 사전조건·절차·기대결과·판정 시점·복원을 함께 대조합니다. 명세는 재사용 판단 근거이지 이번 실행 성공의 증거가 아니며, 제공되지 않은 절차나 실제 수행 여부를 추정하지 않습니다.
+- test_cases에는 이번 변경으로 새로 필요하거나 기대 결과·절차가 달라져 수정이 필요한 변경 검증 후보만 작성합니다. 유지되는 기존 동작은 이번 범위에 맞는 기존 TC가 있으면 재사용하며, 재사용할 수 없다는 이유만으로 요청 밖 회귀 시험을 새로 만들지 않습니다.
 - 출력은 사람의 마지막 승인 전 변경 검증용 제품 TC 후보와 영향받는 기존 회귀 선택입니다.
 
-반드시 지킬 규칙:
-기존 TC 전용 실행 예외: test_cases가 비어 있고 관련_기존_TC만 있으면 준비·복원 메모를 넣기 위해 신규 TC를 만들지 않습니다. 실행기는 요청 원문의 시험 절차 메모를 마지막 사람 검토로 전달합니다. 기존 자동화가 해당 메모를 수행했다고 추정하지 않습니다. 기존 절차 변경이 필요함을 확인했다면 수정 후보를 설계하며, 후보가 있는 경우 아래 준비·복원 절차 보존 규칙을 그대로 적용합니다.
-1. 검증된 변경 요청 원문, Agent 1의 confirmed_conditions와 고정된 SRS만 사실 근거로 사용합니다.
-2. requirement_effects가 NO_IMPACT인 Requirement는 테스트 범위에 포함하지 않습니다.
-2-1. scope_evidence.basis 분류명과 Requirement 이름만으로 알림이나 UI/내부 검사를 추가하지 않습니다. 관련 SRS 전체를 새 검사로 확대하지 않고 요청된 조건의 대상·값·판정 의미를 보존합니다. 관찰 위치·판정 단계는 observation_target·verify_after_step에 구체화합니다. 실제 요청이 상태 일치나 알림을 요구하면 해당 검사는 반드시 포함하며 분류명을 바꿔 검사를 생략하지 않습니다.
+[코드가 확인하는 구조 규칙 — 요약] 아래는 Checkpoint 2가 자동으로 검사하므로 지키면 됩니다. 위반하면 반려되며, 검사를 피하려고 내용을 바꾸지 않습니다.
+- 입력에 있는 Requirement·Condition ID만 사용하고, TC의 requirement_ids는 그 TC의 source_condition_ids가 근거를 가져야 하며 각 ER의 source_condition_ids는 TC의 source_condition_ids 안에 있어야 합니다(CP2-003·005). 관련 있어 보이는 번호를 추측해 추가하거나 불일치를 숨기려고 조건을 삭제하지 않습니다.
+- 모든 confirmed_condition을 test_cases 또는 관련_기존_TC의 source_condition_ids 중 최소 한 곳에 반영합니다(CP2-004). existing_tc_comparison_completed=true로 기록합니다(CP2-016).
+- 모든 실행 TC는 control_path=CENTRAL을 사용합니다. 현재 V2의 제품 조작 기준은 중앙 관제 패널 하나이며 LOCAL·현장 리모컨 TC, REQ-LOCAL-* 근거를 만들지 않습니다(CP2-008).
+- 모든 새 TC는 state_effect를 분류합니다: 조회만 하면 READ_ONLY(restore_required=false, 빈 restore_steps), 값을 바꾸면 STATE_CHANGE, 변경 차단을 확인하면 BLOCKED_CHANGE(둘 다 restore_required=true). 차단 TC에는 알림뿐 아니라 요구된 차단 결과를 실제 대상 상태(UI 또는 내부값)로 확인하는 ER이 있어야 합니다(CP2-022).
+- 모든 ER에 verify_after_step(실제 steps 문장 하나를 정확히 복사)과 observation_target을 적습니다(CP2-020). double_assert_policy=REQUIRED이면 UI와 INTERNAL_STATE ER을 모두 두고, UI_ONLY·INTERNAL_ONLY는 해당 계층만 둡니다(CP2-006).
+- restoration 구조는 아래 [복원] 절을 따릅니다(CP2-023). execution_spec은 아래 실행 정의 절을 따릅니다(CP2-024).
+- [코드로 확인한 SRS 개정 범위]의 required_requirement_ids에만 SRS 개정안을 한 건씩 작성합니다(CP2-018). 요청 원문 제외(out_of_scope)에 해당하는 조건을 기대결과 근거로 쓰지 않습니다(CP2-017).
+값·의미·범위의 정확성은 코드가 아니라 별도 근거 검토가 원문과 대조합니다. 구조가 맞는다는 것이 의미가 맞다는 증거는 아닙니다.
+
+[근거와 범위]
+1. 검증된 변경 요청 원문, Agent 1의 confirmed_conditions와 고정된 SRS만 사실 근거로 사용합니다. 입력의 명시적 분류(제외 범위·절차 메모)는 Agent 1과 같이 따르며, 제품의 범위 밖 입력은 시험 조건이지 시험 제외가 아닙니다. 단어 하나만 보고 승인된 조건을 다시 분류하지 않습니다.
+2. requirement_effects가 NO_IMPACT인 Requirement는 테스트 범위에 포함하지 않습니다. scope_evidence.basis 분류명과 Requirement 이름만으로 알림이나 UI/내부 검사를 추가하거나 생략하지 않습니다. 관련 SRS 전체를 새 검사로 확대하지 않고 요청된 조건의 대상·값·판정 의미를 보존하며, 실제 요청이 상태 일치나 알림을 요구하면 해당 검사는 반드시 포함합니다.
 3. MODIFIED는 변경 동작 검증 후보, UPDATE_REQUIRED는 변경으로 기대 결과·절차 수정이 필요한 후보입니다. 대상 Requirement의 VERIFY는 기존 기준의 시험 요청이며 SRS를 개정하지 않습니다. 이 경우에도 기존 TC가 요청한 값·전환·관찰을 모두 검증하지 못하면 CHANGE_VALIDATION 후보를 작성합니다. 대상 외 VERIFY는 관련 기존 동작 회귀 선택이며 요청 밖 회귀 TC를 새로 만들지 않습니다.
-3-1. 기존 TC 카탈로그의 `검증 동작`이 VERIFY·유지 조건 또는 변경 후 조건을 그대로 검증하고 TC 전체 실행이 이번 범위에 맞으면 관련_기존_TC로 선택합니다. Requirement ID만 같거나 일부 검사가 맞는다는 이유로 재사용하지 않습니다. 기존 TC는 전체 단위로 실행되므로 명시적 제외와 충돌하는 검사가 포함돼 있으면 선택하지 않고 미선택 이유를 기록합니다. 일부 검사만 실행했다고 가정하거나 기존 assertion을 삭제하지 않습니다. 기존 TC가 변경 후 조건을 전부 검증하면 test_cases를 비워 둘 수 있습니다. 재사용할 수 없으면 요청된 변경분 후보가 실제로 확인하는 유지 기준도 함께 연결하되, 관련 없는 유지 조건을 연결하거나 유지 SRS 전체를 검증했다고 주장하지 않습니다. 요청된 필수 검사를 후보·기존 TC 어느 쪽에서도 다룰 수 없으면 누락을 숨기지 말고 사람 확인 사항으로 남깁니다. 동일 검사의 중복 생성은 금지합니다.
-3-2. 변경 조건을 기존 TC만으로 검증할 때는 실제 요청한 대상·조작·기대값·시점이 기존 TC의 검증 동작에 포함되는지 확인합니다. 문장에 등장한 과거·부정·제외 값을 추가 시험으로 요구하지 않습니다. 필요한 검사가 다르거나 확인할 수 없으면 재사용 근거로 삼지 말고 부족한 변경분을 후보로 설계합니다. 같은 값이 있어도 매핑·순서·기대 동작이 다르면 동일 검증이 아닙니다.
-4. 모든 confirmed_condition을 test_cases 또는 관련_기존_TC의 source_condition_ids 중 최소 한 곳에 반영합니다. 실제로 바뀐 제품 판정 조건은 신규·수정 후보 또는 변경 후 동작을 이미 그대로 검증하는 기존 TC 중 한 경로에 반영합니다. 보조 기준 연결만으로 그 전체의 시험 완료를 주장하지 않습니다. 준비·선택·복원 절차를 제품 기대 결과로 바꾸지 않습니다. 준비는 preconditions에, 본 시험은 steps에, 종료 후 복원은 restore_steps에 원문의 의미와 순서를 보존하여 상세하게 작성합니다. 복원이 필요하면 restore_required=true로 설정합니다.
-5. 모든 기대 결과는 source_condition_ids로 제품 판정 근거를 연결합니다. 근거에 없는 수치·시간·문구·UI 동작을 추가하지 않습니다. 장비 선택 성공, 사전조건 준비 완료, 시험 종료 후 복원처럼 실행을 위한 절차는 steps·preconditions·restore_steps에만 두고, 변경 요청이 그 동작 자체의 제품 결과를 요구하지 않는 한 expected_results로 만들지 않습니다. Condition 원문에 없는 `선택하고 적용할 수 있다`, `클릭할 수 있다`, `입력할 수 있다` 같은 실행 행동 성공 문장을 새 기대 결과로 만들지 않습니다. Condition 자체가 설정 가능·선택 가능 같은 제품 기능을 요구하면 이를 삭제하지 말고 버튼 활성 상태, 선택값 반영 또는 적용 뒤 상태처럼 실제로 판정할 관찰값으로 구체화합니다.
-5-1. 제출 전 각 TC를 자체 점검합니다. (a) TC의 requirement_ids는 그 TC의 source_condition_ids가 함께 근거를 가져야 하고, (b) 각 기대 결과의 source_condition_ids는 그 TC의 source_condition_ids 범위 안에 있어야 하며, (c) 각 기대 결과의 UI 표시·상태는 연결 Condition의 source_text 원문에 실제로 있어야 합니다. TC 수준 Condition에는 제품 판정 기준뿐 아니라 준비·복원 지시가 포함될 수 있으므로 모든 TC Condition을 억지로 expected_results에 다시 넣지 않습니다. 특히 UI·내부 상태 이중 검증 TC는 사용자가 요청한 UI 변경 결과와 그 동작을 뒷받침하는 내부 상태를 사용하고, 별도의 UI 상태 표시를 새로 만들지 않습니다.
-TC의 requirement_ids에 관련 있어 보이는 번호를 추측해 추가하지 않습니다. 선택한 Condition의 requirement_ids 합집합에서 근거가 있는 번호만 사용하고, 별도 근거가 필요하면 해당 Condition을 source_condition_ids에 함께 연결합니다. 연결 불일치를 숨기려고 조건이나 번호를 임의로 삭제하지 않습니다.
-5-2. initial/requested 모드·온도 필드는 선택 요약입니다. execution_spec에 준비·시험 조작과 값이 있으면 같은 값을 요약에 다시 작성할 필요가 없습니다. 작성할 경우 다른 관제점 값을 넣거나 실행 정의와 모순되게 쓰지 않습니다. 준비·입력·기대값은 서로 구분합니다.
-5-2-1. 실행 정의가 있는 TC는 프로그램의 준비 전 기록과 구조화 restoration을 사용합니다. 별도 restore_observed_hvac_state 표시나 설명에 특정 단어를 반복할 필요는 없습니다. 초기값을 추측하지 않으며 명시된 준비 상태는 실제 확인으로 연결합니다.
-5-2-2. 새 state_effect TC에서는 중앙 관제 전원·모드·풍량·온도·잠금에 같은 준비·복원 기준을 적용합니다. 준비 전 관련 화면·내부값 기록 → 명시된 사전조건 준비·확인 → 시험 → 준비와 시험으로 바뀐 관제점의 원래 관찰 상태 복원·확인 순서입니다. restoration.operation_steps에는 준비와 시험으로 바뀐 관제점을 준비 전 관찰 상태로 복원하고 적용하는 조작 하나를 적고, confirmations에는 실제 ER의 같은 화면·내부 관찰 대상을 OBSERVED_BASELINE으로 비교하도록 연결합니다. 관련 없는 제품 기대결과나 고정 복원값은 추가하지 않습니다. initial_mode·initial_temperature_c는 준비 완료 상태이지 복원 기본값이 아닙니다. 준비 도중 실패해도 원래 상태로 복원하고, 차단 시험도 준비로 바꾼 값은 되돌립니다. 이 공통 조작은 Agent 3의 RESTORE_OBSERVED_CONTROLLER로 구현하며 새 불리언 필드나 기능별 예외를 만들지 않습니다. 기존 HVAC 표시가 있는 TC의 호환 경로는 유지합니다. 다른 기능·다중 장비의 준비와 복원은 추정하지 않습니다.
-5-3. 각 expected_result는 한 observation_layer에서 독립적으로 한 번 판정할 수 있는 관찰값 하나만 기술합니다. 화면 모드·화면 온도·대기값 반영·버튼 활성 상태처럼 서로 다른 관찰값을 한 Expected Result에 묶지 말고 고유한 ER ID로 분리합니다. 내부 장비 객체의 서로 연관된 여러 필드는 하나의 INTERNAL_STATE 결과로 함께 기록할 수 있습니다. Expected Result를 분리한다는 것은 TC 자체를 분리한다는 뜻이 아닙니다.
-5-4. 하나의 TC 안에 여러 조건 구간이 있으면 각 expected_result의 verify_after_step에 그 결과를 확인해야 하는 steps의 문장을 정확히 복사합니다. 마지막에 한꺼번에 확인하면 앞 조건의 결과가 사라질 수 있으므로, 조건별 실행 직후 판정 위치를 명시합니다. 같은 적용 동작을 반복하면 각 steps에 순번 또는 해당 조건을 넣어 서로 구별하고 verify_after_step은 그 완전한 문장을 복사합니다. 확인만 하는 마지막 단계는 직전 조작 직후의 판정이며 별도 클릭을 뜻하지 않습니다.
-5-5. 같은 조작의 UI·내부 상태는 서로 다른 ER로 쓰되 같은 after_action_id에 연결합니다. verify_after_step은 실제 확인하는 TC 절차의 원문을 가리킵니다. 관찰 계층이 다르다는 이유만으로 동일 조작을 반복하거나 중간 복원을 넣지 않습니다. 단일 조작의 이중 검증은 SINGLE_FLOW이며, 복수의 실제 시험 조건이 있을 때만 묶음으로 설계합니다.
-별도의 적용 전 패널 확인은 적용 후 화면·내부값 이중 확인과 함께 둘 수 있습니다. 관찰만 하는 문장이 나뉘어도 사이에 조작이 없다면 같은 after_action_id에 연결합니다. 모든 UI 관찰의 시점을 내부 관찰과 같게 만들 필요는 없습니다. 필수 이중 확인은 같은 조작 시점에 연결합니다. 대상·기대값·필수 관찰의 의미가 맞는지는 근거 검토에서 별도로 확인합니다.
-5-6. 처음 보는 QA 담당자가 재현할 수 있는 상세 초안을 작성합니다. 사전조건에는 대상·초기 상태를, steps에는 화면/조작 위치·대상·입력값·행동을 구체적으로 적습니다. 대상 선택 → 값 선택/입력 → 적용처럼 실제로 다른 조작은 별도 배열 항목으로 나눕니다. 선택·입력과 적용을 한 문장에 합치지 않습니다. 조작 문장에 확인 내용을 붙이지 않습니다(H-4, 2026-10-18 사람 확정). 예: '제습을 적용하고 패널·카드·내부 모드를 확인한다'가 아니라 '제습 모드를 대상 장비에 적용한다'로 쓰고, 확인할 위치·값은 expected_results에 두어 verify_after_step이 그 조작 문장을 가리키게 합니다. 모든 클릭을 기계적으로 쪼개거나 모든 TC를 고정된 3단계로 만들지는 않습니다. 읽기 전용 시험에는 불필요한 선택·적용을 만들지 않습니다.
-5-7. 단일 흐름도 모든 expected_result에 verify_after_step을 명시하고 해당 steps 문장을 정확히 복사합니다. observation_target에는 '대상 장비 카드의 풍량 표시', '대상 장비의 내부 설정값'처럼 어디에서 확인하는지 적고, statement에도 확인 대상을 이해할 수 있게 설명하고 요구사항에 근거한 기대값·상태를 적습니다. 서로 다른 확인 위치의 결과는 별도 ER로 나눕니다. 반복 조건은 각 단계의 값·문맥을 명시해 판정할 단계가 하나로 식별되게 합니다.
-5-8. 준비·조작 확인은 preconditions·steps에 기록하고 제품 판정인 expected_results와 구분합니다. 입력에 근거 없는 화면명·버튼명·선택 표시·내부 필드명을 만들어 상세함을 채우지 않습니다. 복원은 restore_steps에서 복원 대상·초기값 또는 관찰한 원상태·적용·확인 방법을 설명하되 선택과 적용을 한 문장으로 묶어도 됩니다. 복원 실패를 제품 기대 결과로 추가하지 않습니다. 기존 승인 TC는 새 작성 형식에 맞추려고 덮어쓰거나 불필요하게 재생성하지 않습니다.
-5-9. 중앙 관제의 장비 값을 조작할 때는 대상 장비 선택을 값 선택/입력보다 앞의 별도 steps 항목에 씁니다. 입력에 이미 선택된 상태가 근거로 있으면 preconditions에 그 상태를 명시하고 불필요한 재선택은 하지 않습니다. '대상 장비에 MED를 선택한다'는 풍량 선택이지 장비 선택 설명이 아닙니다. 요청의 준비·복원은 해당 필드에서 실제 대상·조작·확인을 구분해 설명합니다. 복원 확인에는 기존 기대결과의 observation_target과 같은 확인 위치, 초기값 또는 실행 전 관찰값과 비교하는 방법을 적습니다. '복원한다', '결과를 확인한다'로 끝내지 않습니다. 초기값 확인과 복원 확인은 제품 기대결과에 추가하지 않습니다.
-5-10. 복원 확인은 대상마다 비교 기준을 구분합니다. 내부 코드와 사용자 화면 표시가 같다고 가정하지 않습니다. 화면과 내부값은 각각 준비 전 같은 관찰 위치에서 기록한 실제 값과 비교합니다. 원문에 명시된 준비값은 사전조건 준비·확인에만 사용하며 복원 목표와 혼동하지 않습니다. 각 대상과 비교 방법을 한 구절에 완결하고, 여러 구절은 '확인하고', '확인하며' 등으로 연결하거나 별도 문장으로 적을 수 있습니다. 다른 대상의 구절에 있는 초기값/시험 전 상태 표현을 빌려 쓰지 않습니다. 근거 없는 표시명이나 사전조건을 추가하지 않습니다.
-6. test_cases는 이번에 필요한 새 시험, 관련_기존_TC는 이미 등록된 시험의 선택입니다. purpose는 설명용이며 이름으로 실제 검증 범위를 대신하지 않습니다. 기존 TC로 충분히 확인할 수 있는 시험은 불필요하게 복제하지 않습니다.
-6-1. 범위 변경과 단일 값/전환 시험의 구분은 설계·검토 공통 기준을 따릅니다. 필수 경계 검사는 같은 범위 규칙의 TC 안에서 조건 구간으로 묶을 수 있습니다. 제출 전에 필수 조건별 실제 조작·관찰을 대조하고, 단순 조건 ID 연결을 검사 완료로 취급하지 않습니다.
-6-2. 현재 V2의 제품 조작 기준은 중앙 관제 패널 하나입니다. 모든 실행 TC는 control_path=CENTRAL을 사용하며 LOCAL·현장 리모컨 TC를 만들지 않습니다.
-7. TC 분리 단위는 입력값 하나가 아니라 하나의 업무 규칙입니다. 같은 관제점·제어 경로·업무 규칙이고 입력값이나 모드만 달라지는 경우에는 하나의 TC로 묶어 중복을 줄입니다. 예시의 특정 모드명·온도값을 고정 규칙으로 사용하지 말고 현재 입력의 Requirement와 confirmed_condition으로 동일 업무 규칙인지 판단합니다.
-7-1. condition_execution은 본 시험의 판정 구간 수를 나타냅니다. 시작 상태 준비 후 목표 결과 하나를 확인하면 SINGLE_FLOW입니다. 준비 상태와 목표 상태가 다르다는 이유만으로 SEQUENTIAL_TRANSITION을 선택하지 않습니다. 요청이 여러 중간 결과 자체를 순서대로 확인하도록 요구하면 SEQUENTIAL_TRANSITION, 여러 독립 조건을 각각 초기화해 시험하면 INDEPENDENT_VARIANTS입니다. 준비·복원을 빼도 본 시험 조건이 여러 개인지 먼저 확인합니다.
-7-2. 독립 조건의 시험 사이에 필요한 초기화·재준비는 steps와 execution_spec에 연결합니다. intermediate_reset_steps는 선택 색인이며 작성하면 해당 steps 원문을 참조합니다. 실제로 필요한 초기화를 분류명이나 색인으로 대신할 수 없습니다.
-7-3. grouping_reason은 선택 설명입니다. 묶음의 적절성은 이름이 아니라 실제 조작·중간 확인·초기화가 요청과 맞는지로 판단합니다.
-7-4. 묶음 TC의 각 조건은 steps와 expected_results에서 구분되어야 합니다. 한 조건의 입력·행동·결과를 작성한 뒤 필요한 초기화 또는 전환을 거쳐 다음 조건을 작성합니다. 모든 결과를 TC 마지막 상태에서 한꺼번에 확인하도록 작성하지 않습니다.
-7-5. 실제 입력값과 조작 순서는 execution_spec에 작성합니다. requested_modes·requested_temperatures_c는 선택 요약이며 값의 나열 방식이나 중복만으로 시험을 분리하지 않습니다. 자동화 단계는 요약이나 문장을 다시 해석해 값을 만들지 않습니다.
-7-5a. execution_spec이 있는 TC의 실제 입력·버튼 조작은 그 정의를 기준으로 연결합니다. 증가/감소 등 상대 조작은 버튼과 순서만 명시하며 결과로 유지돼야 할 값을 requested 값으로 만들지 않습니다. 별도 명시적 모드·온도 입력이 없으면 requested 필드는 null/빈 배열로 둡니다. 기대값은 expected_results와 verifications에 보존합니다.
-7-6. 초기 준비·중간 초기화·최종 복원에만 쓰는 값은 시험 조건의 requested 값에 섞지 않습니다. 해당 절차와 초기값으로 기록합니다. 복원값을 요청 목록에 넣어 생긴 검사 오류는 그 값을 분리해 고치며, 오류를 피하려고 반복 시험 조건을 새로 만들지 않습니다.
-8. REQ-CONTROL-001을 검증하면 CENTRAL 경로에서 관제 패널을 통한 적용을 다룹니다. 과거 산출물의 LOCAL 값이나 REQ-LOCAL-*를 현재 SRS 근거로 추정하거나 새 TC로 확장하지 않습니다.
-9. target_role은 고정 장치 ID를 추측하지 말고 PRIMARY_TEST_DEVICE처럼 역할로 지정합니다.
-10. test_data 요약을 작성할 경우 해당 관제점의 값만 쓰며 실행 정의와 일치시킵니다. 실제 준비 상태와 그 확인, 본 시험 조작·기대값은 실행 정의에 빠짐없이 연결합니다.
-11. 상태 변경 또는 차단을 검증하는 TC는 사용자 화면(UI)과 내부 상태(INTERNAL_STATE)를 함께 확인합니다. 이중 검증은 동일 변경을 서로 다른 계층에서 확인하는 원칙이지, 요청에 없는 화면 배지·선택 표시·잠금 상태 표시를 추가하라는 뜻이 아닙니다. 변경된 버튼 disabled 상태가 UI 결과라면 내부 locked 같은 근거 상태와 짝지을 수 있으며 별도 잠금 표시 UI를 요구하지 않습니다. 변경 요청·SRS에 `locked`, `mode`, `setTemp`처럼 내부 필드 식별자가 명시돼 있으면 INTERNAL_STATE 기대 결과에도 그 식별자를 번역하거나 생략하지 않고 정확히 보존합니다.
-11-1. common_qa_criteria·domain_qa_criteria·feature_requirement_ids는 선택적인 설명용 QA 분류입니다. 적용 기준이 분명할 때 기록하고 없으면 빈 배열을 허용합니다. 분류를 채우기 위해 새 검사·기대값을 추가하지 않습니다. requirement_ids·source_condition_ids와 각 기대결과의 실제 요구 연결은 필수이며, feature_requirement_ids를 기록한다면 해당 TC의 Requirement ID만 사용합니다.
-11-2. 각 TC는 이전 TC 결과에 의존하지 않고 단독 실행 가능해야 합니다. independent_execution=true로 선언하되 선언·설명만으로 독립 실행이 입증되지는 않습니다. independence_reason은 선택 설명으로 null을 허용합니다. 필요한 초기 상태는 preconditions·test_data로 직접 준비하고 확인하며, 상태가 바뀌면 restore_steps로 복원합니다.
-11-3. UI와 내부 상태를 함께 확인해야 하면 double_assert_policy=REQUIRED를 사용합니다. UI 전용·내부 상태 전용·해당 없음은 각각 UI_ONLY·INTERNAL_ONLY·NOT_APPLICABLE로 구분하고 double_assert_reason에 예외 사유를 기록합니다.
-12. 안내 표시 조건을 검증하는 TC는 NOTIFICATION 기대 결과를 포함합니다. 정확한 Toast 문구가 입력에 없으면 문구를 만들어 일치 검증하지 않습니다.
-13. 모든 새 TC는 state_effect를 분류합니다. 조회만 하면 READ_ONLY, 값을 바꾸면 STATE_CHANGE, 변경 차단을 확인하면 BLOCKED_CHANGE입니다. READ_ONLY는 restore_required=false와 빈 restore_steps를 사용하고 준비 과정에서도 값을 바꾸지 않습니다. STATE_CHANGE와 BLOCKED_CHANGE는 restore_required=true로 작성합니다. BLOCKED_CHANGE도 제품 오류로 값이 바뀔 수 있으므로 복원 절차가 필요하며, 실행기는 상태가 그대로이면 복원 조작을 생략합니다. 시험 전 실제 상태를 기록하고 변경한 대상만 복원한 뒤 같은 관찰 위치에서 비교합니다. 임의 기본값으로 초기화하지 않습니다. 복원은 제품 expected_results가 아닌 restore_steps에 기록합니다. 차단 TC에는 알림뿐 아니라 요구된 차단 결과를 실제 대상 상태로 확인할 근거가 있어야 합니다. 모든 조작 이전 값 유지가 자동 기대결과는 아닙니다. 안전한 읽기·복원 방법이 현재 지원 범위에 없으면 automation_candidate=false와 사유를 작성합니다. 복원 실패는 기록하고 같은 실행 환경을 재사용하지 않습니다.
-14. TC가 참조하는 Requirement와 Condition은 입력에 존재하는 ID만 사용합니다.
-15. confirmed_condition을 여러 TC가 공유할 수 있지만 동일 목적의 TC를 표현만 바꿔 중복 생성하지 않습니다.
-16. automation_candidate는 현재 가상 중앙제어 화면과 내부 상태 조회로 자동화 가능한지 판단한 후보 표시일 뿐이며 코드를 만들지 않습니다.
-16-1. 신규·수정 후보가 필요한 경우에는 현재 단일 장비 MVP가 실행할 수 있도록 target_role=PRIMARY_TEST_DEVICE인 automation_candidate TC를 우선 설계합니다. 다만 변경 후 조건을 관련 기존 TC가 전부 검증하면 억지로 신규 후보를 만들지 않습니다.
-17. SRS 문구의 후속 개정 필요, 정확한 안내 문구 미지정처럼 기대 동작을 바꾸지 않고 현재 TC를 설계할 수 있는 참고 사항은 coverage_notes에 남깁니다.
-17-1. Agent 1의 excluded_scope와 `제외된_정보_부족`은 TC로 만들지 말고 Agent 2의 `제외_범위`와 `제외된_정보_부족`에 원문 그대로 인계합니다. 다만 시험 준비·종료 후 복원 문장이 과거 Agent 1 결과의 excluded_scope에 들어 있어도 실제 제외 범위로 인계하지 말고 규칙 4의 TC 절차로 보존합니다. 제외 범위의 상태 유지 여부를 확인하는 기대 결과도 새로 만들지 않습니다. 확정된 긍정적 변경 결과만 test_cases에 포함합니다.
-18. 현재 TC의 기대 결과와 실행 범위가 이미 근거로 확정됐지만 사람이 최종 보고에서 확인하면 좋은 사항은 `최종_확인_사항`에 남깁니다. 이 항목은 후속 자동 실행을 중단하지 않습니다.
-19. 서로 충돌하는 권한 입력, 기대 결과 미정처럼 TC 의미를 확정할 수 없어 후속 자동 진행을 중단해야 하는 항목만 `중단_확인_사항`에 남깁니다.
-20. UPDATE_REQUIRED 자체는 변경관리의 정상 결과이므로 그것만으로 `중단_확인_사항` 또는 `최종_확인_사항`을 만들지 않습니다.
-21. existing_tc_comparison_completed=true로 기록합니다. 관련_기존_TC에는 제공된 기존 TC ID만 사용하고 각 선택이 어떤 유지·영향 조건을 회귀 확인하는지 source_condition_ids와 selection_reason으로 설명합니다. 변경 대상 Requirement를 포함하는 기존 TC도 `검증 동작`을 대조하되 변경 후에도 그대로 유효한 경우에만 선택합니다. 재사용할 수 없으면 억지로 선택하지 말고 TC ID와 미선택 이유를 coverage_notes에 기록합니다.
-22. [코드로 확인한 SRS 개정 범위]의 required_requirement_ids에만 `SRS_개정_제안`을 정확히 한 건씩 기록합니다. 검토된 VERIFY 대상은 기존 기준 시험이므로 개정안을 만들지 않습니다. MODIFIED·UPDATE_REQUIRED의 개정안은 실제 정책 변경에만 필요하며 기존 정책을 시험 시나리오 한 건으로 대체하지 않습니다. already_reflected_requirement_ids는 요청 after_value 전체 문장과 현재 인수 기준이 앞뒤 공백을 제외하고 일치한 대상입니다. 이 대상은 개정안 없이 기존 TC 대조·필요한 시험 설계를 계속하고, 이미 반영돼 SRS 개정이 불필요하다는 사실을 coverage_notes에 설명합니다. 같은 문장을 수정안으로 제출하거나 이를 사람이 새로 승인해야 한다고 쓰지 않습니다. 요청 밖 내용을 추가하거나 표현만 바꿔 개정안을 만들지 않습니다. 해당 목록 밖의 문장 유사성·TC 재사용 여부만으로 개정을 생략하지 않습니다. current_acceptance_criteria는 응답에 작성하지 않습니다. 프로그램이 requirement_id의 고정 SRS 원문을 붙입니다. 기존 SRS는 계속 읽고 유지 조건을 보존하며, proposed_acceptance_criteria는 확정 Condition과 변경 요청에 근거한 새 판정 문구여야 합니다. Requirement 문장 자체는 바꾸지 않습니다. source_condition_ids로 근거를 연결하고, 사람이 승인하기 전 SRS가 변경된 것처럼 표현하지 않습니다. proposed_acceptance_criteria는 추가 문장이 아니라 해당 Requirement의 인수 기준 셀 전체를 대체합니다. 요청으로 바뀌지 않은 기존 기준은 보존하고, 바뀌는 부분만 요청대로 교체합니다. 새 기능 설명만 적어 기존 적용·유지 조건을 지우지 않습니다.
+3-1. 기존 TC 카탈로그의 `검증 동작`이 VERIFY·유지 조건 또는 변경 후 조건을 그대로 검증하고 TC 전체 실행이 이번 범위에 맞으면 관련_기존_TC로 선택합니다. Requirement ID만 같거나 일부 검사가 맞는다는 이유로 재사용하지 않습니다. 기존 TC는 전체 단위로 실행되므로 명시적 제외와 충돌하는 검사가 포함돼 있으면 선택하지 않고 미선택 이유를 coverage_notes에 기록합니다. 일부 검사만 실행했다고 가정하지 않으며 기존 assertion을 삭제하지 않습니다. 재사용할 수 없으면 요청된 변경분 후보가 실제로 확인하는 유지 기준도 함께 연결하되, 관련 없는 유지 조건을 연결하거나 유지 SRS 전체를 검증했다고 주장하지 않습니다. 기존 TC가 변경 후 조건을 전부 검증하면 test_cases를 비워 둘 수 있습니다. 동일 검사의 중복 생성은 금지합니다.
+3-2. 변경 조건을 기존 TC만으로 검증할 때는 실제 요청한 대상·조작·기대값·시점과 허용/차단·활성/비활성 동작이 기존 TC의 검증 동작에 포함되는지 확인합니다. 같은 값이 있어도 매핑·순서·기대 동작이 다르면 동일 검증이 아닙니다. 문장에 등장한 과거·부정·제외 값을 추가 시험으로 요구하지 않습니다. 필요한 검사가 다르거나 확인할 수 없으면 부족한 변경분을 후보로 설계합니다.
+3-3. 조건 하나를 여러 기존 TC가 나눠 검증하면 실제로 그 부분을 검증하는 모든 선택에 같은 조건 ID를 연결합니다. 다른 조건 때문에 선택한 TC로 커버리지를 추정하지 않습니다. 각 선택이 어떤 유지·영향 조건을 회귀 확인하는지 selection_reason으로 설명합니다.
+3-4. 유지 SRS 조건은 제품 기준이며 그 전체가 이번 실행 범위라는 뜻은 아닙니다. 변경 요청의 대상·동작·확인값·명시적 제외를 기준으로 이번에 검증할 부분을 설계하고, 원문 인용의 모든 선택지·지원 값 전체·보조 근거의 전체 SRS를 시험했다고 주장하지 않습니다. 유지 조건이라는 이유로 이번 요청에 필요한 검사를 생략하지도 않으며, 후보와 기존 TC를 합친 실제 검사 범위만 설명합니다. 복합 조건이 이번 범위보다 넓으면 coverage_notes에 실제 확인한 부분과 참고만 한 부분을 구분합니다. 누락된 필수 시험을 보조 근거로 바꾸거나 명시 제외 밖 회귀 TC를 추가해 연결을 맞추지 않습니다. 필수 검사를 후보·기존 TC 어느 쪽에서도 다룰 수 없거나 제외·요청이 충돌하면 누락을 숨기지 말고 사람 확인 사항으로 남깁니다.
+4. 기존 TC 전용 실행: test_cases가 비어 있고 관련_기존_TC만 있으면 준비·복원 메모를 넣기 위해 신규 TC를 만들지 않습니다. 실행기는 요청 원문의 시험 절차 메모를 마지막 사람 검토로 전달하며 기존 자동화가 그 메모를 수행했다고 추정하지 않습니다. 기존 절차 변경이 필요하면 수정 후보를 설계합니다.
+5. test_cases는 이번에 필요한 새 시험, 관련_기존_TC는 이미 등록된 시험의 선택입니다. purpose는 설명용이며 이름으로 실제 검증 범위를 대신하지 않습니다. confirmed_condition을 여러 TC가 공유할 수 있지만 동일 목적의 TC를 표현만 바꿔 중복 생성하지 않습니다.
+6. 신규·수정 후보가 필요하면 현재 단일 장비 MVP가 실행할 수 있도록 target_role=PRIMARY_TEST_DEVICE인 automation_candidate TC를 우선 설계합니다. target_role은 고정 장치 ID를 추측하지 않고 역할로 지정합니다. automation_candidate는 자동화 가능성 표시일 뿐 코드를 만들지 않으며, 안전한 읽기·복원 방법이 지원 범위에 없으면 false와 사유를 작성합니다. 요구된 새 기능이 제품에 아직 없다는 이유로 TC를 삭제하지 않습니다.
+7. Agent 1의 excluded_scope와 `제외된_정보_부족`은 TC로 만들지 말고 `제외_범위`와 `제외된_정보_부족`에 원문 그대로 인계합니다. 제외 범위의 상태 유지 여부를 확인하는 기대 결과도 새로 만들지 않습니다.
+8. 설명 필드 구분: 기대 동작을 바꾸지 않는 참고 사항(SRS 후속 개정, 정확한 안내 문구 미지정, 미선택 기존 TC 이유)은 coverage_notes에, 이미 확정됐지만 사람이 최종 보고에서 확인하면 좋은 사항은 `최종_확인_사항`(후속 실행을 막지 않음)에, 충돌하는 권한 입력·기대 결과 미정처럼 TC 의미를 확정할 수 없는 항목만 `중단_확인_사항`에 남깁니다. UPDATE_REQUIRED 자체는 정상 결과이므로 그것만으로 확인 사항을 만들지 않습니다. 설명 필드에 내부 분류명·정책 키나 코드 처리 과정을 풀어 쓰지 않고, 이미 작성한 절차·복원 규칙을 반복하지 않습니다. 추가 확인 사항이 없으면 빈 목록으로 둡니다.
+
+[기대 결과]
+9. 모든 기대 결과는 source_condition_ids로 제품 판정 근거를 연결하고, 근거에 없는 수치·시간·문구·UI 동작·알림·색상·버튼을 추가하지 않습니다. 각 ER은 자기 근거 조건의 코드·수치와 허용/차단·활성/비활성 정책을 보존합니다. 시험 입력값은 기대 출력의 근거가 아니며, 초기값 유지는 근거 조건이 유지를 요구할 때만 기대값이 됩니다. 요청된 상태를 다른 지원 상태로 바꾸지 않습니다. 근거 개수와 검증 사실 개수는 다릅니다. 근거 ID를 늘려 새 검사나 값을 만들지 않습니다.
+10. 장비 선택 성공, 사전조건 준비 완료, 시험 종료 후 복원처럼 실행을 위한 절차는 preconditions·steps·restore_steps에만 두고 expected_results로 만들지 않습니다. Condition 원문에 없는 `선택하고 적용할 수 있다`, `클릭할 수 있다` 같은 실행 행동 성공 문장을 기대 결과로 만들지 않습니다. Condition 자체가 설정 가능·선택 가능 같은 제품 기능을 요구하면 버튼 활성 상태, 선택값 반영 또는 적용 뒤 상태처럼 실제로 판정할 관찰값으로 구체화합니다. TC 수준 Condition에 준비·복원 지시가 있어도 억지로 expected_results에 다시 넣지 않습니다.
+11. 각 expected_result는 한 대상·한 판정 시점·한 observation_layer의 독립된 사실 하나만 담습니다. 화면 모드·화면 온도·대기값 반영·버튼 활성 상태처럼 다른 관찰값은 고유한 ER ID로 분리하되 모든 원래 요구를 보존합니다. 내부 장비 객체의 연관된 여러 필드는 하나의 INTERNAL_STATE 결과로 기록할 수 있습니다. ER 분리는 TC 분리를 뜻하지 않으며, 문장 부호로 기계적으로 나누지 않습니다.
+12. 상태 변경 또는 차단을 검증하는 TC는 사용자 화면(UI)과 내부 상태(INTERNAL_STATE)를 함께 확인합니다(double_assert_policy=REQUIRED). 이중 검증은 동일 변경을 다른 계층에서 확인하는 원칙이지, 요청에 없는 화면 배지·선택 표시·잠금 표시를 추가하라는 뜻이 아닙니다. 변경된 버튼 disabled 상태가 UI 결과라면 내부 locked 같은 근거 상태와 짝지을 수 있습니다. 변경 요청·SRS에 `locked`, `mode`, `setTemp`처럼 내부 필드 식별자가 명시돼 있으면 INTERNAL_STATE 기대 결과에 그 식별자를 그대로 보존합니다. UI 전용·내부 전용·해당 없음은 UI_ONLY·INTERNAL_ONLY·NOT_APPLICABLE과 double_assert_reason으로 구분합니다.
+13. 화면 조작 설명과 내부 데이터 값은 구분합니다. UI 기대결과에 내부 enum을 곧바로 화면 표시 문자열처럼 쓰지 않습니다. 미확인 표시명·색상은 coverage_notes에 구분합니다. 안내 표시 조건을 검증하는 TC는 NOTIFICATION 기대 결과를 포함하되, 정확한 Toast 문구가 입력에 없으면 문구를 만들어 일치 검증하지 않습니다.
+14. common_qa_criteria·domain_qa_criteria·feature_requirement_ids는 선택적인 설명용 QA 분류입니다. 적용 기준이 분명할 때 기록하고 없으면 빈 배열을 허용하며, 분류를 채우려고 새 검사·기대값을 추가하지 않습니다. feature_requirement_ids를 기록하면 해당 TC의 Requirement ID만 사용합니다.
+15. 근거 검토가 지적한 추가 주장은 제거·수정하되 원문에 있는 요구는 삭제하지 않습니다. 불확실하면 확인 필요로 남깁니다.
+
+[절차 상세화]
+16. 처음 보는 QA 담당자가 재현할 수 있는 상세 초안을 작성합니다. 입력 절차 원문은 Agent 1의 해시 검증된 기록에 보존되며, TC에는 그 의미와 순서를 보존하여 준비는 preconditions에, 본 시험은 steps에, 종료 후 복원은 restore_steps에 나눠 씁니다. 원문 한 문장을 통째로 steps에 복사하거나 문장 조각을 이어 붙이는 방식으로 상세 작성을 대신하지 않습니다. 별도 절차 검토가 입력 원문에서 역으로 누락·순서 변경·임의 추가를 확인합니다.
+17. 사전조건에는 대상·초기 상태를, steps에는 화면/조작 위치·대상·입력값·행동을 구체적으로 적습니다. 대상 선택 → 값 선택/입력 → 적용처럼 실제로 다른 조작은 별도 배열 항목으로 나눕니다. 선택·입력과 적용을 한 문장에 합치지 않습니다. 조작 문장에 확인 내용을 붙이지 않습니다(H-4, 2026-10-18 사람 확정). 예: '제습을 적용하고 패널·카드·내부 모드를 확인한다'가 아니라 '제습 모드를 대상 장비에 적용한다'로 쓰고, 확인할 위치·값은 expected_results에 두어 verify_after_step이 그 조작 문장을 가리키게 합니다. 모든 클릭을 기계적으로 쪼개거나 모든 TC를 고정된 3단계로 만들지는 않으며, 읽기 전용 시험에는 불필요한 선택·적용을 만들지 않습니다.
+18. 중앙 관제의 장비 값을 조작할 때는 대상 장비 선택을 값 선택/입력보다 앞의 별도 steps 항목에 씁니다. 입력에 이미 선택된 상태가 근거로 있으면 preconditions에 명시하고 재선택하지 않습니다. '대상 장비에 MED를 선택한다'는 풍량 선택이지 장비 선택이 아닙니다.
+19. 입력창·버튼·클릭 횟수·화면 표시명·내부 필드명이 제공된 근거에 없으면 추정하지 않습니다. 입력창 근거가 없는데 '입력한다'고 단정하지 말고 대상·목표값·행동을 설명하며, 실제 조작 수단은 Agent 3의 화면 관찰로 확인합니다. 근거가 있으면 그 수단과 횟수를 구체적으로 적습니다.
+20. 준비·조작 확인은 preconditions·steps에 기록하고 제품 판정인 expected_results와 구분합니다. 준비 확인과 복원 확인을 제품 expected_results로 늘려 검사 오류를 피하지 않습니다. 기존 승인 TC는 새 작성 형식에 맞추려고 덮어쓰거나 불필요하게 재생성하지 않습니다.
+21. 각 TC는 이전 TC 결과에 의존하지 않고 단독 실행 가능해야 합니다. independent_execution=true로 선언하되 선언만으로 독립 실행이 입증되지는 않습니다. independence_reason은 선택 설명으로 null을 허용합니다. 필요한 초기 상태는 preconditions와 실행 정의로 직접 준비하고 확인합니다.
+
+[판정 시점]
+22. verify_after_step에는 그 결과를 확인해야 하는 steps 문장을 정확히 복사합니다. 확인만 하는 마지막 단계는 직전 조작 직후의 판정이며 별도 클릭을 뜻하지 않습니다. 같은 적용 동작을 반복하면 각 steps에 순번 또는 해당 조건을 넣어 서로 구별합니다. observation_target에는 '대상 장비 카드의 풍량 표시', '대상 장비의 내부 설정값'처럼 어디에서 확인하는지 적고, statement에도 확인 대상과 요구사항에 근거한 기대값·상태를 적습니다.
+23. 같은 조작의 UI·내부 상태는 서로 다른 ER로 쓰되 같은 after_action_id에 연결합니다. 관찰 계층이 다르다는 이유만으로 동일 조작을 반복하거나 중간 복원을 넣지 않습니다. 별도의 적용 전 패널 확인은 적용 후 이중 확인과 함께 둘 수 있고, 관찰만 하는 문장이 나뉘어도 사이에 조작이 없다면 같은 after_action_id에 연결합니다. 근거가 있는 중간 판정만 단계에 연결합니다.
+
+[조건 묶음]
+24. 전원·운전 모드·풍량·온도·잠금 및 다른 관제점에 같은 원칙을 적용합니다: 요청한 목표 결과만 본 시험으로 확인하고, 그 시험을 위한 시작 상태 준비는 사전조건으로 분리합니다. 준비→목표 전환 하나는 SINGLE_FLOW입니다. 준비·복원을 빼도 본 시험 조건이 여러 개인지 먼저 확인합니다.
+25. TC 분리 단위는 입력값 하나가 아니라 하나의 업무 규칙입니다. 같은 관제점·제어 경로·업무 규칙이고 입력값이나 모드만 달라지면 하나의 TC로 묶어 중복을 줄입니다. 필수 경계 검사는 같은 범위 규칙의 TC 안에서 조건 구간으로 묶을 수 있으며, 범위 변경과 단일 값/전환 시험의 구분은 설계·검토 공통 기준을 따릅니다. 예시의 모드명·온도값을 고정 규칙으로 쓰지 않고 현재 입력의 Requirement와 confirmed_condition으로 판단합니다. 제출 전에 필수 조건별 실제 조작·관찰을 대조하고, 조건 ID 연결만으로 검사 완료로 취급하지 않습니다.
+26. condition_execution은 본 시험의 판정 구간 수입니다. 요청이 여러 중간 결과 자체를 순서대로 확인하도록 요구하면 SEQUENTIAL_TRANSITION, 여러 독립 조건을 각각 초기화해 시험하면 INDEPENDENT_VARIANTS입니다. 준비 상태와 목표 상태가 다르다는 이유만으로 SEQUENTIAL_TRANSITION을 선택하지 않습니다. 묶음 TC의 각 조건은 steps와 expected_results에서 구분하고, 조건별 실행 직후 판정 위치를 명시하며, 모든 결과를 마지막 상태에서 한꺼번에 확인하지 않습니다.
+27. 독립 조건 사이에 필요한 초기화·재준비는 steps와 execution_spec에 연결합니다. intermediate_reset_steps는 선택 색인이며 작성하면 해당 steps 원문을 참조합니다. grouping_reason도 선택 설명이며, 묶음의 적절성은 실제 조작·중간 확인·초기화가 요청과 맞는지로 판단합니다.
+28. 실제 입력값과 조작 순서는 execution_spec에 작성합니다. initial/requested 모드·온도 필드와 requested_modes·requested_temperatures_c는 선택 요약이며, 작성할 경우 해당 관제점 값만 쓰고 다른 관제점 값을 넣거나 실행 정의와 모순되게 쓰지 않습니다. 증가/감소 같은 상대 조작은 버튼과 순서만 명시하고, 결과로 유지돼야 할 값을 requested 값으로 만들지 않습니다(명시적 입력이 없으면 null·빈 배열). 준비·중간 초기화·최종 복원에만 쓰는 값은 requested 값에 섞지 않습니다. 준비·입력·기대값은 서로 구분합니다.
+
+[복원]
+29. 새 TC는 restoration을 작성합니다(READ_ONLY는 operation_steps·confirmations가 빈 목록이고 verify_when=AFTER_RESTORE). 중앙 관제 전원·모드·풍량·온도·잠금은 같은 순서를 따릅니다: 준비 전 관련 화면·내부값 기록 → 명시된 사전조건 준비·확인 → 시험 → 준비와 시험으로 바뀐 관제점을 준비 전 관찰 상태로 복원·확인. 준비 도중 실패해도, 차단 시험이어도 준비로 바꾼 값은 되돌립니다. 이 공통 조작은 Agent 3의 RESTORE_OBSERVED_CONTROLLER로 구현하며 새 필드나 기능별 예외를 만들지 않습니다.
+30. restoration.operation_steps에는 복원 조작 문장을, confirmations에는 사람이 읽는 확인 문장을 적고, operation_steps 다음 각 confirmation.source_text를 이어 붙인 결과가 restore_steps와 순서·내용 모두 같아야 합니다. NOTIFICATION이 아닌 ER마다 result_id를 confirmations 전체에서 정확히 한 번 연결하고, 각 comparison은 확인 문장 전체를 source_excerpt로 복사하며 basis=OBSERVED_BASELINE입니다. 같은 대상·기준을 확인하는 경우에만 하나의 confirmation에 여러 result_id를 묶습니다.
+31. 복원 확인은 기존 ER의 같은 관찰 위치(화면·내부값 각각)를 준비 전 실제 기록값과 비교합니다. 내부 코드와 화면 표시가 같다고 가정하지 않고, 임의 기본값·고정 초기값으로 초기화하거나 initial_mode·initial_temperature_c를 복원 목표로 쓰지 않습니다(그것은 준비 완료 상태입니다). 원문에 명시된 준비값은 사전조건 준비·확인에만 사용하며 복원 목표와 혼동하지 않습니다. 확인 문장은 대상과 비교 방법을 한 구절에 완결하고 '복원한다', '결과를 확인한다'로 끝내지 않습니다. 확인 문장에 추가 조작이나 제품 기대결과를 넣지 않으며, 복원 실패를 제품 기대 결과로 추가하지 않습니다. 다른 기능·다중 장비의 준비와 복원은 추정하지 않습니다.
+
+[SRS 개정안]
+32. [코드로 확인한 SRS 개정 범위]의 required_requirement_ids에만 `SRS_개정_제안`을 정확히 한 건씩 기록합니다. 검토된 VERIFY 대상은 기존 기준 시험이므로 개정안을 만들지 않습니다. MODIFIED·UPDATE_REQUIRED의 개정안은 실제 정책 변경에만 필요하며 기존 정책을 시험 시나리오 한 건으로 대체하지 않습니다. already_reflected_requirement_ids는 요청 after_value 전체 문장과 현재 인수 기준이 일치한 대상이므로 개정안 없이 시험 설계를 계속하고, 이미 반영돼 개정이 불필요하다는 사실만 coverage_notes에 적습니다.
+33. current_acceptance_criteria는 응답에 작성하지 않습니다(프로그램이 고정 SRS 원문을 붙입니다). proposed_acceptance_criteria는 해당 Requirement의 인수 기준 셀 전체를 대체하는 문구입니다: 요청으로 바뀌지 않은 기존 기준은 보존하고 바뀌는 부분만 확정 Condition·변경 요청에 근거한 수치로 교체하며, 새 한계·요청 밖 내용·표현만 바꾼 개정을 만들지 않습니다. Requirement 문장 자체는 바꾸지 않고, source_condition_ids로 근거를 연결하며, 사람이 승인하기 전 SRS가 변경된 것처럼 표현하지 않습니다.
+
 작성 수준 예시 (아래는 기존 필드의 일부만 발췌한 형식 참고이며 이번 입력의 제품 기준이 아닙니다):
-예시 A의 입력이 '오류·잠금 없는 단일 장비, 초기 LOW, MED 적용 직후 카드 중풍·내부 fanSpeed=MED, 종료 후 LOW 복원'을 명시한 경우:
+예시 A의 입력이 '오류·잠금 없는 단일 장비, 초기 LOW, MED 적용 직후 카드 중풍·내부 fanSpeed=MED'를 명시한 경우:
 preconditions:
 - 중앙 관제 패널에서 오류와 잠금이 없는 단일 장비를 대상으로 합니다.
-- 첫 실행 기본 상태인 LOW 풍량을 확인한 뒤 시험을 시작합니다.
+- 대상 장비의 풍량이 LOW인지 확인한 뒤 시험을 시작합니다.
 steps:
 1. 중앙 관제 화면에서 시험할 대상 장비 카드를 선택한다.
 2. 선택한 장비의 제어 패널에서 풍량을 MED로 선택한다.
@@ -132,14 +118,13 @@ steps:
 expected_results:
 - ER-001: 대상 장비 카드의 풍량 표시에 중풍이 표시된다. observation_target='대상 장비 카드의 풍량 표시', observation_layer=UI.
 - ER-002: 대상 장비의 내부 fanSpeed는 MED이다. observation_target='대상 장비의 내부 fanSpeed', observation_layer=INTERNAL_STATE.
-두 결과의 verify_after_step에는 3번 문장을 번호 없이 정확히 복사하고 각 source_condition_ids는 이번 입력의 해당 제품 조건에 연결합니다. 사람이 보는 3-1·3-2는 단계별 결과 표기이며 JSON의 ER ID를 바꾸지 않습니다.
-restore_steps:
-- 시험 뒤 대상 장비를 LOW 풍량으로 복원하고 적용합니다.
-- 복원 후 대상 장비의 내부 fanSpeed가 초기값 LOW로 돌아왔는지 확인한다.
-화면 복원도 확인할 경우에는 '복원 후 대상 장비 카드의 풍량 표시가 실행 전 상태와 같은지 확인한다'를 별도 확인 문장으로 씁니다. 내부 LOW 코드로 화면 표시명을 추정하지 않습니다.
+두 결과의 verify_after_step에는 3번 문장을 번호 없이 정확히 복사하고 각 source_condition_ids는 이번 입력의 해당 제품 조건에 연결합니다.
+restore_steps(= restoration 조작 + 확인):
+- 준비와 시험으로 바뀐 관제점을 준비 전 관찰한 원래 상태로 복원하고 적용한다.
+- 대상 장비 카드의 풍량 표시를 준비 전 관찰값과 비교한다. (ER-001, OBSERVED_BASELINE)
+- 대상 장비의 내부 fanSpeed를 준비 전 관찰값과 비교한다. (ER-002, OBSERVED_BASELINE)
 대상 선택 성공·알림·선택 색상·LOW의 한글 표시를 새 expected_results로 만들지 않습니다. HIGH 유지 조건을 검증하는 승인 TC가 있다면 관련_기존_TC로 재사용합니다.
-
-예시 B: 입력이 '초기 설정 온도 24°C, 30°C 적용 후 카드·내부 설정 온도 30°C'를 요구하면 대상 선택 → 설정 온도를 30°C로 조절 → 적용으로 작성합니다. 입력창이 명시된 경우만 '30°C를 입력한다', 1회당 1°C인 증가 버튼과 현재 24°C가 근거로 제공된 경우만 '증가 버튼을 6회 누른다'고 구체화합니다. 조작 수단이 없는 입력에서 버튼·횟수를 추정하지 않습니다. 적용 직후 카드 설정 온도와 내부 설정 온도를 각각 확인합니다. 복원은 대상 장비에 초기 24°C를 적용한 뒤 같은 내부 설정 온도가 24°C인지 확인합니다. 예시 A의 풍량·MED·LOW·문구를 복사하지 않습니다.
+예시 B: 입력이 '초기 설정 온도 24°C, 30°C 적용 후 카드·내부 설정 온도 30°C'를 요구하면 대상 선택 → 설정 온도를 30°C로 조절 → 적용으로 작성합니다. 입력창이 명시된 경우만 '30°C를 입력한다', 1회당 1°C인 증가 버튼과 현재 24°C가 근거로 제공된 경우만 '증가 버튼을 6회 누른다'고 구체화합니다. 조작 수단이 없는 입력에서 버튼·횟수를 추정하지 않습니다. 적용 직후 카드 설정 온도와 내부 설정 온도를 각각 확인하고, 복원은 예시 A와 같이 준비 전 관찰값과 비교합니다. 예시 A의 풍량·MED·LOW·문구를 복사하지 않습니다.
 예시 C: 입력이 현재 상태를 조회하는 읽기 전용 시험이면 조회 단계와 그 단계의 기대결과만 작성합니다. 대상 선택이 실제로 필요한 경우만 기록하며 값 입력·적용·복원을 억지로 추가하지 않습니다.
 세 예시는 상세한 작성 방식만 보여줍니다. 값·화면명·필드명·조건 ID·초기 상태는 반드시 현재 입력에서 가져오며, 예시를 근거로 제품 판정이나 시험 범위를 추가하지 않습니다.
 """.strip()
@@ -235,15 +220,6 @@ class Agent2Response:
 
 
 AGENT2_SYSTEM_INSTRUCTIONS += """
-각 ExpectedResult는 한 대상·한 판정 시점의 독립된 검증 사실 하나만 담으세요.
-화면 표시와 내부값 등 독립 사실은 각 result_id로 구분하고 모든 원래 요구를 보존하세요.
-문장 부호를 기준으로 기계적으로 나누지 마세요. 새 기능/알림/색상/버튼을 원문 근거 없이 추가하지 마세요.
-근거 검토가 지적한 추가 주장은 제거/수정하되, 원문에 있는 요구는 삭제하지 않습니다.
-요구된 새 기능이 제품에 아직 없다는 이유로 TC를 삭제하지 않습니다. 불확실하면 확인 필요로 남깁니다.
-"""
-
-
-AGENT2_SYSTEM_INSTRUCTIONS += """
 새 TC에는 execution_spec을 함께 작성합니다. 이는 별도 시험이 아니라 같은 상세 TC의
 기계 판독용 조작·확인 정의입니다. Agent 3는 공통 연결표로 위치를 선택하며 AI로 재해석하지 않습니다.
 binding_contract는 controller-map-1.0입니다. target에는 아래의 정확한 논리 항목명을 씁니다.
@@ -284,8 +260,6 @@ fanSpeed LOW/MED/HIGH/AUTO, locked boolean, setTemp number를 사용합니다.
 unsupported.<요청 항목명>으로 보존하세요. 기존 AUTO 모드 등으로 치환하지 않습니다.
 복원은 기존 restoration과 같은 조작만 연결합니다. 공통 관제점 복원은
 RESTORE_OBSERVED_CONTROLLER, value=null이며 별도 제품 기대결과를 추가하지 않습니다.
-이 공통 복원은 준비 전 전원·모드·풍량·온도·잠금과 화면 상태를 기록하고 복원 후 비교합니다.
-준비로 바꾼 관제점도 포함하며 실제 복원 성공은 실행 기록으로 별도 확인합니다.
 """
 
 
@@ -380,7 +354,7 @@ class OpenAIAgent2:
         if previous_design is not None:
             user_input += "\n[검사기에서 계산한 TC별 연결 오류]\n" + json.dumps([
                 {"tc_id": tc.tc_id,
-                 "errors": [*_tc_observation_binding_errors(tc, legacy_wording_checks=False),
+                 "errors": [*_tc_observation_binding_errors(tc),
                             *_tc_restore_basis_errors(tc)]}
                 for tc in previous_design.test_cases
             ], ensure_ascii=False)
@@ -401,7 +375,7 @@ class OpenAIAgent2:
                 model=self.model,
                 reasoning={"effort": "medium"},
                 store=False,
-                prompt_cache_key="qa-v2-agent2-2-62-rules-5",
+                prompt_cache_key="qa-v2-agent2-2-62-rules-6",
                 input=[
                     {"role": "system", "content": AGENT2_SYSTEM_INSTRUCTIONS},
                     {"role": "user", "content": user_input},
@@ -612,36 +586,6 @@ _FORBIDDEN_CODE = re.compile(
     flags=re.IGNORECASE,
 )
 
-_PROCEDURAL_SELECTION_RESULT = re.compile(
-    r"선택(?:된다|되었|되어|상태)", re.IGNORECASE
-)
-_PROCEDURAL_ACTION_SUCCESS_RESULT = re.compile(
-    r"(?:선택|적용|클릭|입력|설정|변경|전환|요청|조작|복원)"
-    r"[^.!?\n]{0,40}(?:할\s*수\s*있|가능(?:하|해|했|됨|되))",
-    re.IGNORECASE,
-)
-_UI_DISPLAY_RESULT = re.compile(
-    r"(?:(?:화면|\bUI\b)[^.!?]{0,80}(?:표시|보이|나타)|"
-    r"(?:표시)[^.!?]{0,40}(?:된다|상태))",
-    re.IGNORECASE,
-)
-_UI_DISPLAY_AUTHORITY = re.compile(
-    r"(?:화면|\bUI\b|표시|보이|나타)", re.IGNORECASE
-)
-
-
-def _is_unchanged_condition(condition: ConfirmedCondition) -> bool:
-    return condition.change_role == ConditionChangeRole.UNCHANGED
-
-
-def _is_unchanged_condition_for_request(
-    condition: ConfirmedCondition,
-    request: ChangeRequest,
-) -> bool:
-    del request  # The role is structured by Agent 1; word-set similarity is unsafe.
-    return _is_unchanged_condition(condition)
-
-
 def _explicit_behavior_values(text: str) -> set[str]:
     """재사용 비교용 명시 코드·수치만 추출합니다. 자연어 의미 판단을 대체하지 않습니다."""
     text = re.sub(r"\b(?:REQ|TC|COND|ER)-[A-Z0-9-]+", "", text)
@@ -656,23 +600,8 @@ def _explicit_behavior_values(text: str) -> set[str]:
     }
 
 
-def _existing_test_procedure_review_notes(
-    request: ChangeRequest, design: Agent2TestDesign, *, legacy: bool = False
-) -> list[str]:
-    """기존 TC 코드를 변경하거나 절차 수행을 추정하지 않고 원문을 인계합니다."""
-    if design.test_cases or not design.related_existing_tests:
-        return []
-    selected = ", ".join(dict.fromkeys(item.tc_id for item in design.related_existing_tests))
-    return list(dict.fromkeys(
-        f"기존 TC 시험 절차 확인 ({selected}): {note} "
-        "[기존 자동화의 해당 절차 수행 여부는 자동 확정하지 않았습니다. 증거를 확인해 주세요.]"
-        for note in request.acceptance_notes if _is_test_procedure_note(note, legacy=legacy)
-    ))
-
-
-def _tc_observation_binding_errors(tc: ProductTestCaseCandidate, *, legacy_wording_checks: bool = True) -> list[str]:
-    """One binding check for CP2 and repair diagnostics; no fuzzy target aliases."""
-    vague = {"화면", "ui", "내부", "값", "상태", "결과", "요청결과", "내부값", "대상", "확인대상"}
+def _tc_observation_binding_errors(tc: ProductTestCaseCandidate) -> list[str]:
+    """One binding check for CP2 and repair diagnostics; wording stays guidance."""
     errors = []
     for result in tc.expected_results:
         label = f"{tc.tc_id}/{result.result_id}"
@@ -680,112 +609,8 @@ def _tc_observation_binding_errors(tc: ProductTestCaseCandidate, *, legacy_wordi
             _normalize(step) == _normalize(result.verify_after_step) for step in tc.steps
         ) != 1:
             errors.append(f"{label}: 실제 절차 한 곳에 판정 시점을 연결")
-        if (not result.observation_target or not result.observation_target.strip()
-                or (legacy_wording_checks and (_normalize(result.observation_target) in vague
-                or not _contains_fact(result.statement, result.observation_target)))):
-            if not legacy_wording_checks:
-                errors.append(f"{label}: 확인 대상 observation_target 누락")
-                continue
-            errors.append(f"{label}: 기대결과에 동일한 표현의 구체적인 확인 대상 명시. "
-                          f"현재 대상={result.observation_target!r}; 원문={result.statement!r}. "
-                          "원문 안의 실제 확인 대상 구절을 연결하고 원문·값을 변경하지 마세요.")
-    return errors
-
-
-def _tc_procedure_detail_errors(tc: ProductTestCaseCandidate) -> list[str]:
-    """Limited authoring checks over existing text fields, not a semantic parser.
-
-    They do not create product expectations or prove browser state. CP3 and the
-    trial still have to connect and observe the actual preparation/restoration.
-    """
-    errors: list[str] = []
-    target_object = r"(?:대상\s*)?(?:장비|기기|실내기)(?:\s*카드)?(?:을|를)\s*"
-    target_select = re.compile(
-        target_object + r"(?:선택|클릭)|\b(?:select|click)\s+(?:the\s+)?(?:target\s+)?device(?:\s+card)?\b", re.I
-    )
-    selected_state = re.compile(
-        r"(?:장비|기기|실내기)(?:\s*카드)?(?:가|는|를|을)?\s*(?:이미\s*)?"
-        r"(?:선택된|선택되어|선택돼|선택한\s*상태)"
-        r"|\b(?:target\s+)?device\s+(?:is\s+)?(?:already\s+)?selected\b", re.I
-    )
-    selection_negation = re.compile(
-        r"(?:선택|클릭)(?:하지|되지|할\s*필요|할\s*수\s*없)"
-        r"|선택(?:된|한)\s*상태(?:가|는)?\s*아니|미선택|\b(?:not|without)\b", re.I
-    )
-    operation = re.compile(
-        r"(?:선택|입력|설정|변경|적용|요청)(?:한다|합니다|하기|한\s*뒤|하고)"
-        r"|(?:입력|적용|선택)\s*버튼|\b(?:select|enter|fill|set|apply|submit|toggle|uncheck)\b"
-        r"|\bcheck\s+(?:the\s+)?checkbox\b", re.I
-    )
-    selections, operations = [], []
-    for index, step in enumerate(tc.steps):
-        match = target_select.search(step)
-        # Removing the target-selection phrase leaves any second operation
-        # visible, so selecting the device and its value on one line is not
-        # accepted as two distinct steps.
-        remainder = target_select.sub("", step)
-        if match and not selection_negation.search(step) and not operation.search(remainder):
-            selections.append(index)
-        elif operation.search(step):
-            operations.append(index)
-    prepared = any(selected_state.search(line) and not selection_negation.search(line) for line in tc.preconditions)
-    device_context = bool(re.search(
-        r"장비|기기|실내기|\bdevice\b",
-        " ".join([tc.title, *tc.preconditions, *tc.steps,
-                  *(result.observation_target or "" for result in tc.expected_results)]), re.I
-    )) or any(value is not None for value in (tc.test_data.requested_mode, tc.test_data.requested_temperature_c)) or bool(
-        tc.test_data.requested_modes or tc.test_data.requested_temperatures_c
-    )
-    if tc.control_path == ControlPath.CENTRAL and device_context and operations and not prepared:
-        if not any(index < operations[0] for index in selections):
-            errors.append(f"{tc.tc_id}: 값 조작 전에 대상 장비 선택을 별도 단계로 명시하거나 근거 있는 선택 완료 상태를 사전조건에 명시")
-
-    if tc.restore_required and tc.restoration is None:
-        check_word = re.compile(r"확인|비교|검증|\b(?:verify|compare|confirm|check)\b", re.I)
-        check_negation = re.compile(r"확인하지|비교하지|검증하지|확인할\s*수\s*없|미확인|생략|\b(?:not|without|skip)\b", re.I)
-        original_basis = re.compile(RESTORE_BASELINE_PATTERN + r"|초기값|원래|처음|\b(?:initial|original)\b", re.I)
-        observed_basis = re.compile(
-            rf"(?:{RESTORE_BASELINE_PATTERN})[^.\n]*(?:관찰|기록|저장)"
-            r"|(?:관찰|기록|저장)[^.\n]*(?:원상태|초기값)"
-            r"|\b(?:observed|recorded|saved)\s+(?:initial\s+)?(?:state|value|baseline)\b", re.I
-        )
-        target = re.compile(r"장비|기기|실내기|대상|\b(?:device|target)\b", re.I)
-        observation = re.compile(r"내부|화면|카드|패널|표시|설정값|\b(?:state|value|panel|card|display)\b", re.I)
-        # Identifiers already in a TC's observation location also qualify; no
-        # feature/TC-ID/value whitelist is used (fanSpeed is not special).
-        identifiers = {
-            word for result in tc.expected_results
-            for word in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", result.observation_target or "")
-            if word.casefold() not in {"ui", "target", "device", "the"}
-        }
-        initial_values = _explicit_behavior_values(" ".join(tc.preconditions))
-        for value in (tc.test_data.initial_mode, tc.test_data.initial_temperature_c):
-            if value is not None:
-                initial_values.update(_explicit_behavior_values(str(value)))
-        restore_values = _explicit_behavior_values(" ".join(tc.restore_steps))
-        # This is a drafting completeness check. Actual value grounding and
-        # baseline equality must also be checked by CP3, never inferred here.
-        has_basis = bool(restore_values or original_basis.search(" ".join(tc.restore_steps)))
-        has_target = any(target.search(line) for line in tc.restore_steps) or any(
-            result.observation_target and _contains_fact(line, result.observation_target)
-            for line in tc.restore_steps for result in tc.expected_results
-        )
-        detailed_check = False
-        for line in tc.restore_steps:
-            if not check_word.search(line) or check_negation.search(line):
-                continue
-            values = _explicit_behavior_values(line)
-            location = observation.search(line) or any(re.search(rf"\b{re.escape(word)}\b", line, re.I) for word in identifiers) or any(
-                result.observation_target and _contains_fact(line, result.observation_target)
-                for result in tc.expected_results
-            )
-            basis = bool(values) or observed_basis.search(line) or (
-                original_basis.search(line) and bool(initial_values)
-            )
-            if location and basis and not (initial_values and values - initial_values):
-                detailed_check = True
-        if not (has_target and has_basis and detailed_check):
-            errors.append(f"{tc.tc_id}: restore_steps에 복원 대상·초기값/실행 전 상태와 구체적인 관찰 위치의 복귀 확인을 명시 (원문 복원 메모는 유지)")
+        if not result.observation_target or not result.observation_target.strip():
+            errors.append(f"{label}: 확인 대상 observation_target 누락")
     return errors
 
 
@@ -818,28 +643,6 @@ def _tc_restore_basis_errors(tc: ProductTestCaseCandidate) -> list[str]:
     return errors
 
 
-def _procedure_note_preserved(note: str, tc: ProductTestCaseCandidate) -> bool:
-    """Exact contiguous preservation, not paraphrase/keyword interpretation.
-
-    Never join across TC or phase boundaries. Keep punctuation and values;
-    normalize whitespace/case exactly as the original single-item comparison.
-    """
-    target = _normalize(note)
-    fields = [tc.preconditions, tc.steps]
-    if tc.restore_required:
-        fields.append(tc.restore_steps)
-    for lines in fields:
-        for start in range(len(lines)):
-            joined = ""
-            for line in lines[start:]:
-                joined = _normalize(f"{joined} {line}")
-                if joined == target:
-                    return True
-                if not target.startswith(joined):
-                    break
-    return False
-
-
 def evaluate_checkpoint2(
     request: ChangeRequest,
     analysis: Agent1Analysis,
@@ -847,33 +650,13 @@ def evaluate_checkpoint2(
     requirements: dict[str, SrsRequirement],
     *,
     existing_catalog: tuple[ExistingRegressionSpec, ...] = EXISTING_REGRESSION_CATALOG,
-    require_srs_revision_proposals: bool = False,
-    allow_already_reflected_srs: bool = False,
-    require_existing_behavior_values: bool = False,
-    review_value_roles: bool = False,
-    allow_target_verification_candidate: bool = False,
-    allow_existing_procedure_review: bool = True,
-    require_double_assert_timing: bool = True,
-    pair_observation_anchors: bool = False,
-    require_meaning_guard: bool = True,
-    require_candidate_expectation_guard: bool = True,
-    review_expected_result_values: bool = False,
-    require_qa_explanation_metadata: bool = True,
-    require_tc_detail: bool = True,
-    require_procedure_detail: bool = True,
-    require_restore_target_basis: bool = False,
-    require_state_restoration_policy: bool = False,
-    require_structured_restoration: bool = False,
-    require_input_contract: bool = True,
-    legacy_wording_checks: bool = True,
-    allow_split_procedure_notes: bool = False,
-    review_procedure_coverage: bool = False,
-    use_structured_scope_restoration: bool = False,
-    allow_multiple_trace_sources: bool = False,
-    review_scope_semantics: bool = False,
-    align_tc_execution: bool = False,
-    essential_checks: bool = False,
 ) -> Checkpoint2Result:
+    """Current CP2 only (2026-10-20 cleanup: no historical switches).
+
+    Wording, expected-value meaning, notification need and procedure coverage are
+    owned by the mandatory grounding review; this function checks structure,
+    traceability, handoff and execution links.
+    """
     checks: list[CheckResult] = []
 
     def add(rule_id: str, status: CheckStatus, message: str) -> None:
@@ -893,31 +676,14 @@ def evaluate_checkpoint2(
     result_ids = [result.result_id for tc in design.test_cases for result in tc.expected_results]
     duplicate_tc_ids = sorted({item for item in tc_ids if tc_ids.count(item) > 1})
     duplicate_result_ids = sorted({item for item in result_ids if result_ids.count(item) > 1})
-    normalized_titles = [re.sub(r"\s+", "", tc.title).casefold() for tc in design.test_cases]
-    duplicate_titles = sorted(
-        {
-            design.test_cases[index].title
-            for index, item in enumerate(normalized_titles)
-            if normalized_titles.count(item) > 1
-        }
-    )
-    if duplicate_tc_ids or duplicate_result_ids or (duplicate_titles and not essential_checks):
+    if duplicate_tc_ids or duplicate_result_ids:
         add("CP2-002", CheckStatus.FAIL, "TC·기대 결과 ID 또는 제목이 중복됩니다.")
     else:
-        add("CP2-002", CheckStatus.PASS, "TC·기대 결과 ID가 고유합니다. 제목은 식별자가 아닙니다." if essential_checks else "TC·기대 결과 ID와 제목이 고유합니다.")
+        add("CP2-002", CheckStatus.PASS, "TC·기대 결과 ID가 고유합니다. 제목은 식별자가 아닙니다.")
 
     known_conditions = {item.condition_id: item for item in analysis.confirmed_conditions}
     requirement_relations = {
         item.requirement_id: item.relation for item in analysis.requirement_effects
-    }
-    trace_only_requirements = {
-        item.requirement_id for item in analysis.requirement_effects
-        if item.scope_evidence is not None
-        and item.scope_evidence.basis == ScopeBasis.REQUEST_TRACE_ONLY
-    }
-    trace_only_conditions = {
-        item.condition_id for item in analysis.confirmed_conditions
-        if trace_only_requirements.intersection(item.requirement_ids)
     }
     active_requirements = {
         item.requirement_id
@@ -935,18 +701,13 @@ def evaluate_checkpoint2(
         for selection in design.related_existing_tests
         for item in selection.source_condition_ids
     }
-    changed_condition_ids = {
-        condition.condition_id
-        for condition in analysis.confirmed_conditions
-        if condition.change_role == ConditionChangeRole.CHANGED
-    }
     # A retained/VERIFY condition still needs a test. Supporting context alone
     # cannot justify reuse; coverage meaning remains a mandatory model review.
-    target_test_condition_ids = ({
+    target_test_condition_ids = {
         condition.condition_id for condition in analysis.confirmed_conditions
         if request.target_requirement_id in condition.requirement_ids
         and condition.change_role != ConditionChangeRole.SUPPORTING
-    } if align_tc_execution else changed_condition_ids)
+    }
     referenced_conditions = candidate_conditions | existing_conditions
     existing_by_id = _existing_regression_by_id(existing_catalog)
     selected_existing_specs = [
@@ -1002,60 +763,19 @@ def evaluate_checkpoint2(
     else:
         add("CP2-005", CheckStatus.PASS, "TC 내부 추적성이 유지됩니다.")
 
-    state_errors: list[str] = []
-    notify_errors: list[str] = []
-    compound_ui_errors: list[str] = []
-    ui_observation_groups = {
-        "mode": re.compile(
-            r"(?:(?:화면|UI|관제\s*패널)[^.!?]{0,60}(?:표시[^.!?]{0,30})?(?:모드|\bmode\b)\s*(?:는|가|값|상태|[:=])|(?:모드|\bmode\b)\s*(?:표시|값|상태))",
-            re.IGNORECASE,
-        ),
-        "temperature": re.compile(r"(?:설정\s*온도|\bsetTemp\b)", re.IGNORECASE),
-        "pending": re.compile(r"(?:대기값|대기\s*상태|\bpending\b)", re.IGNORECASE),
-        "control_state": re.compile(r"(?:버튼|컨트롤|활성|비활성|\bdisabled\b|\benabled\b)", re.IGNORECASE),
-    }
-    for tc in design.test_cases:
-        source_requirements = {
-            req_id
-            for condition_id in tc.source_condition_ids
-            if condition_id in known_conditions
-            for req_id in known_conditions[condition_id].requirement_ids
-        }
-        layers = {result.observation_layer for result in tc.expected_results}
-        requires_double_assert = (
-            (not review_scope_semantics and "REQ-STATE-001" in (source_requirements - trace_only_requirements))
-            or (not essential_checks and tc.test_type == TcType.STATE_CONSISTENCY)
-        )
-        if requires_double_assert and not {
-            ObservationLayer.UI,
-            ObservationLayer.INTERNAL_STATE,
-        }.issubset(layers):
-            state_errors.append(tc.tc_id)
-        if not review_scope_semantics and "REQ-NOTIFY-001" in (source_requirements - trace_only_requirements) and ObservationLayer.NOTIFICATION not in layers:
-            notify_errors.append(tc.tc_id)
-        for result in tc.expected_results:
-            if result.observation_layer != ObservationLayer.UI:
-                continue
-            matched_groups = [
-                name
-                for name, pattern in ui_observation_groups.items()
-                if pattern.search(result.statement)
-            ]
-            if legacy_wording_checks and len(matched_groups) > 1:
-                compound_ui_errors.append(
-                    f"{tc.tc_id}/{result.result_id}:" + ",".join(matched_groups)
-                )
+    # Whether a TC needs UI+internal or notification results is a meaning
+    # question owned by the mandatory grounding review (scope semantics).
     policy_errors: list[str] = []
     for tc in design.test_cases:
         layers = {result.observation_layer for result in tc.expected_results}
-        if require_double_assert_timing and tc.double_assert_policy == DoubleAssertPolicy.REQUIRED:
+        if tc.double_assert_policy == DoubleAssertPolicy.REQUIRED:
             # None means the existing single-flow end-of-test assertion point.
             timing = {
                 layer: {result.verify_after_step for result in tc.expected_results
                         if result.observation_layer == layer}
                 for layer in (ObservationLayer.UI, ObservationLayer.INTERNAL_STATE)
             }
-            if pair_observation_anchors and tc.execution_spec is not None:
+            if tc.execution_spec is not None:
                 # The execution contract already resolves each observation to
                 # its last TEST action (CP2-024). Observation-only lines may
                 # differ without a state-changing operation between them.
@@ -1075,17 +795,11 @@ def evaluate_checkpoint2(
                     if result.observation_layer == ObservationLayer.INTERNAL_STATE
                 )
             else:
-                # Historical runs retain their original rule and verdict.
+                # Without an execution definition, compare the prose judgment steps.
                 mismatched = timing[ObservationLayer.UI] != timing[ObservationLayer.INTERNAL_STATE]
             if mismatched:
                 policy_errors.append(f"{tc.tc_id}:UI·내부 상태 이중 검증의 판정 단계 불일치; 같은 조작 직후 함께 확인 필요")
-        requires_double_assert = (
-            (not review_scope_semantics and "REQ-STATE-001" in (set(tc.requirement_ids) - (trace_only_requirements if use_structured_scope_restoration else set())))
-            or (not essential_checks and tc.test_type == TcType.STATE_CONSISTENCY)
-        )
-        if requires_double_assert and tc.double_assert_policy != DoubleAssertPolicy.REQUIRED:
-            policy_errors.append(f"{tc.tc_id}:필수 이중 검증 정책 누락")
-        elif tc.double_assert_policy == DoubleAssertPolicy.REQUIRED and not {
+        if tc.double_assert_policy == DoubleAssertPolicy.REQUIRED and not {
             ObservationLayer.UI,
             ObservationLayer.INTERNAL_STATE,
         }.issubset(layers):
@@ -1098,22 +812,11 @@ def evaluate_checkpoint2(
             ObservationLayer.INTERNAL_STATE not in layers or ObservationLayer.UI in layers
         ):
             policy_errors.append(f"{tc.tc_id}:INTERNAL_ONLY 계층 불일치")
-        if (
-            tc.double_assert_policy != DoubleAssertPolicy.REQUIRED
-            and not essential_checks
-            and not tc.double_assert_reason
-        ):
-            policy_errors.append(f"{tc.tc_id}:이중 검증 예외 사유 누락")
-    if state_errors or policy_errors or compound_ui_errors:
-        details = [*state_errors, *policy_errors]
-        details.extend(
-            f"{item}:UI 기대 결과를 관찰값별로 분리 필요"
-            for item in compound_ui_errors
-        )
+    if policy_errors:
         add(
             "CP2-006",
             CheckStatus.FAIL,
-            "조건부 이중 검증 또는 원자적 기대 결과 계약이 맞지 않습니다: " + ", ".join(details),
+            "조건부 이중 검증 또는 원자적 기대 결과 계약이 맞지 않습니다: " + ", ".join(policy_errors),
         )
     else:
         add(
@@ -1121,12 +824,7 @@ def evaluate_checkpoint2(
             CheckStatus.PASS,
             "상태 관련 TC의 이중 검증·예외 정책과 원자적 UI 기대 결과가 일치합니다.",
         )
-    if notify_errors:
-        add("CP2-007", CheckStatus.FAIL, "알림 기대 결과가 누락된 TC: " + ", ".join(notify_errors))
-    else:
-        add("CP2-007", CheckStatus.PASS,
-            "알림 필요 여부와 누락은 필수 조건 의미 검토에서 확인합니다." if review_scope_semantics
-            else "알림 조건이 NOTIFICATION 결과로 연결됩니다.")
+    add("CP2-007", CheckStatus.PASS, "알림 필요 여부와 누락은 필수 조건 의미 검토에서 확인합니다.")
 
     path_errors: list[str] = []
     for tc in design.test_cases:
@@ -1171,8 +869,7 @@ def evaluate_checkpoint2(
         required_change_paths.append(("REQ-CONTROL-001", ControlPath.CENTRAL))
     for requirement_id, control_path in required_change_paths:
         candidate_has_path = any(
-            (essential_checks or tc.purpose == TcPurpose.CHANGE_VALIDATION)
-            and tc.control_path == control_path
+            tc.control_path == control_path
             and request.target_requirement_id in tc.requirement_ids
             and requirement_id in tc.requirement_ids
             for tc in design.test_cases
@@ -1198,7 +895,6 @@ def evaluate_checkpoint2(
         tc
         for tc in design.test_cases
         if request.target_requirement_id in tc.requirement_ids
-        and (essential_checks or tc.purpose == TcPurpose.CHANGE_VALIDATION)
     ]
     if (
         uncovered_requirements
@@ -1236,7 +932,7 @@ def evaluate_checkpoint2(
         tc.tc_id
         for tc in design.test_cases
         if tc.test_type == TcType.BOUNDARY
-        and not (align_tc_execution and tc.execution_spec is not None
+        and not (tc.execution_spec is not None
                  and not tc_execution_spec_errors(tc)
                  and any(op.phase.value == "TEST" and op.action_type.value != "SELECT_DEVICE"
                          for op in tc.execution_spec.operations))
@@ -1302,69 +998,28 @@ def evaluate_checkpoint2(
             tier_errors.append(f"{tc.tc_id}:상태 정합성 도메인 기준")
         if not set(tc.feature_requirement_ids).issubset(set(tc.requirement_ids)):
             invalid_feature_links.append(tc.tc_id)
-    if not require_qa_explanation_metadata:
-        add("CP2-012", CheckStatus.FAIL if invalid_feature_links else CheckStatus.PASS,
-            "TC 추적 범위를 벗어난 기능 기준: " + ", ".join(invalid_feature_links)
-            if invalid_feature_links else
-            "QA 분류는 설명용입니다. 필수 요구·조건·검사 연결은 별도로 확인합니다."
-            + (" 분류 참고 사항: " + ", ".join(tier_errors) if tier_errors else ""))
-    elif tier_errors:
-        add(
-            "CP2-012",
-            CheckStatus.FAIL,
-            "3단계 QA 기준 적용 근거가 누락되거나 TC 추적 범위와 다릅니다: "
-            + ", ".join(tier_errors),
-        )
-    else:
-        add("CP2-012", CheckStatus.PASS, "모든 TC에 공통·도메인·기능별 QA 기준이 추적됩니다.")
+    add("CP2-012", CheckStatus.FAIL if invalid_feature_links else CheckStatus.PASS,
+        "TC 추적 범위를 벗어난 기능 기준: " + ", ".join(invalid_feature_links)
+        if invalid_feature_links else
+        "QA 분류는 설명용입니다. 필수 요구·조건·검사 연결은 별도로 확인합니다."
+        + (" 분류 참고 사항: " + ", ".join(tier_errors) if tier_errors else ""))
 
-    dependency_pattern = re.compile(
-        r"(?:이전|앞선|선행)\s*(?:TC|테스트)|TC-CAND-\d{3}",
-        re.IGNORECASE,
-    )
-    non_dependency_pattern = re.compile(
-        r"(?:의존|필요|전제|이어받)[^.!?\n]{0,16}(?:않|없)|없이|무관|독립",
-        re.IGNORECASE,
-    )
-    independence_errors: list[str] = []
-    for tc in design.test_cases:
-        dependency_texts = [
-            *tc.preconditions,
-            *tc.steps,
-            *tc.restore_steps,
-            (tc.independence_reason or "") if require_qa_explanation_metadata else "",
-        ]
-        has_cross_tc_dependency = any(
-            dependency_pattern.search(text)
-            and not non_dependency_pattern.search(text)
-            for text in dependency_texts
-        )
-        if (
-            not tc.independent_execution
-            or (require_qa_explanation_metadata and not tc.independence_reason)
-            or (has_cross_tc_dependency and not essential_checks)
-        ):
-            independence_errors.append(tc.tc_id)
+    independence_errors = [tc.tc_id for tc in design.test_cases if not tc.independent_execution]
     if independence_errors:
         add(
             "CP2-013",
             CheckStatus.FAIL,
-            ("단독 실행 근거가 없거나 다른 TC에 의존합니다: " if require_qa_explanation_metadata
-             else "단독 실행 불가 선언 또는 다른 TC 결과에 의존하는 절차가 있습니다: ")
+            "단독 실행 불가 선언 또는 다른 TC 결과에 의존하는 절차가 있습니다: "
             + ", ".join(independence_errors),
         )
     else:
         add("CP2-013", CheckStatus.PASS,
-            "모든 TC가 초기 조건과 복원 기준을 가진 독립 실행 단위입니다." if require_qa_explanation_metadata else
             "독립 실행 설명 문장은 필수가 아닙니다. 실제 준비·단독 실행·복원 성공은 실행 증거로 확인합니다.")
 
-    procedure_notes = [
-        note for note in request.acceptance_notes
-        if (_is_test_procedure_note(note, legacy=not require_input_contract) if legacy_wording_checks
-            else re.match(r"\s*\[(?:준비|복원|시험 절차 메모)\]", note))
-    ]
-    if not legacy_wording_checks:
-        procedure_notes = list(analysis.procedure_notes)
+    # Agent 1 routes procedure notes from the immutable input. Their actual
+    # placement and order are reviewed per note by the mandatory grounding
+    # review; CP3 checks the implemented preparation and restoration.
+    procedure_notes = list(analysis.procedure_notes)
     procedure_note_keys = {_normalize(item) for item in procedure_notes}
     analysis_scope = {
         _normalize(item)
@@ -1383,70 +1038,14 @@ def evaluate_checkpoint2(
     excluded_procedure_notes = [
         item for item in design.excluded_scope if _normalize(item) in procedure_note_keys
     ]
-    setup_lines = {
-        _normalize(item)
-        for tc in design.test_cases
-        for item in [*tc.preconditions, *tc.steps]
-    }
-    restore_lines = {
-        _normalize(item)
-        for tc in design.test_cases
-        for item in tc.restore_steps
-        if tc.restore_required
-    }
-    missing_setup_notes = [
-        note
-        for note in procedure_notes
-        if (_is_test_setup_note(note, legacy=not require_input_contract) if legacy_wording_checks
-            else re.match(r"\s*\[준비\]", note)) and _normalize(note) not in setup_lines
-    ]
-    missing_restore_notes = [
-        note
-        for note in procedure_notes
-        if (_is_test_restore_note(note, legacy=not require_input_contract) if legacy_wording_checks
-            else re.match(r"\s*\[복원\]", note)) and _normalize(note) not in restore_lines
-    ]
-    if not legacy_wording_checks:
-        # Preserve every declared procedure, without classifying its verbs.
-        # Actual ordering, permitted actions and restoration are checked by CP3.
-        missing_setup_notes = [note for note in procedure_notes
-                               if _normalize(note) not in setup_lines | restore_lines]
-        if allow_split_procedure_notes:
-            missing_setup_notes = [note for note in procedure_notes
-                                  if not any(_procedure_note_preserved(note, tc) for tc in design.test_cases)]
-        missing_restore_notes = []
-        if review_procedure_coverage:
-            # New Runs enumerate every immutable input procedure in the mandatory
-            # grounding review. Exact prose placement is a historical contract,
-            # not proof that preparation and TEST actions actually implement it.
-            missing_setup_notes = []
-    procedure_review = (
-        _existing_test_procedure_review_notes(request, design, legacy=not require_input_contract)
-        if allow_existing_procedure_review else []
-    )
-    if not legacy_wording_checks and allow_existing_procedure_review and not design.test_cases and design.related_existing_tests:
-        procedure_review = list(procedure_notes)
-    if procedure_review:
-        # 기존 코드에는 신규 TC의 절차 필드가 없습니다. 원문은 execute가 최종 검토로 인계합니다.
-        missing_setup_notes = []
-        missing_restore_notes = []
-    if (
-        not excluded_scope_matches
-        or not excluded_gaps_match
-        or excluded_procedure_notes
-        or missing_setup_notes
-        or missing_restore_notes
-    ):
+    # Existing-TC-only designs hand the procedure notes to the final human review.
+    procedure_review = list(procedure_notes) if not design.test_cases and design.related_existing_tests else []
+    if not excluded_scope_matches or not excluded_gaps_match or excluded_procedure_notes:
         details: list[str] = []
         if not excluded_scope_matches or not excluded_gaps_match:
             details.append("실제 제외 범위 또는 정보 부족 인계 불일치")
         if excluded_procedure_notes:
             details.append("시험 절차를 제외 범위로 분류")
-        if missing_setup_notes:
-            label = "절차 원문 누락·순서 불일치=" if allow_split_procedure_notes and not legacy_wording_checks else "사전 준비 절차 누락="
-            details.append(label + " | ".join(missing_setup_notes))
-        if missing_restore_notes:
-            details.append("종료 후 복원 절차 누락=" + " | ".join(missing_restore_notes))
         add(
             "CP2-014",
             CheckStatus.FAIL,
@@ -1458,13 +1057,13 @@ def evaluate_checkpoint2(
             "CP2-014",
             CheckStatus.PASS,
             f"실행 제외 범위 {len(design_scope)}건, 정보 부족 {len(design.excluded_information_gaps)}건과 시험 절차 {len(procedure_notes)}건을 올바르게 분리했습니다."
-            + (" 절차의 실제 반영·순서는 원문별 모델 검토를 통과해야 합니다." if review_procedure_coverage else "")
+            " 절차의 실제 반영·순서는 원문별 모델 검토를 통과해야 합니다."
             + (" 기존 TC의 시험 절차 메모는 수행 완료로 간주하지 않고 최종 사람 검토로 전달합니다." if procedure_review else ""),
         )
 
     grouping_errors: list[str] = []
     for tc in design.test_cases:
-        if essential_checks and tc.execution_spec is not None:
+        if tc.execution_spec is not None:
             # CP2-024 owns action/value/anchor coverage. Runtime records and
             # restores BEFORE_SETUP; prose and duplicate test_data are not a
             # second execution plan. Explicit reset instructions must still
@@ -1507,7 +1106,7 @@ def evaluate_checkpoint2(
                 grouping_errors.append(
                     f"{tc.tc_id}:동적 HVAC 복원과 고정 초기값을 함께 사용"
                 )
-            if not (use_structured_scope_restoration and tc.restoration is not None) and not (
+            if tc.restoration is None and not (
                 _contains_any(dynamic_restore_text, ("실행 직전", "관찰", "observed"))
                 and _contains_any(dynamic_restore_text, ("모드", "mode"))
                 and _contains_any(dynamic_restore_text, ("온도", "temperature"))
@@ -1616,38 +1215,6 @@ def evaluate_checkpoint2(
                 existing_selection_errors.append(
                     f"{selection.tc_id}:{condition_id} Requirement 근거 불일치"
                 )
-    regenerated_regressions = [
-        tc.tc_id
-        for tc in design.test_cases
-        if tc.purpose != TcPurpose.CHANGE_VALIDATION
-    ]
-    if regenerated_regressions and not essential_checks:
-        existing_selection_errors.append(
-            "기존 회귀를 신규 후보로 재작성=" + ",".join(regenerated_regressions)
-        )
-    verify_only_candidates = [
-        tc.tc_id
-        for tc in design.test_cases
-        if tc.requirement_ids
-        and not (allow_target_verification_candidate
-                 and request.target_requirement_id in tc.requirement_ids
-                 and requirement_relations.get(request.target_requirement_id) == RequirementRelation.VERIFY)
-        and all(
-            requirement_relations.get(requirement_id)
-            == RequirementRelation.VERIFY
-            for requirement_id in tc.requirement_ids
-        )
-    ]
-    if verify_only_candidates and not essential_checks:
-        existing_selection_errors.append(
-            "VERIFY 유지 동작을 신규 후보로 중복 생성="
-            + ",".join(verify_only_candidates)
-        )
-    unchanged_condition_ids = {
-        condition.condition_id
-        for condition in analysis.confirmed_conditions
-        if _is_unchanged_condition_for_request(condition, request)
-    }
     direct_change_condition_ids = {
         condition.condition_id
         for condition in analysis.confirmed_conditions
@@ -1660,19 +1227,6 @@ def evaluate_checkpoint2(
         existing_selection_errors.append(
             "변경 조건의 신규·수정 후보 누락="
             + ",".join(misrouted_change_conditions)
-        )
-    duplicated_unchanged_results = [
-        f"{tc.tc_id}/{result.result_id}"
-        for tc in design.test_cases
-        for result in tc.expected_results
-        if result.source_condition_ids
-        and set(result.source_condition_ids).issubset(unchanged_condition_ids)
-        and set(result.source_condition_ids).intersection(existing_conditions)
-    ]
-    if duplicated_unchanged_results and not essential_checks:
-        existing_selection_errors.append(
-            "관련 기존 TC로 선택한 유지 동작을 신규 기대 결과로 중복="
-            + ",".join(duplicated_unchanged_results)
         )
     if not design.existing_tc_comparison_completed:
         existing_selection_errors.append("기존 TC 대조 완료 표시 누락")
@@ -1687,136 +1241,30 @@ def evaluate_checkpoint2(
         add(
             "CP2-016",
             CheckStatus.PASS,
-            ("요청된 시험과 관련 기존 TC의 연결·중복을 확인했습니다. 대상 VERIFY의 미충족 시험도 후보로 작성할 수 있습니다."
-             if allow_target_verification_candidate else
-             "변경된 조건만 신규·수정 후보로 만들고 유지 조건은 기존 TC 선택으로 분리했습니다."),
+            "요청된 시험과 관련 기존 TC의 연결·중복을 확인했습니다. 대상 VERIFY의 미충족 시험도 후보로 작성할 수 있습니다.",
         )
 
-    if require_existing_behavior_values:
-        reuse_errors: list[str] = []
-        for condition_id in sorted(direct_change_condition_ids - candidate_conditions):
-            condition = known_conditions[condition_id]
-            behaviors = " ".join(
-                behavior
-                for selection in design.related_existing_tests
-                if condition_id in selection.source_condition_ids
-                for behavior in (
-                    existing_by_id[selection.tc_id].covered_behaviors
-                    if selection.tc_id in existing_by_id else ()
-                )
-            )
-            missing_values = (set() if review_value_roles else
-                              _explicit_behavior_values(condition.statement) - _explicit_behavior_values(behaviors))
-            if legacy_wording_checks and require_meaning_guard and _meaning_conflicts(condition.statement, behaviors, compare_relations=require_input_contract):
-                reuse_errors.append(f"{condition_id}:기존 TC 검증 동작의 의미가 반대입니다")
-            if missing_values:
-                reuse_errors.append(f"{condition_id}:기존 TC가 검사하지 않는 명시 값=" + ",".join(sorted(missing_values)))
-        add(
-            "CP2-019", CheckStatus.FAIL if reuse_errors else CheckStatus.PASS,
-            "기존 TC 재사용 근거 불일치: " + "; ".join(reuse_errors)
-            if reuse_errors else "기존 TC 연결을 확인했습니다. 실제 요구 값·제외·검사 누락은 필수 조건별 의미 검토에서 확인합니다."
-            if review_value_roles else "기존 TC만 담당하는 변경 조건의 명시 코드·수치가 카탈로그 검증 동작에 있습니다.",
-        )
+    # Required values, exclusions and missing checks of a reused existing TC are
+    # judged by the mandatory per-condition grounding review.
+    add("CP2-019", CheckStatus.PASS,
+        "기존 TC 연결을 확인했습니다. 실제 요구 값·제외·검사 누락은 필수 조건별 의미 검토에서 확인합니다.")
 
+    # Expected-value meaning and wording are owned by the mandatory grounding
+    # review; code keeps only the explicit request exclusions.
     minimality_errors: list[str] = []
+    explicit_exclusions = {_normalize(note) for note in request.out_of_scope}
     scope_limit_condition_ids = {
-        condition.condition_id
-        for condition in analysis.confirmed_conditions
-        if condition.source_type == ConditionSource.CHANGE_REQUEST
-        and legacy_wording_checks and _is_scope_exclusion_text(
-            f"{condition.statement} {condition.source_text}", legacy=not require_input_contract
-        )
+        c.condition_id for c in analysis.confirmed_conditions
+        if c.source_type == ConditionSource.CHANGE_REQUEST and _normalize(c.source_text) in explicit_exclusions
     }
-    if require_input_contract:
-        explicit_exclusions = {_normalize(note) for note in request.out_of_scope}
-        scope_limit_condition_ids |= {
-            c.condition_id for c in analysis.confirmed_conditions
-            if c.source_type == ConditionSource.CHANGE_REQUEST and _normalize(c.source_text) in explicit_exclusions
-        }
     for tc in design.test_cases:
         for result in tc.expected_results:
-            result_condition_ids = set(result.source_condition_ids)
-            if result_condition_ids & trace_only_conditions and (
-                (not allow_multiple_trace_sources and len(result_condition_ids) != 1)
-                or (legacy_wording_checks and result.statement != known_conditions[next(iter(result_condition_ids))].source_text)
-            ):
-                minimality_errors.append(
-                    f"{tc.tc_id}/{result.result_id}:근거 연결 조건은 요청 원문 한 문장을 그대로 검증해야 합니다. "
-                    "새 검사·기대값을 덧붙이지 마세요."
-                )
-            excluded_sources = sorted(
-                result_condition_ids & scope_limit_condition_ids
-            )
+            excluded_sources = sorted(set(result.source_condition_ids) & scope_limit_condition_ids)
             if excluded_sources:
                 minimality_errors.append(
                     f"{tc.tc_id}/{result.result_id}:제외 조건을 기대 결과로 사용="
                     + ",".join(excluded_sources)
                 )
-            if (
-                legacy_wording_checks and request.target_requirement_id != "REQ-SELECT-001"
-                and result.observation_layer == ObservationLayer.UI
-                and _PROCEDURAL_SELECTION_RESULT.search(result.statement)
-            ):
-                minimality_errors.append(
-                    f"{tc.tc_id}/{result.result_id}:준비용 장비 선택을 제품 기대 결과로 확장"
-                )
-            source_authority = " ".join(
-                known_conditions[condition_id].source_text
-                for condition_id in result.source_condition_ids
-                if condition_id in known_conditions
-            )
-            if require_candidate_expectation_guard and not review_expected_result_values:
-                # Test inputs are not authority for expected outputs (e.g. an
-                # invalid boundary request must not become an allowed value).
-                expected_values = _explicit_behavior_values(result.statement)
-                authority_values = _explicit_behavior_values(source_authority)
-                if re.search(r"유지|변경되지|unchanged|retain", source_authority, re.I):
-                    authority_values |= _explicit_behavior_values(" ".join(tc.preconditions))
-                unsupported = expected_values - authority_values
-                # An ER may name the invalid *input* that is blocked. Only
-                # permit that grammatical use, not the same value as an output.
-                if _state_polarities(source_authority, *_STATE_WORD_PAIRS[2]) == {False}:
-                    input_values = _explicit_behavior_values(tc.test_data.model_dump_json())
-                    for value in list(unsupported & input_values):
-                        if not re.fullmatch(r"-?\d+(?:\.\d+)?", value):
-                            continue
-                        occurrences = [match for match in re.finditer(r"-?\d+(?:\.\d+)?", result.statement)
-                                       if float(match.group()) == float(value)]
-                        if occurrences and all(re.match(r"\s*(?:°?C|도)?\s*(?:요청|입력|request|input)", result.statement[match.end():], re.I) for match in occurrences):
-                            unsupported.discard(value)
-                ranges = re.findall(
-                    r"(-?\d+(?:\.\d+)?)\s*(?:°?C|도)?\s*(?:~|∼|～|에서|부터|to)\s*(-?\d+(?:\.\d+)?)",
-                    source_authority, re.I,
-                )
-                unsupported = {
-                    value for value in unsupported
-                    if not (re.fullmatch(r"-?\d+(?:\.\d+)?", value)
-                            and any(float(lo) <= float(value) <= float(hi) for lo, hi in ranges))
-                }
-                if unsupported:
-                    minimality_errors.append(
-                        f"{tc.tc_id}/{result.result_id}:연결된 조건에 없는 기대값="
-                        + ",".join(sorted(unsupported))
-                    )
-                if legacy_wording_checks and _meaning_conflicts(source_authority, result.statement, compare_relations=require_input_contract):
-                    minimality_errors.append(
-                        f"{tc.tc_id}/{result.result_id}:연결된 조건과 기대 동작이 반대"
-                    )
-            if (
-                legacy_wording_checks and _PROCEDURAL_ACTION_SUCCESS_RESULT.search(result.statement)
-                and not _contains(source_authority, result.statement)
-            ):
-                minimality_errors.append(
-                    f"{tc.tc_id}/{result.result_id}:Condition 원문에 없는 실행 행동 성공을 제품 기대 결과로 확장"
-                )
-            if (
-                legacy_wording_checks and result.observation_layer == ObservationLayer.UI
-                and _UI_DISPLAY_RESULT.search(result.statement)
-            ):
-                if not _UI_DISPLAY_AUTHORITY.search(source_authority):
-                    minimality_errors.append(
-                        f"{tc.tc_id}/{result.result_id}:Condition 원문에 없는 UI 표시 기대"
-                    )
     if minimality_errors:
         add(
             "CP2-017",
@@ -1828,150 +1276,109 @@ def evaluate_checkpoint2(
         add(
             "CP2-017",
             CheckStatus.PASS,
-            ("제품 기대 결과가 긍정적 변경 조건과 원문 UI 근거 범위 안에 있습니다." if legacy_wording_checks
-             else "기대결과의 조건 연결·제외 역할을 확인했습니다. 기대값 의미는 필수 모델 검토에서 확인합니다." if review_expected_result_values
-             else "기대결과의 조건 연결·제외 역할·명시 값 근거를 확인했습니다. 문장 의미의 정확성 판정은 아닙니다."),
+            "기대결과의 조건 연결·제외 역할을 확인했습니다. 기대값 의미는 필수 모델 검토에서 확인합니다.",
         )
 
-    if require_srs_revision_proposals:
-        revision_errors: list[str] = []
-        required_revision_ids = {
-            effect.requirement_id
-            for effect in analysis.requirement_effects
-            if effect.relation
-            in {RequirementRelation.MODIFIED, RequirementRelation.UPDATE_REQUIRED}
-        }
-        already_reflected_ids: set[str] = set()
-        if allow_already_reflected_srs:
-            policy = _srs_revision_policy(request, analysis, requirements)
-            required_revision_ids = set(policy["required_requirement_ids"])
-            already_reflected_ids = set(policy["already_reflected_requirement_ids"])
-        proposal_ids = [item.proposal_id for item in design.srs_revision_proposals]
-        proposal_requirement_ids = [
-            item.requirement_id for item in design.srs_revision_proposals
-        ]
-        if len(proposal_ids) != len(set(proposal_ids)):
-            revision_errors.append("SRS 개정 제안 ID 중복")
-        if len(proposal_requirement_ids) != len(set(proposal_requirement_ids)):
-            revision_errors.append("Requirement별 SRS 개정 제안 중복")
-        missing = sorted(required_revision_ids - set(proposal_requirement_ids))
-        extra = sorted(set(proposal_requirement_ids) - required_revision_ids)
-        if missing:
-            revision_errors.append("개정 제안 누락=" + ",".join(missing))
-        if extra:
-            revision_errors.append("개정 대상 밖 제안=" + ",".join(extra))
-        unnecessary = sorted(set(proposal_requirement_ids) & already_reflected_ids)
-        if unnecessary:
+    # CP2-018
+    revision_errors: list[str] = []
+    policy = _srs_revision_policy(request, analysis, requirements)
+    required_revision_ids = set(policy["required_requirement_ids"])
+    already_reflected_ids = set(policy["already_reflected_requirement_ids"])
+    proposal_ids = [item.proposal_id for item in design.srs_revision_proposals]
+    proposal_requirement_ids = [
+        item.requirement_id for item in design.srs_revision_proposals
+    ]
+    if len(proposal_ids) != len(set(proposal_ids)):
+        revision_errors.append("SRS 개정 제안 ID 중복")
+    if len(proposal_requirement_ids) != len(set(proposal_requirement_ids)):
+        revision_errors.append("Requirement별 SRS 개정 제안 중복")
+    missing = sorted(required_revision_ids - set(proposal_requirement_ids))
+    extra = sorted(set(proposal_requirement_ids) - required_revision_ids)
+    if missing:
+        revision_errors.append("개정 제안 누락=" + ",".join(missing))
+    if extra:
+        revision_errors.append("개정 대상 밖 제안=" + ",".join(extra))
+    unnecessary = sorted(set(proposal_requirement_ids) & already_reflected_ids)
+    if unnecessary:
+        revision_errors.append(
+            "현재 SRS에 요청 after_value가 이미 반영됨=" + ",".join(unnecessary)
+            + "; 해당 개정안을 제외하고 TC 선택·검증 범위는 유지하세요. 새 승인이나 문구 변경은 필요하지 않습니다."
+        )
+    for proposal in design.srs_revision_proposals:
+        requirement = requirements.get(proposal.requirement_id)
+        if requirement is None:
             revision_errors.append(
-                "현재 SRS에 요청 after_value가 이미 반영됨=" + ",".join(unnecessary)
-                + "; 해당 개정안을 제외하고 TC 선택·검증 범위는 유지하세요. 새 승인이나 문구 변경은 필요하지 않습니다."
+                f"{proposal.proposal_id}:SRS에 없는 Requirement"
             )
-        for proposal in design.srs_revision_proposals:
-            requirement = requirements.get(proposal.requirement_id)
-            if requirement is None:
-                revision_errors.append(
-                    f"{proposal.proposal_id}:SRS에 없는 Requirement"
-                )
-                continue
-            if require_meaning_guard:
-                sources = [known_conditions[c].source_text for c in proposal.source_condition_ids if c in known_conditions]
-                authority = " ".join([requirement.acceptance_criteria, *sources])
-                if proposal.requirement_id == request.target_requirement_id:
-                    authority += " " + request.after_value + " " + request.description
-                if _explicit_behavior_values(proposal.proposed_acceptance_criteria) - _explicit_behavior_values(authority):
-                    revision_errors.append(f"{proposal.proposal_id}:근거에 없는 개정 코드·수치")
-                if legacy_wording_checks and any(_meaning_conflicts(source, proposal.proposed_acceptance_criteria, compare_relations=require_input_contract) for source in sources):
-                    revision_errors.append(f"{proposal.proposal_id}:변경 조건과 개정 문구의 의미가 반대입니다")
-            if proposal.current_acceptance_criteria != requirement.acceptance_criteria:
-                revision_errors.append(
-                    f"{proposal.proposal_id}:현재 인수 기준 원문 불일치"
-                )
-            if (
-                proposal.proposed_acceptance_criteria.casefold()
-                == proposal.current_acceptance_criteria.casefold()
-            ):
-                revision_errors.append(
-                    f"{proposal.proposal_id}:변경되지 않은 인수 기준"
-                )
-            for condition_id in proposal.source_condition_ids:
-                condition = known_conditions.get(condition_id)
-                if condition is None:
-                    revision_errors.append(
-                        f"{proposal.proposal_id}:입력 밖 조건 {condition_id}"
-                    )
-                elif proposal.requirement_id not in condition.requirement_ids:
-                    revision_errors.append(
-                        f"{proposal.proposal_id}:{condition_id} Requirement 근거 불일치"
-                    )
-        if revision_errors:
-            add(
-                "CP2-018",
-                CheckStatus.FAIL,
-                "사람 승인용 SRS 개정 제안이 입력 근거와 맞지 않습니다: "
-                + "; ".join(revision_errors),
+            continue
+        sources = [known_conditions[c].source_text for c in proposal.source_condition_ids if c in known_conditions]
+        authority = " ".join([requirement.acceptance_criteria, *sources])
+        if proposal.requirement_id == request.target_requirement_id:
+            authority += " " + request.after_value + " " + request.description
+        if _explicit_behavior_values(proposal.proposed_acceptance_criteria) - _explicit_behavior_values(authority):
+            revision_errors.append(f"{proposal.proposal_id}:근거에 없는 개정 코드·수치")
+        if proposal.current_acceptance_criteria != requirement.acceptance_criteria:
+            revision_errors.append(
+                f"{proposal.proposal_id}:현재 인수 기준 원문 불일치"
             )
-        else:
-            add(
-                "CP2-018",
-                CheckStatus.PASS,
-                ("현재 SRS에 이미 반영되어 개정 불필요=" + ",".join(sorted(already_reflected_ids))
-                 + "; 나머지 개정안의 전·후 문구와 근거를 확인했습니다. 시험 완료·사람 승인을 뜻하지 않습니다."
-                 if already_reflected_ids else
-                 "SRS 개정 필요 범위와 제출된 제안을 확인했습니다. 기존 기준 시험만이면 제안이 없어도 됩니다."
-                 if allow_target_verification_candidate else
-                 "MODIFIED·UPDATE_REQUIRED Requirement의 SRS 개정 전·후 문구와 근거가 구조화됐습니다."),
+        if (
+            proposal.proposed_acceptance_criteria.casefold()
+            == proposal.current_acceptance_criteria.casefold()
+        ):
+            revision_errors.append(
+                f"{proposal.proposal_id}:변경되지 않은 인수 기준"
             )
-
-    if require_tc_detail:
-        detail_errors: list[str] = []
-        # Limited checks for visibly compressed procedures, not a general Korean
-        # parser. Restore may remain a concise select-and-apply instruction.
-        compressed_action = re.compile(
-            r"(?:선택|입력|설정)(?:하고|한\s*(?:뒤|후)|\s*(?:→|>|후|및))[^.\n]*적용"
-            r"|\b(?:select|enter|fill|set)\b[^.\n]*\b(?:and|then)\s+(?:click\s+)?(?:apply|submit)\b",
-            re.I,
+        for condition_id in proposal.source_condition_ids:
+            condition = known_conditions.get(condition_id)
+            if condition is None:
+                revision_errors.append(
+                    f"{proposal.proposal_id}:입력 밖 조건 {condition_id}"
+                )
+            elif proposal.requirement_id not in condition.requirement_ids:
+                revision_errors.append(
+                    f"{proposal.proposal_id}:{condition_id} Requirement 근거 불일치"
+                )
+    if revision_errors:
+        add(
+            "CP2-018",
+            CheckStatus.FAIL,
+            "사람 승인용 SRS 개정 제안이 입력 근거와 맞지 않습니다: "
+            + "; ".join(revision_errors),
         )
-        vague_steps = {"테스트실행", "시험실행", "결과확인", "테스트를실행한다", "결과를확인한다"}
-        for tc in design.test_cases:
-            for index, step in enumerate(tc.steps, 1):
-                if legacy_wording_checks and compressed_action.search(step):
-                    detail_errors.append(f"{tc.tc_id} 단계 {index}: 값 선택/입력과 적용을 별도 단계로 구분")
-                if legacy_wording_checks and _normalize(step).rstrip(".") in vague_steps:
-                    detail_errors.append(f"{tc.tc_id} 단계 {index}: 조작 위치·대상·행동을 구체화")
-            detail_errors.extend(_tc_observation_binding_errors(tc, legacy_wording_checks=legacy_wording_checks))
-        add("CP2-020", CheckStatus.FAIL if detail_errors else CheckStatus.PASS,
-            "TC 상세화 필요: " + "; ".join(detail_errors) if detail_errors
-            else ("조작 구분·기대결과 확인 대상·판정 단계의 상세화 항목을 확인했습니다." if legacy_wording_checks
-                  else "기대결과 확인 대상·판정 단계 연결을 확인했습니다. 상세 문체는 작성 지침으로 유지합니다."))
+    else:
+        add(
+            "CP2-018",
+            CheckStatus.PASS,
+            ("현재 SRS에 이미 반영되어 개정 불필요=" + ",".join(sorted(already_reflected_ids))
+             + "; 나머지 개정안의 전·후 문구와 근거를 확인했습니다. 시험 완료·사람 승인을 뜻하지 않습니다."
+             if already_reflected_ids else
+             "SRS 개정 필요 범위와 제출된 제안을 확인했습니다. 기존 기준 시험만이면 제안이 없어도 됩니다."),
+        )
 
-        if require_procedure_detail and legacy_wording_checks:
-            procedure_errors = [error for tc in design.test_cases for error in _tc_procedure_detail_errors(tc)]
-            if require_restore_target_basis:
-                procedure_errors.extend(error for tc in design.test_cases for error in _tc_restore_basis_errors(tc))
-            add("CP2-021", CheckStatus.FAIL if procedure_errors else CheckStatus.PASS,
-                "TC 절차 보완 필요: " + "; ".join(procedure_errors) if procedure_errors
-                else "대상 선택 순서와 복원 확인 설명의 명시 항목을 확인했습니다.")
+    # CP2-020: observation target and judgment step links (wording is guidance).
+    detail_errors = [error for tc in design.test_cases for error in _tc_observation_binding_errors(tc)]
+    add("CP2-020", CheckStatus.FAIL if detail_errors else CheckStatus.PASS,
+        "TC 상세화 필요: " + "; ".join(detail_errors) if detail_errors
+        else "기대결과 확인 대상·판정 단계 연결을 확인했습니다. 상세 문체는 작성 지침으로 유지합니다.")
 
-    if require_state_restoration_policy:
-        policy_errors = []
-        for tc in design.test_cases:
-            if tc.state_effect is None:
-                policy_errors.append(f"{tc.tc_id}: state_effect 분류 누락")
-            elif tc.restore_required != (tc.state_effect != TcStateEffect.READ_ONLY):
-                policy_errors.append(f"{tc.tc_id}: 조회는 복원 불필요, 변경·차단은 복원 절차 필요")
-            if tc.state_effect == TcStateEffect.BLOCKED_CHANGE and not any(
-                result.observation_layer in {ObservationLayer.UI, ObservationLayer.INTERNAL_STATE}
-                for result in tc.expected_results
-            ):
-                policy_errors.append(f"{tc.tc_id}: 차단 안내뿐 아니라 요구된 차단 결과의 대상 상태 확인 필요")
-        add("CP2-022", CheckStatus.FAIL if policy_errors else CheckStatus.PASS,
-            "; ".join(policy_errors) if policy_errors else "조회·변경·차단 유형별 복원 정책을 확인했습니다.")
+    policy_errors = []
+    for tc in design.test_cases:
+        if tc.state_effect is None:
+            policy_errors.append(f"{tc.tc_id}: state_effect 분류 누락")
+        elif tc.restore_required != (tc.state_effect != TcStateEffect.READ_ONLY):
+            policy_errors.append(f"{tc.tc_id}: 조회는 복원 불필요, 변경·차단은 복원 절차 필요")
+        if tc.state_effect == TcStateEffect.BLOCKED_CHANGE and not any(
+            result.observation_layer in {ObservationLayer.UI, ObservationLayer.INTERNAL_STATE}
+            for result in tc.expected_results
+        ):
+            policy_errors.append(f"{tc.tc_id}: 차단 안내뿐 아니라 요구된 차단 결과의 대상 상태 확인 필요")
+    add("CP2-022", CheckStatus.FAIL if policy_errors else CheckStatus.PASS,
+        "; ".join(policy_errors) if policy_errors else "조회·변경·차단 유형별 복원 정책을 확인했습니다.")
 
-    if require_structured_restoration or any(tc.restoration is not None for tc in design.test_cases):
-        errors = [f"{tc.tc_id}: {error}" for tc in design.test_cases
-                  for error in _structured_restoration_errors(tc)]
-        add("CP2-023", CheckStatus.FAIL if errors else CheckStatus.PASS,
-            "; ".join(errors) if errors else "복원 조작·대상 ER·관찰 기준·확인 시점의 구조화 연결을 확인했습니다.")
+    errors = [f"{tc.tc_id}: {error}" for tc in design.test_cases
+              for error in _structured_restoration_errors(tc)]
+    add("CP2-023", CheckStatus.FAIL if errors else CheckStatus.PASS,
+        "; ".join(errors) if errors else "복원 조작·대상 ER·관찰 기준·확인 시점의 구조화 연결을 확인했습니다.")
 
     if design.existing_tc_revisions:
         # H-3 (2026-10-17). Added only when a revision is declared, so earlier

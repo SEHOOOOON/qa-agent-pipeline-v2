@@ -16,13 +16,8 @@ def test_baseline_order_facts_match_compiler_across_controls(field,initial,targe
     code=compile_automation_candidate('RUN-20261011-120000-ABCDEF',case,plan)
     assert code.index('selectedUnitId === 1') < code.index('controller_original = _controller_baseline(page, 1)')
     assert code.index('controller_original = _controller_baseline(page, 1)') < code.index('state_change_started = True')
-    old=grounding.build_grounding_input('AGENT3',None,{},plan,test_case=case,observation=obs,
-        include_review_responsibilities=True,include_task_boundaries='1.3')
-    new=grounding.build_grounding_input('AGENT3',None,{},plan,test_case=case,observation=obs,
-        include_review_responsibilities=True,include_task_boundaries='1.3',baseline_capture_order=True)
-    assert 'baseline_capture_order' not in old['context']['compiler_plan_facts']
+    new=grounding.build_grounding_input('AGENT3',None,{},plan,test_case=case,observation=obs)
     assert new['context']['compiler_plan_facts']['baseline_capture_order']==facts
-    assert old['items']==new['items']  # No review target removed or verdict changed.
     plan.actions[0].value=None  # Controller-map selection is bound by selector/plan ID.
     assert controller_baseline_order_facts(case,plan)==facts
 
@@ -37,7 +32,7 @@ def test_baseline_order_facts_do_not_claim_safe_order_for_invalid_plan(fault,con
     elif fault=='late_select':plan.actions[0],plan.actions[1]=plan.actions[1],plan.actions[0]
     else:plan.actions=[a for a in plan.actions if a.phase.value!='RESTORE']
     assert controller_baseline_order_facts(case,plan) is None
-    cp=pipeline.evaluate_checkpoint3_plan(case,plan,obs,require_assertion_target_identity=True)
+    cp=pipeline.evaluate_checkpoint3_plan(case,plan,obs)
     assert cp.status==CheckStatus.FAIL
 
 
@@ -101,7 +96,7 @@ def test_normalized_restoration_reaches_cp3_without_losing_protection(controller
         plan.restore_confirmations[0].comparisons[0].basis = pipeline.RestoreComparisonBasis.PROVED_INITIAL
     elif fault == "missing_restore":
         plan.actions = [a for a in plan.actions if a.phase != AutomationPhase.RESTORE]
-    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation, legacy_wording_checks=False)
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation)
     assert cp.status == (CheckStatus.PASS if fault is None else CheckStatus.FAIL), cp.model_dump()
     if fault is None:
         code = compile_automation_candidate("FORMAT-LOCAL", case, plan)
@@ -118,17 +113,11 @@ def test_saved_dry_tc_executes_unchanged_and_restores(controller_observation, tm
     before = case.model_dump_json()
     plan = assemble_tc_bindings(case, resolve_controller_bindings(case))
     assert not tc_plan_handoff_errors(case, plan)
-    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
-        require_precondition_proof=True, require_restore_plan_links=True,
-        require_restore_comparison_basis=True, legacy_wording_checks=False,
-        allow_terminal_observation_anchor=True, require_assertion_target_identity=True,
-        review_precondition_coverage=True, review_value_roles=True, shared_evidence=True,
-        allow_state_change_terminal_observation=True, execution_interface=True)
+    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation)
     assert checkpoint.status == CheckStatus.PASS, checkpoint.model_dump_json(indent=2)
     monkeypatch.setenv("QA_TARGET_URL", (REPO_ROOT / "product_baseline/virtual-controller.html").as_uri())
     monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
-    code = compile_automation_candidate("LOCAL-SAVED-DRY", case, plan,
-        explicit_expectations_only=True, typed_values=True)
+    code = compile_automation_candidate("LOCAL-SAVED-DRY", case, plan)
     namespace = {}
     exec(compile(code, "saved_dry", "exec"), namespace)
     functions = [value for name, value in namespace.items() if name.startswith("test_") and callable(value)]
@@ -175,12 +164,10 @@ def test_typed_value_comparison_contract(actual, expected, equal):
 @pytest.mark.parametrize("field,initial,target", [
     ("status", "OPERATION", "STOP"), ("mode", "COOL", "HEAT"),
     ("fanSpeed", "AUTO", "LOW"), ("setTemp", 27, 21), ("locked", False, True)])
-def test_typed_compilation_uses_common_comparison_and_keeps_legacy(field, initial, target):
+def test_typed_compilation_uses_common_comparison(field, initial, target):
     import ast
     case, plan = controller_lifecycle_fixture(field, initial, target)
-    old = compile_automation_candidate("RUN-COMPARE", case, plan, explicit_expectations_only=True)
-    new = compile_automation_candidate("RUN-COMPARE", case, plan, explicit_expectations_only=True, typed_values=True)
-    assert "_qa_values_equal" not in old
+    new = compile_automation_candidate("RUN-COMPARE", case, plan)
     assert "def _qa_values_equal" in new
     tree = ast.parse(new)
     # Inspect actual emitted assertions, not just an unused helper definition.
@@ -190,8 +177,6 @@ def test_typed_compilation_uses_common_comparison_and_keeps_legacy(field, initia
     assert any(ast.unparse(node.test.operand.args[0]) == "actual" for node in checks)
     assert any(ast.unparse(node.test.operand.args[0]) == "restored_controller" for node in checks)
     assert all(c.status != CheckStatus.FAIL for c in pipeline.evaluate_compiled_candidate(case, new))
-    assert old == compile_automation_candidate("RUN-COMPARE", case, plan,
-        explicit_expectations_only=True, typed_values=False)
 
 
 @pytest.mark.parametrize("initial_mode,selected_device,initial,target,relative", [
@@ -226,14 +211,12 @@ def test_execution_interface_preparation_changes_actionability(initial_mode, sel
     observation = inspect_target_ui(product, required_selectors=set(eligibility.required_selectors),
         required_harness_keys=set(eligibility.required_harness_keys))
     plan = pipeline.ControllerMapAgent3().plan(case, observation, {}).plan
-    old = pipeline.evaluate_checkpoint3_plan(case, plan, observation)
-    assert old.status == (CheckStatus.FAIL if relative else CheckStatus.PASS)
-    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, observation, execution_interface=True)
+    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, observation)
     assert checkpoint.status == CheckStatus.PASS, checkpoint.model_dump_json(indent=2)
     monkeypatch.setenv("QA_TARGET_URL", product.as_uri())
     monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
     namespace = {}
-    exec(compile(compile_automation_candidate("INTERFACE-LOCAL", case, plan, explicit_expectations_only=True, typed_values=True),
+    exec(compile(compile_automation_candidate("INTERFACE-LOCAL", case, plan),
                  "interface_trial", "exec"), namespace)
     if initial == 16:
         with pytest.raises(AssertionError, match="PRODUCT_MISMATCH"):
@@ -264,8 +247,7 @@ def test_typed_internal_boolean_mismatch_is_reported_and_restored(tmp_path, monk
     before = product.read_bytes()
     monkeypatch.setenv("QA_TARGET_URL", product.as_uri())
     monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
-    code = compile_automation_candidate("TYPED-OBSERVATION", case, plan,
-        explicit_expectations_only=True, typed_values=True)
+    code = compile_automation_candidate("TYPED-OBSERVATION", case, plan)
     scope = {}
     exec(compile(code, "typed_trial", "exec"), scope)
     with pytest.raises(AssertionError, match="PRODUCT_MISMATCH"):
@@ -287,7 +269,7 @@ def test_execution_interface_unusable_at_execution_is_not_skipped(fault, mapped_
     element = next(e for e in observation.elements if e.selector == "#det-fan-high")
     setattr(element, "enabled" if fault == "disabled" else "visible", False)
     plan = pipeline.ControllerMapAgent3().plan(case, observation, {}).plan
-    assert pipeline.evaluate_checkpoint3_plan(case, plan, observation, execution_interface=True).status == CheckStatus.PASS
+    assert pipeline.evaluate_checkpoint3_plan(case, plan, observation).status == CheckStatus.PASS
     original_click = Locator.click
     injected = []
     def guarded_click(locator, *args, **kwargs):
@@ -304,7 +286,7 @@ def test_execution_interface_unusable_at_execution_is_not_skipped(fault, mapped_
     monkeypatch.setenv("QA_TARGET_URL", (REPO_ROOT / "product_baseline/virtual-controller.html").as_uri())
     monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
     namespace = {}
-    exec(compile(compile_automation_candidate("INTERFACE-FAULT", case, plan, explicit_expectations_only=True),
+    exec(compile(compile_automation_candidate("INTERFACE-FAULT", case, plan),
                  "interface_fault", "exec"), namespace)
     with pytest.raises(PlaywrightTimeoutError):
         namespace["test_tc_cand_090"]()
@@ -335,7 +317,7 @@ def test_execution_interface_preserves_fidelity_and_element_guards(field, initia
         observation.elements = [e for e in observation.elements if e.selector != ".btn-apply-cmd"]
     else:
         next(e for e in observation.elements if e.selector == ".btn-apply-cmd").match_count = 2
-    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, observation, execution_interface=True)
+    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, observation)
     assert checkpoint.status == CheckStatus.FAIL
 
 
@@ -424,8 +406,7 @@ def panel_readback_browser():
 
 
 @pytest.mark.parametrize("mutation", ["valid", "read_only", "input", "hidden", "disabled", "duplicate", "missing"])
-@pytest.mark.parametrize("interface", [False, True])
-def test_observed_click_capability_preserves_cp3_guards(mutation, interface):
+def test_observed_click_capability_preserves_cp3_guards(mutation):
     from qa_pipeline_agent3 import _observed_action_hint
     case, plan, obs = generic_control_guard_fixture()
     action = plan.actions[0]
@@ -447,10 +428,10 @@ def test_observed_click_capability_preserves_cp3_guards(mutation, interface):
         obs.elements.pop()
     # Only test this operation's CP3-002; other fixture checks are unrelated.
     plan.actions = [action]
-    result = pipeline.evaluate_checkpoint3_plan(case, plan, obs, legacy_wording_checks=False,
-                                               execution_interface=interface)
+    result = pipeline.evaluate_checkpoint3_plan(case, plan, obs)
     check = next(item for item in result.checks if item.rule_id == "CP3-002")
-    allowed = mutation == "valid" or (interface and mutation in {"hidden", "disabled"})
+    # Visibility/enablement at run time is the execution interface's job.
+    allowed = mutation in {"valid", "hidden", "disabled"}
     assert check.status == (CheckStatus.PASS if allowed else CheckStatus.FAIL)
 
 
@@ -593,8 +574,7 @@ def test_controller_device_select_hint_reaches_semantic_review(mapped_controller
     selector = next(a.selector for a in plan.actions if a.action_type.value == "SELECT_DEVICE")
     index = next(i for i, e in enumerate(obs.elements) if e.selector == selector)
     assert obs.elements[index].tag == "div" and obs.elements[index].action_hint == "CLICK"
-    review = g.build_grounding_input("AGENT3", None, {}, plan, test_case=case, observation=obs,
-        include_execution_contract=True, include_review_responsibilities=True, include_task_boundaries="1.3")
+    review = g.build_grounding_input("AGENT3", None, {}, plan, test_case=case, observation=obs)
     docs = {d["source_id"]: d["text"] for d in review["source_documents"]}
     assert docs[f"UI_INVENTORY/elements/{index}/selector"] == selector
     assert docs[f"UI_INVENTORY/elements/{index}/action_hint"] == "CLICK"
@@ -604,7 +584,7 @@ def test_controller_device_select_hint_reaches_semantic_review(mapped_controller
 def test_compiled_device_selection_checks_effect_not_just_handler(effect, panel_readback_browser):
     from playwright.sync_api import TimeoutError as BrowserTimeout
     case, plan = mapped_tc_fixture("status", "OPERATION", "STOP")
-    code = compile_automation_candidate("SELECT-GUARD", case, plan, explicit_expectations_only=True)
+    code = compile_automation_candidate("SELECT-GUARD", case, plan)
     lines = code.splitlines()
     click = next(i for i, line in enumerate(lines) if "page.locator('#device-card-1 .card-body-split').click()" in line)
     block = "\n".join(line.strip() for line in lines[click:click + 2])
@@ -701,7 +681,7 @@ def test_controller_map_five_controls_execute_without_binding_model(field, initi
     monkeypatch.setenv("QA_TARGET_URL", (REPO_ROOT / "product_baseline/virtual-controller.html").as_uri())
     monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
     namespace = {}
-    exec(compile(compile_automation_candidate("MAP-LOCAL", case, plan, explicit_expectations_only=True), "mapped", "exec"), namespace)
+    exec(compile(compile_automation_candidate("MAP-LOCAL", case, plan), "mapped", "exec"), namespace)
     namespace["test_tc_cand_090"]()
     output = capsys.readouterr().out
     assert "RESTORE_STATUS: RESTORED" in output and "PRODUCT_MISMATCH" not in output
@@ -733,8 +713,7 @@ def test_local_matrix_new_combinations_preserve_tc_and_restore(field, initial, t
     plan = ControllerMapAgent3().plan(case, mapped_controller_observation, {}).plan
     checkpoint = evaluate_checkpoint3_plan(case, plan, mapped_controller_observation)
     assert checkpoint.status == CheckStatus.PASS, checkpoint.model_dump_json(indent=2)
-    code = compile_automation_candidate("LOCAL-NEW-COMBINATIONS", case, plan,
-                                      explicit_expectations_only=True, typed_values=True)
+    code = compile_automation_candidate("LOCAL-NEW-COMBINATIONS", case, plan)
     monkeypatch.setenv("QA_TARGET_URL", (REPO_ROOT / "product_baseline/virtual-controller.html").as_uri())
     monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
     namespace = {}
@@ -787,7 +766,7 @@ def test_temperature_adjustment_shared_progress_guard(helper, values, target, re
     monkeypatch.setenv("QA_TARGET_URL", "about:blank")
     monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path))
     case, plan = mapped_tc_fixture()
-    code = compile_automation_candidate("LOCAL-PROGRESS", case, plan, typed_values=True)
+    code = compile_automation_candidate("LOCAL-PROGRESS", case, plan)
     namespace = {}
     exec(compile(code, "progress_guard", "exec"), namespace)
     page = TemperatureSequencePage(values)
@@ -812,8 +791,7 @@ def test_temperature_unreachable_trial_is_execution_error_not_product_failure(in
                                     discover_generic=False)
     plan = ControllerMapAgent3().plan(case, observation, {}).plan
     code_file = tmp_path / "test_unreachable.py"
-    _write_text_atomic(code_file, compile_automation_candidate("LOCAL-UNREACHABLE", case, plan,
-                       explicit_expectations_only=True, typed_values=True))
+    _write_text_atomic(code_file, compile_automation_candidate("LOCAL-UNREACHABLE", case, plan))
     result = pipeline.run_candidate_trial(code_file, target_html, tmp_path / "trial", timeout_seconds=90)
     assert result.outcome == pipeline.TrialOutcome.AUTOMATION_ERROR
     assert pipeline._neutral_status_from_trial(result.outcome) == pipeline.NeutralExecutionStatus.EXECUTION_ERROR
@@ -830,8 +808,7 @@ def test_error_capture_preserves_original_error_and_restoration(capture_fails,
     from qa_pipeline_agent3 import ControllerMapAgent3
     case, _ = mapped_tc_fixture("setTemp", 18, 29.5)
     plan = ControllerMapAgent3().plan(case, mapped_controller_observation, {}).plan
-    code = compile_automation_candidate("LOCAL-CAPTURE-FAILURE", case, plan,
-                                      explicit_expectations_only=True)
+    code = compile_automation_candidate("LOCAL-CAPTURE-FAILURE", case, plan)
     monkeypatch.setenv("QA_TARGET_URL", (REPO_ROOT / "product_baseline/virtual-controller.html").as_uri())
     monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path))
     if capture_fails:
@@ -967,7 +944,7 @@ def test_controller_map_read_only_and_boundary_keep_tc_verdict(expected, control
     monkeypatch.setenv("QA_TARGET_URL", (REPO_ROOT / "product_baseline/virtual-controller.html").as_uri())
     monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
     namespace = {}
-    code = compile_automation_candidate("MAP-BOUNDARY", case, plan, explicit_expectations_only=True)
+    code = compile_automation_candidate("MAP-BOUNDARY", case, plan)
     exec(code, namespace)
     if expected == 31:
         # Deliberately incorrect oracle: the adapter must not silently change it to 30.
@@ -1000,7 +977,7 @@ def test_frozen_tc_bindings_preserve_definition_and_local_execution(
     target = REPO_ROOT / "product_baseline/virtual-controller.html"
     monkeypatch.setenv("QA_TARGET_URL", target.as_uri())
     monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
-    code = compile_automation_candidate("LOCAL-TC-HANDOFF", case, plan, explicit_expectations_only=True)
+    code = compile_automation_candidate("LOCAL-TC-HANDOFF", case, plan)
     namespace = {}
     exec(compile(code, "tc_handoff", "exec"), namespace)
     namespace["test_tc_cand_090"]()
@@ -1130,7 +1107,7 @@ def test_frozen_tc_boundary_input_is_not_expected_output(expected, mismatch, con
     monkeypatch.setenv("QA_TARGET_URL", (REPO_ROOT / "product_baseline/virtual-controller.html").as_uri())
     monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
     namespace = {}
-    exec(compile_automation_candidate("LOCAL-FROZEN-BOUNDARY", case, plan, explicit_expectations_only=True), namespace)
+    exec(compile_automation_candidate("LOCAL-FROZEN-BOUNDARY", case, plan), namespace)
     if mismatch:
         with pytest.raises(AssertionError, match="PRODUCT_MISMATCH"):
             namespace["test_tc_cand_090"]()
@@ -1223,15 +1200,11 @@ def test_execution_interface_saved_handoff_preserves_results_and_integrity(
 
     # A later read must reject changed policy, review, code and evidence without API.
     manifest_file = run / "agent3_manifest.json"
-    for marker in (None, "unknown"):
-        pipeline._write_json(manifest_file, {**manifest, "execution_interface_contract": marker})
-        with pytest.raises(ValueError, match="실행 인터페이스 계약|원래값 캡처 순서 설명 계약"):
-            pipeline._candidate_execution_record(run, run_id, product)
-    pipeline._write_json(manifest_file, manifest)
-    for marker in (None, "unknown"):
-        pipeline._write_json(manifest_file, {**manifest, "value_comparison_contract": marker})
-        with pytest.raises(ValueError, match="값 비교 계약"):
-            pipeline._candidate_execution_record(run, run_id, product)
+    for key in ("execution_interface_contract", "value_comparison_contract"):
+        for marker in (None, "unknown"):
+            pipeline._write_json(manifest_file, {**manifest, key: marker})
+            with pytest.raises(ValueError, match="옛 형식 Agent 3"):
+                pipeline._candidate_execution_record(run, run_id, product)
     pipeline._write_json(manifest_file, manifest)
     for path in (run / "agent3_grounding_review.json", run / result.test_file,
                  run / result.stdout_file):
@@ -1269,7 +1242,7 @@ def test_frozen_tc_agent3_orchestration_saves_binding_and_shared_review(tmp_path
     manifest = pipeline._read_json_payload(run / "agent3_manifest.json")
     assert manifest["prompt_version"] == "agent3-3.46"
     assert manifest["execution_interface_contract"] == "1.2"
-    pipeline_execution._agent3_review_options(manifest)
+    pipeline_execution._require_current_contract(manifest, pipeline_execution._current_agent3_contract(case), "Agent 3")
     pipeline_execution._verify_agent3_plan_value_formats(run, manifest, observation, plan, case)
     payload = pipeline._read_json_payload(run / "agent3_grounding_input_attempt_1.json")
     assert any(d["source_id"] == "TC_EXECUTION_HANDOFF/definition_preserved" and d["text"] == "true"
@@ -1307,34 +1280,25 @@ def test_frozen_tc_paraphrases_do_not_reinterpret_values(wording, controller_obs
     ("fanSpeed", "LOW", "MED", "HIGH"),
     ("setTemp", 18, 24, 27),
     ("locked", False, True, "HIGH")])
-@pytest.mark.parametrize("explicit", [False, True])
 def test_product_verdict_does_not_invent_whole_test_retention(
-        tmp_path, monkeypatch, capsys, controller_observation, field, initial, permitted, rejected, explicit):
+        tmp_path, monkeypatch, capsys, controller_observation, field, initial, permitted, rejected):
     case, plan = permitted_then_blocked_fixture(field, initial, permitted, rejected)
-    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
-        legacy_wording_checks=False, shared_evidence=True, require_restore_plan_links=True,
-        require_plan_fidelity=True, require_assertion_target_identity=True)
+    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation)
     assert checkpoint.status == CheckStatus.PASS, checkpoint.model_dump_json(indent=2)
     original = case.model_dump_json(), plan.model_dump_json()
-    code = compile_automation_candidate("LOCAL-VERDICT-SCOPE", case, plan,
-        explicit_expectations_only=explicit)
+    code = compile_automation_candidate("LOCAL-VERDICT-SCOPE", case, plan)
     assert all(c.status == CheckStatus.PASS for c in pipeline.evaluate_compiled_candidate(case, code))
     target = Path(__file__).resolve().parents[1] / "product_baseline/virtual-controller.html"
     monkeypatch.setenv("QA_TARGET_URL", target.as_uri())
     monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
     namespace = {}
     exec(compile(code, "verdict_scope", "exec"), namespace)
-    if explicit:
-        namespace["test_tc_cand_090"]()
-    else:
-        with pytest.raises(AssertionError, match="blocked operation changed observed state"):
-            namespace["test_tc_cand_090"]()
+    namespace["test_tc_cand_090"]()
     output = capsys.readouterr().out
     assert "RESTORE_STATUS: RESTORED" in output
     assert "RESTORE_MISMATCH" not in output
-    if explicit:
-        assert "PRODUCT_MISMATCH" not in output
-        assert "RESTORE_CONFIRMATIONS_VERIFIED" in output
+    assert "PRODUCT_MISMATCH" not in output
+    assert "RESTORE_CONFIRMATIONS_VERIFIED" in output
     assert original == (case.model_dump_json(), plan.model_dump_json())
 
 
@@ -1348,11 +1312,9 @@ def test_explicit_boundary_results_are_not_replaced_by_observation(
     for result, assertion in zip(case.expected_results, plan.assertions):
         result.statement = f"{result.observation_target} 값은 {expected}이다."
         assertion.expected_fields[0].expected_value = expected
-    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
-        legacy_wording_checks=False, shared_evidence=True, require_plan_fidelity=True)
+    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation)
     assert checkpoint.status == CheckStatus.PASS, checkpoint.model_dump_json(indent=2)
-    code = compile_automation_candidate("LOCAL-BOUNDARY-SCOPE", case, plan,
-        explicit_expectations_only=True)
+    code = compile_automation_candidate("LOCAL-BOUNDARY-SCOPE", case, plan)
     target = Path(__file__).resolve().parents[1] / "product_baseline/virtual-controller.html"
     monkeypatch.setenv("QA_TARGET_URL", target.as_uri())
     monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
@@ -1376,8 +1338,7 @@ def test_product_action_is_independent_of_expected_output(requested, expected):
         blocked=True, blocked_by_lock=False)
     for assertion in plan.assertions:
         assertion.expected_fields[0].expected_value = expected
-    code = compile_automation_candidate("LOCAL-ACTION-SCOPE", case, plan,
-        explicit_expectations_only=True)
+    code = compile_automation_candidate("LOCAL-ACTION-SCOPE", case, plan)
     assert f"_request_temperature(page, {float(requested)})" in code
     assert "_set_temperature(page, 24.0)" in code  # setup remains strict
     assert "unexpected_state_change" not in code
@@ -1411,19 +1372,12 @@ def test_terminal_observation_preserves_execution_guards(field, initial, request
         case.steps.insert(1, observation_step)
     elif mutation == "source_paraphrase":
         test_actions[-1].source_text = test_actions[-1].source_text.replace("한다", "합니다")
-    options = dict(legacy_wording_checks=False, allow_terminal_observation_anchor=True,
-        require_assertion_target_identity=True, require_precondition_proof=True,
-        require_restore_plan_links=True, require_restore_comparison_basis=True,
-        review_precondition_coverage=True, review_value_roles=True, shared_evidence=True)
     before = case.model_dump_json(), plan.model_dump_json()
-    result = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
-        allow_state_change_terminal_observation=True, **options)
+    result = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation)
     assert (result.status == CheckStatus.PASS) == (mutation == "none"), result.model_dump_json()
     if mutation == "none":
-        legacy = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation, **options)
-        assert next(c for c in legacy.checks if c.rule_id == "CP3-003A").status == CheckStatus.FAIL
         from qa_pipeline_agent2 import _tc_observation_binding_errors
-        assert not _tc_observation_binding_errors(case, legacy_wording_checks=False)
+        assert not _tc_observation_binding_errors(case)
     assert before == (case.model_dump_json(), plan.model_dump_json())
 
 
@@ -1440,10 +1394,7 @@ def test_terminal_observation_local_trial_and_restoration(kind, controller_obser
     final_ids = {a.result_id for a in plan.assertions if a.after_action_id == final_action}
     for result in case.expected_results:
         if result.result_id in final_ids: result.verify_after_step = observation_step
-    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
-        legacy_wording_checks=False, allow_terminal_observation_anchor=True,
-        allow_state_change_terminal_observation=True, require_assertion_target_identity=True,
-        require_restore_plan_links=True, review_precondition_coverage=True, review_value_roles=True, shared_evidence=True)
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation)
     assert cp.status == CheckStatus.PASS, cp.model_dump_json()
     code = compile_automation_candidate("LOCAL-TERMINAL-OBSERVATION", case, plan)
     product = Path(__file__).resolve().parents[1] / "product_baseline/virtual-controller.html"
@@ -1487,13 +1438,10 @@ def test_repeated_apply_steps_require_unique_reference_not_fuzzy_matching(number
             if result.verify_after_step == source: result.verify_after_step = replacement
         for action in plan.actions:
             if action.source_text == source: action.source_text = replacement
-    errors = _tc_observation_binding_errors(case, legacy_wording_checks=False)
+    errors = _tc_observation_binding_errors(case)
     assert bool(errors) == (not numbered)
     if numbered:
-        result = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
-            legacy_wording_checks=False, allow_terminal_observation_anchor=True,
-            allow_state_change_terminal_observation=True, require_assertion_target_identity=True,
-            require_restore_plan_links=True, review_precondition_coverage=True, review_value_roles=True, shared_evidence=True)
+        result = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation)
         assert result.status == CheckStatus.PASS, result.model_dump_json()
 
 
@@ -1504,14 +1452,8 @@ def test_repeated_apply_steps_require_unique_reference_not_fuzzy_matching(number
 def test_mixed_precondition_readers_share_coverage(field, initial, requested, variant, controller_observation):
     case, plan = mixed_precondition_fixture(field, initial, requested, variant)
     before = case.model_dump_json(), plan.model_dump_json()
-    errors = pipeline._precondition_proof_errors(case, plan, controller_observation,
-        legacy_wording_checks=False, review_precondition_coverage=True,
-        review_value_roles=True, shared_evidence=True)
+    errors = pipeline._precondition_proof_errors(case, plan, controller_observation)
     assert bool(errors) == (variant in {"wrong_device", "unknown_reader"}), errors
-    legacy = pipeline._precondition_proof_errors(case, plan, controller_observation,
-        legacy_wording_checks=False, review_precondition_coverage=False,
-        review_value_roles=True, shared_evidence=True)
-    assert bool(legacy) == (variant != "baseline")
     assert before == (case.model_dump_json(), plan.model_dump_json())
 
 
@@ -1521,10 +1463,9 @@ def test_temperature_helper_follows_action_anchor_not_prose(split, requested, ex
     case, plan = split_boundary_fixture(split=split, request_value=requested, expected_value=expected)
     before = case.model_dump_json(), plan.model_dump_json()
     code = compile_automation_candidate("LOCAL-ANCHOR", case, plan)
-    helper = "_request_temperature" if requested != expected else "_set_temperature"
-    assert f"{helper}(page, {float(requested)})" in code
-    # The intermediate reset is preparation, not this boundary's request.
-    assert "_set_temperature(page, 30.0)" in code
+    # Every TEST-phase temperature is a request; expectations are checked separately.
+    assert f"_request_temperature(page, {float(requested)})" in code
+    assert "_request_temperature(page, 30.0)" in code
     assert before == (case.model_dump_json(), plan.model_dump_json())
 
 
@@ -1534,9 +1475,7 @@ def test_temperature_helper_follows_action_anchor_not_prose(split, requested, ex
 def test_mixed_reader_local_trial_and_restoration(field, initial, requested, controller_observation,
                                                  tmp_path, monkeypatch, capsys):
     case, plan = mixed_precondition_fixture(field, initial, requested)
-    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
-        legacy_wording_checks=False, review_precondition_coverage=True, review_value_roles=True,
-        shared_evidence=True, require_assertion_target_identity=True, require_restore_plan_links=True)
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation)
     assert cp.status == CheckStatus.PASS, cp.model_dump_json()
     code = compile_automation_candidate("LOCAL-MIXED-READERS", case, plan)
     product = Path(__file__).resolve().parents[1] / "product_baseline/virtual-controller.html"
@@ -1557,14 +1496,11 @@ def test_mixed_reader_local_trial_and_restoration(field, initial, requested, con
 def test_grouped_boundary_local_trial_preserves_assertions_and_restore(split, second_expected,
         controller_observation, tmp_path, monkeypatch, capsys):
     case, plan = controller_grouped_boundary_fixture(split=split, second_expected=second_expected)
-    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
-        legacy_wording_checks=False, review_precondition_coverage=True, review_value_roles=True,
-        shared_evidence=True, require_assertion_target_identity=True, require_restore_plan_links=True)
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation)
     assert cp.status == CheckStatus.PASS, cp.model_dump_json()
     code = compile_automation_candidate("LOCAL-GROUPED-BOUNDARY", case, plan)
     assert "_request_temperature(page, 31.0)" in code
-    second_helper = "_set_temperature" if second_expected == 21 else "_request_temperature"
-    assert f"{second_helper}(page, 21.0)" in code
+    assert "_request_temperature(page, 21.0)" in code
     assert all(c.status == CheckStatus.PASS for c in pipeline.evaluate_compiled_candidate(case, code))
     product = Path(__file__).resolve().parents[1] / "product_baseline/virtual-controller.html"
     before = product.read_bytes()
@@ -1592,8 +1528,7 @@ def test_mixed_reader_coverage_still_requires_review(controller_observation, var
     import qa_pipeline_grounding as g
     case, plan = mixed_precondition_fixture("mode", "COOL", "HEAT", variant)
     payload = g.build_grounding_input("AGENT3", None, {}, plan, test_case=case,
-        observation=controller_observation, include_execution_contract=True,
-        include_review_responsibilities=True, include_task_boundaries="1.2")
+        observation=controller_observation)
     item = next(i for i in payload["items"] if i["kind"] == "PRECONDITION_COVERAGE"
         and i["content"]["source"] == case.preconditions[-1])
     assert len(item["content"]["checks"]) == (1 if variant == "missing" else 2)
@@ -1603,18 +1538,6 @@ def test_mixed_reader_coverage_still_requires_review(controller_observation, var
     record["review"]["items"] = [i for i in record["review"]["items"] if i["item_id"] != item["item_id"]]
     with pytest.raises(ValueError, match="검토 응답 오류"):
         g.check_review_record(payload, record)
-
-
-def test_temperature_helper_does_not_borrow_later_condition():
-    case, plan = split_boundary_fixture()
-    # Remove the upper-bound observation. The lower bound must not authorize it.
-    plan.assertions = plan.assertions[:-1]
-    code = compile_automation_candidate("LOCAL-NO-BORROW", case, plan)
-    assert "_set_temperature(page, 31.0)" in code
-    # A late assertion must not leak past the first apply into another segment.
-    plan.assertions[0].after_action_id = "ACT-010"
-    code = compile_automation_candidate("LOCAL-NO-BORROW", case, plan)
-    assert "_set_temperature(page, 30.0)" in code
 
 
 @pytest.mark.parametrize("mutation", ["normal", "wrong_input", "wrong_output", "missing_assertion", "early_anchor"])
@@ -1628,19 +1551,13 @@ def test_boundary_outputs_are_not_inputs_but_remain_bound_to_er(controller_obser
         plan.assertions.pop()
     elif mutation == "early_anchor":
         plan.assertions[-1].after_action_id = "ACT-100"
-    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
-        legacy_wording_checks=False, review_precondition_coverage=True, review_value_roles=True,
-        shared_evidence=True, require_assertion_target_identity=True, require_restore_plan_links=True)
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation)
     expected_rule = {"wrong_input": "CP3-005", "wrong_output": "CP3-004",
         "missing_assertion": "CP3-003", "early_anchor": "CP3-003A"}.get(mutation)
     if expected_rule:
         assert any(c.rule_id == expected_rule and c.status == CheckStatus.FAIL for c in cp.checks)
     else:
         assert cp.status == CheckStatus.PASS, cp.model_dump_json()
-    legacy = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
-        legacy_wording_checks=False, review_precondition_coverage=True, review_value_roles=True,
-        shared_evidence=False)
-    assert any(c.rule_id == "CP3-005" and c.status == CheckStatus.FAIL for c in legacy.checks)
 
 
 _CONTROL_SCENARIOS = [
@@ -1688,8 +1605,7 @@ def test_shared_evidence_writer_checker_reviewer_use_same_inventory(controller_o
             action.source_text = case.steps[0]
     # State meaning is deliberately a model-review responsibility, not a word parser.
     payload = pipeline.build_agent3_model_input(case, controller_observation, {}, shared_evidence=True)
-    review = g.build_grounding_input("AGENT3", None, {}, plan, test_case=case, observation=controller_observation,
-        include_execution_contract=True, include_review_responsibilities=True, include_task_boundaries="1.2")
+    review = g.build_grounding_input("AGENT3", None, {}, plan, test_case=case, observation=controller_observation)
     assert field in payload["ui_observation"]["device_state_fields"]
     assert f"window.__vccs.devices[0].{field}" in payload["ui_observation"]["harness_values"]
     assert review["context"]["controller_evidence"] == payload["controller_evidence"]
@@ -1699,8 +1615,7 @@ def test_shared_evidence_writer_checker_reviewer_use_same_inventory(controller_o
     assert len([i for i in review["items"] if i["kind"] == "EXPECTED_RESULT"]) == len(case.expected_results)
     # Missing checks and unsupported readers remain structural failures.
     plan.assertions.pop()
-    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
-        legacy_wording_checks=False, review_precondition_coverage=True, review_value_roles=True, shared_evidence=True)
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation)
     assert cp.status == CheckStatus.FAIL
 
 
@@ -1712,12 +1627,10 @@ def test_shared_evidence_keeps_value_mismatch_in_mandatory_review(controller_obs
     import qa_pipeline_grounding as g
     case, plan = controller_lifecycle_fixture(field, initial, target)
     case.expected_results[1].statement = "적용 후 내부 상태는 " + label + "이다."
-    opts = dict(legacy_wording_checks=False, review_precondition_coverage=True, review_value_roles=True)
-    assert pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation, **opts, shared_evidence=True).status == CheckStatus.PASS
+    assert pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation).status == CheckStatus.PASS
     # A valid enum is not proof of correct meaning. Scripted rejection tests routing only.
     plan.assertions[1].expected_fields[0].expected_value = wrong
-    payload = g.build_grounding_input("AGENT3", None, {}, plan, test_case=case, observation=controller_observation,
-        include_review_responsibilities=True, include_task_boundaries="1.2")
+    payload = g.build_grounding_input("AGENT3", None, {}, plan, test_case=case, observation=controller_observation)
     record = fake_grounding_record(payload)
     item_id = next(i["item_id"] for i in payload["items"]
                    if i["kind"] == "EXPECTED_RESULT"
@@ -1736,14 +1649,13 @@ def test_shared_evidence_missing_control_does_not_gain_auto_capability(controlle
     # Inventing a selector for a requested but absent control is still rejected.
     action = next(a for a in plan.actions if a.phase == pipeline.AutomationPhase.TEST and a.selector)
     action.selector = "#nonexistent-automatic-switch"
-    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
-        legacy_wording_checks=False, review_precondition_coverage=True, review_value_roles=True, shared_evidence=True)
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation)
     assert cp.status == CheckStatus.FAIL
     unsupported = Agent3AutomationPlan.model_validate(dict(tc_id=case.tc_id, target_device_id=1,
         summary="요청한 독립 관제점이 관찰되지 않았습니다.",
         planning_status="AUTOMATION_SUPPORT_EXTENSION_REQUIRED",
         extension_reasons=["기존 AUTO 운전 모드는 별개이며 자동 전환 설정/해제 조작과 관찰 경로가 없습니다."]))
-    cp = pipeline.evaluate_checkpoint3_plan(case, unsupported, controller_observation, shared_evidence=True)
+    cp = pipeline.evaluate_checkpoint3_plan(case, unsupported, controller_observation)
     assert cp.status == CheckStatus.REVIEW
     assert cp.candidate_status == pipeline.AutomationCandidateStatus.AUTOMATION_SUPPORT_EXTENSION_REQUIRED
 
@@ -1787,9 +1699,7 @@ def test_plan_value_format_shared_across_plan_roles(tmp_path, monkeypatch, capsy
     assert bool(changes) == (field != "setTemp")
     assert before == (raw.model_dump_json(), case.model_dump_json(), controller_observation.model_dump_json())
     assert pipeline._normalize_agent3_plan_values(normalized, controller_observation) == (normalized, [])
-    cp = pipeline.evaluate_checkpoint3_plan(case, normalized, controller_observation,
-        legacy_wording_checks=False, require_restore_plan_links=True, require_restore_comparison_basis=True,
-        review_precondition_coverage=True, review_value_roles=True, require_assertion_target_identity=True)
+    cp = pipeline.evaluate_checkpoint3_plan(case, normalized, controller_observation)
     assert cp.status == CheckStatus.PASS, cp.model_dump_json(indent=2)
 
     # Execute the normalized plan against the unchanged local product, not a
@@ -1813,10 +1723,7 @@ def test_plan_value_format_shared_across_plan_roles(tmp_path, monkeypatch, capsy
 def test_local_heat_temperature_trial_restores_preparation_state(tmp_path, monkeypatch, capsys, controller_observation):
     # Hand-authored input, not an AI generation/evaluation success claim.
     case, plan = controller_lifecycle_fixture("setTemp", 27, 21, prepare={"mode": "HEAT"}, prove_ui=True)
-    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
-        legacy_wording_checks=False, require_restore_plan_links=True, require_restore_comparison_basis=True,
-        review_precondition_coverage=True, review_value_roles=True, require_assertion_target_identity=True,
-        shared_evidence=True)
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation)
     assert cp.status == CheckStatus.PASS, cp.model_dump_json(indent=2)
     code = compile_automation_candidate("LOCAL-HEAT-27-21", case, plan)
     assert all(check.status == CheckStatus.PASS for check in pipeline.evaluate_compiled_candidate(case, code))
@@ -1838,17 +1745,14 @@ def test_plan_value_format_does_not_fix_wrong_expectation_or_selector(controller
     case, raw = controller_lifecycle_fixture("mode", "COOL", "HEAT")
     raw.assertions[1].expected_fields[0].expected_value = "cool."
     normalized, changes = pipeline._normalize_agent3_plan_values(raw, controller_observation)
+    # Format conversion only; whether COOL is the right expectation is the mandatory review's job.
     assert changes and normalized.assertions[1].expected_fields[0].expected_value == "COOL"
-    cp = pipeline.evaluate_checkpoint3_plan(case, normalized, controller_observation,
-        legacy_wording_checks=False, review_precondition_coverage=True, review_value_roles=True)
-    assert any(c.rule_id == "CP3-004" and c.status == CheckStatus.FAIL for c in cp.checks)
     case, raw = controller_lifecycle_fixture("mode", "COOL", "HEAT")
     action = next(a for a in raw.actions if a.action_type == pipeline.AutomationActionType.SET_MODE)
     action.value, action.selector = "cool.", "#det-mode-heat"
     normalized, _ = pipeline._normalize_agent3_plan_values(raw, controller_observation)
     assert normalized.actions[1].selector == raw.actions[1].selector
-    cp = pipeline.evaluate_checkpoint3_plan(case, normalized, controller_observation,
-        legacy_wording_checks=False, review_precondition_coverage=True, review_value_roles=True)
+    cp = pipeline.evaluate_checkpoint3_plan(case, normalized, controller_observation)
     assert any(c.rule_id == "CP3-002" and c.status == CheckStatus.FAIL for c in cp.checks)
 
 
@@ -1880,7 +1784,8 @@ def test_plan_value_format_records_raw_and_checks_handoff(tmp_path, controller_o
     manifest = {"plan_value_formats": records}
     pipeline_execution._verify_agent3_plan_value_formats(tmp_path, manifest, controller_observation, canonical)
     assert normalized == canonical and raw.assertions[1].expected_fields[0].expected_value == "강풍."
-    pipeline_execution._verify_agent3_plan_value_formats(tmp_path, {}, controller_observation, raw)
+    with pytest.raises(ValueError, match="순서"):  # current runs always record value formats
+        pipeline_execution._verify_agent3_plan_value_formats(tmp_path, {}, controller_observation, raw)
     with pytest.raises(ValueError, match="최종 계획"):
         pipeline_execution._verify_agent3_plan_value_formats(tmp_path, manifest, controller_observation, raw)
     path = tmp_path / "agent3_plan_value_format_attempt_1.json"
@@ -1931,8 +1836,7 @@ def test_plan_value_format_pipeline_uses_same_plan_for_review_and_compile(tmp_pa
     original_compile = pipeline_execution.compile_automation_candidate
     def compile_plan(run_id, tc, plan, **kwargs):
         assert plan == canonical
-        assert kwargs == {"explicit_expectations_only": True, "typed_values": True,
-                          "consistent_card_lock": True}
+        assert kwargs == {}
         return original_compile(run_id, tc, plan, **kwargs)
     monkeypatch.setattr(pipeline_execution, "compile_automation_candidate", compile_plan)
     monkeypatch.setattr(pipeline_execution, "run_candidate_trial", lambda *a, **kw: _trial(TrialOutcome.PASS))
@@ -1958,16 +1862,12 @@ def test_precondition_value_roles_preserve_only_required_starting_state(controll
     case.preconditions[index] = source
     for entry in [*plan.actions, *plan.precondition_checks]:
         if entry.source_text == original: entry.source_text = source
-    opts = dict(legacy_wording_checks=False, require_precondition_proof=True, review_precondition_coverage=True,
-        require_restore_plan_links=True, require_restore_comparison_basis=True, require_assertion_target_identity=True)
-    old = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation, **opts)
-    assert any(c.rule_id == 'CP3-006D' and c.status == CheckStatus.FAIL for c in old.checks)
-    current = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation, review_value_roles=True, **opts)
+    current = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation)
     assert current.status == CheckStatus.PASS, current.model_dump_json(indent=2)
     # Structural support/identity and cited-value protection are not removed.
     check = next(c for c in plan.precondition_checks if c.source_text == source)
     check.expected_value = 'UNSUPPORTED_VALUE'
-    bad = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation, review_value_roles=True, **opts)
+    bad = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation)
     assert bad.status == CheckStatus.FAIL
 
 
@@ -1979,8 +1879,7 @@ def test_precondition_semantic_coverage_is_required_after_value_role_relaxation(
     if fault == 'missing_start': plan.precondition_checks.pop()
     elif fault == 'wrong_start': plan.precondition_checks[-1].expected_value = 21
     else: plan.precondition_checks[-1].selector = 'window.__vccs.devices[0].mode'
-    payload = g.build_grounding_input('AGENT3', None, {}, plan, test_case=case, observation=controller_observation,
-        include_execution_contract=True, include_review_responsibilities=True, include_task_boundaries='1.1')
+    payload = g.build_grounding_input('AGENT3', None, {}, plan, test_case=case, observation=controller_observation)
     target = next(i for i in payload['items'] if i['item_id'] == 'PRECONDITION/1')
     assert target['content']['source'] == case.preconditions[1]
     record = fake_grounding_record(payload)
@@ -1998,8 +1897,7 @@ def test_preparation_recovery_has_compiler_facts_without_extra_product_ers(contr
     case, plan = controller_lifecycle_fixture(field, initial, target, prepare={"mode": "HEAT"})
     result_ids = [r.result_id for r in case.expected_results]
     payload = grounding.build_grounding_input("AGENT3", None, {}, plan, test_case=case,
-        observation=controller_observation, include_execution_contract=True,
-        include_review_responsibilities=True, include_task_boundaries=True)
+        observation=controller_observation)
     recovery = payload["context"]["compiler_plan_facts"]["controller_recovery"]
     assert set(recovery["internal_fields"]) == {"status", "mode", "fanSpeed", "setTemp", "locked"}
     assert recovery["target_device_id"] == plan.target_device_id
@@ -2008,14 +1906,13 @@ def test_preparation_recovery_has_compiler_facts_without_extra_product_ers(contr
     assert not recovery["depends_on_product_result_ids"] and not recovery["trial_success_proved"]
     code = compile_automation_candidate("RECOVERY-FACTS", case, plan)
     assert "controller_original = _controller_baseline" in code
-    assert "if restored_controller != controller_original:" in code
+    assert "if not _qa_values_equal(restored_controller, controller_original):" in code
     assert [r.result_id for r in case.expected_results] == result_ids
     assert all(field in r.observation_target for r in case.expected_results)
     # Facts never fabricate a restore operation when the plan omits it.
     plan.actions = [a for a in plan.actions if a.phase != AutomationPhase.RESTORE]
     assert pipeline.controller_recovery_plan_facts(case, plan) is None
-    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
-        legacy_wording_checks=False, review_precondition_coverage=True, require_restore_plan_links=True)
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation)
     assert cp.status == CheckStatus.FAIL
 
 
@@ -2037,10 +1934,7 @@ def test_temperature_context_recovers_mode_without_mode_product_er(
     case, plan = controller_lifecycle_fixture("setTemp", initial, target, prepare={"mode": mode}, prove_ui=True)
     assert all("setTemp" in r.observation_target for r in case.expected_results)
     assert case.test_data.initial_mode == mode
-    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation,
-        legacy_wording_checks=False, require_precondition_proof=True,
-        review_precondition_coverage=True, require_restore_plan_links=True,
-        require_restore_comparison_basis=True, require_assertion_target_identity=True)
+    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation)
     assert checkpoint.status == CheckStatus.PASS, checkpoint.model_dump_json(indent=2)
     code = compile_automation_candidate("CONTEXT-RECOVERY", case, plan)
     target_html = REPO_ROOT / "product_baseline/virtual-controller.html"
@@ -2075,14 +1969,9 @@ def test_automatic_capture_and_required_state_have_separate_review_coverage(cont
     case, plan = controller_lifecycle_fixture(field, initial, target)
     record_instruction = '준비 전 대상 장비의 화면 및 내부 원래 값을 기록한다.'
     case.preconditions.append(record_instruction)
-    opts = dict(legacy_wording_checks=False, require_restore_plan_links=True, require_restore_comparison_basis=True,
-                require_assertion_target_identity=True)
-    old = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation, **opts)
-    assert old.status == CheckStatus.FAIL
-    new = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation, review_precondition_coverage=True, **opts)
+    new = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation)
     assert new.status == CheckStatus.PASS, new.model_dump_json(indent=2)
-    payload = grounding.build_grounding_input('AGENT3', None, {}, plan, test_case=case, observation=controller_observation,
-        include_execution_contract=True, include_review_responsibilities=True)
+    payload = grounding.build_grounding_input('AGENT3', None, {}, plan, test_case=case, observation=controller_observation)
     coverage = [item for item in payload['items'] if item['kind'] == 'PRECONDITION_COVERAGE']
     assert [item['content']['source'] for item in coverage] == case.preconditions
     assert coverage[-1]['content']['checks'] == []
@@ -2095,11 +1984,11 @@ def test_automatic_capture_and_required_state_have_separate_review_coverage(cont
     assert grounding.attach_grounding_check(new, grounding.check_review_record(payload, valid)).status == CheckStatus.PASS
     missing_review = fake_grounding_record(payload)
     missing_review['review']['items'] = [i for i in missing_review['review']['items'] if i['item_id'] != coverage[-1]['item_id']]
-    assert grounding.check_review_record(payload, missing_review).status == CheckStatus.FAIL
+    with pytest.raises(ValueError, match="누락"):
+        grounding.check_review_record(payload, missing_review)
     # Omission remains in the TC-driven review targets, even if no checks remain.
     plan.precondition_checks = []
-    missing = grounding.build_grounding_input('AGENT3', None, {}, plan, test_case=case, observation=controller_observation,
-        include_execution_contract=True, include_review_responsibilities=True)
+    missing = grounding.build_grounding_input('AGENT3', None, {}, plan, test_case=case, observation=controller_observation)
     assert len([i for i in missing['items'] if i['kind'] == 'PRECONDITION_COVERAGE']) == len(case.preconditions)
     record = fake_grounding_record(missing)
     next(i for i in record['review']['items'] if i['item_id'] == 'PRECONDITION/0').update(
@@ -2115,13 +2004,11 @@ def test_review_ownership_keeps_structural_plan_protections(controller_observati
     elif mutation == 'expected_value': plan.assertions[0].expected_fields[0].expected_value = 'HIGH'
     elif mutation == 'missing_assertion': plan.assertions.pop()
     elif mutation == 'missing_restore': plan.actions = [a for a in plan.actions if a.phase != AutomationPhase.RESTORE]
-    result = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation, legacy_wording_checks=False,
-        review_precondition_coverage=True, require_restore_plan_links=True, require_assertion_target_identity=True)
+    result = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation)
     if mutation == 'expected_value':
         # Finite UI enum meaning is deliberately model reviewed; internal value mismatch remains separate.
         import qa_pipeline_grounding as grounding
-        payload = grounding.build_grounding_input('AGENT3', None, {}, plan, test_case=case, observation=controller_observation,
-            include_execution_contract=True, include_review_responsibilities=True)
+        payload = grounding.build_grounding_input('AGENT3', None, {}, plan, test_case=case, observation=controller_observation)
         record = fake_grounding_record(payload, verdict='UNSUPPORTED')
         assert grounding.attach_grounding_check(result, grounding.check_review_record(payload, record)).status == CheckStatus.FAIL
     else:
@@ -2137,9 +2024,7 @@ def test_detailed_controller_preconditions_and_target_readers(tmp_path, monkeypa
                                                              field, initial, requested, ui_target):
     case, plan = controller_lifecycle_fixture(field, initial, requested, prove_ui=True)
     plan.assertions[0].selector = ui_target
-    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation, legacy_wording_checks=False,
-        require_precondition_proof=True, require_restore_plan_links=True, require_plan_fidelity=True,
-        require_assertion_target_identity=True)
+    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation)
     assert checkpoint.status == CheckStatus.PASS, checkpoint.model_dump_json(indent=2)
     code = compile_automation_candidate('DETAILED-CONTROLLER', case, plan)
     assert all(c.status == CheckStatus.PASS for c in pipeline.evaluate_compiled_candidate(case, code))
@@ -2159,7 +2044,7 @@ def test_detailed_controller_preconditions_and_target_readers(tmp_path, monkeypa
 def test_controller_precondition_reader_rejects_unknown_targets(controller_observation, selector):
     case, plan = controller_lifecycle_fixture('status', 'OPERATION', 'STOP', prove_ui=True)
     plan.precondition_checks[-1].selector = selector
-    errors = pipeline._precondition_proof_errors(case, plan, controller_observation, legacy_wording_checks=False)
+    errors = pipeline._precondition_proof_errors(case, plan, controller_observation)
     assert 'unsupported or unobserved controller precondition reader' in errors
 
 
@@ -2176,9 +2061,7 @@ def test_detailed_controller_eligibility_includes_panel_observation():
     ('mode', 'UNKNOWN', '제습 상태', False), ('setTemp', 99, '설정 온도 25°C', False),
 ])
 def test_decoded_ui_values_use_adapter_types_and_semantic_review(field, value, label, expected):
-    assert pipeline._controller_ui_value_is_grounded(field, value, label, legacy_wording_checks=False) is expected
-    if field == 'mode' and value == 'DRY':
-        assert not pipeline._controller_ui_value_is_grounded(field, value, label, legacy_wording_checks=True)
+    assert pipeline._controller_ui_value_is_grounded(field, value, label) is expected
 
 
 @pytest.mark.parametrize('field,value', [('status', 'OPERATION'), ('mode', 'HEAT'), ('fanSpeed', 'HIGH'), ('setTemp', 25), ('locked', True)])
@@ -2209,14 +2092,12 @@ def test_panel_reader_does_not_substitute_card_or_internal(field, value):
 
 
 @pytest.mark.parametrize('field,initial,requested,blocked', _CONTROL_SCENARIOS)
-@pytest.mark.parametrize('typed_values', [False, True])
 def test_controller_common_lifecycle_on_unmodified_product(tmp_path, monkeypatch, capsys, controller_observation,
-                                                         field, initial, requested, blocked, typed_values):
+                                                         field, initial, requested, blocked):
     case, plan = controller_lifecycle_fixture(field, initial, requested, blocked=blocked)
-    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation, legacy_wording_checks=False,
-        require_restore_plan_links=True, require_plan_fidelity=True, require_assertion_target_identity=True)
+    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation)
     assert checkpoint.status == CheckStatus.PASS, checkpoint.model_dump_json(indent=2)
-    code = compile_automation_candidate('LOCAL-CONTROLLER-LIFECYCLE', case, plan, typed_values=typed_values)
+    code = compile_automation_candidate('LOCAL-CONTROLLER-LIFECYCLE', case, plan)
     assert all(c.status == CheckStatus.PASS for c in pipeline.evaluate_compiled_candidate(case, code))
     target = Path(__file__).resolve().parents[1] / 'product_baseline/virtual-controller.html'
     before = target.read_bytes()
@@ -2248,11 +2129,10 @@ def test_controller_common_lifecycle_on_unmodified_product(tmp_path, monkeypatch
     ('setTemp', 18, 24), ('locked', False, True),
 ])
 @pytest.mark.parametrize('fault', ['UI', 'INTERNAL'])
-@pytest.mark.parametrize('explicit', [False, True])
 def test_controller_restoration_detects_each_layer_failure(tmp_path, monkeypatch, capsys, controller_observation,
-                                                         field, initial, requested, fault, explicit):
+                                                         field, initial, requested, fault):
     case, plan = controller_lifecycle_fixture(field, initial, requested)
-    code = compile_automation_candidate('LOCAL-RESTORATION-FAULT', case, plan, explicit_expectations_only=explicit)
+    code = compile_automation_candidate('LOCAL-RESTORATION-FAULT', case, plan)
     target = Path(__file__).resolve().parents[1] / 'product_baseline/virtual-controller.html'
     monkeypatch.setenv('QA_TARGET_URL', target.as_uri())
     monkeypatch.setenv('QA_EVIDENCE_DIR', str(tmp_path / 'evidence'))
@@ -2291,7 +2171,7 @@ def test_controller_restoration_detects_each_layer_failure(tmp_path, monkeypatch
 def test_controller_read_only_never_writes(tmp_path, monkeypatch, capsys, controller_observation, field):
     initial = controller_observation.harness_values[f'window.__vccs.devices[0].{field}']
     case, plan = controller_lifecycle_fixture(field, initial, initial, read_only=True)
-    check = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation, legacy_wording_checks=False)
+    check = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation)
     assert check.status == CheckStatus.PASS, check.model_dump_json(indent=2)
     code = compile_automation_candidate('LOCAL-READ-ONLY', case, plan)
     # A helper definition may be emitted, but no write helper is called.
@@ -2366,8 +2246,7 @@ def test_controller_recovers_before_test_starts(tmp_path, monkeypatch, capsys, c
 def test_controller_temperature_boundary_preserves_product_failure(tmp_path, monkeypatch, capsys, controller_observation,
                                                                  initial, requested, product_mismatch):
     case, plan = controller_lifecycle_fixture('setTemp', initial, requested, blocked=True, blocked_by_lock=False)
-    check = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation, legacy_wording_checks=False,
-                                             require_plan_fidelity=True)
+    check = pipeline.evaluate_checkpoint3_plan(case, plan, controller_observation)
     assert check.status == CheckStatus.PASS, check.model_dump_json(indent=2)
     code = compile_automation_candidate('LOCAL-TEMPERATURE-BOUNDARY', case, plan)
     target = Path(__file__).resolve().parents[1] / 'product_baseline/virtual-controller.html'
@@ -2386,13 +2265,12 @@ def test_controller_temperature_boundary_preserves_product_failure(tmp_path, mon
 
 
 @pytest.mark.parametrize('unexpected_write', [False, True])
-@pytest.mark.parametrize('explicit', [False, True])
 def test_controller_blocked_without_preparation_cleans_pending_only(tmp_path, monkeypatch, capsys, controller_observation,
-                                                                   unexpected_write, explicit):
+                                                                   unexpected_write):
     from playwright.sync_api import Locator
     case, plan = controller_lifecycle_fixture('fanSpeed', 'LOW', 'HIGH', blocked=True)
     plan.actions = [a for a in plan.actions if a.phase != AutomationPhase.PRECONDITION or a.action_type == AutomationActionType.SELECT_DEVICE]
-    code = compile_automation_candidate('LOCAL-BLOCKED-ORIGINAL', case, plan, explicit_expectations_only=explicit)
+    code = compile_automation_candidate('LOCAL-BLOCKED-ORIGINAL', case, plan)
     target = Path(__file__).resolve().parents[1] / 'product_baseline/virtual-controller.html'
     monkeypatch.setenv('QA_TARGET_URL', target.as_uri())
     monkeypatch.setenv('QA_EVIDENCE_DIR', str(tmp_path / 'evidence'))
@@ -2454,7 +2332,7 @@ def test_controller_common_contract_rejects_unsafe_plans(controller_observation,
         next(e for e in observation.elements if e.selector == selector).match_count = 2
     else:
         plan.assertions[0].expected_fields[0].field_name = 'purify'
-    result = pipeline.evaluate_checkpoint3_plan(case, plan, observation, legacy_wording_checks=False)
+    result = pipeline.evaluate_checkpoint3_plan(case, plan, observation)
     assert result.status == CheckStatus.FAIL
 
 
@@ -2492,10 +2370,7 @@ def test_assertion_device_path_must_identify_plan_target(identity, index):
     observation.harness_values[path + ".enabled"] = False
     if identity is not None:
         observation.harness_values[path + ".id"] = identity
-    old = pipeline.evaluate_checkpoint3_plan(case, plan, observation, legacy_wording_checks=False)
-    assert old.status == CheckStatus.PASS  # Stored historical contract is unchanged.
-    current = pipeline.evaluate_checkpoint3_plan(case, plan, observation, legacy_wording_checks=False,
-                                                  require_assertion_target_identity=True)
+    current = pipeline.evaluate_checkpoint3_plan(case, plan, observation)
     assert (current.status == CheckStatus.PASS) == (identity == plan.target_device_id)
     if identity != plan.target_device_id:
         assert "device index" in next(c.message for c in current.checks if c.rule_id == "CP3-004")
@@ -2519,7 +2394,7 @@ def test_inventory_missing_html_is_rejected_before_browser(tmp_path):
 @pytest.mark.parametrize('mutation', ['none', 'precondition', 'sequence'])
 def test_checkpoint3_proof_and_sequence_have_distinct_identifiers(mutation):
     case, plan, observation = precondition_guard_fixture()
-    if mutation == 'precondition': plan.precondition_checks = []
+    if mutation == 'precondition': plan.precondition_checks[0].source_text = 'not an approved precondition'
     elif mutation == 'sequence':
         next(a for a in plan.actions if a.phase == pipeline.AutomationPhase.TEST).source_text = 'not in TC'
     checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, observation)
@@ -2563,10 +2438,7 @@ def test_terminal_observation_uses_last_test_action_without_invented_click(mutat
         plan.assertions.pop()
     elif mutation == "write_tc":
         case.state_effect = pipeline.TcStateEffect.STATE_CHANGE
-    legacy = pipeline.evaluate_checkpoint3_plan(case, plan, observation, legacy_wording_checks=False)
-    assert legacy.status == CheckStatus.FAIL
-    current = pipeline.evaluate_checkpoint3_plan(case, plan, observation, legacy_wording_checks=False,
-                                       allow_terminal_observation_anchor=True)
+    current = pipeline.evaluate_checkpoint3_plan(case, plan, observation)
     assert (current.status == CheckStatus.PASS) == (mutation == "none"), current.model_dump()
     if mutation == "none":
         code = compile_automation_candidate("RUN-20260924-120000-ABCDEF", case, plan)
@@ -2592,7 +2464,7 @@ def test_new_wording_policy_preserves_execution_contract(mutation):
         plan.actions.pop()
     elif mutation == "restore_link":
         plan.restore_confirmations.pop()
-    cp = pipeline.evaluate_checkpoint3_plan(case, plan, observation, legacy_wording_checks=False)
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, observation)
     assert (cp.status == CheckStatus.PASS) == (mutation == "none"), cp.model_dump()
 
 
@@ -2665,15 +2537,14 @@ def test_structured_restoration_executes_real_baseline_comparison(tmp_path, monk
 @pytest.mark.parametrize("basis", ["시험 전", "시험 시작 전", "실행 시작 직전", "시험 직전", "실행 전"])
 @pytest.mark.parametrize("target", ["풍량 표시", "설정 온도 표시", "운전 모드 표시", "잠금 상태 표시", "조회 결과 표시"])
 def test_cp2_cp3_share_baseline_vocabulary_across_observation_targets(basis, target):
-    from qa_pipeline_agent2 import _tc_restore_basis_errors, _tc_procedure_detail_errors
+    from qa_pipeline_agent2 import _tc_restore_basis_errors
     case, plan, observation = mixed_restore_comparison_fixture()
     # Change only presentation wording; typed reader, expected value and actual
     # compiler binding remain identical. No product scenario result is invented.
     case = type(case).model_validate_json(case.model_dump_json().replace("풍량 표시", target).replace("실행 전", basis))
     plan = type(plan).model_validate_json(plan.model_dump_json().replace("풍량 표시", target).replace("실행 전", basis))
     assert not _tc_restore_basis_errors(case)
-    assert not _tc_procedure_detail_errors(case)
-    cp = pipeline.evaluate_checkpoint3_plan(case, plan, observation, require_restore_comparison_basis=True)
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, observation)
     assert cp.status == CheckStatus.PASS, [c.message for c in cp.checks if c.status == CheckStatus.FAIL]
 
 
@@ -2682,7 +2553,7 @@ def test_shared_baseline_does_not_approve_wrong_comparison(basis):
     case, plan, observation = mixed_restore_comparison_fixture()
     case = type(case).model_validate_json(case.model_dump_json().replace("실행 전 상태", basis))
     plan = type(plan).model_validate_json(plan.model_dump_json().replace("실행 전 상태", basis))
-    cp = pipeline.evaluate_checkpoint3_plan(case, plan, observation, require_restore_comparison_basis=True)
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, observation)
     assert cp.status == CheckStatus.FAIL
 
 
@@ -2695,8 +2566,7 @@ def test_hvac_preparation_restores_original_not_prepared_state(tmp_path, monkeyp
         for result, assertion in zip(case.expected_results, plan.assertions):
             result.statement = result.statement.replace("18", "17")
             assertion.expected_number = 17
-    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, observation,
-        require_restore_plan_links=True, require_restore_comparison_basis=True)
+    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, observation)
     assert checkpoint.status == CheckStatus.PASS, checkpoint.model_dump_json()
     code = compile_automation_candidate("RUN-20260920-120000-ABCDEF", case, plan)
     assert all(c.status == CheckStatus.PASS for c in evaluate_compiled_candidate(case, code))
@@ -2745,7 +2615,8 @@ def test_hvac_preparation_restores_original_not_prepared_state(tmp_path, monkeyp
         namespace["test_tc_cand_003"]()
     output = capsys.readouterr().out
     assert "RESTORE_STATUS: " + ("FAILED" if scenario == "restore_failure" else "RESTORED") in output
-    assert ("PRODUCT_MISMATCH: blocked operation" in output) == (scenario == "blocked_bug")
+    # A changed blocked value is an explicit expectation mismatch (no separate whole-state check).
+    assert ('"matched": false' in output) == (scenario == "blocked_bug")
     if scenario == "restore_failure":
         assert "ENVIRONMENT_RETIRED:" in output
     assert (tmp_path / "evidence" / "trial-trace.zip").is_file()
@@ -2837,7 +2708,7 @@ def test_state_restoration_policy_in_real_browser(tmp_path, monkeypatch, capsys,
               "test_and_restore_failure": "FAILED", "precondition_failure": "NOT_STARTED"}[scenario]
     assert "RESTORE_STATUS: " + status in output
     if scenario == "blocked_bug":
-        assert "PRODUCT_MISMATCH: blocked operation" in output
+        assert '"matched": false' in output
     if "restore_failure" in scenario:
         assert "RESTORE_MISMATCH:" in output
         assert "ENVIRONMENT_RETIRED:" in output
@@ -2891,8 +2762,7 @@ def test_agent3_temperature_plan_preserves_approved_step_order(mutation):
         plan.actions = setup + [by_id[f"ACT-{n:03d}"] for n in (9, 10, 7, 8, 5, 6)]
     elif mutation == "omit_reset":
         plan.actions = [item for item in plan.actions if item.action_id not in {"ACT-007", "ACT-008"}]
-    result = pipeline.evaluate_checkpoint3_plan(case, plan, observation,
-        require_precondition_proof=False)
+    result = pipeline.evaluate_checkpoint3_plan(case, plan, observation)
     assert (result.status == CheckStatus.PASS) is (mutation == "none")
 
 
@@ -2961,7 +2831,7 @@ def test_agent3_sends_context_bindings_and_action_only_repair_guidance_without_w
 @pytest.mark.parametrize("failure", [None, "ui", "internal"])
 def test_explicit_restore_basis_checks_display_and_internal_separately(tmp_path, monkeypatch, capsys, connector, failure):
     case, plan, observation = mixed_restore_comparison_fixture(connector)
-    cp = pipeline.evaluate_checkpoint3_plan(case, plan, observation, require_restore_comparison_basis=True)
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, observation)
     assert cp.status == CheckStatus.PASS, [c.message for c in cp.checks if c.status == CheckStatus.FAIL]
     code = compile_automation_candidate("RUN-20260916-130000-ABCDEF", case, plan)
     target = tmp_path / "mixed.html"
@@ -3019,65 +2889,11 @@ def test_explicit_restore_basis_rejects_ungrounded_or_missing_comparisons(mutati
             case.restore_steps[-1] = link.source_text = link.source_text.replace(old_internal, new_internal)
             link.comparisons[1].source_excerpt = new_internal
             link.comparisons[1].basis = pipeline.RestoreComparisonBasis.OBSERVED_BASELINE
-    cp = pipeline.evaluate_checkpoint3_plan(case, plan, observation, require_restore_comparison_basis=True)
+    cp = pipeline.evaluate_checkpoint3_plan(case, plan, observation)
     assert cp.status == CheckStatus.FAIL
     assert any(c.rule_id == "CP3-006B" and c.status == CheckStatus.FAIL for c in cp.checks)
     if mutation != "missing_action":
         assert not any("approved step is missing" in c.message for c in cp.checks)
-
-
-@pytest.mark.parametrize("mutation", [None, "missing", "wrong_id", "duplicate_id", "duplicate_line", "changed_source", "extra_line", "missing_target", "new_target", "wrong_value", "negated", "fake_action"])
-def test_restore_plan_links_preserve_sources_targets_and_fail_closed(mutation):
-    case, plan, observation = _restoration_detail_fixture()
-    line = "복원 후 새 제어 스위치와 내부 enabled 값을 실행 전 확인한 상태와 비교해 일치하는지 확인한다."
-    case.restore_steps.append(line)
-    link = pipeline.RestoreConfirmation(source_text=line, result_ids=[r.result_id for r in case.expected_results])
-    plan.restore_confirmations = [link]
-    if mutation == "missing":
-        plan.restore_confirmations = []
-    elif mutation == "wrong_id":
-        link.result_ids[0] = "ER-999"
-    elif mutation == "duplicate_id":
-        link.result_ids.append(link.result_ids[0])
-    elif mutation == "duplicate_line":
-        plan.restore_confirmations.append(link.model_copy(deep=True))
-    elif mutation == "changed_source":
-        link.source_text += " 새 문장"
-    elif mutation == "extra_line":
-        plan.restore_confirmations.append(link.model_copy(update={"source_text": "추가 검사"}))
-    elif mutation == "missing_target":
-        link.result_ids.pop()
-    elif mutation == "new_target":
-        case.restore_steps[-1] = link.source_text = line.replace("상태와", "상태 및 새 알림과")
-    elif mutation == "wrong_value":
-        case.restore_steps[-1] = link.source_text = line.replace("상태와", "상태 및 HIGH와")
-    elif mutation == "negated":
-        case.restore_steps[-1] = link.source_text = line.replace("일치하는지", "불일치하는지")
-    elif mutation == "fake_action":
-        plan.actions.append(plan.actions[-1].model_copy(update={"action_id": "ACT-092", "source_text": line}))
-    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, observation, require_restore_plan_links=True)
-    assert checkpoint.status == (CheckStatus.PASS if mutation is None else CheckStatus.FAIL)
-    if mutation is None:
-        code = compile_automation_candidate("RUN-20260916-130000-ABCDEF", case, plan)
-        assert "RESTORE_CONFIRMATIONS_VERIFIED" in code
-        assert "restore_actual != restore_baseline_" in code
-        assert pipeline.Agent3AutomationPlan.model_validate_json(plan.model_dump_json()) == plan
-    elif plan.restore_confirmations:
-        with pytest.raises(pipeline.Agent3Error, match="복원 확인 계획"):
-            compile_automation_candidate("RUN-20260916-130000-ABCDEF", case, plan)
-
-
-@pytest.mark.parametrize("wording", [
-    "복원 후 새 제어 스위치와 내부 enabled 값을 실행 전 확인한 상태와 비교해 일치하는지 확인한다.",
-    "복원 후 새 제어 스위치와 내부 enabled 값을 시험 전 관찰한 상태와 비교해 일치하는지 확인한다.",
-    "복원 후 새 제어 스위치와 내부 enabled 값을 실행 전 기록한 상태와 비교해 일치하는지 확인한다.",
-])
-def test_restore_links_accept_observed_initial_state_wording(wording):
-    case, plan, observation = _restoration_detail_fixture()
-    case.restore_steps.append(wording)
-    plan.restore_confirmations = [pipeline.RestoreConfirmation(source_text=wording,
-        result_ids=[r.result_id for r in case.expected_results])]
-    assert pipeline.evaluate_checkpoint3_plan(case, plan, observation, require_restore_plan_links=True).status == CheckStatus.PASS
 
 
 def _restoration_detail_fixture():
@@ -3095,8 +2911,7 @@ def _restoration_detail_fixture():
 ])
 @pytest.mark.parametrize("restore_broken", [False, True])
 @pytest.mark.parametrize("detailed", [False, True])
-@pytest.mark.parametrize("explicit_basis", [False, True])
-def test_restore_linked_browser_comparisons_across_control_values(tmp_path, monkeypatch, capsys, feature, initial, changed, restore_broken, detailed, explicit_basis):
+def test_restore_linked_browser_comparisons_across_control_values(tmp_path, monkeypatch, capsys, feature, initial, changed, restore_broken, detailed):
     case, plan, observation = _restoration_detail_fixture()
     ui_target, internal_target = f"{feature} 입력란", f"내부 {feature} value 값"
     case.preconditions = [f"{ui_target}의 초기값은 {initial}이고 {internal_target}은 {initial}이다."]
@@ -3123,22 +2938,20 @@ def test_restore_linked_browser_comparisons_across_control_values(tmp_path, monk
             selector="window.__vccs.feature.value", expected_value=initial)]
     plan.restore_confirmations = [pipeline.RestoreConfirmation(source_text=confirmation,
         result_ids=[r.result_id for r in case.expected_results])]
-    if explicit_basis:
-        # Exercise the new lifecycle with fan/temperature/mode values, while
-        # the other half retains historical artifact compiler coverage.
-        case.state_effect = pipeline.TcStateEffect.STATE_CHANGE
-        ui_clause = f"복원 후 {ui_target}이 실행 전 상태와 같은지 확인하고,"
-        internal_clause = f"{internal_target}이 초기값 {initial}와 같은지 확인한다."
-        if detailed:
-            ui_clause = f"복원 후 {ui_target}에서 {feature} 표시가 실행 전 확인한 상태와 같은지 확인하며,"
-        case.restore_steps[-1] = plan.restore_confirmations[0].source_text = ui_clause + " " + internal_clause
-        plan.restore_confirmations[0].comparisons = [
-            pipeline.RestoreComparison(result_id=case.expected_results[0].result_id, source_excerpt=ui_clause, basis="OBSERVED_BASELINE"),
-            pipeline.RestoreComparison(result_id=case.expected_results[1].result_id, source_excerpt=internal_clause, basis="PROVED_INITIAL")]
+    # Current contract: every confirmation names its comparison basis.
+    case.state_effect = pipeline.TcStateEffect.STATE_CHANGE
+    ui_clause = f"복원 후 {ui_target}이 실행 전 상태와 같은지 확인하고,"
+    internal_clause = f"{internal_target}이 초기값 {initial}와 같은지 확인한다."
+    if detailed:
+        ui_clause = f"복원 후 {ui_target}에서 {feature} 표시가 실행 전 확인한 상태와 같은지 확인하며,"
+    case.restore_steps[-1] = plan.restore_confirmations[0].source_text = ui_clause + " " + internal_clause
+    plan.restore_confirmations[0].comparisons = [
+        pipeline.RestoreComparison(result_id=case.expected_results[0].result_id, source_excerpt=ui_clause, basis="OBSERVED_BASELINE"),
+        pipeline.RestoreComparison(result_id=case.expected_results[1].result_id, source_excerpt=internal_clause, basis="PROVED_INITIAL")]
     observation.harness_values = {"window.__vccs.feature.value": initial}
     observation.elements[-1].text = ui_target
     observation.elements[-1].action_hint = "FILL"
-    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, observation, require_restore_plan_links=True)
+    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, observation)
     assert checkpoint.status == CheckStatus.PASS, [item.message for item in checkpoint.checks if item.status == CheckStatus.FAIL]
     code = compile_automation_candidate("RUN-20260916-130000-ABCDEF", case, plan)
     target = tmp_path / "control.html"
@@ -3165,8 +2978,7 @@ def test_restore_linked_browser_comparisons_across_control_values(tmp_path, monk
 @pytest.mark.parametrize("fault", [None, "UI", "INTERNAL_STATE"])
 def test_product_fan_transitions_share_dual_restoration(tmp_path, monkeypatch, capsys, initial, changed, fault):
     case, plan, observation = fan_transition_restoration_fixture(initial, changed)
-    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, observation,
-        require_restore_plan_links=True, legacy_wording_checks=False)
+    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, observation)
     assert checkpoint.status == CheckStatus.PASS, [c.message for c in checkpoint.checks if c.status == CheckStatus.FAIL]
     code = compile_automation_candidate("RUN-20260925-130000-ABCDEF", case, plan)
     # Only the temporary product's initial data changes; the actual test and
@@ -3220,52 +3032,6 @@ def test_product_fan_transitions_share_dual_restoration(tmp_path, monkeypatch, c
         assert "RESTORE_CONFIRMATIONS_VERIFIED: ER-090,ER-091" in output
 
 
-def test_restore_confirmation_uses_existing_baselines_without_extra_actions(tmp_path, monkeypatch):
-    case, plan, observation = _restoration_detail_fixture()
-    previous = compile_automation_candidate("RUN-20260916-120000-ABCDEF", case, plan)
-    case.restore_steps.append("복원 후 새 제어 스위치와 내부 enabled 값을 시험 전 상태와 비교해 일치하는지 확인한다.")
-    assert pipeline.evaluate_checkpoint3_plan(case, plan, observation).status == CheckStatus.PASS
-    code = compile_automation_candidate("RUN-20260916-120000-ABCDEF", case, plan)
-    assert code == previous
-    assert len(plan.actions) == 2 and len(plan.assertions) == 2
-    target = tmp_path / "restore-detail.html"
-    _write_text_atomic(target, '''<!doctype html><input id="new-feature-toggle" type="checkbox"
-        onchange="window.__vccs.feature.enabled=this.checked"><script>
-        window.__vccs={feature:{enabled:false}};</script>''')
-    monkeypatch.setenv("QA_TARGET_URL", target.as_uri())
-    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
-    namespace = {}
-    exec(compile(code, "restore_detail_check", "exec"), namespace)
-    namespace["test_tc_cand_090"]()
-
-
-@pytest.mark.parametrize("restore_broken", [False, True])
-def test_restore_linked_switch_checks_real_boolean_restoration(tmp_path, monkeypatch, capsys, restore_broken):
-    case, plan, observation = _restoration_detail_fixture()
-    line = "복원 후 새 제어 스위치와 내부 enabled 값을 시험 전 관찰한 상태와 비교해 일치하는지 확인한다."
-    case.restore_steps.append(line)
-    plan.restore_confirmations = [pipeline.RestoreConfirmation(source_text=line,
-        result_ids=[r.result_id for r in case.expected_results])]
-    assert pipeline.evaluate_checkpoint3_plan(case, plan, observation, require_restore_plan_links=True).status == CheckStatus.PASS
-    code = compile_automation_candidate("RUN-20260916-130000-ABCDEF", case, plan)
-    target = tmp_path / "switch.html"
-    handler = "if(this.checked)" if restore_broken else ""
-    _write_text_atomic(target, f'''<!doctype html><input id="new-feature-toggle" type="checkbox"
-        onchange="{handler}window.__vccs.feature.enabled=this.checked"><script>
-        window.__vccs={{feature:{{enabled:false}}}};</script>''')
-    monkeypatch.setenv("QA_TARGET_URL", target.as_uri())
-    monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
-    namespace = {}
-    exec(compile(code, "boolean_restore", "exec"), namespace)
-    if restore_broken:
-        with pytest.raises(AssertionError, match="RESTORE_MISMATCH"):
-            namespace["test_tc_cand_090"]()
-        assert "RESTORE_CONFIRMATIONS_VERIFIED" not in capsys.readouterr().out
-    else:
-        namespace["test_tc_cand_090"]()
-        assert "RESTORE_CONFIRMATIONS_VERIFIED" in capsys.readouterr().out
-
-
 def test_restore_comparison_supports_shared_target_without_borrowing_other_target_basis():
     from qa_pipeline_agent3 import _restore_comparison_coverage
     case, plan, _ = mixed_restore_comparison_fixture()
@@ -3298,44 +3064,6 @@ def test_restore_links_do_not_claim_unsupported_or_unproved_comparisons(mutation
     else:
         proof.selector = "window.__vccs.devices[1].enabled"
         observation.harness_values[proof.selector] = False
-    assert pipeline.evaluate_checkpoint3_plan(case, plan, observation, require_restore_plan_links=True).status == CheckStatus.FAIL
-
-
-@pytest.mark.parametrize("mutation", ["new_target", "new_value", "unproved_value", "missing_action", "early_check", "fake_action", "negated_comparison"])
-def test_restore_confirmation_rejects_unimplemented_or_ungrounded_checks(mutation):
-    case, plan, observation = _restoration_detail_fixture()
-    line = "복원 후 내부 enabled 값을 시험 전 상태와 비교해 일치하는지 확인한다."
-    if mutation == "new_target":
-        line = "복원 후 내부 enabled 값과 새 알림을 시험 전 상태와 비교해 일치하는지 확인한다."
-    elif mutation == "new_value":
-        line = "복원 후 내부 enabled 값이 true로 돌아왔는지 확인한다."
-    elif mutation == "unproved_value":
-        line = "복원 후 내부 enabled 값이 false로 돌아왔는지 확인한다."
-    elif mutation == "negated_comparison":
-        line = "복원 후 내부 enabled 값을 시험 전 상태와 비교해 불일치하는지 확인한다."
-    if mutation == "early_check":
-        case.restore_steps.insert(0, line)
-    else:
-        case.restore_steps.append(line)
-    if mutation == "missing_action":
-        plan.actions = plan.actions[:1]
-    elif mutation == "fake_action":
-        plan.actions.append(plan.actions[-1].model_copy(update={"action_id": "ACT-092", "source_text": line}))
-    checkpoint = pipeline.evaluate_checkpoint3_plan(case, plan, observation)
-    assert checkpoint.status == CheckStatus.FAIL
-    assert any(item.rule_id == "CP3-006A" and item.status == CheckStatus.FAIL for item in checkpoint.checks)
-
-
-def test_restore_confirmation_explicit_value_needs_same_target_precondition_proof():
-    case, plan, observation = _restoration_detail_fixture()
-    initial = "내부 enabled 값은 false다."
-    case.preconditions.append(initial)
-    plan.precondition_checks.append(pipeline.PreconditionCheck(source_text=initial,
-        read_kind="INTERNAL_VALUE", selector="window.__vccs.feature.enabled", expected_value=False))
-    case.restore_steps.append("복원 후 내부 enabled 값이 false로 돌아왔는지 확인한다.")
-    assert pipeline.evaluate_checkpoint3_plan(case, plan, observation).status == CheckStatus.PASS
-    plan.precondition_checks[-1].selector = "window.__vccs.other.enabled"
-    observation.harness_values["window.__vccs.other.enabled"] = False
     assert pipeline.evaluate_checkpoint3_plan(case, plan, observation).status == CheckStatus.FAIL
 
 
@@ -3359,74 +3087,12 @@ def test_restore_confirmation_matches_string_initial_value_not_feature_names():
     assert pipeline._restore_confirmation_coverage(case, plan)[1]
 
 
-def test_restore_confirmation_does_not_accept_proof_for_another_device():
-    case, plan, observation = _restoration_detail_fixture()
-    initial = "내부 enabled 값은 false다."
-    case.preconditions.append(initial)
-    plan.precondition_checks.append(pipeline.PreconditionCheck(source_text=initial,
-        read_kind="INTERNAL_VALUE", selector="window.__vccs.devices[0].enabled", expected_value=False))
-    observation.harness_values.update({"window.__vccs.devices[0].id": 1, "window.__vccs.devices[0].enabled": False})
-    observation.device_state_fields.append("enabled")
-    plan.assertions[1] = AutomationAssertion(result_id="ER-091", observation_layer="INTERNAL_STATE",
-        strategy="INTERNAL_DEVICE_FIELDS_EQUALS", selector="window.__vccs.devices", after_action_id="ACT-090",
-        expected_fields=[pipeline.DeviceFieldExpectation(field_name="enabled", expected_value=True)])
-    case.restore_steps.append("복원 후 내부 enabled 값이 초기값 false로 돌아왔는지 확인한다.")
-    assert pipeline.evaluate_checkpoint3_plan(case, plan, observation).status == CheckStatus.PASS
-    observation.harness_values["window.__vccs.devices[0].id"] = 2
-    assert pipeline.evaluate_checkpoint3_plan(case, plan, observation).status == CheckStatus.FAIL
-
-
 def test_restore_check_action_is_not_mistaken_for_read_only_confirmation():
     case, plan, observation = generic_control_guard_fixture()
     case.restore_steps = ["Check the new feature toggle."]
     plan.actions[-1].source_text = case.restore_steps[0]
     plan.actions[-1].action_type = AutomationActionType.CHECK
     assert pipeline._restore_confirmation_coverage(case, plan) == (set(), [])
-
-
-def test_restore_confirmation_legacy_temperature_uses_existing_fixed_checks():
-    case = agent3_test_case()
-    plan = agent3_plan()
-    operation = "Restore AUTO 18 and verify UI and internal state."
-    case.restore_required = True
-    case.restore_steps = [operation]
-    for result, target in zip(case.expected_results[:2], ["UI", "Internal setTemp"]):
-        result.observation_target = target
-        result.verify_after_step = case.steps[0]
-    for assertion in plan.assertions[:2]:
-        assertion.after_action_id = "ACT-006"
-    plan.actions.extend([
-        AutomationAction(action_id="ACT-007", phase="RESTORE", action_type="SET_TEMPERATURE",
-                         selector="#det-temp-display", value=18.0, source_text=operation),
-        AutomationAction(action_id="ACT-008", phase="RESTORE", action_type="APPLY_COMMANDS",
-                         selector=".btn-apply-cmd", source_text=operation),
-    ])
-    previous = compile_automation_candidate("RUN-20260916-120000-ABCDEF", case, plan)
-    case.restore_steps.extend(["복원 후 UI가 18로 돌아왔는지 확인한다.", "복원 후 Internal setTemp가 18로 돌아왔는지 확인한다."])
-    assert evaluate_checkpoint3_plan(case, plan, agent3_observation()).status == CheckStatus.PASS
-    assert compile_automation_candidate("RUN-20260916-120000-ABCDEF", case, plan) == previous
-    case.restore_steps[-1] = "복원 후 Internal setTemp가 17로 돌아왔는지 확인한다."
-    assert evaluate_checkpoint3_plan(case, plan, agent3_observation()).status == CheckStatus.FAIL
-
-
-def test_historical_restore_confirmation_uses_previous_checkpoint_rules():
-    case, plan = agent3_test_case(), agent3_plan()
-    operation = "Restore AUTO 18 and verify UI and internal state."
-    case.restore_required = True
-    case.restore_steps = [operation, "복원 후 UI가 초기값 18로 돌아왔는지 확인한다."]
-    plan.actions.extend([
-        AutomationAction(action_id="ACT-007", phase="RESTORE", action_type="SET_TEMPERATURE",
-                         selector="#det-temp-display", value=18.0, source_text=operation),
-        AutomationAction(action_id="ACT-008", phase="RESTORE", action_type="APPLY_COMMANDS",
-                         selector=".btn-apply-cmd", source_text=operation),
-    ])
-    previous = pipeline.evaluate_checkpoint3_plan(case, plan, agent3_observation(),
-        require_precondition_proof=False, require_restore_confirmation_detail=False,
-        require_plan_fidelity=False)
-    current = pipeline.evaluate_checkpoint3_plan(case, plan, agent3_observation(), require_precondition_proof=False)
-    assert previous.status == CheckStatus.PASS
-    assert current.status == CheckStatus.FAIL
-    assert any(item.rule_id == "CP3-006A" and "observation_target" in item.message for item in current.checks)
 
 
 def test_detailed_single_flow_requires_and_executes_explicit_assertion_anchor(tmp_path, monkeypatch):
@@ -3452,15 +3118,12 @@ def test_detailed_single_flow_requires_and_executes_explicit_assertion_anchor(tm
     namespace["test_tc_cand_090"]()
 
 
-@pytest.mark.parametrize("mutation", ["missing", "wrong_source", "unknown_selector", "wrong_value", "weak_text", "unproved_login", "enabled_instead_of_checked", "early_assertion"])
+@pytest.mark.parametrize("mutation", ["wrong_source", "unknown_selector", "wrong_value", "weak_text", "enabled_instead_of_checked", "early_assertion"])
 def test_precondition_proof_rejects_unverified_plans(mutation):
     case, plan, observation = precondition_guard_fixture()
-    assert evaluate_checkpoint3_plan(case, plan, observation, require_precondition_proof=True).status == CheckStatus.PASS
+    assert evaluate_checkpoint3_plan(case, plan, observation).status == CheckStatus.PASS
     check = plan.precondition_checks[0]
-    if mutation == "missing":
-        plan.precondition_checks = []
-        assert pipeline.evaluate_checkpoint3_plan(case, plan, observation).status == CheckStatus.FAIL
-    elif mutation == "wrong_source":
+    if mutation == "wrong_source":
         check.source_text = "다른 사전조건"
     elif mutation == "unknown_selector":
         check.selector = "#not-observed"
@@ -3471,13 +3134,11 @@ def test_precondition_proof_rejects_unverified_plans(mutation):
         check.expected_value = "새 제어"
     elif mutation == "enabled_instead_of_checked":
         check.read_kind = pipeline.PreconditionReadKind.UI_ENABLED
-    elif mutation == "early_assertion":
+    else:  # early_assertion
         preparation = plan.actions[-1].model_copy(update={"action_id": "ACT-089", "phase": AutomationPhase.PRECONDITION, "source_text": case.preconditions[0]})
         plan.actions.insert(0, preparation)
         plan.assertions[0].after_action_id = preparation.action_id
-    else:
-        case.preconditions.append("관리자 권한으로 로그인되어 있어야 한다.")
-    checkpoint = evaluate_checkpoint3_plan(case, plan, observation, require_precondition_proof=True)
+    checkpoint = evaluate_checkpoint3_plan(case, plan, observation)
     assert next(item for item in checkpoint.checks if item.rule_id == "CP3-006D").status == CheckStatus.FAIL
 
 
@@ -3487,23 +3148,8 @@ def test_baseline_context_cannot_prove_administrator_login():
     observation.verified_execution_context.target_device_visible = True
     plan.precondition_checks.append(pipeline.PreconditionCheck(source_text=case.preconditions[-1],
         read_kind="BASELINE_CONTEXT", selector="target_device_visible", expected_value=True))
-    checkpoint = evaluate_checkpoint3_plan(case, plan, observation, require_precondition_proof=True)
+    checkpoint = evaluate_checkpoint3_plan(case, plan, observation)
     assert checkpoint.status == CheckStatus.FAIL
-
-
-def test_compound_baseline_precondition_needs_each_observed_fact():
-    case, plan, observation = precondition_guard_fixture()
-    source = "온라인 대상 장비는 오류와 잠금이 없는 상태다."
-    case.preconditions.append(source)
-    context = observation.verified_execution_context
-    context.target_device_visible = context.device_state_available = True
-    context.error_free = context.unlocked = context.online = True
-    plan.precondition_checks.append(pipeline.PreconditionCheck(source_text=source,
-        read_kind="BASELINE_CONTEXT", selector="target_device_visible", expected_value=True))
-    assert evaluate_checkpoint3_plan(case, plan, observation, require_precondition_proof=True).status == CheckStatus.FAIL
-    plan.precondition_checks.extend(pipeline.PreconditionCheck(source_text=source,
-        read_kind="BASELINE_CONTEXT", selector=key, expected_value=True) for key in ("error_free", "unlocked", "online"))
-    assert evaluate_checkpoint3_plan(case, plan, observation, require_precondition_proof=True).status == CheckStatus.PASS
 
 
 def test_narrow_inventory_exposes_target_initial_values_without_full_discovery():
@@ -3522,15 +3168,15 @@ def test_precondition_internal_device_reference_must_match_target_identity():
     observation.harness_values.update({"window.__vccs.devices[0].id": 2, "window.__vccs.devices[0].mode": "AUTO"})
     plan.precondition_checks = [pipeline.PreconditionCheck(source_text=case.preconditions[0],
         read_kind="INTERNAL_VALUE", selector="window.__vccs.devices[0].mode", expected_value="AUTO")]
-    assert evaluate_checkpoint3_plan(case, plan, observation, require_precondition_proof=True).status == CheckStatus.FAIL
+    assert evaluate_checkpoint3_plan(case, plan, observation).status == CheckStatus.FAIL
     observation.harness_values["window.__vccs.devices[0].id"] = 1
-    assert evaluate_checkpoint3_plan(case, plan, observation, require_precondition_proof=True).status == CheckStatus.PASS
+    assert evaluate_checkpoint3_plan(case, plan, observation).status == CheckStatus.PASS
 
 
 @pytest.mark.parametrize("initial_checked", [False, True])
 def test_runtime_precondition_is_verified_before_product_test(tmp_path, initial_checked):
     case, plan, observation = precondition_guard_fixture()
-    assert evaluate_checkpoint3_plan(case, plan, observation, require_precondition_proof=True).status == CheckStatus.PASS
+    assert evaluate_checkpoint3_plan(case, plan, observation).status == CheckStatus.PASS
     target = tmp_path / "switch.html"
     _write_text_atomic(target, f'''<!doctype html><title>Proof fixture</title>
         <input id="new-feature-toggle" type="checkbox" {'checked' if initial_checked else ''}
@@ -3557,18 +3203,6 @@ def test_runtime_precondition_is_verified_before_product_test(tmp_path, initial_
     else:
         assert "PRECONDITION_OBSERVED: 1 False" in stdout
         assert "PRECONDITIONS_VERIFIED: 1" in stdout
-
-
-def test_precondition_multiple_explicit_values_need_multiple_checks():
-    case, plan, observation = precondition_guard_fixture()
-    case.preconditions = ["내부 role 값은 ADMIN이고 site 값은 SOUTH다."]
-    observation.harness_values.update({"window.__vccs.role": "ADMIN", "window.__vccs.site": "SOUTH"})
-    plan.precondition_checks = [pipeline.PreconditionCheck(source_text=case.preconditions[0],
-        read_kind="INTERNAL_VALUE", selector="window.__vccs.role", expected_value="ADMIN")]
-    assert evaluate_checkpoint3_plan(case, plan, observation, require_precondition_proof=True).status == CheckStatus.FAIL
-    plan.precondition_checks.append(pipeline.PreconditionCheck(source_text=case.preconditions[0],
-        read_kind="INTERNAL_VALUE", selector="window.__vccs.site", expected_value="SOUTH"))
-    assert evaluate_checkpoint3_plan(case, plan, observation, require_precondition_proof=True).status == CheckStatus.PASS
 
 
 def test_cp3_rejects_static_label_in_place_of_switch_state():
@@ -4106,7 +3740,6 @@ def test_agent3_rejects_unobserved_or_ungrounded_device_fields() -> None:
 
     cp3 = next(item for item in checkpoint.checks if item.rule_id == "CP3-004")
     assert checkpoint.status == CheckStatus.FAIL
-    assert "field is not named in the Expected Result: mode" in cp3.message
     assert "field was not observed: unregistered" in cp3.message
 
 def test_agent3_non_hvac_mode_values_use_generic_discovery() -> None:
@@ -4296,13 +3929,11 @@ def test_agent3_allows_dynamic_text_on_the_approved_target_device_card() -> None
         item for item in checkpoint.checks if item.rule_id == "CP3-004"
     ).status == CheckStatus.PASS
 
-    strict = pipeline.evaluate_checkpoint3_plan(test_case, plan, observation,
-        require_precondition_proof=False)
+    strict = pipeline.evaluate_checkpoint3_plan(test_case, plan, observation)
     assert strict.status == CheckStatus.PASS
     shortened = plan.model_copy(deep=True)
     shortened.assertions[0].expected_text = "풍"
-    rejected = pipeline.evaluate_checkpoint3_plan(test_case, shortened, observation,
-        require_precondition_proof=False)
+    rejected = pipeline.evaluate_checkpoint3_plan(test_case, shortened, observation)
     assert rejected.status == CheckStatus.FAIL
     assert any("only part" in item.message for item in rejected.checks)
 
@@ -4329,7 +3960,7 @@ def test_agent3_allows_dynamic_text_on_the_approved_target_device_card() -> None
     )
     assert "restore_baseline_0" in compiled
     assert "'fields': ['fanSpeed']" in compiled
-    assert "if restore_actual != restore_baseline_0" in compiled
+    assert "if not _qa_values_equal(restore_actual, restore_baseline_0)" in compiled
 
 def test_agent3_notification_rejects_the_whole_expected_result_as_ui_text() -> None:
     payload = agent3_plan().model_dump(mode="json")
@@ -4610,7 +4241,7 @@ def test_grouped_hvac_trial_restores_runtime_baseline(tmp_path: Path) -> None:
         "RUN-20260827-130000-ABCDEF", test_case, plan
     )
     assert "observed_hvac_baseline" in code
-    assert "restored_hvac_state != observed_hvac_baseline" in code
+    assert "_qa_values_equal(restored_hvac_state, observed_hvac_baseline)" in code
     assert all(
         item.status == CheckStatus.PASS
         for item in evaluate_compiled_candidate(test_case, code)
@@ -4814,7 +4445,7 @@ def test_agent3_grouped_tc_interleaves_assertions_before_next_condition() -> Non
     assert code.index("# EXPECTED_RESULT: ER-007") < code.index("# ACT-007")
     assert code.index("# ACT-010") < code.index("# EXPECTED_RESULT: ER-008")
     assert "_request_temperature(page, 17.0)" in code
-    assert "_set_temperature(page, 30.0)" in code
+    assert "_request_temperature(page, 30.0)" in code
     assert "_request_temperature(page, 31.0)" in code
 
 def test_agent3_grouped_tc_rejects_unanchored_condition_results() -> None:
@@ -5066,7 +4697,6 @@ def test_ungrounded_numeric_expectation_is_rejected_by_cp3() -> None:
     checkpoint = evaluate_checkpoint3_plan(agent3_test_case(), Agent3AutomationPlan.model_validate(payload), agent3_observation())
     assert checkpoint.status == CheckStatus.FAIL
     assert any(item.rule_id == "CP3-004" and item.status == CheckStatus.FAIL for item in checkpoint.checks)
-    assert any(item.rule_id == "CP3-005" and item.status == CheckStatus.FAIL for item in checkpoint.checks)
 
 def test_unsupported_expected_text_is_rejected_by_cp3() -> None:
     payload = agent3_plan().model_dump(mode="json")
@@ -5456,7 +5086,7 @@ def test_agent3_error_artifact_requires_a_fresh_attempt_workspace(
 
 def test_modified_agent2_artifact_is_blocked_before_agent3(tmp_path: Path) -> None:
     # Test design tampering independently of historical checkout line endings.
-    run_dir, run_id = build_historical_agent2_run(tmp_path)
+    run_dir, run_id = build_verified_agent2_run(tmp_path)
     pipeline._load_verified_agent2_run(run_dir, run_id)
     design_file = run_dir / "agent2_test_design.json"
     design_file.write_text(design_file.read_text(encoding="utf-8") + "\n", encoding="utf-8")

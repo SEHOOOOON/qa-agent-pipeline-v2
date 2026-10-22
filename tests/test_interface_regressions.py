@@ -31,15 +31,14 @@ def test_mapped_mode_buttons_execute_and_restore(initial, requested, mapped_cont
     case = mode_buttons_case(initial, requested)
     before = case.model_dump_json()
     plan = a3.ControllerMapAgent3().plan(case, mapped_controller_observation, {}).plan
-    cp = a3.evaluate_checkpoint3_plan(case, plan, mapped_controller_observation, execution_interface=True)
+    cp = a3.evaluate_checkpoint3_plan(case, plan, mapped_controller_observation)
     assert cp.status == CheckStatus.PASS, cp.model_dump_json(indent=2)
     enabled_checks = [a for a in plan.assertions if a.strategy.value == "UI_ENABLED_EQUALS"]
     assert {a.selector for a in enabled_checks} == {"#det-temp-up-btn", "#det-temp-down-btn"}
     monkeypatch.setenv("QA_TARGET_URL", (REPO_ROOT / "product_baseline/virtual-controller.html").as_uri())
     monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
     namespace = {}
-    exec(compile(compile_automation_candidate("LOCAL-MODE-BUTTONS", case, plan,
-        explicit_expectations_only=True, typed_values=True), "mode_buttons", "exec"), namespace)
+    exec(compile(compile_automation_candidate("LOCAL-MODE-BUTTONS", case, plan), "mode_buttons", "exec"), namespace)
     namespace["test_tc_cand_090"]()
     output = capsys.readouterr().out
     assert "RESTORE_STATUS: RESTORED" in output
@@ -86,8 +85,7 @@ def test_each_button_mismatch_is_detected_and_still_restored(direction, mapped_c
     monkeypatch.setenv("QA_TARGET_URL", (REPO_ROOT / "product_baseline/virtual-controller.html").as_uri())
     monkeypatch.setenv("QA_EVIDENCE_DIR", str(tmp_path / "evidence"))
     namespace = {}
-    exec(compile(compile_automation_candidate("LOCAL-BUTTON-MISMATCH", case, plan,
-        explicit_expectations_only=True, typed_values=True), "button_mismatch", "exec"), namespace)
+    exec(compile(compile_automation_candidate("LOCAL-BUTTON-MISMATCH", case, plan), "button_mismatch", "exec"), namespace)
     with pytest.raises(AssertionError):
         namespace["test_tc_cand_090"]()
     output = capsys.readouterr().out
@@ -153,22 +151,14 @@ def test_existing_ui_reader_really_maps_labels_not_internal_values():
 
 @pytest.mark.parametrize("field,initial,target", [("status", "OPERATION", "STOP"), ("mode", "COOL", "HEAT"),
     ("fanSpeed", "LOW", "MED"), ("setTemp", 24, 26), ("locked", False, True)])
-def test_interface_explanation_preserves_old_inputs_and_review_responsibility(field, initial, target):
+def test_interface_explanation_reaches_review_and_keeps_verdict_routing(field, initial, target):
     case, plan = controller_lifecycle_fixture(field, initial, target)
-    options = dict(test_case=case, observation=generic_control_guard_fixture()[2],
-        include_review_responsibilities=True, include_task_boundaries="1.3", explicit_expectations_only=True)
-    old = grounding.build_grounding_input("AGENT3", None, {}, plan, execution_interface=True, **options)
-    new = grounding.build_grounding_input("AGENT3", None, {}, plan, execution_interface="1.1", **options)
-    assert old == grounding.build_grounding_input("AGENT3", None, {}, plan, execution_interface="1.0", **options)
-    assert old["items"] == new["items"]
-    assert old["artifact_sha256"] == new["artifact_sha256"]
+    new = grounding.build_grounding_input("AGENT3", None, {}, plan, test_case=case,
+                                          observation=generic_control_guard_fixture()[2])
     assert new["context"]["execution_interface"]["trial_success_proved"] is False
-    assert all("ui_decoding" not in r for r in old["context"]["execution_interface"]["readers"])
     interface = new["context"]["execution_interface"]
     assert any("ui_decoding_ref" in r for r in interface["readers"])
     assert all(r["ui_decoding_ref"] in interface["ui_decoders"] for r in interface["readers"] if "ui_decoding_ref" in r)
-    with pytest.raises(ValueError, match="해시"):
-        grounding.check_review_record(new, fake_grounding_record(old))
     for verdict, status in (("SUPPORTED", "PASS"), ("UNSUPPORTED", "FAIL"), ("UNCERTAIN", "REVIEW")):
         record = fake_grounding_record(new)
         record["review"]["items"][0]["verdict"] = verdict

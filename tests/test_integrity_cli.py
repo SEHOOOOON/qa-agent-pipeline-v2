@@ -250,78 +250,17 @@ def test_srs_quote_policy_initial_rewrite_and_verified_loader(tmp_path, monkeypa
     assert original["srs_quote_contract"] == "1.0"
     for invalid in (None, "unknown", "0.9"):
         _write_json(manifest_file, {**original, "srs_quote_contract": invalid})
-        with pytest.raises(ValueError, match="SRS 인용 계약"):
+        with pytest.raises(ValueError, match="옛 형식 Agent 1"):
             _load_verified_agent1_run(run_dir, run_dir.name)
-    _write_json(manifest_file, {**original, "contract_version": "2.9",
-        "scope_guard_contract": "1.1", "prompt_version": "agent1-2.22",
-        "requirement_link_contract": None})
-    with pytest.raises(ValueError, match="SRS 인용 계약"):
-        _load_verified_agent1_run(run_dir, run_dir.name)
-    _write_json(manifest_file, {**original, "contract_version": "2.9", "srs_quote_contract": None,
-        "scope_guard_contract": "1.1", "prompt_version": "agent1-2.22",
-        "requirement_link_contract": None})
-    with pytest.raises(ValueError, match="작업 경계 계약"):
-        _load_verified_agent1_run(run_dir, run_dir.name)
     _write_json(manifest_file, original)
     assert _load_verified_agent1_run(run_dir, run_dir.name)[3].status == CheckStatus.PASS
 
 
-@pytest.mark.parametrize("stage", ["CP1", "CP2"])
-@pytest.mark.parametrize("legacy", [True, False])
-@pytest.mark.parametrize("mutation", [
-    "unchanged", "pass_message", "fail_message", "review_message", "overall_status",
-    "rule_status", "rule_id", "missing", "duplicate", "order", "checkpoint_name",
-])
-def test_checkpoint_revalidation_limits_legacy_pass_message_compatibility(stage, legacy, mutation):
-    stored = checkpoint_revalidation_fixture(stage)
-    recomputed = stored.model_copy(deep=True)
-    if mutation == "pass_message":
-        recomputed.checks[0].message = "새 성공 안내"
-    elif mutation in {"fail_message", "review_message"}:
-        status = CheckStatus.FAIL if mutation == "fail_message" else CheckStatus.REVIEW
-        stored.checks[0].status = recomputed.checks[0].status = status
-        recomputed.checks[0].message = "바뀐 실패 또는 검토 근거"
-    elif mutation == "overall_status":
-        recomputed.status = CheckStatus.FAIL
-    elif mutation == "rule_status":
-        recomputed.checks[0].status = CheckStatus.FAIL
-    elif mutation == "rule_id":
-        recomputed.checks[0].rule_id = f"{stage}-999"
-    elif mutation == "missing":
-        recomputed.checks.pop()
-    elif mutation == "duplicate":
-        recomputed.checks.append(recomputed.checks[0].model_copy(deep=True))
-    elif mutation == "order":
-        recomputed.checks.reverse()
-    elif mutation == "checkpoint_name":
-        recomputed.checkpoint = "OTHER"
-    original = stored.model_dump(mode="json"), recomputed.model_dump(mode="json")
-    expected = mutation == "unchanged" or (legacy and mutation == "pass_message")
-    assert pipeline_execution._checkpoint_revalidation_matches(
-        stored, recomputed, legacy=legacy) == expected
-    assert original == (stored.model_dump(mode="json"), recomputed.model_dump(mode="json"))
-
-
-@pytest.mark.parametrize("mutation", ["review_notes", "handoff", "different_model"])
-def test_checkpoint_revalidation_preserves_review_notes_and_handoff(mutation):
-    stored = checkpoint_revalidation_fixture("CP1")
-    recomputed = stored.model_copy(deep=True)
-    if mutation == "review_notes":
-        recomputed.final_review_notes.append("사람이 확인해야 할 추가 근거")
-    elif mutation == "handoff":
-        recomputed.handoff_status = HandoffStatus.PAUSE
-    else:
-        recomputed = checkpoint_revalidation_fixture("CP2")
-    assert not pipeline_execution._checkpoint_revalidation_matches(stored, recomputed, legacy=True)
-
-
-@pytest.mark.parametrize("stage", ["CP1", "CP2"])
+@pytest.mark.parametrize("stage", ["CP1"])
 @pytest.mark.parametrize("mutation", ["pass_message", "unhashed_message", "rule_status", "missing_rule", "recomputed_failure"])
-def test_historical_checkpoint_loader_preserves_hash_and_decision_guards(tmp_path, monkeypatch, stage, mutation):
-    builder = build_verified_agent1_run if stage == "CP1" else build_historical_agent2_run
-    run_dir, run_id = builder(tmp_path)
-    loader = (pipeline_execution._load_verified_agent1_run if stage == "CP1"
-              else pipeline_execution._load_verified_agent2_run)
+def test_checkpoint_loader_preserves_hash_and_decision_guards(tmp_path, monkeypatch, stage, mutation):
+    run_dir, run_id = build_verified_agent1_run(tmp_path)
+    loader = pipeline_execution._load_verified_agent1_run
     checkpoint_file = run_dir / f"checkpoint{stage[-1]}.json"
     manifest_file = run_dir / ("run_manifest.json" if stage == "CP1" else "agent2_manifest.json")
     checkpoint = pipeline._read_json_payload(checkpoint_file)
@@ -348,11 +287,8 @@ def test_historical_checkpoint_loader_preserves_hash_and_decision_guards(tmp_pat
     def forbid_model(*args, **kwargs):
         raise AssertionError("Read-only checkpoint verification must not construct an API client")
     monkeypatch.setattr(pipeline_execution, "OpenAI", forbid_model)
-    if mutation == "pass_message":
+    with pytest.raises(ValueError):  # current runs: the stored checkpoint must match exactly
         loader(run_dir, run_id)
-    else:
-        with pytest.raises(ValueError):
-            loader(run_dir, run_id)
     assert before == {path.name: _sha256_file(path) for path in run_dir.iterdir() if path.is_file()}
 
 
@@ -374,25 +310,6 @@ def test_declared_procedures_reach_final_review_for_existing_tests(tmp_path):
         "request_sha256": _sha256_file(run_dir / "request.json")})
     notes = pipeline_execution._final_review_notes_for_validation(run_dir)
     assert any(note in item and "실제 수행 증거" in item for item in notes)
-
-
-@pytest.mark.parametrize("current,previous", [("2.8", "2.7"), ("3.8", "3.7"), ("4.6", "4.4"), ("4.7", "4.5")])
-@pytest.mark.parametrize("mutation", ["valid", "missing", "unknown", "downgrade", "legacy"])
-def test_wording_policy_is_bound_to_contract_version(current, previous, mutation):
-    manifest = {"contract_version": current, "wording_policy": "STRUCTURAL_ONLY_V1"}
-    if mutation == "missing":
-        manifest.pop("wording_policy")
-    elif mutation == "unknown":
-        manifest["wording_policy"] = "unknown"
-    elif mutation == "downgrade":
-        manifest["contract_version"] = previous
-    elif mutation == "legacy":
-        manifest = {"contract_version": previous}
-    if mutation in {"valid", "legacy"}:
-        assert pipeline_execution._legacy_wording_policy(manifest, {current}) == (mutation == "legacy")
-    else:
-        with pytest.raises(ValueError, match="문장 검사 정책"):
-            pipeline_execution._legacy_wording_policy(manifest, {current})
 
 
 def test_request_trace_run_handoff_requires_new_scope_contract(tmp_path, monkeypatch):
@@ -422,26 +339,10 @@ def test_request_trace_run_handoff_requires_new_scope_contract(tmp_path, monkeyp
     manifest_file = run_dir / "run_manifest.json"
     original = pipeline._read_json_payload(manifest_file)
     assert original["input_routing_contract"] == "1.0"
-    for scope in (None, "1.1", "unknown"):
-        _write_json(manifest_file, {**original, "scope_guard_contract": scope})
-        with pytest.raises(ValueError, match="검사 범위 계약"):
-            _load_verified_agent1_run(run_dir, run_dir.name)
-    _write_json(manifest_file, {**original, "prompt_version": "agent1-2.22"})
-    with pytest.raises(ValueError, match="근거 연결 계약"):
-        _load_verified_agent1_run(run_dir, run_dir.name)
-    for invalid in (None, "0.9", "unknown"):
-        _write_json(manifest_file, {**original, "input_routing_contract": invalid})
-        with pytest.raises(ValueError, match="입력 분류 계약"):
-            _load_verified_agent1_run(run_dir, run_dir.name)
-    _write_json(manifest_file, {**original, "contract_version": "2.6",
-        "scope_guard_contract": "1.1", "prompt_version": "agent1-2.22",
-        "requirement_link_contract": None})
-    with pytest.raises(ValueError, match="입력 분류 계약"):
-        _load_verified_agent1_run(run_dir, run_dir.name)
-    for contract, scope in [("2.6", None), ("2.6", "1.0"), ("2.5", "1.0"), ("2.5", "1.1")]:
-        altered = {**original, "contract_version": contract, "scope_guard_contract": scope}
-        _write_json(manifest_file, altered)
-        with pytest.raises(ValueError, match="검사 범위 계약"):
+    for key, value in (("scope_guard_contract", "1.1"), ("prompt_version", "agent1-2.22"),
+                       ("input_routing_contract", None), ("contract_version", "2.6")):
+        _write_json(manifest_file, {**original, key: value})
+        with pytest.raises(ValueError, match="옛 형식 Agent 1"):
             _load_verified_agent1_run(run_dir, run_dir.name)
 
 
@@ -493,11 +394,9 @@ def test_request_role_alignment_live_rewrite_and_handoff(tmp_path, monkeypatch, 
     assert len(reviews) == (2 if outcome == 'reject' else 1)
     if continuing:
         _load_verified_agent1_run(run_dir, run_dir.name)
-        # Downgrading the version must not reinterpret a newly accepted quote.
-        # The 2026-10-17 severity marker belongs to 2.25 runs; a 2.24 fixture omits it.
+        # A downgraded marker is an old-format run, not a reinterpretation.
         _write_json(manifest_file, {**manifest, 'prompt_version':'agent1-2.24', 'review_severity_contract': None})
-        # Rejected either by the bound review hash or by the CP1 recomputation.
-        with pytest.raises(ValueError, match='Checkpoint 1|입력 해시'):
+        with pytest.raises(ValueError, match='옛 형식 Agent 1'):
             _load_verified_agent1_run(run_dir, run_dir.name)
     else:
         assert manifest['handoff_status'] != 'CONTINUE'
@@ -586,23 +485,6 @@ def test_scope_gate_rewrite_and_pause_before_agent2(tmp_path, monkeypatch, outco
                 run_id=run_dir.name, runs_root=args.runs_root, model=None,
             ))
         assert not (run_dir / "agent2_test_design.json").exists()
-
-
-def test_scope_contract_loader_preserves_legacy_and_rejects_missing_new_contract(tmp_path):
-    run_dir, run_id = build_verified_agent1_run(tmp_path)
-    manifest_file = run_dir / "run_manifest.json"
-    manifest = pipeline._read_json_payload(manifest_file)
-    manifest.pop("scope_guard_contract")
-    historical = evaluate_checkpoint1(cp1_request(), cp1_valid_analysis(), cp1_requirements(),
-                                     require_scope_guard=False)
-    _write_json(run_dir / "checkpoint1.json", historical.model_dump(mode="json"))
-    manifest["checkpoint1_sha256"] = _sha256_file(run_dir / "checkpoint1.json")
-    _write_json(manifest_file, manifest)
-    assert len(_load_verified_agent1_run(run_dir, run_id)[3].checks) == 10
-    manifest["contract_version"] = "2.5"
-    _write_json(manifest_file, manifest)
-    with pytest.raises(ValueError, match="검사 범위 계약"):
-        _load_verified_agent1_run(run_dir, run_id)
 
 
 @pytest.mark.parametrize("limit,blocked", [(260, True), (None, False)])
@@ -709,64 +591,27 @@ def test_historical_agent1_run_remains_readable(tmp_path: Path) -> None:
     assert checkpoint.handoff_status == HandoffStatus.CONTINUE
 
 
-@pytest.mark.parametrize("contract", ["2.6", "2.7"])
-@pytest.mark.parametrize("note", [
-    "[준비] 시험 전 대상 장비가 AUTO 모드인지 확인합니다.",
-    "시험 전 대상 장비가 AUTO 모드인지 확인합니다.",
-    "[복원] 시험 후 대상 장비를 시험 전 상태로 복원합니다.",
-    "시험 후 대상 장비를 시험 전 상태로 복원합니다.",
+@pytest.mark.parametrize("key,value", [
+    ("contract_version", "2.7"), ("prompt_version", "agent1-2.13"), ("input_routing_contract", None),
 ])
-def test_new_agent2_rejects_historical_analysis_before_any_side_effect(
-    tmp_path, monkeypatch, contract, note
-):
+def test_new_agent2_rejects_old_format_agent1_run_before_any_side_effect(tmp_path, monkeypatch, key, value):
     run_dir, run_id = build_verified_agent1_run(tmp_path)
-    request, analysis = cp1_request(), cp1_valid_analysis()
-    request.acceptance_notes.append(note)
-    checkpoint = evaluate_checkpoint1(
-        request, analysis, cp1_requirements(),
-        require_input_contract=contract == "2.7", legacy_wording_checks=True,
-    )
-    assert checkpoint.status == CheckStatus.PASS, checkpoint.model_dump()
-    assert checkpoint.handoff_status == HandoffStatus.CONTINUE
-
-    # Historical responses genuinely lack the new field. Recompute their CP
-    # under the original policy instead of relabeling a current checkpoint.
-    historical_analysis = analysis.model_dump(mode="json")
-    historical_analysis.pop("procedure_notes")
-    _write_json(run_dir / "request.json", request.model_dump(mode="json"))
-    _write_json(run_dir / "agent1_change_analysis.json", historical_analysis)
-    _write_json(run_dir / "checkpoint1.json", checkpoint.model_dump(mode="json"))
     manifest = pipeline._read_json_payload(run_dir / "run_manifest.json")
-    manifest.update({
-        "contract_version": contract,
-        "prompt_version": "agent1-2.13" if contract == "2.7" else "agent1-2.12",
-        "scope_guard_contract": "1.1",
-        "meaning_guard_contract": "1.0",
-        "request_sha256": _sha256_file(run_dir / "request.json"),
-        "agent1_analysis_sha256": _sha256_file(run_dir / "agent1_change_analysis.json"),
-        "checkpoint1_sha256": _sha256_file(run_dir / "checkpoint1.json"),
-    })
-    if contract == "2.7":
-        manifest["input_routing_contract"] = "1.0"
-    _write_json(run_dir / "run_manifest.json", manifest)
+    _write_json(run_dir / "run_manifest.json", {**manifest, key: value})
     original_hashes = {path.name: _sha256_file(path) for path in run_dir.iterdir()}
-
-    historical = _load_verified_agent1_run(run_dir, run_id)
-    assert historical[2].procedure_notes == []
-    assert historical[4]["contract_version"] == contract
     calls = []
 
     def forbidden_agent2(**kwargs):
         calls.append("model")
-        pytest.fail("A historical analysis must be rejected before model construction")
+        pytest.fail("An old-format analysis must be rejected before model construction")
 
     def forbidden_catalog(*args, **kwargs):
         calls.append("catalog")
-        pytest.fail("A historical analysis must be rejected before catalog preparation")
+        pytest.fail("An old-format analysis must be rejected before catalog preparation")
 
     monkeypatch.setattr(pipeline_execution, "OpenAIAgent2", forbidden_agent2)
     monkeypatch.setattr(pipeline_execution, "load_approved_regression_catalog", forbidden_catalog)
-    with pytest.raises(ValueError, match="과거 Agent 1.*새 Agent 1"):
+    with pytest.raises(ValueError, match="옛 형식 Agent 1"):
         pipeline.run_agent2(SimpleNamespace(run_id=run_id, runs_root=str(tmp_path), model=None))
 
     assert calls == []
@@ -1053,121 +898,22 @@ def test_agent1_to_agent2_cli_handoff_with_frozen_inputs(
         run_dir / f"agent2_grounding_input_attempt_{reviewed_attempt}.json"
     )
     assert any(item["kind"] == "CONDITION_COVERAGE" for item in review_input["items"])
-    # Downgrading a new manifest cannot reuse a review over different inputs.
-    _write_json(run_dir / "agent2_manifest.json", {**manifest, "contract_version": "3.11"})
-    with pytest.raises(ValueError, match="새 절차 검토 계약"):
-        pipeline._load_verified_agent2_run(run_dir, run_dir.name)
-    _write_json(run_dir / "agent2_manifest.json", manifest)
     assert manifest["scope_restoration_policy"] == "STRUCTURED_V1"
-    for invalid in (None, "unknown"):
-        _write_json(run_dir / "agent2_manifest.json", {**manifest, "scope_restoration_policy": invalid})
-        with pytest.raises(ValueError, match="범위·복원 검사 정책"):
-            pipeline._load_verified_agent2_run(run_dir, run_dir.name)
-    _write_json(run_dir / "agent2_manifest.json", {**manifest, "contract_version": "3.9"})
-    with pytest.raises(ValueError, match="범위·복원 검사 정책"):
-        pipeline._load_verified_agent2_run(run_dir, run_dir.name)
     assert manifest["procedure_preservation_contract"] == "2.0"
-    for replacement in (
-        {"procedure_preservation_contract": "1.0"},
-        {"grounding_contract": None},
-    ):
-        _write_json(run_dir / "agent2_manifest.json", {**manifest, **replacement})
-        with pytest.raises(ValueError, match="새 절차 검토 계약"):
-            pipeline._load_verified_agent2_run(run_dir, run_dir.name)
-    for invalid in (None, "0.9", "unknown"):
-        _write_json(run_dir / "agent2_manifest.json", {**manifest, "procedure_preservation_contract": invalid})
-        with pytest.raises(ValueError, match="절차 보존 계약"):
-            pipeline._load_verified_agent2_run(run_dir, run_dir.name)
-    _write_json(run_dir / "agent2_manifest.json", {**manifest, "contract_version": "3.8"})
-    with pytest.raises(ValueError, match="절차 보존 계약"):
-        pipeline._load_verified_agent2_run(run_dir, run_dir.name)
     assert manifest["wording_policy"] == "STRUCTURAL_ONLY_V1"
-    for invalid in (None, "unknown"):
-        _write_json(run_dir / "agent2_manifest.json", {**manifest, "wording_policy": invalid})
-        with pytest.raises(ValueError, match="문장 검사 정책"):
-            pipeline._load_verified_agent2_run(run_dir, run_dir.name)
     assert manifest["input_routing_contract"] == "1.0"
-    for invalid in (None, "0.9", "unknown"):
-        _write_json(run_dir / "agent2_manifest.json", {**manifest, "input_routing_contract": invalid})
-        with pytest.raises(ValueError, match="입력 분류 계약"):
-            pipeline._load_verified_agent2_run(run_dir, run_dir.name)
     assert manifest["structured_restoration_contract"] == "1.0"
-    for invalid in (None, "0.9", "unknown"):
-        _write_json(run_dir / "agent2_manifest.json", {**manifest, "structured_restoration_contract": invalid})
-        with pytest.raises(ValueError, match="구조화 복원 계약"):
-            pipeline._load_verified_agent2_run(run_dir, run_dir.name)
-    _write_json(run_dir / "agent2_manifest.json", {**manifest, "contract_version": "3.5", "structured_restoration_contract": None})
-    with pytest.raises(ValueError, match="구조화 복원 계약"):
-        pipeline._load_verified_agent2_run(run_dir, run_dir.name)
     assert manifest["state_restoration_contract"] == "1.0"
-    for invalid in (None, "0.9", "unknown"):
-        _write_json(run_dir / "agent2_manifest.json", {**manifest, "state_restoration_contract": invalid})
-        with pytest.raises(ValueError, match="상태 복원 계약"):
+    # Any other marker value is an old-format run, never a silent reinterpretation.
+    for key, value in (("contract_version", "3.11"), ("scope_restoration_policy", None),
+                       ("procedure_preservation_contract", "1.0"), ("grounding_contract", None),
+                       ("wording_policy", None), ("input_routing_contract", "0.9"),
+                       ("structured_restoration_contract", None), ("state_restoration_contract", None),
+                       ("srs_revision_contract", "1.0"), ("tc_detail_contract", "1.1")):
+        _write_json(run_dir / "agent2_manifest.json", {**manifest, key: value})
+        with pytest.raises(ValueError, match="옛 형식 Agent 2"):
             pipeline._load_verified_agent2_run(run_dir, run_dir.name)
-    _write_json(run_dir / "agent2_manifest.json", {**manifest, "contract_version": "3.4"})
-    with pytest.raises(ValueError, match="상태 복원 계약"):
-        pipeline._load_verified_agent2_run(run_dir, run_dir.name)
-
-    for unsupported in (None, "1.0", "unknown"):
-        _write_json(run_dir / "agent2_manifest.json", {**manifest, "srs_revision_contract": unsupported})
-        with pytest.raises(ValueError, match="SRS 개정 계약"):
-            pipeline._load_verified_agent2_run(run_dir, run_dir.name)
-    _write_json(run_dir / "agent2_manifest.json", {**manifest, "contract_version": "3.3"})
-    with pytest.raises(ValueError, match="SRS 개정 계약"):
-        pipeline._load_verified_agent2_run(run_dir, run_dir.name)
-
-    # New runs may not drop/downgrade the additional procedure check. Old 1.0
-    # records retain their original checks and are not rewritten by the loader.
-    for unsupported in (None, "1.0", "1.1", "unknown"):
-        _write_json(run_dir / "agent2_manifest.json", {**manifest, "tc_detail_contract": unsupported})
-        with pytest.raises(ValueError, match="TC 상세화 계약"):
-            pipeline._load_verified_agent2_run(run_dir, run_dir.name)
-    checkpoint = pipeline._read_json_payload(run_dir / "checkpoint2.json")
-    checkpoint["checks"] = [item for item in checkpoint["checks"] if item["rule_id"] not in {"CP2-021", "CP2-022", "CP2-023"}]
-    _write_json(run_dir / "checkpoint2.json", checkpoint)
-    legacy_design = pipeline._read_json_payload(run_dir / "agent2_test_design.json")
-    for tc in legacy_design["test_cases"]:
-        tc.pop("state_effect")
-        tc.pop("restoration")
-        # Historical positive fixture must still satisfy its mandatory metadata.
-        # Empty metadata rejection under old rules is covered in test_agent2.
-        tc["common_qa_criteria"] = [CommonQaCriterion.BOUNDARY_VALUE.value]
-        tc["domain_qa_criteria"] = [DomainQaCriterion.TARGET_DEVICE_ACCURACY.value]
-        tc["feature_requirement_ids"] = ["REQ-TEMP-001"]
-        tc["independence_reason"] = "사전조건에서 대상 장비의 모드와 초기 온도를 직접 구성한다."
-        if procedure_style == "split":
-            # Historical contract only accepts the whole note as one item.
-            tc["restore_steps"] = [" ".join(tc["restore_steps"][:2]), *tc["restore_steps"][2:]]
-    _write_json(run_dir / "agent2_test_design.json", legacy_design)
-    # Build a historical fixture using historical rules/messages, not by
-    # relabeling the new-policy checkpoint as an old checkpoint.
-    historical_cp = pipeline.evaluate_checkpoint2(
-        verified[0], verified[2], Agent2TestDesign.model_validate(legacy_design), verified[1],
-        existing_catalog=pipeline._catalog_from_snapshot(catalog_snapshot),
-        require_srs_revision_proposals=True, require_existing_behavior_values=True,
-        require_procedure_detail=False, require_input_contract=False,
-        legacy_wording_checks=True,
-    )
-    _write_json(run_dir / "checkpoint2.json", historical_cp.model_dump(mode="json"))
-    legacy = {**manifest, "design_review_contract": None, "contract_version": "3.1", "tc_detail_contract": "1.0", "srs_revision_contract": "1.0",
-              "baseline_capture_order_contract": None, "range_change_rules_contract": None,
-              "review_severity_contract": None, "range_checklist_contract": None,
-              "focused_design_review_contract": None, "human_judgment_examples_contract": None,
-              "double_assert_timing_contract": "1.0",
-                  "tc_execution_alignment_contract": None,
-                  "essential_validation_contract": None,
-              "scope_guard_contract": None,
-              "grounding_contract": None, "grounding_review_sha256": None, "grounding_reviews": [],
-              "review_responsibility_contract": None,
-              "task_boundary_contract": None,
-              "output_tolerance_contract": None,
-              "state_restoration_contract": None, "structured_restoration_contract": None, "input_routing_contract": None,
-              "wording_policy": None, "procedure_preservation_contract": None, "scope_restoration_policy": None,
-              "agent2_design_sha256": _sha256_file(run_dir / "agent2_test_design.json"),
-              "prompt_version": "agent2-2.24", "checkpoint2_sha256": _sha256_file(run_dir / "checkpoint2.json")}
-    # This temporary historical fixture predates the independent review artifact.
-    (run_dir / "agent2_grounding_review.json").unlink()
-    _write_json(run_dir / "agent2_manifest.json", legacy)
+    _write_json(run_dir / "agent2_manifest.json", manifest)
     pipeline._load_verified_agent2_run(run_dir, run_dir.name)
 
 def test_agent2_rejects_an_active_run_reservation(tmp_path: Path) -> None:

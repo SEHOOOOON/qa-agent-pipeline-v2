@@ -208,16 +208,13 @@ def compare(rows, design: dict) -> list[dict[str, str]]:
     return problems
 
 
-def range_checklist_check(analysis, design, honor_exclusions: bool = True):
-    """CP2 check for a new Run; None when the request is not a readable range change.
-
-    ``honor_exclusions=False`` reproduces range_checklist_contract 1.0 Runs.
-    """
+def range_checklist_check(analysis, design):
+    """CP2 check; None when the request is not a readable range change."""
     from qa_pipeline_contracts import CheckResult, CheckStatus
     table = range_table(analysis)
     if table is None:
         return None
-    rows = checklist(table, excluded_switch_modes(analysis) if honor_exclusions else ())
+    rows = checklist(table, excluded_switch_modes(analysis))
     data = design.model_dump(mode="json", by_alias=True) if hasattr(design, "model_dump") else design
     problems = compare(rows, data)
     if problems:

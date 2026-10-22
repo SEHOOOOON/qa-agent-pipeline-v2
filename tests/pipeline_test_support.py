@@ -274,7 +274,6 @@ from qa_pipeline_v2 import (
     TcPurpose,
     TcType,
     TestData as StructuredTestData,
-    _is_unchanged_condition_for_request,
 )
 
 def agent2_design() -> Agent2TestDesign:
@@ -353,15 +352,9 @@ class Agent2FakeResponses:
             usage=SimpleNamespace(input_tokens=200, output_tokens=100, total_tokens=300),
         )
 
-from qa_pipeline_v2 import evaluate_checkpoint2
+from qa_pipeline_v2 import evaluate_checkpoint2, evaluate_checkpoint3_plan
 
 
-def evaluate_checkpoint2(*args, require_tc_detail=False, **kwargs):
-    """Keep historical CP2 unit fixtures separate from the new detail contract.
-
-    Production defaults to True; new detail and CLI tests exercise that path.
-    """
-    return pipeline.evaluate_checkpoint2(*args, require_tc_detail=require_tc_detail, **kwargs)
 
 from qa_pipeline_v2 import (
     Agent1Analysis,
@@ -495,7 +488,20 @@ def cp2_requirements():
         ]
     }
 
+CP2_APPLY_STEP = "18°C 미만 온도를 요청한다."
+import qa_pipeline_v2 as pipeline
+CP2_RESTORATION = pipeline.StructuredRestoration(
+    operation_steps=["준비 전 관찰한 설정 온도로 복원하고 적용한다."],
+    confirmations=[pipeline.RestoreConfirmation(
+        source_text=f"{target}를 준비 전 관찰값과 비교한다.", result_ids=[result_id],
+        comparisons=[pipeline.RestoreComparison(result_id=result_id,
+            source_excerpt=f"{target}를 준비 전 관찰값과 비교한다.", basis="OBSERVED_BASELINE")])
+        for result_id, target in (("ER-001", "화면 온도"), ("ER-002", "내부 온도"))],
+    verify_when="AFTER_RESTORE")
+
+
 def cp2_valid_design() -> Agent2TestDesign:
+    """Current-contract CP2 design (state effect, structured restoration, SRS proposal)."""
     return Agent2TestDesign(
         request_id="CR-TEST-001",
         existing_tc_comparison_completed=True,
@@ -527,25 +533,31 @@ def cp2_valid_design() -> Agent2TestDesign:
                     requested_temperature_c=17,
                 ),
                 preconditions=["AUTO 모드이고 설정 온도가 18°C다."],
-                steps=["18°C 미만 온도를 요청한다."],
+                steps=[CP2_APPLY_STEP],
                 expected_results=[
                     ExpectedResult(
                         result_id="ER-001",
                         statement="화면 온도가 기존 값을 유지한다.",
                         observation_layer=ObservationLayer.UI,
                         source_condition_ids=["COND-001", "COND-002"],
+                        verify_after_step=CP2_APPLY_STEP,
+                        observation_target="화면 온도",
                     ),
                     ExpectedResult(
                         result_id="ER-002",
                         statement="내부 온도가 기존 값을 유지한다.",
                         observation_layer=ObservationLayer.INTERNAL_STATE,
                         source_condition_ids=["COND-002"],
+                        verify_after_step=CP2_APPLY_STEP,
+                        observation_target="내부 온도",
                     ),
                     ExpectedResult(
                         result_id="ER-003",
                         statement="차단 안내가 표시된다.",
                         observation_layer=ObservationLayer.NOTIFICATION,
                         source_condition_ids=["COND-003"],
+                        verify_after_step=CP2_APPLY_STEP,
+                        observation_target="차단 안내",
                     ),
                 ],
                 common_qa_criteria=[CommonQaCriterion.BOUNDARY_VALUE],
@@ -557,12 +569,19 @@ def cp2_valid_design() -> Agent2TestDesign:
                 independent_execution=True,
                 independence_reason="사전조건에서 AUTO 모드와 초기 온도를 직접 구성한다.",
                 double_assert_policy=DoubleAssertPolicy.REQUIRED,
-                restore_required=False,
-                restore_steps=[],
+                state_effect=pipeline.TcStateEffect.BLOCKED_CHANGE,
+                restore_required=True,
+                restoration=CP2_RESTORATION,
+                restore_steps=[*CP2_RESTORATION.operation_steps,
+                               *(item.source_text for item in CP2_RESTORATION.confirmations)],
                 automation_candidate=True,
                 automation_reason="UI와 내부 상태를 조회할 수 있다.",
             )
         ],
+        srs_revision_proposals=[pipeline.SrsRevisionProposal(
+            proposal_id="SRS-REV-001", requirement_id="REQ-TEMP-001", source_condition_ids=["COND-001"],
+            current_acceptance_criteria="범위 밖 차단", proposed_acceptance_criteria="18°C 미만 요청을 차단한다.",
+            reason="요청한 하한 변경")],
         coverage_summary="확정 조건 3개를 반영했다.",
     )
 
@@ -629,13 +648,13 @@ from qa_pipeline_v2 import (
 )
 
 def build_verified_agent1_run(tmp_path: Path) -> tuple[Path, str]:
+    """A current-contract Agent 1 run (scripted review, not a live model result)."""
+    from qa_pipeline_grounding import attach_grounding_check, check_review_record
     run_id = "RUN-20260813-120000-ABC123"
     run_dir = tmp_path / run_id
     run_dir.mkdir()
     request = cp1_request()
     analysis = cp1_valid_analysis()
-    requirements = cp1_requirements()
-    checkpoint = evaluate_checkpoint1(request, analysis, requirements)
     request_file = run_dir / "request.json"
     srs_file = run_dir / "srs_snapshot.md"
     analysis_file = run_dir / "agent1_change_analysis.json"
@@ -645,16 +664,27 @@ def build_verified_agent1_run(tmp_path: Path) -> tuple[Path, str]:
         srs_file,
         (REPO_ROOT / "docs" / "01_PRODUCT_SRS.md").read_text(encoding="utf-8"),
     )
+    requirements = load_srs_requirements(srs_file)
+    draft_file = run_dir / "agent1_link_draft_attempt_1.json"
+    _write_json(draft_file, pipeline.agent1_link_draft(analysis).model_dump(mode="json"))
+    payload = pipeline_execution._agent1_grounding_input(request, requirements, analysis)
+    record = fake_grounding_record(payload)
+    review_file = run_dir / "agent1_grounding_review.json"
+    _write_json(review_file, record)
+    checkpoint = attach_grounding_check(evaluate_checkpoint1(request, analysis, requirements),
+                                        check_review_record(payload, record))
     _write_json(analysis_file, analysis.model_dump(mode="json"))
     _write_json(checkpoint_file, checkpoint.model_dump(mode="json"))
     _write_json(
         run_dir / "run_manifest.json",
         {
+            **pipeline_execution._current_agent1_contract(),
             "run_id": run_id,
             "stage": "AGENT_1_CP1",
-            "scope_guard_contract": "1.0",
             "status": checkpoint.status.value,
             "handoff_status": checkpoint.handoff_status.value,
+            "requirement_link_source": {"file": draft_file.name, "sha256": _sha256_file(draft_file)},
+            "grounding_review_sha256": _sha256_file(review_file),
             "request_sha256": _sha256_file(request_file),
             "srs_sha256": _sha256_file(srs_file),
             "agent1_analysis_sha256": _sha256_file(analysis_file),
@@ -663,54 +693,6 @@ def build_verified_agent1_run(tmp_path: Path) -> tuple[Path, str]:
     )
     return run_dir, run_id
 
-
-def build_historical_agent2_run(tmp_path: Path) -> tuple[Path, str]:
-    """Synthetic legacy-contract fixture; not a rewritten historical Live Run."""
-    run_dir, run_id = build_verified_agent1_run(tmp_path)
-    request, requirements, analysis, _, source = _load_verified_agent1_run(run_dir, run_id)
-    conditions = ["COND-001", "COND-002", "COND-003", "COND-005"]
-    tc = cp2_valid_design().test_cases[0].model_copy(update={
-        "requirement_ids": ["REQ-TEMP-001"], "source_condition_ids": conditions,
-        "feature_requirement_ids": ["REQ-TEMP-001"],
-        "domain_qa_criteria": [DomainQaCriterion.TARGET_DEVICE_ACCURACY],
-        "double_assert_policy": DoubleAssertPolicy.UI_ONLY,
-        "double_assert_reason": "이 단위 Fixture는 화면 경계 결과만 확인한다.",
-        "expected_results": [ExpectedResult(result_id="ER-001",
-            statement="화면 온도가 변경 조건과 일치한다.", observation_layer=ObservationLayer.UI,
-            source_condition_ids=conditions)],
-    })
-    design = cp2_valid_design().model_copy(update={
-        "test_cases": [tc], "excluded_scope": analysis.excluded_scope,
-        "excluded_information_gaps": analysis.information_gaps,
-    })
-    checkpoint = pipeline.evaluate_checkpoint2(request, analysis, design, requirements,
-        require_input_contract=False, require_meaning_guard=False, require_tc_detail=False,
-        require_procedure_detail=False, require_candidate_expectation_guard=False,
-        allow_existing_procedure_review=False, require_double_assert_timing=False)
-    assert checkpoint.status == CheckStatus.PASS, checkpoint.model_dump(mode="json")
-    _write_json(run_dir / "agent2_test_design.json", design.model_dump(mode="json"))
-    _write_json(run_dir / "checkpoint2.json", checkpoint.model_dump(mode="json"))
-    _write_json(run_dir / "agent2_manifest.json", {
-        "run_id": run_id, "stage": "AGENT_2_CP2", "status": "PASS", "contract_version": "2.8",
-        "source_run_manifest_sha256": _sha256_file(run_dir / "run_manifest.json"),
-        **{key: source[key] for key in (
-            "request_sha256", "srs_sha256", "agent1_analysis_sha256", "checkpoint1_sha256")},
-        "agent2_design_sha256": _sha256_file(run_dir / "agent2_test_design.json"),
-        "checkpoint2_sha256": _sha256_file(run_dir / "checkpoint2.json"),
-    })
-    return run_dir, run_id
-
-
-def checkpoint_revalidation_fixture(stage: str):
-    """Small CP1/CP2 records for presentation-vs-decision comparison tests."""
-    checks = [
-        pipeline.CheckResult(rule_id=f"{stage}-001", status=CheckStatus.PASS, message="기존 성공 안내"),
-        pipeline.CheckResult(rule_id=f"{stage}-002", status=CheckStatus.PASS, message="두 번째 성공 안내"),
-    ]
-    if stage == "CP1":
-        return pipeline.Checkpoint1Result(status=CheckStatus.PASS,
-            handoff_status=HandoffStatus.CONTINUE, checks=checks)
-    return pipeline.Checkpoint2Result(status=CheckStatus.PASS, checks=checks)
 
 import qa_pipeline_v2 as pipeline
 
@@ -737,16 +719,75 @@ from qa_pipeline_v2 import (
     run_candidate_trial,
 )
 
-def evaluate_checkpoint3_plan(test_case, plan, observation, *, require_precondition_proof=False):
-    """Legacy plan fixtures isolate older CP3 rules; new proof tests opt in.
 
-    The production API defaults to strict proof checking. This adapter is only
-    for historical unit fixtures that intentionally contain no proof contract.
-    """
-    return pipeline.evaluate_checkpoint3_plan(test_case, plan, observation,
-        require_plan_fidelity=False,
-        require_precondition_proof=require_precondition_proof)
+def current_agent2_design(request, analysis) -> Agent2TestDesign:
+    """A design that passes the current CP2 for cp1_request()/cp1_valid_analysis()."""
+    conditions = ["COND-001", "COND-002", "COND-003", "COND-005"]
+    step = "변경된 하한 경계값을 요청한다."
+    restore = ["대상 장비를 시험 전 온도로 복원한다.", "화면 온도가 시험 전 기록한 상태와 같은지 확인한다."]
+    tc = ProductTestCaseCandidate(
+        tc_id="TC-CAND-001", title="AUTO 모드 변경 범위 확인", purpose=TcPurpose.CHANGE_VALIDATION,
+        test_type=TcType.BOUNDARY, requirement_ids=["REQ-TEMP-001"], source_condition_ids=conditions,
+        control_path=ControlPath.CENTRAL, target_role="PRIMARY_TEST_DEVICE",
+        test_data=StructuredTestData(initial_mode="AUTO", requested_mode="AUTO",
+                                     initial_temperature_c=18, requested_temperature_c=17),
+        preconditions=["대상 장비가 AUTO 모드다."],
+        steps=["중앙 관제 화면에서 대상 장비 카드를 선택한다.", step],
+        expected_results=[ExpectedResult(result_id="ER-001", statement="화면 온도가 변경 조건과 일치한다.",
+            observation_target="화면 온도", verify_after_step=step, observation_layer=ObservationLayer.UI,
+            source_condition_ids=conditions)],
+        common_qa_criteria=[CommonQaCriterion.BOUNDARY_VALUE],
+        domain_qa_criteria=[DomainQaCriterion.TARGET_DEVICE_ACCURACY],
+        feature_requirement_ids=["REQ-TEMP-001"], independent_execution=True,
+        independence_reason="사전조건에서 대상 장비의 모드와 초기 온도를 직접 구성한다.",
+        double_assert_policy=DoubleAssertPolicy.UI_ONLY,
+        double_assert_reason="이 단위 Fixture는 화면 경계 결과만 확인한다.",
+        state_effect=pipeline.TcStateEffect.BLOCKED_CHANGE, restore_required=True, restore_steps=restore,
+        restoration=pipeline.StructuredRestoration(operation_steps=restore[:1],
+            confirmations=[pipeline.RestoreConfirmation(source_text=restore[1], result_ids=["ER-001"],
+                comparisons=[pipeline.RestoreComparison(result_id="ER-001", source_excerpt=restore[1],
+                                                       basis="OBSERVED_BASELINE")])],
+            verify_when="AFTER_RESTORE"),
+        automation_candidate=True, automation_reason="화면에서 요청 결과를 확인할 수 있다.")
+    return Agent2TestDesign(
+        request_id=request.request_id, existing_tc_comparison_completed=True,
+        related_existing_tests=[ExistingTestSelection(tc_id="TC-TEMP-001", source_condition_ids=["COND-001"],
+            selection_reason="변경 대상 온도 정책의 기존 경계 TC를 회귀 확인한다.")],
+        test_cases=[tc],
+        srs_revision_proposals=[pipeline.SrsRevisionProposal(
+            proposal_id="SRS-REV-001", requirement_id="REQ-TEMP-001", source_condition_ids=conditions,
+            current_acceptance_criteria=("범위 안 요청은 반영되고 범위 밖 요청은 차단되며 "
+                                         "화면·내부 설정 온도가 기존 값을 유지합니다."),
+            proposed_acceptance_criteria=("AUTO 모드에서는 18~30°C 요청을 허용하고 범위 밖 요청은 "
+                                          "차단하며 화면·내부 설정 온도가 기존 값을 유지합니다."),
+            reason="AUTO 모드 하한 변경을 SRS 인수 기준에 반영합니다.")],
+        coverage_summary="확정 조건을 변경 검증 TC에 연결했다.",
+        excluded_scope=analysis.excluded_scope, excluded_information_gaps=analysis.information_gaps)
 
+
+def build_verified_agent2_run(tmp_path: Path) -> tuple[Path, str]:
+    """A current-contract Agent 2 run made by run_agent2 with scripted model/review."""
+    run_dir, run_id = build_verified_agent1_run(tmp_path)
+
+    class ScriptedAgent2:
+        def __init__(self, *, model=None):
+            self.model = model or "scripted-agent2"
+
+        def design(self, request, analysis, requirements, **kwargs):
+            return pipeline.Agent2Response(design=current_agent2_design(request, analysis), response_id=None,
+                model=self.model, usage={"input_tokens": 0, "output_tokens": 0, "total_tokens": 0})
+
+    reviewer = SimpleNamespace(review=lambda payload: fake_grounding_record(payload))
+    saved = pipeline_execution.OpenAIAgent2, pipeline_execution.OpenAIGroundingReviewer
+    pipeline_execution.OpenAIAgent2 = ScriptedAgent2
+    pipeline_execution.OpenAIGroundingReviewer = lambda **kwargs: reviewer
+    try:
+        code = pipeline_execution.run_agent2(SimpleNamespace(run_id=run_id, runs_root=str(tmp_path), model=None,
+            approved_assets_root=str(REPO_ROOT / "approved_assets")))
+    finally:
+        pipeline_execution.OpenAIAgent2, pipeline_execution.OpenAIGroundingReviewer = saved
+    assert code == 0, (run_dir / "agent2_error.json").read_text(encoding="utf-8") if (run_dir / "agent2_error.json").exists() else code
+    return run_dir, run_id
 
 def agent3_test_case() -> ProductTestCaseCandidate:
     return ProductTestCaseCandidate.model_validate(
@@ -1508,6 +1549,19 @@ def _neutral_execution_result(
         evidence_complete=True,
     )
 
+def current_agent3_fields(artifact_dir, tc, plan, observation, ui_bindings=None):
+    """Write current-contract Agent 3 records (value formats, scripted review) and return manifest fields."""
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    plan, record = pipeline_execution._prepare_agent3_plan(artifact_dir, 1, plan, observation, tc, ui_bindings)
+    payload = pipeline_execution._agent3_grounding_input({}, plan, tc, observation)
+    _write_json(artifact_dir / "agent3_grounding_review.json", fake_grounding_record(payload))
+    contract = pipeline_execution._current_agent3_contract(tc)
+    if contract["binding_contract"] is None:
+        del contract["binding_contract"]
+    return plan, {**contract, "plan_value_formats": [record],
+                  "grounding_review_sha256": _sha256_file(artifact_dir / "agent3_grounding_review.json")}
+
+
 def _build_candidate_execution_handoff(
     tmp_path: Path, monkeypatch
 ) -> tuple[Path, Path, str]:
@@ -1521,7 +1575,7 @@ def _build_candidate_execution_handoff(
     target.write_text("<!doctype html>", encoding="utf-8")
     tc = agent3_test_case()
     observation = agent3_observation()
-    plan = agent3_plan()
+    plan, contract_fields = current_agent3_fields(run_dir, tc, agent3_plan(), observation)
     code = compile_automation_candidate(run_id, tc, plan)
     checkpoint = evaluate_checkpoint3_plan(tc, plan, observation)
     checkpoint.checks.extend(evaluate_compiled_candidate(tc, code))
@@ -1563,6 +1617,7 @@ def _build_candidate_execution_handoff(
     _write_json(
         run_dir / "agent3_manifest.json",
         {
+            **contract_fields,
             "run_id": run_id,
             "stage": "AGENT_3_CP3_TRIAL",
             "status": "PASS",
@@ -1780,18 +1835,23 @@ def _write_agent4_inputs(
 
 @pytest.fixture
 def saved_single_approval_run(tmp_path):
-    """Real local API evidence copied intact; no source-check or review stub."""
-    import shutil
-    run_id = "RUN-20261006-124032-11E19F"
-    source = REPO_ROOT / "runs/cont1007/runs" / run_id
-    if not source.exists():
-        pytest.skip("Local real API evidence is not distributed")
-    runs, assets = tmp_path / "runs", tmp_path / "assets"
-    shutil.copytree(source, runs / run_id)
-    shutil.copytree(REPO_ROOT / "approved_assets", assets)
-    srs = tmp_path / "srs.md"
-    shutil.copy2(REPO_ROOT / "docs/01_PRODUCT_SRS.md", srs)
-    return runs, assets, REPO_ROOT / "product_baseline/virtual-controller.html", run_id, "TC-CAND-001", srs
+    """A real current-contract run (2026-10-20 fan request), extracted read-only from P2 evidence."""
+    import zipfile
+    archive = (REPO_ROOT.parent / "agent-evaluation-framework" / "evaluation-runs" / "live-20261020" / "runs"
+               / "FLOW-20261020-121457-f4770f" / "trial-1" / "evidence.zip")
+    if not archive.is_file():
+        pytest.skip("Local real API evidence (P2 live-20261020) is not distributed")
+    run_id = "RUN-20261020-121459-FBFCB1"
+    root = tmp_path / "p1"
+    with zipfile.ZipFile(archive) as bundle:
+        for name in bundle.namelist():
+            if name.endswith("/") or not name.startswith(("p1/runs/", "p1/approved_assets/", "p1/product_baseline/", "p1/docs/")):
+                continue
+            target = tmp_path / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(bundle.read(name))
+    return (root / "runs", root / "approved_assets", root / "product_baseline/virtual-controller.html",
+            run_id, "TC-CAND-001", root / "docs/01_PRODUCT_SRS.md")
 
 
 def build_approvable_ui_run(
