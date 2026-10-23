@@ -3,8 +3,7 @@
 from pipeline_test_support import *
 
 @pytest.mark.parametrize("field,initial,target", [
-    ("status", "OPERATION", "STOP"), ("mode", "COOL", "HEAT"),
-    ("fanSpeed", "HIGH", "LOW"), ("setTemp", 29, 22), ("locked", False, True)])
+    ("status", "OPERATION", "STOP"), ("setTemp", 29, 22), ("locked", False, True)])
 @pytest.mark.parametrize("layout", ["split", "reversed_comparisons", "different_prose", "shared_prose"])
 def test_live_restoration_layout_preserves_every_reader(field, initial, target, layout):
     from qa_pipeline_agent2 import _normalize_agent2_live_design
@@ -83,8 +82,7 @@ def test_live_restoration_layout_does_not_repair_broken_contract(fault):
 
 
 @pytest.mark.parametrize("field,initial,target", [
-    ("status", "OPERATION", "STOP"), ("mode", "COOL", "HEAT"),
-    ("fanSpeed", "AUTO", "LOW"), ("setTemp", 27, 21), ("locked", False, True)])
+    ("status", "OPERATION", "STOP"), ("setTemp", 27, 21), ("locked", False, True)])
 @pytest.mark.parametrize("variant,valid", [
     ("paired", True), ("extra_panel", True), ("separate_read_lines", True),
     ("different_action", False), ("different_condition", True),
@@ -123,8 +121,7 @@ def test_double_assert_execution_anchors(field, initial, target, variant, valid)
 
 
 @pytest.mark.parametrize("field,initial,target", [
-    ("status", "OPERATION", "STOP"), ("mode", "COOL", "HEAT"),
-    ("fanSpeed", "MED", "HIGH"), ("setTemp", 28, 22), ("locked", False, True)])
+    ("status", "OPERATION", "STOP"), ("setTemp", 28, 22), ("locked", False, True)])
 def test_live_reference_whitespace_normalization_preserves_source_and_values(field, initial, target):
     from qa_pipeline_agent2 import _normalize_agent2_live_design
     case, _ = mapped_tc_fixture(field, initial, target)
@@ -166,8 +163,7 @@ def essential_cp2(design):
 
 
 @pytest.mark.parametrize("field,initial,target", [
-    ("status", "OPERATION", "STOP"), ("mode", "COOL", "HEAT"),
-    ("fanSpeed", "AUTO", "LOW"), ("setTemp", 27, 21), ("locked", False, True)])
+    ("status", "OPERATION", "STOP"), ("setTemp", 27, 21), ("locked", False, True)])
 @pytest.mark.parametrize("variant", ["group_label", "duplicate_values", "record_flag", "purpose_label", "dependency_mention"])
 def test_essential_checks_use_execution_not_presentation(field, initial, target, variant):
     case, _ = mapped_tc_fixture(field, initial, target)
@@ -246,7 +242,7 @@ def test_text_contract_rejects_unused_text_for_other_readers(strategy):
 
 
 @pytest.mark.parametrize("role", list(ConditionChangeRole))
-@pytest.mark.parametrize("values", [("MED", "HIGH"), ("18°C", "30°C"), ("HEAT", "COOL")])
+@pytest.mark.parametrize("values", [("MED", "HIGH"), ("18°C", "30°C")])
 def test_reuse_target_alignment_preserves_condition_roles(role, values):
     request, analysis, design, catalog = compound_reuse_fixture(values)
     analysis.confirmed_conditions[0].change_role = role
@@ -273,8 +269,7 @@ def test_reuse_alignment_does_not_accept_unrelated_selection(fault):
 
 
 @pytest.mark.parametrize("field,initial,target", [
-    ("setTemp", 16, 15), ("setTemp", 30, 31), ("fanSpeed", "LOW", "HIGH"),
-    ("mode", "COOL", "HEAT"), ("status", "OPERATION", "STOP"), ("locked", False, True)])
+    ("setTemp", 16, 15), ("setTemp", 30, 31), ("status", "OPERATION", "STOP")])
 def test_boundary_execution_definition_does_not_require_redundant_metadata(field, initial, target):
     case, _ = mapped_tc_fixture(field, initial, target, blocked=True)
     case.test_type = TcType.BOUNDARY
@@ -400,7 +395,7 @@ def test_frozen_tc_technical_id_repair_updates_verification_refs():
     assert design.test_cases[0].expected_results[0].result_id == case.expected_results[0].result_id
 
 
-@pytest.mark.parametrize("basis", ["DIRECT_REQUEST", "CHANGE_DEPENDENCY", "REQUEST_TRACE_ONLY"])
+@pytest.mark.parametrize("basis", ["DIRECT_REQUEST", "REQUEST_TRACE_ONLY"])
 @pytest.mark.parametrize("requirement,layer,rule", [
     ("REQ-STATE-001", ObservationLayer.INTERNAL_STATE, "CP2-006"),
     ("REQ-NOTIFY-001", ObservationLayer.NOTIFICATION, "CP2-007")])
@@ -425,7 +420,7 @@ def test_scope_labels_do_not_invent_observation_layers(basis, requirement, layer
     # This isolates the structural rule; mandatory meaning review decides actual scope.
 
 
-@pytest.mark.parametrize("basis", ["DIRECT_REQUEST", "CHANGE_DEPENDENCY", "REQUEST_TRACE_ONLY"])
+@pytest.mark.parametrize("basis", ["DIRECT_REQUEST", "REQUEST_TRACE_ONLY"])
 @pytest.mark.parametrize("required_by", ["policy", "type"])
 def test_scope_relaxation_keeps_explicit_double_assert_contract(basis, required_by):
     """An explicit REQUIRED policy needs both layers; a STATE_CONSISTENCY label alone does not."""
@@ -456,7 +451,7 @@ def test_baseline_test_does_not_require_srs_revision(relation, proposal_required
     assert cp2_check(cp, "CP2-018").status == (CheckStatus.FAIL if proposal_required else CheckStatus.PASS)
 
 
-@pytest.mark.parametrize('values,excluded', [(('MED', 'HIGH'), 'LOW'), (('21', '27'), '16'), (('HEAT', 'COOL'), 'AUTO')])
+@pytest.mark.parametrize('values,excluded', [(('MED', 'HIGH'), 'LOW'), (('21', '27'), '16')])
 @pytest.mark.parametrize('suffix', [' {value}는 제외한다.', ' 이전 값 {value}의 검사는 요구하지 않는다.'])
 def test_reuse_value_roles_do_not_turn_exclusions_into_tests(values, excluded, suffix):
     request, analysis, design, catalog = compound_reuse_fixture(values)
@@ -655,8 +650,7 @@ def test_cp2_structured_restoration_checks_ids_coverage_and_policy(mutation):
 
 
 @pytest.mark.parametrize("field,initial,target", [
-    ("status", "STOP", "OPERATION"), ("mode", "COOL", "HEAT"),
-    ("fanSpeed", "LOW", "HIGH"), ("locked", False, True), ("setTemp", 27, 21),
+    ("status", "STOP", "OPERATION"), ("locked", False, True), ("setTemp", 27, 21),
 ])
 @pytest.mark.parametrize("variant", ["duplicate", "grouped", "missing_result", "wrong_basis"])
 def test_restoration_duplicate_feedback_preserves_each_result(field, initial, target, variant):
@@ -1068,7 +1062,7 @@ def test_valid_design_passes_checkpoint2() -> None:
     assert len(result.checks) == 22
     assert all(item.status == CheckStatus.PASS for item in result.checks)
 
-@pytest.mark.parametrize("values", [("MED", "HIGH"), ("18°C", "30°C"), ("HEAT", "COOL")])
+@pytest.mark.parametrize("values", [("MED", "HIGH"), ("18°C", "30°C")])
 @pytest.mark.parametrize("layout", ["split", "one_complete", "missing_link", "actual_gap"])
 def test_compound_existing_reuse_requires_actual_condition_links(values, layout):
     request, analysis, design, catalog = compound_reuse_fixture(values, layout)

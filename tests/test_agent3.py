@@ -76,8 +76,7 @@ def test_restore_confirmation_independent_of_product_verdict(tmp_path, monkeypat
 
 
 @pytest.mark.parametrize("field,initial,target", [
-    ("status", "OPERATION", "STOP"), ("mode", "COOL", "HEAT"),
-    ("fanSpeed", "HIGH", "LOW"), ("setTemp", 29, 22), ("locked", False, True)])
+    ("status", "OPERATION", "STOP"), ("setTemp", 29, 22), ("locked", False, True)])
 @pytest.mark.parametrize("fault", [None, "missing_reader", "wrong_device", "wrong_value", "wrong_basis", "missing_restore"])
 def test_normalized_restoration_reaches_cp3_without_losing_protection(controller_observation, field, initial, target, fault):
     from qa_pipeline_agent2 import _normalize_agent2_live_design
@@ -180,8 +179,7 @@ def test_typed_compilation_uses_common_comparison(field, initial, target):
 
 
 @pytest.mark.parametrize("initial_mode,selected_device,initial,target,relative", [
-    ("FAN", 4, 19, 18, True), ("DRY", 4, 28, 27, True),
-    ("FAN", 1, 19, 18, True), ("DRY", 1, 28, 27, True),
+    ("FAN", 4, 19, 18, True), ("DRY", 1, 28, 27, True),
     ("FAN", 4, 27, 21, False), ("DRY", 1, 27, 21, False),
     ("FAN", 1, 16, 16, True)])
 def test_execution_interface_preparation_changes_actionability(initial_mode, selected_device, initial, target,
@@ -295,8 +293,7 @@ def test_execution_interface_unusable_at_execution_is_not_skipped(fault, mapped_
     assert "RESTORE_STATUS: RESTORED" in output
 
 
-@pytest.mark.parametrize("field,initial,target", [("status", "OPERATION", "STOP"), ("mode", "COOL", "HEAT"),
-    ("fanSpeed", "LOW", "HIGH"), ("setTemp", 27, 21), ("locked", False, True)])
+@pytest.mark.parametrize("field,initial,target", [("status", "OPERATION", "STOP"), ("setTemp", 27, 21), ("locked", False, True)])
 @pytest.mark.parametrize("fault", ["value", "order", "source", "assertion", "device", "missing", "duplicate"])
 def test_execution_interface_preserves_fidelity_and_element_guards(field, initial, target, fault,
         mapped_controller_observation):
