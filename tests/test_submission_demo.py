@@ -79,8 +79,13 @@ def test_trimmed_portfolio_keeps_core_story_and_evidence():
     전원 정지 상세 표·TC 설계 기준 패널은 본문에서 뺐고, 원본 증거 파일은 그대로 둔다."""
     html = (ROOT / 'project.html').read_text(encoding='utf-8')
     for text in ('분석 → 시험 설계 → 실행 → 보고 → 사람 판단', '기준을 정해도 AI의 해석은 달랐습니다',
-                 '실제 실행 결과 · 2026.10.15', '실무 적용 가능성과 한계', 'AI에게 QA 기준을 알려 주는 일'):
+                 '실행 결과 · 2026.10.15', '확인한 범위와 남은 한계', 'AI에게 QA 기준을 알려 주는 일',
+                 '이후 확인한 것 · 2026.10.17', '필수 시험 5개 중 3개'):
         assert text in html
+    # 2026-10-22 portfolio review: the 10/15 run was a DRY_RUN report, and the
+    # status box must not carry an older date than the runs it lists.
+    for stale in ('Slack·Notion으로 전달했습니다', '2026.10.09 확인 자료', 'submission-20261010/request.example.json'):
+        assert stale not in html
     assert 'class="pf-bar"' in html and 'aria-current="page">프로젝트1<' in html
     for file in ('power-observations.json', 'power-trial-stdout.txt'):
         assert (ROOT / 'evidence/submission-20261010' / file).is_file()
