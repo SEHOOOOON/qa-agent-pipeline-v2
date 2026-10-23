@@ -1059,7 +1059,7 @@ def test_valid_design_passes_checkpoint2() -> None:
     result = evaluate_checkpoint2(cp1_request(), cp2_analysis(), cp2_valid_design(), cp2_requirements())
 
     assert result.status == CheckStatus.PASS
-    assert len(result.checks) == 22
+    assert len(result.checks) == 22  # CP2-LANG appears only on a violation
     assert all(item.status == CheckStatus.PASS for item in result.checks)
 
 @pytest.mark.parametrize("values", [("MED", "HIGH"), ("18°C", "30°C")])
@@ -2058,3 +2058,23 @@ def test_writer_is_told_not_to_mix_operation_and_check_in_one_step():
     """2026-10-18 사람 대조 H-4: 절차 한 줄에는 조작만, 확인은 expected_results로."""
     from qa_pipeline_agent2 import AGENT2_SYSTEM_INSTRUCTIONS
     assert "조작 문장에 확인 내용을 붙이지 않습니다(H-4" in AGENT2_SYSTEM_INSTRUCTIONS
+
+
+# --- TC 문장 언어 (2026-10-23 사람 대조: 풍량 TC 제목이 중국어로 생성됨) -----------------------
+@pytest.mark.parametrize("field,text,ok", [
+    ("title", "LOW准备后应用HIGH并核对面板、卡片与内部风量", False),   # 실제 10-23 풍량 제목
+    ("title", "LOW 준비 후 HIGH 적용 時 패널 확인", False),          # 한자 한 글자
+    ("steps", "選択した風量を適用する。", False),                    # 일본어
+    ("title", "냉방 20°C 적용 후 패널·카드·내부 setTemp=20 확인 (COOL, IDU-00)", True),
+])
+def test_tc_text_must_be_korean(field, text, ok):
+    design = cp2_valid_design()
+    tc = design.test_cases[0]
+    setattr(tc, field, text if field == "title" else [text, *tc.steps[1:]])
+    result = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
+    lang = [c for c in result.checks if c.rule_id == "CP2-LANG"]
+    if ok:   # reported only on a violation, so saved Korean designs recompute unchanged
+        assert not lang
+    else:
+        assert lang[0].status == CheckStatus.FAIL and result.status == CheckStatus.FAIL
+        assert tc.tc_id in lang[0].message and "한국어로 다시 작성" in lang[0].message

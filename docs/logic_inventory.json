@@ -3499,7 +3499,7 @@
       }
     },
     "src/qa_pipeline_agent2.py": {
-      "sha256": "20720e61d3af12d8a724ef3f83a2ab8a3e35aa324d76c04afe7129f658d3172a",
+      "sha256": "4210191122321fea01a0154c32d22a08d3259e5fb5582bdebde8444d5372f2e4",
       "definitions": [
         {
           "line": 15,
@@ -3632,16 +3632,24 @@
           "decorators": []
         },
         {
-          "line": 629,
-          "end_line": 1388,
+          "line": 632,
+          "end_line": 638,
+          "scope": "<module>",
+          "name": "_human_tc_texts",
+          "kind": "FunctionDef",
+          "decorators": []
+        },
+        {
+          "line": 641,
+          "end_line": 1410,
           "scope": "<module>",
           "name": "evaluate_checkpoint2",
           "kind": "FunctionDef",
           "decorators": []
         },
         {
-          "line": 645,
-          "end_line": 646,
+          "line": 657,
+          "end_line": 658,
           "scope": "evaluate_checkpoint2",
           "name": "evaluate_checkpoint2.add",
           "kind": "FunctionDef",
@@ -5458,21 +5466,57 @@
           "else_lines": []
         },
         {
-          "line": 648,
-          "end_line": 651,
+          "line": 634,
+          "end_line": 636,
+          "scope": "_human_tc_texts",
+          "kind": "For",
+          "condition_or_value": "(label, items) in (('준비', tc.preconditions), ('절차', tc.steps), ('복원', tc.restore_steps))",
+          "guards": [],
+          "body_lines": [
+            635
+          ],
+          "else_lines": []
+        },
+        {
+          "line": 635,
+          "end_line": 636,
+          "scope": "_human_tc_texts",
+          "kind": "For",
+          "condition_or_value": "text in items",
+          "guards": [],
+          "body_lines": [
+            636
+          ],
+          "else_lines": []
+        },
+        {
+          "line": 637,
+          "end_line": 638,
+          "scope": "_human_tc_texts",
+          "kind": "For",
+          "condition_or_value": "result in tc.expected_results",
+          "guards": [],
+          "body_lines": [
+            638
+          ],
+          "else_lines": []
+        },
+        {
+          "line": 660,
+          "end_line": 663,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "any((tc.execution_spec is not None for tc in design.test_cases))",
           "guards": [],
           "body_lines": [
-            649,
-            650
+            661,
+            662
           ],
           "else_lines": []
         },
         {
-          "line": 648,
-          "end_line": 648,
+          "line": 660,
+          "end_line": 660,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -5483,8 +5527,8 @@
           "guards": []
         },
         {
-          "line": 649,
-          "end_line": 649,
+          "line": 661,
+          "end_line": 661,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -5493,12 +5537,12 @@
             "filters": []
           },
           "guards": [
-            "L648 TRUE: any((tc.execution_spec is not None for tc in design.test_cases))"
+            "L660 TRUE: any((tc.execution_spec is not None for tc in design.test_cases))"
           ]
         },
         {
-          "line": 649,
-          "end_line": 649,
+          "line": 661,
+          "end_line": 661,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -5507,50 +5551,50 @@
             "filters": []
           },
           "guards": [
-            "L648 TRUE: any((tc.execution_spec is not None for tc in design.test_cases))"
+            "L660 TRUE: any((tc.execution_spec is not None for tc in design.test_cases))"
           ]
         },
         {
-          "line": 650,
-          "end_line": 650,
+          "line": 662,
+          "end_line": 662,
           "scope": "evaluate_checkpoint2",
           "kind": "IfExp",
           "condition_or_value": "errors",
           "guards": [
-            "L648 TRUE: any((tc.execution_spec is not None for tc in design.test_cases))"
+            "L660 TRUE: any((tc.execution_spec is not None for tc in design.test_cases))"
           ],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 651,
-          "end_line": 651,
+          "line": 663,
+          "end_line": 663,
           "scope": "evaluate_checkpoint2",
           "kind": "IfExp",
           "condition_or_value": "errors",
           "guards": [
-            "L648 TRUE: any((tc.execution_spec is not None for tc in design.test_cases))"
+            "L660 TRUE: any((tc.execution_spec is not None for tc in design.test_cases))"
           ],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 653,
-          "end_line": 656,
+          "line": 665,
+          "end_line": 668,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "design.request_id == analysis.request_id == request.request_id",
           "guards": [],
           "body_lines": [
-            654
+            666
           ],
           "else_lines": [
-            656
+            668
           ]
         },
         {
-          "line": 658,
-          "end_line": 658,
+          "line": 670,
+          "end_line": 670,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -5561,8 +5605,8 @@
           "guards": []
         },
         {
-          "line": 659,
-          "end_line": 659,
+          "line": 671,
+          "end_line": 671,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -5573,8 +5617,8 @@
           "guards": []
         },
         {
-          "line": 659,
-          "end_line": 659,
+          "line": 671,
+          "end_line": 671,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -5585,8 +5629,8 @@
           "guards": []
         },
         {
-          "line": 660,
-          "end_line": 660,
+          "line": 672,
+          "end_line": 672,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -5599,8 +5643,8 @@
           "guards": []
         },
         {
-          "line": 661,
-          "end_line": 661,
+          "line": 673,
+          "end_line": 673,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -5613,22 +5657,22 @@
           "guards": []
         },
         {
-          "line": 662,
-          "end_line": 665,
+          "line": 674,
+          "end_line": 677,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "duplicate_tc_ids or duplicate_result_ids",
           "guards": [],
           "body_lines": [
-            663
+            675
           ],
           "else_lines": [
-            665
+            677
           ]
         },
         {
-          "line": 662,
-          "end_line": 662,
+          "line": 674,
+          "end_line": 674,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "duplicate_tc_ids or duplicate_result_ids",
@@ -5637,8 +5681,8 @@
           "else_lines": []
         },
         {
-          "line": 667,
-          "end_line": 667,
+          "line": 679,
+          "end_line": 679,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -5649,8 +5693,8 @@
           "guards": []
         },
         {
-          "line": 669,
-          "end_line": 669,
+          "line": 681,
+          "end_line": 681,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -5661,8 +5705,8 @@
           "guards": []
         },
         {
-          "line": 673,
-          "end_line": 673,
+          "line": 685,
+          "end_line": 685,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -5675,8 +5719,8 @@
           "guards": []
         },
         {
-          "line": 677,
-          "end_line": 677,
+          "line": 689,
+          "end_line": 689,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -5687,8 +5731,8 @@
           "guards": []
         },
         {
-          "line": 677,
-          "end_line": 677,
+          "line": 689,
+          "end_line": 689,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -5699,8 +5743,8 @@
           "guards": []
         },
         {
-          "line": 680,
-          "end_line": 680,
+          "line": 692,
+          "end_line": 692,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -5711,8 +5755,8 @@
           "guards": []
         },
         {
-          "line": 680,
-          "end_line": 680,
+          "line": 692,
+          "end_line": 692,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -5723,8 +5767,8 @@
           "guards": []
         },
         {
-          "line": 684,
-          "end_line": 684,
+          "line": 696,
+          "end_line": 696,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -5735,8 +5779,8 @@
           "guards": []
         },
         {
-          "line": 685,
-          "end_line": 685,
+          "line": 697,
+          "end_line": 697,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -5747,8 +5791,8 @@
           "guards": []
         },
         {
-          "line": 690,
-          "end_line": 690,
+          "line": 702,
+          "end_line": 702,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -5761,8 +5805,8 @@
           "guards": []
         },
         {
-          "line": 691,
-          "end_line": 692,
+          "line": 703,
+          "end_line": 704,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "request.target_requirement_id in condition.requirement_ids and condition.change_role != ConditionChangeRole.SUPPORTING",
@@ -5771,8 +5815,8 @@
           "else_lines": []
         },
         {
-          "line": 698,
-          "end_line": 698,
+          "line": 710,
+          "end_line": 710,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -5785,8 +5829,8 @@
           "guards": []
         },
         {
-          "line": 703,
-          "end_line": 703,
+          "line": 715,
+          "end_line": 715,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -5797,8 +5841,8 @@
           "guards": []
         },
         {
-          "line": 704,
-          "end_line": 704,
+          "line": 716,
+          "end_line": 716,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -5809,22 +5853,22 @@
           "guards": []
         },
         {
-          "line": 711,
-          "end_line": 714,
+          "line": 723,
+          "end_line": 726,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "unknown_requirements or unknown_conditions",
           "guards": [],
           "body_lines": [
-            712
+            724
           ],
           "else_lines": [
-            714
+            726
           ]
         },
         {
-          "line": 711,
-          "end_line": 711,
+          "line": 723,
+          "end_line": 723,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "unknown_requirements or unknown_conditions",
@@ -5833,37 +5877,37 @@
           "else_lines": []
         },
         {
-          "line": 717,
-          "end_line": 720,
+          "line": 729,
+          "end_line": 732,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "missing_conditions",
           "guards": [],
           "body_lines": [
-            718
+            730
           ],
           "else_lines": [
-            720
+            732
           ]
         },
         {
-          "line": 723,
-          "end_line": 738,
+          "line": 735,
+          "end_line": 750,
           "scope": "evaluate_checkpoint2",
           "kind": "For",
           "condition_or_value": "tc in design.test_cases",
           "guards": [],
           "body_lines": [
-            724,
-            725,
-            731,
-            734
+            736,
+            737,
+            743,
+            746
           ],
           "else_lines": []
         },
         {
-          "line": 727,
-          "end_line": 727,
+          "line": 739,
+          "end_line": 739,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -5876,8 +5920,8 @@
           "guards": []
         },
         {
-          "line": 729,
-          "end_line": 729,
+          "line": 741,
+          "end_line": 741,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -5888,45 +5932,45 @@
           "guards": []
         },
         {
-          "line": 731,
-          "end_line": 733,
+          "line": 743,
+          "end_line": 745,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "not set(tc.requirement_ids).issubset(condition_requirement_ids)",
           "guards": [],
           "body_lines": [
-            732,
-            733
+            744,
+            745
           ],
           "else_lines": []
         },
         {
-          "line": 733,
-          "end_line": 733,
+          "line": 745,
+          "end_line": 745,
           "scope": "evaluate_checkpoint2",
           "kind": "Continue",
           "condition_or_value": null,
           "guards": [
-            "L731 TRUE: not set(tc.requirement_ids).issubset(condition_requirement_ids)"
+            "L743 TRUE: not set(tc.requirement_ids).issubset(condition_requirement_ids)"
           ],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 734,
-          "end_line": 738,
+          "line": 746,
+          "end_line": 750,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "any((not set(expected.source_condition_ids).issubset(tc_condition_ids) for expected in tc.expected_results))",
           "guards": [],
           "body_lines": [
-            738
+            750
           ],
           "else_lines": []
         },
         {
-          "line": 736,
-          "end_line": 736,
+          "line": 748,
+          "end_line": 748,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -5937,36 +5981,36 @@
           "guards": []
         },
         {
-          "line": 739,
-          "end_line": 747,
+          "line": 751,
+          "end_line": 759,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "trace_errors",
           "guards": [],
           "body_lines": [
-            740
+            752
           ],
           "else_lines": [
-            747
+            759
           ]
         },
         {
-          "line": 752,
-          "end_line": 797,
+          "line": 764,
+          "end_line": 809,
           "scope": "evaluate_checkpoint2",
           "kind": "For",
           "condition_or_value": "tc in design.test_cases",
           "guards": [],
           "body_lines": [
-            753,
-            754,
-            785
+            765,
+            766,
+            797
           ],
           "else_lines": []
         },
         {
-          "line": 753,
-          "end_line": 753,
+          "line": 765,
+          "end_line": 765,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -5977,22 +6021,22 @@
           "guards": []
         },
         {
-          "line": 754,
-          "end_line": 784,
+          "line": 766,
+          "end_line": 796,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "tc.double_assert_policy == DoubleAssertPolicy.REQUIRED",
           "guards": [],
           "body_lines": [
-            756,
-            761,
-            783
+            768,
+            773,
+            795
           ],
           "else_lines": []
         },
         {
-          "line": 757,
-          "end_line": 757,
+          "line": 769,
+          "end_line": 769,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -6003,12 +6047,12 @@
             ]
           },
           "guards": [
-            "L754 TRUE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED"
+            "L766 TRUE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED"
           ]
         },
         {
-          "line": 759,
-          "end_line": 759,
+          "line": 771,
+          "end_line": 771,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -6017,30 +6061,30 @@
             "filters": []
           },
           "guards": [
-            "L754 TRUE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED"
+            "L766 TRUE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED"
           ]
         },
         {
-          "line": 761,
-          "end_line": 782,
+          "line": 773,
+          "end_line": 794,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "tc.execution_spec is not None",
           "guards": [
-            "L754 TRUE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED"
+            "L766 TRUE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED"
           ],
           "body_lines": [
-            768,
-            769,
-            771
+            780,
+            781,
+            783
           ],
           "else_lines": [
-            782
+            794
           ]
         },
         {
-          "line": 768,
-          "end_line": 768,
+          "line": 780,
+          "end_line": 780,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -6049,13 +6093,13 @@
             "filters": []
           },
           "guards": [
-            "L754 TRUE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED",
-            "L761 TRUE: tc.execution_spec is not None"
+            "L766 TRUE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED",
+            "L773 TRUE: tc.execution_spec is not None"
           ]
         },
         {
-          "line": 769,
-          "end_line": 769,
+          "line": 781,
+          "end_line": 781,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -6066,39 +6110,39 @@
             ]
           },
           "guards": [
-            "L754 TRUE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED",
-            "L761 TRUE: tc.execution_spec is not None"
+            "L766 TRUE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED",
+            "L773 TRUE: tc.execution_spec is not None"
           ]
         },
         {
-          "line": 772,
-          "end_line": 776,
+          "line": 784,
+          "end_line": 788,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "result.result_id not in by_result or not any((ui.result_id in by_result and by_result[result.result_id].after_action_id is not None and (by_result[result.result_id].after_action_id == by_result[ui.result_id].after_action_id) for ui in ui_results))",
           "guards": [
-            "L754 TRUE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED",
-            "L761 TRUE: tc.execution_spec is not None"
+            "L766 TRUE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED",
+            "L773 TRUE: tc.execution_spec is not None"
           ],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 773,
-          "end_line": 775,
+          "line": 785,
+          "end_line": 787,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "ui.result_id in by_result and by_result[result.result_id].after_action_id is not None and (by_result[result.result_id].after_action_id == by_result[ui.result_id].after_action_id)",
           "guards": [
-            "L754 TRUE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED",
-            "L761 TRUE: tc.execution_spec is not None"
+            "L766 TRUE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED",
+            "L773 TRUE: tc.execution_spec is not None"
           ],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 776,
-          "end_line": 776,
+          "line": 788,
+          "end_line": 788,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -6107,13 +6151,13 @@
             "filters": []
           },
           "guards": [
-            "L754 TRUE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED",
-            "L761 TRUE: tc.execution_spec is not None"
+            "L766 TRUE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED",
+            "L773 TRUE: tc.execution_spec is not None"
           ]
         },
         {
-          "line": 777,
-          "end_line": 777,
+          "line": 789,
+          "end_line": 789,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -6124,41 +6168,41 @@
             ]
           },
           "guards": [
-            "L754 TRUE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED",
-            "L761 TRUE: tc.execution_spec is not None"
+            "L766 TRUE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED",
+            "L773 TRUE: tc.execution_spec is not None"
           ]
         },
         {
-          "line": 783,
-          "end_line": 784,
+          "line": 795,
+          "end_line": 796,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "mismatched",
           "guards": [
-            "L754 TRUE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED"
+            "L766 TRUE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED"
           ],
           "body_lines": [
-            784
+            796
           ],
           "else_lines": []
         },
         {
-          "line": 785,
-          "end_line": 797,
+          "line": 797,
+          "end_line": 809,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "tc.double_assert_policy == DoubleAssertPolicy.REQUIRED and (not {ObservationLayer.UI, ObservationLayer.INTERNAL_STATE}.issubset(layers))",
           "guards": [],
           "body_lines": [
-            789
+            801
           ],
           "else_lines": [
-            790
+            802
           ]
         },
         {
-          "line": 785,
-          "end_line": 788,
+          "line": 797,
+          "end_line": 800,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "tc.double_assert_policy == DoubleAssertPolicy.REQUIRED and (not {ObservationLayer.UI, ObservationLayer.INTERNAL_STATE}.issubset(layers))",
@@ -6167,140 +6211,140 @@
           "else_lines": []
         },
         {
-          "line": 790,
-          "end_line": 797,
+          "line": 802,
+          "end_line": 809,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "tc.double_assert_policy == DoubleAssertPolicy.UI_ONLY and (ObservationLayer.UI not in layers or ObservationLayer.INTERNAL_STATE in layers)",
           "guards": [
-            "L785 FALSE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED and (not {ObservationLayer.UI, ObservationLayer.INTERNAL_STATE}.issubset(layers))"
+            "L797 FALSE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED and (not {ObservationLayer.UI, ObservationLayer.INTERNAL_STATE}.issubset(layers))"
           ],
           "body_lines": [
-            793
+            805
           ],
           "else_lines": [
-            794
+            806
           ]
         },
         {
-          "line": 790,
-          "end_line": 792,
+          "line": 802,
+          "end_line": 804,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "tc.double_assert_policy == DoubleAssertPolicy.UI_ONLY and (ObservationLayer.UI not in layers or ObservationLayer.INTERNAL_STATE in layers)",
           "guards": [
-            "L785 FALSE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED and (not {ObservationLayer.UI, ObservationLayer.INTERNAL_STATE}.issubset(layers))"
+            "L797 FALSE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED and (not {ObservationLayer.UI, ObservationLayer.INTERNAL_STATE}.issubset(layers))"
           ],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 791,
-          "end_line": 791,
+          "line": 803,
+          "end_line": 803,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "ObservationLayer.UI not in layers or ObservationLayer.INTERNAL_STATE in layers",
           "guards": [
-            "L785 FALSE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED and (not {ObservationLayer.UI, ObservationLayer.INTERNAL_STATE}.issubset(layers))"
+            "L797 FALSE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED and (not {ObservationLayer.UI, ObservationLayer.INTERNAL_STATE}.issubset(layers))"
           ],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 794,
-          "end_line": 797,
+          "line": 806,
+          "end_line": 809,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "tc.double_assert_policy == DoubleAssertPolicy.INTERNAL_ONLY and (ObservationLayer.INTERNAL_STATE not in layers or ObservationLayer.UI in layers)",
           "guards": [
-            "L785 FALSE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED and (not {ObservationLayer.UI, ObservationLayer.INTERNAL_STATE}.issubset(layers))",
-            "L790 FALSE: tc.double_assert_policy == DoubleAssertPolicy.UI_ONLY and (ObservationLayer.UI not in layers or ObservationLayer.INTERNAL_STATE in layers)"
+            "L797 FALSE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED and (not {ObservationLayer.UI, ObservationLayer.INTERNAL_STATE}.issubset(layers))",
+            "L802 FALSE: tc.double_assert_policy == DoubleAssertPolicy.UI_ONLY and (ObservationLayer.UI not in layers or ObservationLayer.INTERNAL_STATE in layers)"
           ],
           "body_lines": [
-            797
+            809
           ],
           "else_lines": []
         },
         {
-          "line": 794,
-          "end_line": 796,
+          "line": 806,
+          "end_line": 808,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "tc.double_assert_policy == DoubleAssertPolicy.INTERNAL_ONLY and (ObservationLayer.INTERNAL_STATE not in layers or ObservationLayer.UI in layers)",
           "guards": [
-            "L785 FALSE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED and (not {ObservationLayer.UI, ObservationLayer.INTERNAL_STATE}.issubset(layers))",
-            "L790 FALSE: tc.double_assert_policy == DoubleAssertPolicy.UI_ONLY and (ObservationLayer.UI not in layers or ObservationLayer.INTERNAL_STATE in layers)"
+            "L797 FALSE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED and (not {ObservationLayer.UI, ObservationLayer.INTERNAL_STATE}.issubset(layers))",
+            "L802 FALSE: tc.double_assert_policy == DoubleAssertPolicy.UI_ONLY and (ObservationLayer.UI not in layers or ObservationLayer.INTERNAL_STATE in layers)"
           ],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 795,
-          "end_line": 795,
+          "line": 807,
+          "end_line": 807,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "ObservationLayer.INTERNAL_STATE not in layers or ObservationLayer.UI in layers",
           "guards": [
-            "L785 FALSE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED and (not {ObservationLayer.UI, ObservationLayer.INTERNAL_STATE}.issubset(layers))",
-            "L790 FALSE: tc.double_assert_policy == DoubleAssertPolicy.UI_ONLY and (ObservationLayer.UI not in layers or ObservationLayer.INTERNAL_STATE in layers)"
+            "L797 FALSE: tc.double_assert_policy == DoubleAssertPolicy.REQUIRED and (not {ObservationLayer.UI, ObservationLayer.INTERNAL_STATE}.issubset(layers))",
+            "L802 FALSE: tc.double_assert_policy == DoubleAssertPolicy.UI_ONLY and (ObservationLayer.UI not in layers or ObservationLayer.INTERNAL_STATE in layers)"
           ],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 798,
-          "end_line": 809,
+          "line": 810,
+          "end_line": 821,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "policy_errors",
           "guards": [],
           "body_lines": [
-            799
+            811
           ],
           "else_lines": [
-            805
+            817
           ]
         },
         {
-          "line": 813,
-          "end_line": 817,
+          "line": 825,
+          "end_line": 829,
           "scope": "evaluate_checkpoint2",
           "kind": "For",
           "condition_or_value": "tc in design.test_cases",
           "guards": [],
           "body_lines": [
-            814,
-            816
+            826,
+            828
           ],
           "else_lines": []
         },
         {
-          "line": 814,
-          "end_line": 815,
+          "line": 826,
+          "end_line": 827,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "tc.control_path != ControlPath.CENTRAL",
           "guards": [],
           "body_lines": [
-            815
+            827
           ],
           "else_lines": []
         },
         {
-          "line": 816,
-          "end_line": 817,
+          "line": 828,
+          "end_line": 829,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "any((req_id.startswith('REQ-LOCAL-') for req_id in tc.requirement_ids))",
           "guards": [],
           "body_lines": [
-            817
+            829
           ],
           "else_lines": []
         },
         {
-          "line": 816,
-          "end_line": 816,
+          "line": 828,
+          "end_line": 828,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -6311,8 +6355,8 @@
           "guards": []
         },
         {
-          "line": 820,
-          "end_line": 820,
+          "line": 832,
+          "end_line": 832,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -6325,91 +6369,11 @@
           "guards": []
         },
         {
-          "line": 827,
-          "end_line": 830,
-          "scope": "evaluate_checkpoint2",
-          "kind": "BoolOp",
-          "condition_or_value": "request.target_requirement_id in spec.requirement_ids and bool(set(selection.source_condition_ids).intersection(target_test_condition_ids))",
-          "guards": [],
-          "body_lines": [],
-          "else_lines": []
-        },
-        {
-          "line": 831,
-          "end_line": 834,
-          "scope": "evaluate_checkpoint2",
-          "kind": "comprehension",
-          "condition_or_value": {
-            "target": "(selection, spec)",
-            "iter": "((selection, existing_by_id.get(selection.tc_id)) for selection in design.related_existing_tests)",
-            "filters": [
-              "spec is not None"
-            ]
-          },
-          "guards": []
-        },
-        {
-          "line": 833,
-          "end_line": 833,
-          "scope": "evaluate_checkpoint2",
-          "kind": "comprehension",
-          "condition_or_value": {
-            "target": "selection",
-            "iter": "design.related_existing_tests",
-            "filters": []
-          },
-          "guards": []
-        },
-        {
-          "line": 837,
-          "end_line": 849,
-          "scope": "evaluate_checkpoint2",
-          "kind": "If",
-          "condition_or_value": "'REQ-CONTROL-001' in candidate_required_requirements and (not any((tc.control_path == ControlPath.CENTRAL and 'REQ-CONTROL-001' in tc.requirement_ids for tc in design.test_cases))) and (not any(('REQ-CONTROL-001' in spec.requirement_ids and bool(set(selection.source_condition_ids).intersection(target_test_condition_ids)) for (selection, spec) in ((selection, existing_by_id.get(selection.tc_id)) for selection in design.related_existing_tests) if spec is not None)))",
-          "guards": [],
-          "body_lines": [
-            849
-          ],
-          "else_lines": []
-        },
-        {
-          "line": 837,
-          "end_line": 848,
-          "scope": "evaluate_checkpoint2",
-          "kind": "BoolOp",
-          "condition_or_value": "'REQ-CONTROL-001' in candidate_required_requirements and (not any((tc.control_path == ControlPath.CENTRAL and 'REQ-CONTROL-001' in tc.requirement_ids for tc in design.test_cases))) and (not any(('REQ-CONTROL-001' in spec.requirement_ids and bool(set(selection.source_condition_ids).intersection(target_test_condition_ids)) for (selection, spec) in ((selection, existing_by_id.get(selection.tc_id)) for selection in design.related_existing_tests) if spec is not None)))",
-          "guards": [],
-          "body_lines": [],
-          "else_lines": []
-        },
-        {
-          "line": 838,
-          "end_line": 838,
-          "scope": "evaluate_checkpoint2",
-          "kind": "BoolOp",
-          "condition_or_value": "tc.control_path == ControlPath.CENTRAL and 'REQ-CONTROL-001' in tc.requirement_ids",
-          "guards": [],
-          "body_lines": [],
-          "else_lines": []
-        },
-        {
           "line": 839,
-          "end_line": 839,
-          "scope": "evaluate_checkpoint2",
-          "kind": "comprehension",
-          "condition_or_value": {
-            "target": "tc",
-            "iter": "design.test_cases",
-            "filters": []
-          },
-          "guards": []
-        },
-        {
-          "line": 841,
           "end_line": 842,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
-          "condition_or_value": "'REQ-CONTROL-001' in spec.requirement_ids and bool(set(selection.source_condition_ids).intersection(target_test_condition_ids))",
+          "condition_or_value": "request.target_requirement_id in spec.requirement_ids and bool(set(selection.source_condition_ids).intersection(target_test_condition_ids))",
           "guards": [],
           "body_lines": [],
           "else_lines": []
@@ -6441,44 +6405,40 @@
           "guards": []
         },
         {
-          "line": 851,
-          "end_line": 852,
+          "line": 849,
+          "end_line": 861,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
-          "condition_or_value": "'REQ-CONTROL-001' in candidate_required_requirements",
+          "condition_or_value": "'REQ-CONTROL-001' in candidate_required_requirements and (not any((tc.control_path == ControlPath.CENTRAL and 'REQ-CONTROL-001' in tc.requirement_ids for tc in design.test_cases))) and (not any(('REQ-CONTROL-001' in spec.requirement_ids and bool(set(selection.source_condition_ids).intersection(target_test_condition_ids)) for (selection, spec) in ((selection, existing_by_id.get(selection.tc_id)) for selection in design.related_existing_tests) if spec is not None)))",
           "guards": [],
           "body_lines": [
-            852
+            861
           ],
           "else_lines": []
         },
         {
-          "line": 853,
-          "end_line": 875,
-          "scope": "evaluate_checkpoint2",
-          "kind": "For",
-          "condition_or_value": "(requirement_id, control_path) in required_change_paths",
-          "guards": [],
-          "body_lines": [
-            854,
-            860,
-            874
-          ],
-          "else_lines": []
-        },
-        {
-          "line": 855,
-          "end_line": 857,
+          "line": 849,
+          "end_line": 860,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
-          "condition_or_value": "tc.control_path == control_path and request.target_requirement_id in tc.requirement_ids and (requirement_id in tc.requirement_ids)",
+          "condition_or_value": "'REQ-CONTROL-001' in candidate_required_requirements and (not any((tc.control_path == ControlPath.CENTRAL and 'REQ-CONTROL-001' in tc.requirement_ids for tc in design.test_cases))) and (not any(('REQ-CONTROL-001' in spec.requirement_ids and bool(set(selection.source_condition_ids).intersection(target_test_condition_ids)) for (selection, spec) in ((selection, existing_by_id.get(selection.tc_id)) for selection in design.related_existing_tests) if spec is not None)))",
           "guards": [],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 858,
-          "end_line": 858,
+          "line": 850,
+          "end_line": 850,
+          "scope": "evaluate_checkpoint2",
+          "kind": "BoolOp",
+          "condition_or_value": "tc.control_path == ControlPath.CENTRAL and 'REQ-CONTROL-001' in tc.requirement_ids",
+          "guards": [],
+          "body_lines": [],
+          "else_lines": []
+        },
+        {
+          "line": 851,
+          "end_line": 851,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -6489,18 +6449,18 @@
           "guards": []
         },
         {
-          "line": 861,
-          "end_line": 867,
+          "line": 853,
+          "end_line": 854,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
-          "condition_or_value": "request.target_requirement_id in spec.requirement_ids and requirement_id in spec.requirement_ids and bool(set(selection.source_condition_ids).intersection(target_test_condition_ids))",
+          "condition_or_value": "'REQ-CONTROL-001' in spec.requirement_ids and bool(set(selection.source_condition_ids).intersection(target_test_condition_ids))",
           "guards": [],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 868,
-          "end_line": 871,
+          "line": 855,
+          "end_line": 858,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -6513,8 +6473,8 @@
           "guards": []
         },
         {
-          "line": 870,
-          "end_line": 870,
+          "line": 857,
+          "end_line": 857,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -6525,20 +6485,104 @@
           "guards": []
         },
         {
-          "line": 874,
-          "end_line": 875,
+          "line": 863,
+          "end_line": 864,
+          "scope": "evaluate_checkpoint2",
+          "kind": "If",
+          "condition_or_value": "'REQ-CONTROL-001' in candidate_required_requirements",
+          "guards": [],
+          "body_lines": [
+            864
+          ],
+          "else_lines": []
+        },
+        {
+          "line": 865,
+          "end_line": 887,
+          "scope": "evaluate_checkpoint2",
+          "kind": "For",
+          "condition_or_value": "(requirement_id, control_path) in required_change_paths",
+          "guards": [],
+          "body_lines": [
+            866,
+            872,
+            886
+          ],
+          "else_lines": []
+        },
+        {
+          "line": 867,
+          "end_line": 869,
+          "scope": "evaluate_checkpoint2",
+          "kind": "BoolOp",
+          "condition_or_value": "tc.control_path == control_path and request.target_requirement_id in tc.requirement_ids and (requirement_id in tc.requirement_ids)",
+          "guards": [],
+          "body_lines": [],
+          "else_lines": []
+        },
+        {
+          "line": 870,
+          "end_line": 870,
+          "scope": "evaluate_checkpoint2",
+          "kind": "comprehension",
+          "condition_or_value": {
+            "target": "tc",
+            "iter": "design.test_cases",
+            "filters": []
+          },
+          "guards": []
+        },
+        {
+          "line": 873,
+          "end_line": 879,
+          "scope": "evaluate_checkpoint2",
+          "kind": "BoolOp",
+          "condition_or_value": "request.target_requirement_id in spec.requirement_ids and requirement_id in spec.requirement_ids and bool(set(selection.source_condition_ids).intersection(target_test_condition_ids))",
+          "guards": [],
+          "body_lines": [],
+          "else_lines": []
+        },
+        {
+          "line": 880,
+          "end_line": 883,
+          "scope": "evaluate_checkpoint2",
+          "kind": "comprehension",
+          "condition_or_value": {
+            "target": "(selection, spec)",
+            "iter": "((selection, existing_by_id.get(selection.tc_id)) for selection in design.related_existing_tests)",
+            "filters": [
+              "spec is not None"
+            ]
+          },
+          "guards": []
+        },
+        {
+          "line": 882,
+          "end_line": 882,
+          "scope": "evaluate_checkpoint2",
+          "kind": "comprehension",
+          "condition_or_value": {
+            "target": "selection",
+            "iter": "design.related_existing_tests",
+            "filters": []
+          },
+          "guards": []
+        },
+        {
+          "line": 886,
+          "end_line": 887,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "not candidate_has_path and (not existing_has_path)",
           "guards": [],
           "body_lines": [
-            875
+            887
           ],
           "else_lines": []
         },
         {
-          "line": 874,
-          "end_line": 874,
+          "line": 886,
+          "end_line": 886,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "not candidate_has_path and (not existing_has_path)",
@@ -6547,8 +6591,8 @@
           "else_lines": []
         },
         {
-          "line": 879,
-          "end_line": 879,
+          "line": 891,
+          "end_line": 891,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -6561,26 +6605,26 @@
           "guards": []
         },
         {
-          "line": 882,
-          "end_line": 895,
+          "line": 894,
+          "end_line": 907,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "uncovered_requirements or (not target_change_tests and (not existing_covers_target_change)) or path_errors",
           "guards": [],
           "body_lines": [
-            887,
-            888,
-            890,
-            892,
-            893
+            899,
+            900,
+            902,
+            904,
+            905
           ],
           "else_lines": [
-            895
+            907
           ]
         },
         {
-          "line": 883,
-          "end_line": 885,
+          "line": 895,
+          "end_line": 897,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "uncovered_requirements or (not target_change_tests and (not existing_covers_target_change)) or path_errors",
@@ -6589,8 +6633,8 @@
           "else_lines": []
         },
         {
-          "line": 884,
-          "end_line": 884,
+          "line": 896,
+          "end_line": 896,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "not target_change_tests and (not existing_covers_target_change)",
@@ -6599,48 +6643,48 @@
           "else_lines": []
         },
         {
-          "line": 888,
-          "end_line": 889,
+          "line": 900,
+          "end_line": 901,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "uncovered_requirements",
           "guards": [
-            "L882 TRUE: uncovered_requirements or (not target_change_tests and (not existing_covers_target_change)) or path_errors"
+            "L894 TRUE: uncovered_requirements or (not target_change_tests and (not existing_covers_target_change)) or path_errors"
           ],
           "body_lines": [
-            889
+            901
           ],
           "else_lines": []
         },
         {
-          "line": 890,
-          "end_line": 891,
+          "line": 902,
+          "end_line": 903,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "not target_change_tests and (not existing_covers_target_change)",
           "guards": [
-            "L882 TRUE: uncovered_requirements or (not target_change_tests and (not existing_covers_target_change)) or path_errors"
+            "L894 TRUE: uncovered_requirements or (not target_change_tests and (not existing_covers_target_change)) or path_errors"
           ],
           "body_lines": [
-            891
+            903
           ],
           "else_lines": []
         },
         {
-          "line": 890,
-          "end_line": 890,
+          "line": 902,
+          "end_line": 902,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "not target_change_tests and (not existing_covers_target_change)",
           "guards": [
-            "L882 TRUE: uncovered_requirements or (not target_change_tests and (not existing_covers_target_change)) or path_errors"
+            "L894 TRUE: uncovered_requirements or (not target_change_tests and (not existing_covers_target_change)) or path_errors"
           ],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 899,
-          "end_line": 899,
+          "line": 911,
+          "end_line": 911,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -6651,8 +6695,8 @@
           "guards": []
         },
         {
-          "line": 900,
-          "end_line": 907,
+          "line": 912,
+          "end_line": 919,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -6663,8 +6707,8 @@
           "guards": []
         },
         {
-          "line": 904,
-          "end_line": 904,
+          "line": 916,
+          "end_line": 916,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -6675,22 +6719,22 @@
           "guards": []
         },
         {
-          "line": 909,
-          "end_line": 912,
+          "line": 921,
+          "end_line": 924,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "any((_FORBIDDEN_CODE.search(value) for value in text_fields))",
           "guards": [],
           "body_lines": [
-            910
+            922
           ],
           "else_lines": [
-            912
+            924
           ]
         },
         {
-          "line": 909,
-          "end_line": 909,
+          "line": 921,
+          "end_line": 921,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -6701,8 +6745,8 @@
           "guards": []
         },
         {
-          "line": 916,
-          "end_line": 916,
+          "line": 928,
+          "end_line": 928,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -6715,8 +6759,8 @@
           "guards": []
         },
         {
-          "line": 917,
-          "end_line": 925,
+          "line": 929,
+          "end_line": 937,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "tc.test_type == TcType.BOUNDARY and (not (tc.execution_spec is not None and (not tc_execution_spec_errors(tc)) and any((op.phase.value == 'TEST' and op.action_type.value != 'SELECT_DEVICE' for op in tc.execution_spec.operations)))) and (tc.test_data.requested_mode is None) and (not tc.test_data.requested_modes) and (tc.test_data.requested_temperature_c is None) and (not tc.test_data.requested_temperatures_c)",
@@ -6725,8 +6769,8 @@
           "else_lines": []
         },
         {
-          "line": 918,
-          "end_line": 921,
+          "line": 930,
+          "end_line": 933,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "tc.execution_spec is not None and (not tc_execution_spec_errors(tc)) and any((op.phase.value == 'TEST' and op.action_type.value != 'SELECT_DEVICE' for op in tc.execution_spec.operations))",
@@ -6735,8 +6779,8 @@
           "else_lines": []
         },
         {
-          "line": 920,
-          "end_line": 920,
+          "line": 932,
+          "end_line": 932,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "op.phase.value == 'TEST' and op.action_type.value != 'SELECT_DEVICE'",
@@ -6745,8 +6789,8 @@
           "else_lines": []
         },
         {
-          "line": 921,
-          "end_line": 921,
+          "line": 933,
+          "end_line": 933,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -6757,142 +6801,76 @@
           "guards": []
         },
         {
-          "line": 927,
-          "end_line": 935,
+          "line": 939,
+          "end_line": 947,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "test_data_errors",
           "guards": [],
           "body_lines": [
-            928
+            940
           ],
           "else_lines": [
-            935
+            947
           ]
         },
         {
-          "line": 937,
-          "end_line": 954,
+          "line": 949,
+          "end_line": 966,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "design.human_review_notes",
           "guards": [],
           "body_lines": [
-            938
+            950
           ],
           "else_lines": [
-            945,
-            946
+            957,
+            958
           ]
         },
         {
-          "line": 946,
-          "end_line": 954,
+          "line": 958,
+          "end_line": 966,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "note_count",
           "guards": [
-            "L937 FALSE: design.human_review_notes"
+            "L949 FALSE: design.human_review_notes"
           ],
           "body_lines": [
-            947
+            959
           ],
           "else_lines": [
-            954
+            966
           ]
         },
         {
-          "line": 963,
-          "end_line": 983,
+          "line": 975,
+          "end_line": 995,
           "scope": "evaluate_checkpoint2",
           "kind": "For",
           "condition_or_value": "tc in design.test_cases",
           "guards": [],
           "body_lines": [
-            964,
-            965,
-            969,
-            971,
             976,
-            982
+            977,
+            981,
+            983,
+            988,
+            994
           ],
           "else_lines": []
         },
         {
-          "line": 965,
-          "end_line": 968,
+          "line": 977,
+          "end_line": 980,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "not tc.common_qa_criteria or (expected_common is not None and expected_common not in tc.common_qa_criteria)",
           "guards": [],
           "body_lines": [
-            968
-          ],
-          "else_lines": []
-        },
-        {
-          "line": 965,
-          "end_line": 967,
-          "scope": "evaluate_checkpoint2",
-          "kind": "BoolOp",
-          "condition_or_value": "not tc.common_qa_criteria or (expected_common is not None and expected_common not in tc.common_qa_criteria)",
-          "guards": [],
-          "body_lines": [],
-          "else_lines": []
-        },
-        {
-          "line": 966,
-          "end_line": 966,
-          "scope": "evaluate_checkpoint2",
-          "kind": "BoolOp",
-          "condition_or_value": "expected_common is not None and expected_common not in tc.common_qa_criteria",
-          "guards": [],
-          "body_lines": [],
-          "else_lines": []
-        },
-        {
-          "line": 969,
-          "end_line": 970,
-          "scope": "evaluate_checkpoint2",
-          "kind": "If",
-          "condition_or_value": "not tc.domain_qa_criteria",
-          "guards": [],
-          "body_lines": [
-            970
-          ],
-          "else_lines": []
-        },
-        {
-          "line": 971,
-          "end_line": 975,
-          "scope": "evaluate_checkpoint2",
-          "kind": "If",
-          "condition_or_value": "not tc.feature_requirement_ids or not set(tc.feature_requirement_ids).issubset(set(tc.requirement_ids))",
-          "guards": [],
-          "body_lines": [
-            975
-          ],
-          "else_lines": []
-        },
-        {
-          "line": 972,
-          "end_line": 973,
-          "scope": "evaluate_checkpoint2",
-          "kind": "BoolOp",
-          "condition_or_value": "not tc.feature_requirement_ids or not set(tc.feature_requirement_ids).issubset(set(tc.requirement_ids))",
-          "guards": [],
-          "body_lines": [],
-          "else_lines": []
-        },
-        {
-          "line": 976,
-          "end_line": 981,
-          "scope": "evaluate_checkpoint2",
-          "kind": "If",
-          "condition_or_value": "tc.test_type == TcType.STATE_CONSISTENCY and DomainQaCriterion.UI_INTERNAL_STATE_CONSISTENCY not in tc.domain_qa_criteria",
-          "guards": [],
-          "body_lines": [
-            981
+            980
           ],
           "else_lines": []
         },
@@ -6901,58 +6879,124 @@
           "end_line": 979,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
-          "condition_or_value": "tc.test_type == TcType.STATE_CONSISTENCY and DomainQaCriterion.UI_INTERNAL_STATE_CONSISTENCY not in tc.domain_qa_criteria",
+          "condition_or_value": "not tc.common_qa_criteria or (expected_common is not None and expected_common not in tc.common_qa_criteria)",
           "guards": [],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 982,
-          "end_line": 983,
+          "line": 978,
+          "end_line": 978,
+          "scope": "evaluate_checkpoint2",
+          "kind": "BoolOp",
+          "condition_or_value": "expected_common is not None and expected_common not in tc.common_qa_criteria",
+          "guards": [],
+          "body_lines": [],
+          "else_lines": []
+        },
+        {
+          "line": 981,
+          "end_line": 982,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
-          "condition_or_value": "not set(tc.feature_requirement_ids).issubset(set(tc.requirement_ids))",
+          "condition_or_value": "not tc.domain_qa_criteria",
           "guards": [],
           "body_lines": [
-            983
+            982
+          ],
+          "else_lines": []
+        },
+        {
+          "line": 983,
+          "end_line": 987,
+          "scope": "evaluate_checkpoint2",
+          "kind": "If",
+          "condition_or_value": "not tc.feature_requirement_ids or not set(tc.feature_requirement_ids).issubset(set(tc.requirement_ids))",
+          "guards": [],
+          "body_lines": [
+            987
           ],
           "else_lines": []
         },
         {
           "line": 984,
-          "end_line": 984,
+          "end_line": 985,
           "scope": "evaluate_checkpoint2",
-          "kind": "IfExp",
-          "condition_or_value": "invalid_feature_links",
-          "guards": [],
-          "body_lines": [],
-          "else_lines": []
-        },
-        {
-          "line": 985,
-          "end_line": 988,
-          "scope": "evaluate_checkpoint2",
-          "kind": "IfExp",
-          "condition_or_value": "invalid_feature_links",
+          "kind": "BoolOp",
+          "condition_or_value": "not tc.feature_requirement_ids or not set(tc.feature_requirement_ids).issubset(set(tc.requirement_ids))",
           "guards": [],
           "body_lines": [],
           "else_lines": []
         },
         {
           "line": 988,
-          "end_line": 988,
+          "end_line": 993,
+          "scope": "evaluate_checkpoint2",
+          "kind": "If",
+          "condition_or_value": "tc.test_type == TcType.STATE_CONSISTENCY and DomainQaCriterion.UI_INTERNAL_STATE_CONSISTENCY not in tc.domain_qa_criteria",
+          "guards": [],
+          "body_lines": [
+            993
+          ],
+          "else_lines": []
+        },
+        {
+          "line": 989,
+          "end_line": 991,
+          "scope": "evaluate_checkpoint2",
+          "kind": "BoolOp",
+          "condition_or_value": "tc.test_type == TcType.STATE_CONSISTENCY and DomainQaCriterion.UI_INTERNAL_STATE_CONSISTENCY not in tc.domain_qa_criteria",
+          "guards": [],
+          "body_lines": [],
+          "else_lines": []
+        },
+        {
+          "line": 994,
+          "end_line": 995,
+          "scope": "evaluate_checkpoint2",
+          "kind": "If",
+          "condition_or_value": "not set(tc.feature_requirement_ids).issubset(set(tc.requirement_ids))",
+          "guards": [],
+          "body_lines": [
+            995
+          ],
+          "else_lines": []
+        },
+        {
+          "line": 996,
+          "end_line": 996,
+          "scope": "evaluate_checkpoint2",
+          "kind": "IfExp",
+          "condition_or_value": "invalid_feature_links",
+          "guards": [],
+          "body_lines": [],
+          "else_lines": []
+        },
+        {
+          "line": 997,
+          "end_line": 1000,
+          "scope": "evaluate_checkpoint2",
+          "kind": "IfExp",
+          "condition_or_value": "invalid_feature_links",
+          "guards": [],
+          "body_lines": [],
+          "else_lines": []
+        },
+        {
+          "line": 1000,
+          "end_line": 1000,
           "scope": "evaluate_checkpoint2",
           "kind": "IfExp",
           "condition_or_value": "tier_errors",
           "guards": [
-            "L985 FALSE: invalid_feature_links"
+            "L997 FALSE: invalid_feature_links"
           ],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 990,
-          "end_line": 990,
+          "line": 1002,
+          "end_line": 1002,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -6965,22 +7009,22 @@
           "guards": []
         },
         {
-          "line": 991,
-          "end_line": 1000,
+          "line": 1003,
+          "end_line": 1012,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "independence_errors",
           "guards": [],
           "body_lines": [
-            992
+            1004
           ],
           "else_lines": [
-            999
+            1011
           ]
         },
         {
-          "line": 1006,
-          "end_line": 1006,
+          "line": 1018,
+          "end_line": 1018,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -6991,8 +7035,8 @@
           "guards": []
         },
         {
-          "line": 1009,
-          "end_line": 1009,
+          "line": 1021,
+          "end_line": 1021,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -7005,8 +7049,8 @@
           "guards": []
         },
         {
-          "line": 1014,
-          "end_line": 1014,
+          "line": 1026,
+          "end_line": 1026,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -7019,8 +7063,8 @@
           "guards": []
         },
         {
-          "line": 1019,
-          "end_line": 1019,
+          "line": 1031,
+          "end_line": 1031,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -7031,8 +7075,8 @@
           "guards": []
         },
         {
-          "line": 1020,
-          "end_line": 1020,
+          "line": 1032,
+          "end_line": 1032,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -7043,8 +7087,8 @@
           "guards": []
         },
         {
-          "line": 1022,
-          "end_line": 1022,
+          "line": 1034,
+          "end_line": 1034,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -7057,8 +7101,8 @@
           "guards": []
         },
         {
-          "line": 1025,
-          "end_line": 1025,
+          "line": 1037,
+          "end_line": 1037,
           "scope": "evaluate_checkpoint2",
           "kind": "IfExp",
           "condition_or_value": "not design.test_cases and design.related_existing_tests",
@@ -7067,8 +7111,8 @@
           "else_lines": []
         },
         {
-          "line": 1025,
-          "end_line": 1025,
+          "line": 1037,
+          "end_line": 1037,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "not design.test_cases and design.related_existing_tests",
@@ -7077,25 +7121,25 @@
           "else_lines": []
         },
         {
-          "line": 1026,
-          "end_line": 1045,
+          "line": 1038,
+          "end_line": 1057,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "not excluded_scope_matches or not excluded_gaps_match or excluded_procedure_notes",
           "guards": [],
           "body_lines": [
-            1027,
-            1028,
-            1030,
-            1032
+            1039,
+            1040,
+            1042,
+            1044
           ],
           "else_lines": [
-            1039
+            1051
           ]
         },
         {
-          "line": 1026,
-          "end_line": 1026,
+          "line": 1038,
+          "end_line": 1038,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "not excluded_scope_matches or not excluded_gaps_match or excluded_procedure_notes",
@@ -7104,158 +7148,158 @@
           "else_lines": []
         },
         {
-          "line": 1028,
-          "end_line": 1029,
+          "line": 1040,
+          "end_line": 1041,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "not excluded_scope_matches or not excluded_gaps_match",
           "guards": [
-            "L1026 TRUE: not excluded_scope_matches or not excluded_gaps_match or excluded_procedure_notes"
+            "L1038 TRUE: not excluded_scope_matches or not excluded_gaps_match or excluded_procedure_notes"
           ],
           "body_lines": [
-            1029
+            1041
           ],
           "else_lines": []
         },
         {
-          "line": 1028,
-          "end_line": 1028,
+          "line": 1040,
+          "end_line": 1040,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "not excluded_scope_matches or not excluded_gaps_match",
           "guards": [
-            "L1026 TRUE: not excluded_scope_matches or not excluded_gaps_match or excluded_procedure_notes"
+            "L1038 TRUE: not excluded_scope_matches or not excluded_gaps_match or excluded_procedure_notes"
           ],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 1030,
-          "end_line": 1031,
+          "line": 1042,
+          "end_line": 1043,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "excluded_procedure_notes",
           "guards": [
-            "L1026 TRUE: not excluded_scope_matches or not excluded_gaps_match or excluded_procedure_notes"
+            "L1038 TRUE: not excluded_scope_matches or not excluded_gaps_match or excluded_procedure_notes"
           ],
           "body_lines": [
-            1031
+            1043
           ],
-          "else_lines": []
-        },
-        {
-          "line": 1044,
-          "end_line": 1044,
-          "scope": "evaluate_checkpoint2",
-          "kind": "IfExp",
-          "condition_or_value": "procedure_review",
-          "guards": [
-            "L1026 FALSE: not excluded_scope_matches or not excluded_gaps_match or excluded_procedure_notes"
-          ],
-          "body_lines": [],
-          "else_lines": []
-        },
-        {
-          "line": 1048,
-          "end_line": 1151,
-          "scope": "evaluate_checkpoint2",
-          "kind": "For",
-          "condition_or_value": "tc in design.test_cases",
-          "guards": [],
-          "body_lines": [
-            1049,
-            1061,
-            1062,
-            1065,
-            1067,
-            1068,
-            1071,
-            1072,
-            1078,
-            1079,
-            1112,
-            1114,
-            1119,
-            1121,
-            1124,
-            1126,
-            1132,
-            1135,
-            1140,
-            1141,
-            1144,
-            1147
-          ],
-          "else_lines": []
-        },
-        {
-          "line": 1049,
-          "end_line": 1060,
-          "scope": "evaluate_checkpoint2",
-          "kind": "If",
-          "condition_or_value": "tc.execution_spec is not None",
-          "guards": [],
-          "body_lines": [
-            1054,
-            1060
-          ],
-          "else_lines": []
-        },
-        {
-          "line": 1054,
-          "end_line": 1059,
-          "scope": "evaluate_checkpoint2",
-          "kind": "For",
-          "condition_or_value": "step in tc.intermediate_reset_steps",
-          "guards": [
-            "L1049 TRUE: tc.execution_spec is not None"
-          ],
-          "body_lines": [
-            1055
-          ],
-          "else_lines": []
-        },
-        {
-          "line": 1055,
-          "end_line": 1059,
-          "scope": "evaluate_checkpoint2",
-          "kind": "If",
-          "condition_or_value": "step not in tc.steps or not any((op.phase == AutomationPhase.TEST and op.source_text == step for op in tc.execution_spec.operations))",
-          "guards": [
-            "L1049 TRUE: tc.execution_spec is not None"
-          ],
-          "body_lines": [
-            1059
-          ],
-          "else_lines": []
-        },
-        {
-          "line": 1055,
-          "end_line": 1058,
-          "scope": "evaluate_checkpoint2",
-          "kind": "BoolOp",
-          "condition_or_value": "step not in tc.steps or not any((op.phase == AutomationPhase.TEST and op.source_text == step for op in tc.execution_spec.operations))",
-          "guards": [
-            "L1049 TRUE: tc.execution_spec is not None"
-          ],
-          "body_lines": [],
           "else_lines": []
         },
         {
           "line": 1056,
           "end_line": 1056,
           "scope": "evaluate_checkpoint2",
-          "kind": "BoolOp",
-          "condition_or_value": "op.phase == AutomationPhase.TEST and op.source_text == step",
+          "kind": "IfExp",
+          "condition_or_value": "procedure_review",
           "guards": [
-            "L1049 TRUE: tc.execution_spec is not None"
+            "L1038 FALSE: not excluded_scope_matches or not excluded_gaps_match or excluded_procedure_notes"
           ],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 1057,
-          "end_line": 1057,
+          "line": 1060,
+          "end_line": 1163,
+          "scope": "evaluate_checkpoint2",
+          "kind": "For",
+          "condition_or_value": "tc in design.test_cases",
+          "guards": [],
+          "body_lines": [
+            1061,
+            1073,
+            1074,
+            1077,
+            1079,
+            1080,
+            1083,
+            1084,
+            1090,
+            1091,
+            1124,
+            1126,
+            1131,
+            1133,
+            1136,
+            1138,
+            1144,
+            1147,
+            1152,
+            1153,
+            1156,
+            1159
+          ],
+          "else_lines": []
+        },
+        {
+          "line": 1061,
+          "end_line": 1072,
+          "scope": "evaluate_checkpoint2",
+          "kind": "If",
+          "condition_or_value": "tc.execution_spec is not None",
+          "guards": [],
+          "body_lines": [
+            1066,
+            1072
+          ],
+          "else_lines": []
+        },
+        {
+          "line": 1066,
+          "end_line": 1071,
+          "scope": "evaluate_checkpoint2",
+          "kind": "For",
+          "condition_or_value": "step in tc.intermediate_reset_steps",
+          "guards": [
+            "L1061 TRUE: tc.execution_spec is not None"
+          ],
+          "body_lines": [
+            1067
+          ],
+          "else_lines": []
+        },
+        {
+          "line": 1067,
+          "end_line": 1071,
+          "scope": "evaluate_checkpoint2",
+          "kind": "If",
+          "condition_or_value": "step not in tc.steps or not any((op.phase == AutomationPhase.TEST and op.source_text == step for op in tc.execution_spec.operations))",
+          "guards": [
+            "L1061 TRUE: tc.execution_spec is not None"
+          ],
+          "body_lines": [
+            1071
+          ],
+          "else_lines": []
+        },
+        {
+          "line": 1067,
+          "end_line": 1070,
+          "scope": "evaluate_checkpoint2",
+          "kind": "BoolOp",
+          "condition_or_value": "step not in tc.steps or not any((op.phase == AutomationPhase.TEST and op.source_text == step for op in tc.execution_spec.operations))",
+          "guards": [
+            "L1061 TRUE: tc.execution_spec is not None"
+          ],
+          "body_lines": [],
+          "else_lines": []
+        },
+        {
+          "line": 1068,
+          "end_line": 1068,
+          "scope": "evaluate_checkpoint2",
+          "kind": "BoolOp",
+          "condition_or_value": "op.phase == AutomationPhase.TEST and op.source_text == step",
+          "guards": [
+            "L1061 TRUE: tc.execution_spec is not None"
+          ],
+          "body_lines": [],
+          "else_lines": []
+        },
+        {
+          "line": 1069,
+          "end_line": 1069,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -7264,24 +7308,24 @@
             "filters": []
           },
           "guards": [
-            "L1049 TRUE: tc.execution_spec is not None"
+            "L1061 TRUE: tc.execution_spec is not None"
           ]
         },
         {
-          "line": 1060,
-          "end_line": 1060,
+          "line": 1072,
+          "end_line": 1072,
           "scope": "evaluate_checkpoint2",
           "kind": "Continue",
           "condition_or_value": null,
           "guards": [
-            "L1049 TRUE: tc.execution_spec is not None"
+            "L1061 TRUE: tc.execution_spec is not None"
           ],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 1063,
-          "end_line": 1063,
+          "line": 1075,
+          "end_line": 1075,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "data.requested_modes or data.requested_temperatures_c",
@@ -7290,20 +7334,20 @@
           "else_lines": []
         },
         {
-          "line": 1065,
-          "end_line": 1066,
+          "line": 1077,
+          "end_line": 1078,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "len(data.requested_modes) != len(set(data.requested_modes))",
           "guards": [],
           "body_lines": [
-            1066
+            1078
           ],
           "else_lines": []
         },
         {
-          "line": 1067,
-          "end_line": 1067,
+          "line": 1079,
+          "end_line": 1079,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -7314,20 +7358,20 @@
           "guards": []
         },
         {
-          "line": 1068,
-          "end_line": 1069,
+          "line": 1080,
+          "end_line": 1081,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "len(normalized_temperatures) != len(set(normalized_temperatures))",
           "guards": [],
           "body_lines": [
-            1069
+            1081
           ],
           "else_lines": []
         },
         {
-          "line": 1073,
-          "end_line": 1076,
+          "line": 1085,
+          "end_line": 1088,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "data.requested_mode or data.requested_modes or data.requested_temperature_c is not None or data.requested_temperatures_c",
@@ -7336,264 +7380,264 @@
           "else_lines": []
         },
         {
-          "line": 1079,
-          "end_line": 1111,
+          "line": 1091,
+          "end_line": 1123,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "data.restore_observed_hvac_state",
           "guards": [],
           "body_lines": [
-            1080,
-            1084,
-            1088,
-            1092
+            1092,
+            1096,
+            1100,
+            1104
           ],
           "else_lines": [
-            1102
+            1114
           ]
         },
         {
-          "line": 1080,
-          "end_line": 1083,
+          "line": 1092,
+          "end_line": 1095,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "not grouped and tc.state_effect is None",
           "guards": [
-            "L1079 TRUE: data.restore_observed_hvac_state"
+            "L1091 TRUE: data.restore_observed_hvac_state"
           ],
           "body_lines": [
-            1081
+            1093
           ],
           "else_lines": []
         },
         {
-          "line": 1080,
-          "end_line": 1080,
+          "line": 1092,
+          "end_line": 1092,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "not grouped and tc.state_effect is None",
           "guards": [
-            "L1079 TRUE: data.restore_observed_hvac_state"
+            "L1091 TRUE: data.restore_observed_hvac_state"
           ],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 1084,
-          "end_line": 1087,
+          "line": 1096,
+          "end_line": 1099,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "not tc.restore_required or not hvac_values_changed",
           "guards": [
-            "L1079 TRUE: data.restore_observed_hvac_state"
+            "L1091 TRUE: data.restore_observed_hvac_state"
           ],
           "body_lines": [
-            1085
+            1097
           ],
           "else_lines": []
         },
         {
-          "line": 1084,
-          "end_line": 1084,
+          "line": 1096,
+          "end_line": 1096,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "not tc.restore_required or not hvac_values_changed",
           "guards": [
-            "L1079 TRUE: data.restore_observed_hvac_state"
+            "L1091 TRUE: data.restore_observed_hvac_state"
           ],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 1088,
-          "end_line": 1091,
+          "line": 1100,
+          "end_line": 1103,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "tc.state_effect is None and (data.initial_mode is not None or data.initial_temperature_c is not None)",
           "guards": [
-            "L1079 TRUE: data.restore_observed_hvac_state"
+            "L1091 TRUE: data.restore_observed_hvac_state"
           ],
           "body_lines": [
-            1089
+            1101
           ],
           "else_lines": []
         },
         {
-          "line": 1088,
-          "end_line": 1088,
+          "line": 1100,
+          "end_line": 1100,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "tc.state_effect is None and (data.initial_mode is not None or data.initial_temperature_c is not None)",
           "guards": [
-            "L1079 TRUE: data.restore_observed_hvac_state"
+            "L1091 TRUE: data.restore_observed_hvac_state"
           ],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 1088,
-          "end_line": 1088,
+          "line": 1100,
+          "end_line": 1100,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "data.initial_mode is not None or data.initial_temperature_c is not None",
           "guards": [
-            "L1079 TRUE: data.restore_observed_hvac_state"
+            "L1091 TRUE: data.restore_observed_hvac_state"
           ],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 1092,
-          "end_line": 1101,
+          "line": 1104,
+          "end_line": 1113,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "tc.restoration is None and (not (_contains_any(dynamic_restore_text, ('실행 직전', '관찰', 'observed')) and _contains_any(dynamic_restore_text, ('모드', 'mode')) and _contains_any(dynamic_restore_text, ('온도', 'temperature')) and _contains_any(dynamic_restore_text, ('복원', 'restore')) and _contains_any(dynamic_restore_text, ('적용', 'apply'))))",
           "guards": [
-            "L1079 TRUE: data.restore_observed_hvac_state"
+            "L1091 TRUE: data.restore_observed_hvac_state"
           ],
           "body_lines": [
-            1099
+            1111
           ],
           "else_lines": []
         },
         {
-          "line": 1092,
-          "end_line": 1098,
+          "line": 1104,
+          "end_line": 1110,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "tc.restoration is None and (not (_contains_any(dynamic_restore_text, ('실행 직전', '관찰', 'observed')) and _contains_any(dynamic_restore_text, ('모드', 'mode')) and _contains_any(dynamic_restore_text, ('온도', 'temperature')) and _contains_any(dynamic_restore_text, ('복원', 'restore')) and _contains_any(dynamic_restore_text, ('적용', 'apply'))))",
           "guards": [
-            "L1079 TRUE: data.restore_observed_hvac_state"
+            "L1091 TRUE: data.restore_observed_hvac_state"
           ],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 1093,
-          "end_line": 1097,
+          "line": 1105,
+          "end_line": 1109,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "_contains_any(dynamic_restore_text, ('실행 직전', '관찰', 'observed')) and _contains_any(dynamic_restore_text, ('모드', 'mode')) and _contains_any(dynamic_restore_text, ('온도', 'temperature')) and _contains_any(dynamic_restore_text, ('복원', 'restore')) and _contains_any(dynamic_restore_text, ('적용', 'apply'))",
           "guards": [
-            "L1079 TRUE: data.restore_observed_hvac_state"
+            "L1091 TRUE: data.restore_observed_hvac_state"
           ],
-          "body_lines": [],
-          "else_lines": []
-        },
-        {
-          "line": 1102,
-          "end_line": 1111,
-          "scope": "evaluate_checkpoint2",
-          "kind": "If",
-          "condition_or_value": "grouped and tc.restore_required and hvac_values_changed and (data.initial_mode is None) and (data.initial_temperature_c is None)",
-          "guards": [
-            "L1079 FALSE: data.restore_observed_hvac_state"
-          ],
-          "body_lines": [
-            1109
-          ],
-          "else_lines": []
-        },
-        {
-          "line": 1103,
-          "end_line": 1107,
-          "scope": "evaluate_checkpoint2",
-          "kind": "BoolOp",
-          "condition_or_value": "grouped and tc.restore_required and hvac_values_changed and (data.initial_mode is None) and (data.initial_temperature_c is None)",
-          "guards": [
-            "L1079 FALSE: data.restore_observed_hvac_state"
-          ],
-          "body_lines": [],
-          "else_lines": []
-        },
-        {
-          "line": 1112,
-          "end_line": 1113,
-          "scope": "evaluate_checkpoint2",
-          "kind": "If",
-          "condition_or_value": "plural_values_used and (not grouped)",
-          "guards": [],
-          "body_lines": [
-            1113
-          ],
-          "else_lines": []
-        },
-        {
-          "line": 1112,
-          "end_line": 1112,
-          "scope": "evaluate_checkpoint2",
-          "kind": "BoolOp",
-          "condition_or_value": "plural_values_used and (not grouped)",
-          "guards": [],
           "body_lines": [],
           "else_lines": []
         },
         {
           "line": 1114,
-          "end_line": 1117,
+          "end_line": 1123,
+          "scope": "evaluate_checkpoint2",
+          "kind": "If",
+          "condition_or_value": "grouped and tc.restore_required and hvac_values_changed and (data.initial_mode is None) and (data.initial_temperature_c is None)",
+          "guards": [
+            "L1091 FALSE: data.restore_observed_hvac_state"
+          ],
+          "body_lines": [
+            1121
+          ],
+          "else_lines": []
+        },
+        {
+          "line": 1115,
+          "end_line": 1119,
+          "scope": "evaluate_checkpoint2",
+          "kind": "BoolOp",
+          "condition_or_value": "grouped and tc.restore_required and hvac_values_changed and (data.initial_mode is None) and (data.initial_temperature_c is None)",
+          "guards": [
+            "L1091 FALSE: data.restore_observed_hvac_state"
+          ],
+          "body_lines": [],
+          "else_lines": []
+        },
+        {
+          "line": 1124,
+          "end_line": 1125,
+          "scope": "evaluate_checkpoint2",
+          "kind": "If",
+          "condition_or_value": "plural_values_used and (not grouped)",
+          "guards": [],
+          "body_lines": [
+            1125
+          ],
+          "else_lines": []
+        },
+        {
+          "line": 1124,
+          "end_line": 1124,
+          "scope": "evaluate_checkpoint2",
+          "kind": "BoolOp",
+          "condition_or_value": "plural_values_used and (not grouped)",
+          "guards": [],
+          "body_lines": [],
+          "else_lines": []
+        },
+        {
+          "line": 1126,
+          "end_line": 1129,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "not grouped",
           "guards": [],
           "body_lines": [
-            1115,
-            1117
+            1127,
+            1129
           ],
           "else_lines": []
         },
         {
-          "line": 1115,
-          "end_line": 1116,
+          "line": 1127,
+          "end_line": 1128,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "tc.grouping_reason or tc.intermediate_reset_steps",
           "guards": [
-            "L1114 TRUE: not grouped"
+            "L1126 TRUE: not grouped"
           ],
           "body_lines": [
-            1116
+            1128
           ],
           "else_lines": []
         },
         {
-          "line": 1115,
-          "end_line": 1115,
+          "line": 1127,
+          "end_line": 1127,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "tc.grouping_reason or tc.intermediate_reset_steps",
           "guards": [
-            "L1114 TRUE: not grouped"
+            "L1126 TRUE: not grouped"
           ],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 1117,
-          "end_line": 1117,
+          "line": 1129,
+          "end_line": 1129,
           "scope": "evaluate_checkpoint2",
           "kind": "Continue",
           "condition_or_value": null,
           "guards": [
-            "L1114 TRUE: not grouped"
+            "L1126 TRUE: not grouped"
           ],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 1119,
-          "end_line": 1120,
+          "line": 1131,
+          "end_line": 1132,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "not tc.grouping_reason",
           "guards": [],
           "body_lines": [
-            1120
+            1132
           ],
           "else_lines": []
         },
         {
-          "line": 1122,
-          "end_line": 1122,
+          "line": 1134,
+          "end_line": 1134,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -7606,32 +7650,32 @@
           "guards": []
         },
         {
-          "line": 1124,
-          "end_line": 1125,
+          "line": 1136,
+          "end_line": 1137,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "invalid_reset_steps",
           "guards": [],
           "body_lines": [
-            1125
+            1137
           ],
           "else_lines": []
         },
         {
-          "line": 1126,
-          "end_line": 1130,
+          "line": 1138,
+          "end_line": 1142,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "tc.condition_execution == ConditionExecution.INDEPENDENT_VARIANTS and (not tc.intermediate_reset_steps)",
           "guards": [],
           "body_lines": [
-            1130
+            1142
           ],
           "else_lines": []
         },
         {
-          "line": 1127,
-          "end_line": 1128,
+          "line": 1139,
+          "end_line": 1140,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "tc.condition_execution == ConditionExecution.INDEPENDENT_VARIANTS and (not tc.intermediate_reset_steps)",
@@ -7640,8 +7684,8 @@
           "else_lines": []
         },
         {
-          "line": 1133,
-          "end_line": 1133,
+          "line": 1145,
+          "end_line": 1145,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -7652,22 +7696,22 @@
           "guards": []
         },
         {
-          "line": 1135,
-          "end_line": 1138,
+          "line": 1147,
+          "end_line": 1150,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "any((step is None or step not in tc.steps for step in verification_steps))",
           "guards": [],
           "body_lines": [
-            1136
+            1148
           ],
           "else_lines": [
-            1137
+            1149
           ]
         },
         {
-          "line": 1135,
-          "end_line": 1135,
+          "line": 1147,
+          "end_line": 1147,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "step is None or step not in tc.steps",
@@ -7676,8 +7720,8 @@
           "else_lines": []
         },
         {
-          "line": 1135,
-          "end_line": 1135,
+          "line": 1147,
+          "end_line": 1147,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -7688,46 +7732,46 @@
           "guards": []
         },
         {
-          "line": 1137,
-          "end_line": 1138,
+          "line": 1149,
+          "end_line": 1150,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "len(set(verification_steps)) < 2",
           "guards": [
-            "L1135 FALSE: any((step is None or step not in tc.steps for step in verification_steps))"
+            "L1147 FALSE: any((step is None or step not in tc.steps for step in verification_steps))"
           ],
           "body_lines": [
-            1138
+            1150
           ],
           "else_lines": []
         },
         {
-          "line": 1141,
-          "end_line": 1143,
+          "line": 1153,
+          "end_line": 1155,
           "scope": "evaluate_checkpoint2",
           "kind": "For",
           "condition_or_value": "mode in data.requested_modes",
           "guards": [],
           "body_lines": [
-            1142
+            1154
           ],
           "else_lines": []
         },
         {
-          "line": 1142,
-          "end_line": 1143,
+          "line": 1154,
+          "end_line": 1155,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "not _contains(procedure_text, mode)",
           "guards": [],
           "body_lines": [
-            1143
+            1155
           ],
           "else_lines": []
         },
         {
-          "line": 1145,
-          "end_line": 1145,
+          "line": 1157,
+          "end_line": 1157,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -7738,46 +7782,46 @@
           "guards": []
         },
         {
-          "line": 1147,
-          "end_line": 1151,
+          "line": 1159,
+          "end_line": 1163,
           "scope": "evaluate_checkpoint2",
           "kind": "For",
           "condition_or_value": "temperature in data.requested_temperatures_c",
           "guards": [],
           "body_lines": [
-            1148
+            1160
           ],
           "else_lines": []
         },
         {
-          "line": 1148,
-          "end_line": 1151,
+          "line": 1160,
+          "end_line": 1163,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "float(temperature) not in procedure_numbers",
           "guards": [],
           "body_lines": [
-            1149
+            1161
           ],
           "else_lines": []
         },
         {
-          "line": 1153,
-          "end_line": 1165,
+          "line": 1165,
+          "end_line": 1177,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "grouping_errors",
           "guards": [],
           "body_lines": [
-            1154
+            1166
           ],
           "else_lines": [
-            1161
+            1173
           ]
         },
         {
-          "line": 1168,
-          "end_line": 1168,
+          "line": 1180,
+          "end_line": 1180,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -7788,8 +7832,8 @@
           "guards": []
         },
         {
-          "line": 1172,
-          "end_line": 1172,
+          "line": 1184,
+          "end_line": 1184,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -7802,111 +7846,111 @@
           "guards": []
         },
         {
-          "line": 1176,
-          "end_line": 1179,
+          "line": 1188,
+          "end_line": 1191,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "duplicate_existing_ids",
           "guards": [],
           "body_lines": [
-            1177
+            1189
           ],
           "else_lines": []
         },
         {
-          "line": 1183,
-          "end_line": 1186,
+          "line": 1195,
+          "end_line": 1198,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "unknown_existing_ids",
           "guards": [],
           "body_lines": [
-            1184
+            1196
           ],
           "else_lines": []
         },
         {
-          "line": 1187,
-          "end_line": 1200,
+          "line": 1199,
+          "end_line": 1212,
           "scope": "evaluate_checkpoint2",
           "kind": "For",
           "condition_or_value": "selection in design.related_existing_tests",
           "guards": [],
           "body_lines": [
-            1188,
-            1189,
-            1191
+            1200,
+            1201,
+            1203
           ],
           "else_lines": []
         },
         {
-          "line": 1189,
-          "end_line": 1190,
+          "line": 1201,
+          "end_line": 1202,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "spec is None",
           "guards": [],
           "body_lines": [
-            1190
+            1202
           ],
           "else_lines": []
         },
         {
-          "line": 1190,
-          "end_line": 1190,
+          "line": 1202,
+          "end_line": 1202,
           "scope": "evaluate_checkpoint2",
           "kind": "Continue",
           "condition_or_value": null,
           "guards": [
-            "L1189 TRUE: spec is None"
+            "L1201 TRUE: spec is None"
           ],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 1191,
-          "end_line": 1200,
+          "line": 1203,
+          "end_line": 1212,
           "scope": "evaluate_checkpoint2",
           "kind": "For",
           "condition_or_value": "condition_id in selection.source_condition_ids",
           "guards": [],
           "body_lines": [
-            1192,
-            1193
+            1204,
+            1205
           ],
           "else_lines": []
         },
         {
-          "line": 1193,
-          "end_line": 1200,
+          "line": 1205,
+          "end_line": 1212,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "condition is None",
           "guards": [],
           "body_lines": [
-            1194
+            1206
           ],
           "else_lines": [
-            1197
+            1209
           ]
         },
         {
-          "line": 1197,
-          "end_line": 1200,
+          "line": 1209,
+          "end_line": 1212,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "not set(condition.requirement_ids).intersection(spec.requirement_ids)",
           "guards": [
-            "L1193 FALSE: condition is None"
+            "L1205 FALSE: condition is None"
           ],
           "body_lines": [
-            1198
+            1210
           ],
           "else_lines": []
         },
         {
-          "line": 1203,
-          "end_line": 1203,
+          "line": 1215,
+          "end_line": 1215,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -7919,46 +7963,46 @@
           "guards": []
         },
         {
-          "line": 1209,
-          "end_line": 1213,
+          "line": 1221,
+          "end_line": 1225,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "misrouted_change_conditions",
           "guards": [],
           "body_lines": [
-            1210
+            1222
           ],
           "else_lines": []
         },
         {
-          "line": 1214,
-          "end_line": 1215,
+          "line": 1226,
+          "end_line": 1227,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "not design.existing_tc_comparison_completed",
           "guards": [],
           "body_lines": [
-            1215
+            1227
           ],
           "else_lines": []
         },
         {
-          "line": 1216,
-          "end_line": 1228,
+          "line": 1228,
+          "end_line": 1240,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "existing_selection_errors",
           "guards": [],
           "body_lines": [
-            1217
+            1229
           ],
           "else_lines": [
-            1224
+            1236
           ]
         },
         {
-          "line": 1238,
-          "end_line": 1238,
+          "line": 1250,
+          "end_line": 1250,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -7969,8 +8013,8 @@
           "guards": []
         },
         {
-          "line": 1240,
-          "end_line": 1240,
+          "line": 1252,
+          "end_line": 1252,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -7983,8 +8027,8 @@
           "guards": []
         },
         {
-          "line": 1241,
-          "end_line": 1241,
+          "line": 1253,
+          "end_line": 1253,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "c.source_type == ConditionSource.CHANGE_REQUEST and _normalize(c.source_text) in explicit_exclusions",
@@ -7993,59 +8037,59 @@
           "else_lines": []
         },
         {
-          "line": 1243,
-          "end_line": 1250,
+          "line": 1255,
+          "end_line": 1262,
           "scope": "evaluate_checkpoint2",
           "kind": "For",
           "condition_or_value": "tc in design.test_cases",
           "guards": [],
           "body_lines": [
-            1244
+            1256
           ],
           "else_lines": []
         },
         {
-          "line": 1244,
-          "end_line": 1250,
+          "line": 1256,
+          "end_line": 1262,
           "scope": "evaluate_checkpoint2",
           "kind": "For",
           "condition_or_value": "result in tc.expected_results",
           "guards": [],
           "body_lines": [
-            1245,
-            1246
+            1257,
+            1258
           ],
           "else_lines": []
         },
         {
-          "line": 1246,
-          "end_line": 1250,
+          "line": 1258,
+          "end_line": 1262,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "excluded_sources",
           "guards": [],
           "body_lines": [
-            1247
+            1259
           ],
           "else_lines": []
         },
         {
-          "line": 1251,
-          "end_line": 1263,
+          "line": 1263,
+          "end_line": 1275,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "minimality_errors",
           "guards": [],
           "body_lines": [
-            1252
+            1264
           ],
           "else_lines": [
-            1259
+            1271
           ]
         },
         {
-          "line": 1270,
-          "end_line": 1270,
+          "line": 1282,
+          "end_line": 1282,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -8056,8 +8100,8 @@
           "guards": []
         },
         {
-          "line": 1272,
-          "end_line": 1272,
+          "line": 1284,
+          "end_line": 1284,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -8068,113 +8112,113 @@
           "guards": []
         },
         {
-          "line": 1274,
-          "end_line": 1275,
+          "line": 1286,
+          "end_line": 1287,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "len(proposal_ids) != len(set(proposal_ids))",
           "guards": [],
           "body_lines": [
-            1275
+            1287
           ],
           "else_lines": []
         },
         {
-          "line": 1276,
-          "end_line": 1277,
+          "line": 1288,
+          "end_line": 1289,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "len(proposal_requirement_ids) != len(set(proposal_requirement_ids))",
           "guards": [],
           "body_lines": [
-            1277
-          ],
-          "else_lines": []
-        },
-        {
-          "line": 1280,
-          "end_line": 1281,
-          "scope": "evaluate_checkpoint2",
-          "kind": "If",
-          "condition_or_value": "missing",
-          "guards": [],
-          "body_lines": [
-            1281
-          ],
-          "else_lines": []
-        },
-        {
-          "line": 1282,
-          "end_line": 1283,
-          "scope": "evaluate_checkpoint2",
-          "kind": "If",
-          "condition_or_value": "extra",
-          "guards": [],
-          "body_lines": [
-            1283
-          ],
-          "else_lines": []
-        },
-        {
-          "line": 1285,
-          "end_line": 1289,
-          "scope": "evaluate_checkpoint2",
-          "kind": "If",
-          "condition_or_value": "unnecessary",
-          "guards": [],
-          "body_lines": [
-            1286
-          ],
-          "else_lines": []
-        },
-        {
-          "line": 1290,
-          "end_line": 1323,
-          "scope": "evaluate_checkpoint2",
-          "kind": "For",
-          "condition_or_value": "proposal in design.srs_revision_proposals",
-          "guards": [],
-          "body_lines": [
-            1291,
-            1292,
-            1297,
-            1298,
-            1299,
-            1301,
-            1303,
-            1307,
-            1314
+            1289
           ],
           "else_lines": []
         },
         {
           "line": 1292,
-          "end_line": 1296,
+          "end_line": 1293,
+          "scope": "evaluate_checkpoint2",
+          "kind": "If",
+          "condition_or_value": "missing",
+          "guards": [],
+          "body_lines": [
+            1293
+          ],
+          "else_lines": []
+        },
+        {
+          "line": 1294,
+          "end_line": 1295,
+          "scope": "evaluate_checkpoint2",
+          "kind": "If",
+          "condition_or_value": "extra",
+          "guards": [],
+          "body_lines": [
+            1295
+          ],
+          "else_lines": []
+        },
+        {
+          "line": 1297,
+          "end_line": 1301,
+          "scope": "evaluate_checkpoint2",
+          "kind": "If",
+          "condition_or_value": "unnecessary",
+          "guards": [],
+          "body_lines": [
+            1298
+          ],
+          "else_lines": []
+        },
+        {
+          "line": 1302,
+          "end_line": 1335,
+          "scope": "evaluate_checkpoint2",
+          "kind": "For",
+          "condition_or_value": "proposal in design.srs_revision_proposals",
+          "guards": [],
+          "body_lines": [
+            1303,
+            1304,
+            1309,
+            1310,
+            1311,
+            1313,
+            1315,
+            1319,
+            1326
+          ],
+          "else_lines": []
+        },
+        {
+          "line": 1304,
+          "end_line": 1308,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "requirement is None",
           "guards": [],
           "body_lines": [
-            1293,
-            1296
+            1305,
+            1308
           ],
           "else_lines": []
         },
         {
-          "line": 1296,
-          "end_line": 1296,
+          "line": 1308,
+          "end_line": 1308,
           "scope": "evaluate_checkpoint2",
           "kind": "Continue",
           "condition_or_value": null,
           "guards": [
-            "L1292 TRUE: requirement is None"
+            "L1304 TRUE: requirement is None"
           ],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 1297,
-          "end_line": 1297,
+          "line": 1309,
+          "end_line": 1309,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -8187,123 +8231,123 @@
           "guards": []
         },
         {
-          "line": 1299,
-          "end_line": 1300,
+          "line": 1311,
+          "end_line": 1312,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "proposal.requirement_id == request.target_requirement_id",
           "guards": [],
           "body_lines": [
-            1300
+            1312
           ],
           "else_lines": []
         },
         {
-          "line": 1301,
-          "end_line": 1302,
+          "line": 1313,
+          "end_line": 1314,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "_explicit_behavior_values(proposal.proposed_acceptance_criteria) - _explicit_behavior_values(authority)",
           "guards": [],
           "body_lines": [
-            1302
+            1314
           ],
           "else_lines": []
         },
         {
-          "line": 1303,
-          "end_line": 1306,
+          "line": 1315,
+          "end_line": 1318,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "proposal.current_acceptance_criteria != requirement.acceptance_criteria",
           "guards": [],
           "body_lines": [
-            1304
-          ],
-          "else_lines": []
-        },
-        {
-          "line": 1307,
-          "end_line": 1313,
-          "scope": "evaluate_checkpoint2",
-          "kind": "If",
-          "condition_or_value": "proposal.proposed_acceptance_criteria.casefold() == proposal.current_acceptance_criteria.casefold()",
-          "guards": [],
-          "body_lines": [
-            1311
-          ],
-          "else_lines": []
-        },
-        {
-          "line": 1314,
-          "end_line": 1323,
-          "scope": "evaluate_checkpoint2",
-          "kind": "For",
-          "condition_or_value": "condition_id in proposal.source_condition_ids",
-          "guards": [],
-          "body_lines": [
-            1315,
             1316
           ],
           "else_lines": []
         },
         {
-          "line": 1316,
-          "end_line": 1323,
+          "line": 1319,
+          "end_line": 1325,
+          "scope": "evaluate_checkpoint2",
+          "kind": "If",
+          "condition_or_value": "proposal.proposed_acceptance_criteria.casefold() == proposal.current_acceptance_criteria.casefold()",
+          "guards": [],
+          "body_lines": [
+            1323
+          ],
+          "else_lines": []
+        },
+        {
+          "line": 1326,
+          "end_line": 1335,
+          "scope": "evaluate_checkpoint2",
+          "kind": "For",
+          "condition_or_value": "condition_id in proposal.source_condition_ids",
+          "guards": [],
+          "body_lines": [
+            1327,
+            1328
+          ],
+          "else_lines": []
+        },
+        {
+          "line": 1328,
+          "end_line": 1335,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "condition is None",
           "guards": [],
           "body_lines": [
-            1317
-          ],
-          "else_lines": [
-            1320
-          ]
-        },
-        {
-          "line": 1320,
-          "end_line": 1323,
-          "scope": "evaluate_checkpoint2",
-          "kind": "If",
-          "condition_or_value": "proposal.requirement_id not in condition.requirement_ids",
-          "guards": [
-            "L1316 FALSE: condition is None"
-          ],
-          "body_lines": [
-            1321
-          ],
-          "else_lines": []
-        },
-        {
-          "line": 1324,
-          "end_line": 1339,
-          "scope": "evaluate_checkpoint2",
-          "kind": "If",
-          "condition_or_value": "revision_errors",
-          "guards": [],
-          "body_lines": [
-            1325
+            1329
           ],
           "else_lines": [
             1332
           ]
         },
         {
-          "line": 1335,
-          "end_line": 1338,
+          "line": 1332,
+          "end_line": 1335,
+          "scope": "evaluate_checkpoint2",
+          "kind": "If",
+          "condition_or_value": "proposal.requirement_id not in condition.requirement_ids",
+          "guards": [
+            "L1328 FALSE: condition is None"
+          ],
+          "body_lines": [
+            1333
+          ],
+          "else_lines": []
+        },
+        {
+          "line": 1336,
+          "end_line": 1351,
+          "scope": "evaluate_checkpoint2",
+          "kind": "If",
+          "condition_or_value": "revision_errors",
+          "guards": [],
+          "body_lines": [
+            1337
+          ],
+          "else_lines": [
+            1344
+          ]
+        },
+        {
+          "line": 1347,
+          "end_line": 1350,
           "scope": "evaluate_checkpoint2",
           "kind": "IfExp",
           "condition_or_value": "already_reflected_ids",
           "guards": [
-            "L1324 FALSE: revision_errors"
+            "L1336 FALSE: revision_errors"
           ],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 1342,
-          "end_line": 1342,
+          "line": 1354,
+          "end_line": 1354,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -8314,8 +8358,8 @@
           "guards": []
         },
         {
-          "line": 1342,
-          "end_line": 1342,
+          "line": 1354,
+          "end_line": 1354,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -8326,8 +8370,8 @@
           "guards": []
         },
         {
-          "line": 1343,
-          "end_line": 1343,
+          "line": 1355,
+          "end_line": 1355,
           "scope": "evaluate_checkpoint2",
           "kind": "IfExp",
           "condition_or_value": "detail_errors",
@@ -8336,71 +8380,71 @@
           "else_lines": []
         },
         {
-          "line": 1344,
-          "end_line": 1345,
-          "scope": "evaluate_checkpoint2",
-          "kind": "IfExp",
-          "condition_or_value": "detail_errors",
-          "guards": [],
-          "body_lines": [],
-          "else_lines": []
-        },
-        {
-          "line": 1348,
+          "line": 1356,
           "end_line": 1357,
+          "scope": "evaluate_checkpoint2",
+          "kind": "IfExp",
+          "condition_or_value": "detail_errors",
+          "guards": [],
+          "body_lines": [],
+          "else_lines": []
+        },
+        {
+          "line": 1360,
+          "end_line": 1369,
           "scope": "evaluate_checkpoint2",
           "kind": "For",
           "condition_or_value": "tc in design.test_cases",
           "guards": [],
           "body_lines": [
-            1349,
-            1353
+            1361,
+            1365
           ],
           "else_lines": []
         },
         {
-          "line": 1349,
-          "end_line": 1352,
+          "line": 1361,
+          "end_line": 1364,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "tc.state_effect is None",
           "guards": [],
           "body_lines": [
-            1350
+            1362
           ],
           "else_lines": [
-            1351
+            1363
           ]
         },
         {
-          "line": 1351,
-          "end_line": 1352,
+          "line": 1363,
+          "end_line": 1364,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "tc.restore_required != (tc.state_effect != TcStateEffect.READ_ONLY)",
           "guards": [
-            "L1349 FALSE: tc.state_effect is None"
+            "L1361 FALSE: tc.state_effect is None"
           ],
           "body_lines": [
-            1352
+            1364
           ],
           "else_lines": []
         },
         {
-          "line": 1353,
-          "end_line": 1357,
+          "line": 1365,
+          "end_line": 1369,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "tc.state_effect == TcStateEffect.BLOCKED_CHANGE and (not any((result.observation_layer in {ObservationLayer.UI, ObservationLayer.INTERNAL_STATE} for result in tc.expected_results)))",
           "guards": [],
           "body_lines": [
-            1357
+            1369
           ],
           "else_lines": []
         },
         {
-          "line": 1353,
-          "end_line": 1356,
+          "line": 1365,
+          "end_line": 1368,
           "scope": "evaluate_checkpoint2",
           "kind": "BoolOp",
           "condition_or_value": "tc.state_effect == TcStateEffect.BLOCKED_CHANGE and (not any((result.observation_layer in {ObservationLayer.UI, ObservationLayer.INTERNAL_STATE} for result in tc.expected_results)))",
@@ -8409,8 +8453,8 @@
           "else_lines": []
         },
         {
-          "line": 1355,
-          "end_line": 1355,
+          "line": 1367,
+          "end_line": 1367,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -8421,8 +8465,8 @@
           "guards": []
         },
         {
-          "line": 1358,
-          "end_line": 1358,
+          "line": 1370,
+          "end_line": 1370,
           "scope": "evaluate_checkpoint2",
           "kind": "IfExp",
           "condition_or_value": "policy_errors",
@@ -8431,8 +8475,8 @@
           "else_lines": []
         },
         {
-          "line": 1359,
-          "end_line": 1359,
+          "line": 1371,
+          "end_line": 1371,
           "scope": "evaluate_checkpoint2",
           "kind": "IfExp",
           "condition_or_value": "policy_errors",
@@ -8441,8 +8485,8 @@
           "else_lines": []
         },
         {
-          "line": 1361,
-          "end_line": 1361,
+          "line": 1373,
+          "end_line": 1373,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -8453,8 +8497,8 @@
           "guards": []
         },
         {
-          "line": 1362,
-          "end_line": 1362,
+          "line": 1374,
+          "end_line": 1374,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -8465,8 +8509,8 @@
           "guards": []
         },
         {
-          "line": 1363,
-          "end_line": 1363,
+          "line": 1375,
+          "end_line": 1375,
           "scope": "evaluate_checkpoint2",
           "kind": "IfExp",
           "condition_or_value": "errors",
@@ -8475,8 +8519,8 @@
           "else_lines": []
         },
         {
-          "line": 1364,
-          "end_line": 1364,
+          "line": 1376,
+          "end_line": 1376,
           "scope": "evaluate_checkpoint2",
           "kind": "IfExp",
           "condition_or_value": "errors",
@@ -8485,25 +8529,63 @@
           "else_lines": []
         },
         {
-          "line": 1366,
-          "end_line": 1385,
+          "line": 1382,
+          "end_line": 1382,
+          "scope": "evaluate_checkpoint2",
+          "kind": "comprehension",
+          "condition_or_value": {
+            "target": "tc",
+            "iter": "design.test_cases",
+            "filters": []
+          },
+          "guards": []
+        },
+        {
+          "line": 1383,
+          "end_line": 1383,
+          "scope": "evaluate_checkpoint2",
+          "kind": "comprehension",
+          "condition_or_value": {
+            "target": "(label, text)",
+            "iter": "_human_tc_texts(tc)",
+            "filters": [
+              "_FOREIGN_SCRIPT.search(text)"
+            ]
+          },
+          "guards": []
+        },
+        {
+          "line": 1384,
+          "end_line": 1386,
+          "scope": "evaluate_checkpoint2",
+          "kind": "If",
+          "condition_or_value": "errors",
+          "guards": [],
+          "body_lines": [
+            1385
+          ],
+          "else_lines": []
+        },
+        {
+          "line": 1388,
+          "end_line": 1407,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "design.existing_tc_revisions",
           "guards": [],
           "body_lines": [
-            1369,
-            1370,
-            1371,
-            1372,
-            1373,
-            1383
+            1391,
+            1392,
+            1393,
+            1394,
+            1395,
+            1405
           ],
           "else_lines": []
         },
         {
-          "line": 1371,
-          "end_line": 1371,
+          "line": 1393,
+          "end_line": 1393,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -8512,110 +8594,110 @@
             "filters": []
           },
           "guards": [
-            "L1366 TRUE: design.existing_tc_revisions"
+            "L1388 TRUE: design.existing_tc_revisions"
           ]
         },
         {
-          "line": 1373,
-          "end_line": 1382,
+          "line": 1395,
+          "end_line": 1404,
           "scope": "evaluate_checkpoint2",
           "kind": "For",
           "condition_or_value": "revision in design.existing_tc_revisions",
           "guards": [
-            "L1366 TRUE: design.existing_tc_revisions"
+            "L1388 TRUE: design.existing_tc_revisions"
           ],
           "body_lines": [
-            1374,
-            1376,
-            1378,
-            1380,
-            1382
+            1396,
+            1398,
+            1400,
+            1402,
+            1404
           ],
           "else_lines": []
         },
         {
-          "line": 1374,
-          "end_line": 1375,
+          "line": 1396,
+          "end_line": 1397,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "revision.tc_id not in existing_by_id",
           "guards": [
-            "L1366 TRUE: design.existing_tc_revisions"
+            "L1388 TRUE: design.existing_tc_revisions"
           ],
           "body_lines": [
-            1375
+            1397
           ],
           "else_lines": []
         },
         {
-          "line": 1376,
-          "end_line": 1377,
+          "line": 1398,
+          "end_line": 1399,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "revision.revised_by not in candidates",
           "guards": [
-            "L1366 TRUE: design.existing_tc_revisions"
+            "L1388 TRUE: design.existing_tc_revisions"
           ],
           "body_lines": [
-            1377
+            1399
           ],
           "else_lines": []
         },
         {
-          "line": 1378,
-          "end_line": 1379,
+          "line": 1400,
+          "end_line": 1401,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "revision.tc_id in reused",
           "guards": [
-            "L1366 TRUE: design.existing_tc_revisions"
+            "L1388 TRUE: design.existing_tc_revisions"
           ],
           "body_lines": [
-            1379
+            1401
           ],
           "else_lines": []
         },
         {
-          "line": 1380,
-          "end_line": 1381,
+          "line": 1402,
+          "end_line": 1403,
           "scope": "evaluate_checkpoint2",
           "kind": "If",
           "condition_or_value": "revision.tc_id in seen",
           "guards": [
-            "L1366 TRUE: design.existing_tc_revisions"
+            "L1388 TRUE: design.existing_tc_revisions"
           ],
           "body_lines": [
-            1381
+            1403
           ],
           "else_lines": []
         },
         {
-          "line": 1383,
-          "end_line": 1383,
+          "line": 1405,
+          "end_line": 1405,
           "scope": "evaluate_checkpoint2",
           "kind": "IfExp",
           "condition_or_value": "errors",
           "guards": [
-            "L1366 TRUE: design.existing_tc_revisions"
+            "L1388 TRUE: design.existing_tc_revisions"
           ],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 1384,
-          "end_line": 1385,
+          "line": 1406,
+          "end_line": 1407,
           "scope": "evaluate_checkpoint2",
           "kind": "IfExp",
           "condition_or_value": "errors",
           "guards": [
-            "L1366 TRUE: design.existing_tc_revisions"
+            "L1388 TRUE: design.existing_tc_revisions"
           ],
           "body_lines": [],
           "else_lines": []
         },
         {
-          "line": 1387,
-          "end_line": 1387,
+          "line": 1409,
+          "end_line": 1409,
           "scope": "evaluate_checkpoint2",
           "kind": "comprehension",
           "condition_or_value": {
@@ -8626,8 +8708,8 @@
           "guards": []
         },
         {
-          "line": 1388,
-          "end_line": 1388,
+          "line": 1410,
+          "end_line": 1410,
           "scope": "evaluate_checkpoint2",
           "kind": "Return",
           "condition_or_value": "Checkpoint2Result(status=status, checks=checks)",
@@ -8636,8 +8718,8 @@
           "else_lines": []
         },
         {
-          "line": 1390,
-          "end_line": 1390,
+          "line": 1412,
+          "end_line": 1412,
           "scope": "<module>",
           "kind": "comprehension",
           "condition_or_value": {
@@ -8652,402 +8734,412 @@
       ],
       "checkpoint_occurrences": [
         {
-          "line": 650,
-          "end_line": 651,
+          "line": 662,
+          "end_line": 663,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-024",
           "guards": [
-            "L648 TRUE: any((tc.execution_spec is not None for tc in design.test_cases))"
+            "L660 TRUE: any((tc.execution_spec is not None for tc in design.test_cases))"
           ],
           "call": "add('CP2-024', CheckStatus.FAIL if errors else CheckStatus.PASS, ' / '.join(errors) if errors else 'TC 조작·기대값·확인 시점의 구조화 참조를 확인했습니다.')"
         },
         {
-          "line": 654,
-          "end_line": 654,
+          "line": 666,
+          "end_line": 666,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-001",
           "guards": [
-            "L653 TRUE: design.request_id == analysis.request_id == request.request_id"
+            "L665 TRUE: design.request_id == analysis.request_id == request.request_id"
           ],
           "call": "add('CP2-001', CheckStatus.PASS, '변경 요청·Agent 1·Agent 2의 요청 ID가 일치합니다.')"
         },
         {
-          "line": 656,
-          "end_line": 656,
+          "line": 668,
+          "end_line": 668,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-001",
           "guards": [
-            "L653 FALSE: design.request_id == analysis.request_id == request.request_id"
+            "L665 FALSE: design.request_id == analysis.request_id == request.request_id"
           ],
           "call": "add('CP2-001', CheckStatus.FAIL, 'Agent 2의 변경 요청 ID가 앞 단계 입력과 다릅니다.')"
         },
         {
-          "line": 663,
-          "end_line": 663,
+          "line": 675,
+          "end_line": 675,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-002",
           "guards": [
-            "L662 TRUE: duplicate_tc_ids or duplicate_result_ids"
+            "L674 TRUE: duplicate_tc_ids or duplicate_result_ids"
           ],
           "call": "add('CP2-002', CheckStatus.FAIL, 'TC·기대 결과 ID 또는 제목이 중복됩니다.')"
         },
         {
-          "line": 665,
-          "end_line": 665,
+          "line": 677,
+          "end_line": 677,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-002",
           "guards": [
-            "L662 FALSE: duplicate_tc_ids or duplicate_result_ids"
+            "L674 FALSE: duplicate_tc_ids or duplicate_result_ids"
           ],
           "call": "add('CP2-002', CheckStatus.PASS, 'TC·기대 결과 ID가 고유합니다. 제목은 식별자가 아닙니다.')"
         },
         {
-          "line": 712,
-          "end_line": 712,
+          "line": 724,
+          "end_line": 724,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-003",
           "guards": [
-            "L711 TRUE: unknown_requirements or unknown_conditions"
+            "L723 TRUE: unknown_requirements or unknown_conditions"
           ],
           "call": "add('CP2-003', CheckStatus.FAIL, '입력 범위 밖 Requirement 또는 Condition을 참조했습니다.')"
         },
         {
-          "line": 714,
-          "end_line": 714,
+          "line": 726,
+          "end_line": 726,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-003",
           "guards": [
-            "L711 FALSE: unknown_requirements or unknown_conditions"
+            "L723 FALSE: unknown_requirements or unknown_conditions"
           ],
           "call": "add('CP2-003', CheckStatus.PASS, '모든 추적 ID가 승인된 입력 범위에 존재합니다.')"
         },
         {
-          "line": 718,
-          "end_line": 718,
+          "line": 730,
+          "end_line": 730,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-004",
           "guards": [
-            "L717 TRUE: missing_conditions"
+            "L729 TRUE: missing_conditions"
           ],
           "call": "add('CP2-004', CheckStatus.FAIL, '변경 후보 또는 관련 기존 TC에 반영되지 않은 확정 조건: ' + ', '.join(missing_conditions))"
         },
         {
-          "line": 720,
-          "end_line": 720,
+          "line": 732,
+          "end_line": 732,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-004",
           "guards": [
-            "L717 FALSE: missing_conditions"
+            "L729 FALSE: missing_conditions"
           ],
           "call": "add('CP2-004', CheckStatus.PASS, 'Agent 1의 모든 확정 조건을 변경 후보 또는 관련 기존 TC가 반영합니다.')"
         },
         {
-          "line": 740,
-          "end_line": 745,
+          "line": 752,
+          "end_line": 757,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-005",
           "guards": [
-            "L739 TRUE: trace_errors"
+            "L751 TRUE: trace_errors"
           ],
           "call": "add('CP2-005', CheckStatus.FAIL, 'TC 내부 Requirement·Condition·기대 결과 추적이 끊겼습니다: ' + ', '.join(sorted(set(trace_errors))))"
         },
         {
-          "line": 747,
-          "end_line": 747,
+          "line": 759,
+          "end_line": 759,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-005",
           "guards": [
-            "L739 FALSE: trace_errors"
+            "L751 FALSE: trace_errors"
           ],
           "call": "add('CP2-005', CheckStatus.PASS, 'TC 내부 추적성이 유지됩니다.')"
         },
         {
-          "line": 799,
-          "end_line": 803,
+          "line": 811,
+          "end_line": 815,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-006",
           "guards": [
-            "L798 TRUE: policy_errors"
+            "L810 TRUE: policy_errors"
           ],
           "call": "add('CP2-006', CheckStatus.FAIL, '조건부 이중 검증 또는 원자적 기대 결과 계약이 맞지 않습니다: ' + ', '.join(policy_errors))"
         },
         {
-          "line": 805,
-          "end_line": 809,
+          "line": 817,
+          "end_line": 821,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-006",
           "guards": [
-            "L798 FALSE: policy_errors"
+            "L810 FALSE: policy_errors"
           ],
           "call": "add('CP2-006', CheckStatus.PASS, '상태 관련 TC의 이중 검증·예외 정책과 원자적 UI 기대 결과가 일치합니다.')"
         },
         {
-          "line": 810,
-          "end_line": 810,
+          "line": 822,
+          "end_line": 822,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-007",
           "guards": [],
           "call": "add('CP2-007', CheckStatus.PASS, '알림 필요 여부와 누락은 필수 조건 의미 검토에서 확인합니다.')"
         },
         {
-          "line": 893,
-          "end_line": 893,
+          "line": 905,
+          "end_line": 905,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-008",
           "guards": [
-            "L882 TRUE: uncovered_requirements or (not target_change_tests and (not existing_covers_target_change)) or path_errors"
+            "L894 TRUE: uncovered_requirements or (not target_change_tests and (not existing_covers_target_change)) or path_errors"
           ],
           "call": "add('CP2-008', CheckStatus.FAIL, '변경 범위 또는 제어 경로가 불완전합니다: ' + '; '.join(details))"
         },
         {
-          "line": 895,
-          "end_line": 895,
+          "line": 907,
+          "end_line": 907,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-008",
           "guards": [
-            "L882 FALSE: uncovered_requirements or (not target_change_tests and (not existing_covers_target_change)) or path_errors"
+            "L894 FALSE: uncovered_requirements or (not target_change_tests and (not existing_covers_target_change)) or path_errors"
           ],
           "call": "add('CP2-008', CheckStatus.PASS, '변경 후보 또는 변경 후 동작을 이미 검증하는 기존 TC와 영향 Requirement가 중앙 관제 패널 경로로 연결됩니다.')"
         },
         {
-          "line": 910,
-          "end_line": 910,
+          "line": 922,
+          "end_line": 922,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-009",
           "guards": [
-            "L909 TRUE: any((_FORBIDDEN_CODE.search(value) for value in text_fields))"
+            "L921 TRUE: any((_FORBIDDEN_CODE.search(value) for value in text_fields))"
           ],
           "call": "add('CP2-009', CheckStatus.FAIL, '제품 TC에 자동화 코드 또는 금지 표현이 섞였습니다.')"
         },
         {
-          "line": 912,
-          "end_line": 912,
+          "line": 924,
+          "end_line": 924,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-009",
           "guards": [
-            "L909 FALSE: any((_FORBIDDEN_CODE.search(value) for value in text_fields))"
+            "L921 FALSE: any((_FORBIDDEN_CODE.search(value) for value in text_fields))"
           ],
           "call": "add('CP2-009', CheckStatus.PASS, '제품 TC와 자동화 구현의 역할이 분리됐습니다.')"
         },
         {
-          "line": 928,
-          "end_line": 933,
+          "line": 940,
+          "end_line": 945,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-010",
           "guards": [
-            "L927 TRUE: test_data_errors"
+            "L939 TRUE: test_data_errors"
           ],
           "call": "add('CP2-010', CheckStatus.FAIL, '경계 TC의 구조화된 요청 모드 또는 온도 시험 데이터가 없습니다: ' + ', '.join(test_data_errors))"
         },
         {
-          "line": 935,
-          "end_line": 935,
+          "line": 947,
+          "end_line": 947,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-010",
           "guards": [
-            "L927 FALSE: test_data_errors"
+            "L939 FALSE: test_data_errors"
           ],
           "call": "add('CP2-010', CheckStatus.PASS, '실행에 필요한 대상 역할과 시험 데이터가 구조화됐습니다.')"
         },
         {
-          "line": 938,
-          "end_line": 943,
+          "line": 950,
+          "end_line": 955,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-011",
           "guards": [
-            "L937 TRUE: design.human_review_notes"
+            "L949 TRUE: design.human_review_notes"
           ],
           "call": "add('CP2-011', CheckStatus.REVIEW, '기대 결과를 확정할 수 없어 실행을 멈춘 확인 사항이 있습니다: ' + ' / '.join(design.human_review_notes))"
         },
         {
-          "line": 947,
-          "end_line": 952,
+          "line": 959,
+          "end_line": 964,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-011",
           "guards": [
-            "L937 FALSE: design.human_review_notes",
-            "L946 TRUE: note_count"
+            "L949 FALSE: design.human_review_notes",
+            "L958 TRUE: note_count"
           ],
           "call": "add('CP2-011', CheckStatus.PASS, f'후속 자동 실행을 막지 않는 참고·최종 검토 사항 {note_count}건을 기록했습니다.')"
         },
         {
-          "line": 954,
-          "end_line": 954,
+          "line": 966,
+          "end_line": 966,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-011",
           "guards": [
-            "L937 FALSE: design.human_review_notes",
-            "L946 FALSE: note_count"
+            "L949 FALSE: design.human_review_notes",
+            "L958 FALSE: note_count"
           ],
           "call": "add('CP2-011', CheckStatus.PASS, '추가 의미 판단이 필요한 항목이 없습니다.')"
         },
         {
-          "line": 984,
-          "end_line": 988,
+          "line": 996,
+          "end_line": 1000,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-012",
           "guards": [],
           "call": "add('CP2-012', CheckStatus.FAIL if invalid_feature_links else CheckStatus.PASS, 'TC 추적 범위를 벗어난 기능 기준: ' + ', '.join(invalid_feature_links) if invalid_feature_links else 'QA 분류는 설명용입니다. 필수 요구·조건·검사 연결은 별도로 확인합니다.' + (' 분류 참고 사항: ' + ', '.join(tier_errors) if tier_errors else ''))"
         },
         {
-          "line": 992,
-          "end_line": 997,
+          "line": 1004,
+          "end_line": 1009,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-013",
           "guards": [
-            "L991 TRUE: independence_errors"
+            "L1003 TRUE: independence_errors"
           ],
           "call": "add('CP2-013', CheckStatus.FAIL, '단독 실행 불가 선언 또는 다른 TC 결과에 의존하는 절차가 있습니다: ' + ', '.join(independence_errors))"
         },
         {
-          "line": 999,
-          "end_line": 1000,
+          "line": 1011,
+          "end_line": 1012,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-013",
           "guards": [
-            "L991 FALSE: independence_errors"
+            "L1003 FALSE: independence_errors"
           ],
           "call": "add('CP2-013', CheckStatus.PASS, '독립 실행 설명 문장은 필수가 아닙니다. 실제 준비·단독 실행·복원 성공은 실행 증거로 확인합니다.')"
         },
         {
-          "line": 1032,
-          "end_line": 1037,
+          "line": 1044,
+          "end_line": 1049,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-014",
           "guards": [
-            "L1026 TRUE: not excluded_scope_matches or not excluded_gaps_match or excluded_procedure_notes"
+            "L1038 TRUE: not excluded_scope_matches or not excluded_gaps_match or excluded_procedure_notes"
           ],
           "call": "add('CP2-014', CheckStatus.FAIL, 'Agent 1 제외 항목과 변경 요청 시험 절차의 인계가 맞지 않습니다: ' + '; '.join(details))"
         },
         {
-          "line": 1039,
-          "end_line": 1045,
+          "line": 1051,
+          "end_line": 1057,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-014",
           "guards": [
-            "L1026 FALSE: not excluded_scope_matches or not excluded_gaps_match or excluded_procedure_notes"
+            "L1038 FALSE: not excluded_scope_matches or not excluded_gaps_match or excluded_procedure_notes"
           ],
           "call": "add('CP2-014', CheckStatus.PASS, f'실행 제외 범위 {len(design_scope)}건, 정보 부족 {len(design.excluded_information_gaps)}건과 시험 절차 {len(procedure_notes)}건을 올바르게 분리했습니다. 절차의 실제 반영·순서는 원문별 모델 검토를 통과해야 합니다.' + (' 기존 TC의 시험 절차 메모는 수행 완료로 간주하지 않고 최종 사람 검토로 전달합니다.' if procedure_review else ''))"
         },
         {
-          "line": 1154,
-          "end_line": 1159,
+          "line": 1166,
+          "end_line": 1171,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-015",
           "guards": [
-            "L1153 TRUE: grouping_errors"
+            "L1165 TRUE: grouping_errors"
           ],
           "call": "add('CP2-015', CheckStatus.FAIL, '동일 업무 규칙 묶음 TC의 조건별 실행·판정 계약이 맞지 않습니다: ' + ', '.join(grouping_errors))"
         },
         {
-          "line": 1161,
-          "end_line": 1165,
+          "line": 1173,
+          "end_line": 1177,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-015",
           "guards": [
-            "L1153 FALSE: grouping_errors"
+            "L1165 FALSE: grouping_errors"
           ],
           "call": "add('CP2-015', CheckStatus.PASS, '같은 업무 규칙의 조건 묶음과 조건별 판정·초기화 계약이 일치합니다.')"
         },
         {
-          "line": 1217,
-          "end_line": 1222,
+          "line": 1229,
+          "end_line": 1234,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-016",
           "guards": [
-            "L1216 TRUE: existing_selection_errors"
+            "L1228 TRUE: existing_selection_errors"
           ],
           "call": "add('CP2-016', CheckStatus.FAIL, '변경분 후보와 관련 기존 TC 분리가 맞지 않습니다: ' + '; '.join(existing_selection_errors))"
         },
         {
-          "line": 1224,
-          "end_line": 1228,
+          "line": 1236,
+          "end_line": 1240,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-016",
           "guards": [
-            "L1216 FALSE: existing_selection_errors"
+            "L1228 FALSE: existing_selection_errors"
           ],
           "call": "add('CP2-016', CheckStatus.PASS, '요청된 시험과 관련 기존 TC의 연결·중복을 확인했습니다. 대상 VERIFY의 미충족 시험도 후보로 작성할 수 있습니다.')"
         },
         {
-          "line": 1232,
-          "end_line": 1233,
+          "line": 1244,
+          "end_line": 1245,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-019",
           "guards": [],
           "call": "add('CP2-019', CheckStatus.PASS, '기존 TC 연결을 확인했습니다. 실제 요구 값·제외·검사 누락은 필수 조건별 의미 검토에서 확인합니다.')"
         },
         {
-          "line": 1252,
-          "end_line": 1257,
+          "line": 1264,
+          "end_line": 1269,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-017",
           "guards": [
-            "L1251 TRUE: minimality_errors"
+            "L1263 TRUE: minimality_errors"
           ],
           "call": "add('CP2-017', CheckStatus.FAIL, '변경 요구 범위를 넘어선 기대 결과가 있습니다: ' + '; '.join(minimality_errors))"
         },
         {
-          "line": 1259,
-          "end_line": 1263,
+          "line": 1271,
+          "end_line": 1275,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-017",
           "guards": [
-            "L1251 FALSE: minimality_errors"
+            "L1263 FALSE: minimality_errors"
           ],
           "call": "add('CP2-017', CheckStatus.PASS, '기대결과의 조건 연결·제외 역할을 확인했습니다. 기대값 의미는 필수 모델 검토에서 확인합니다.')"
         },
         {
-          "line": 1325,
-          "end_line": 1330,
+          "line": 1337,
+          "end_line": 1342,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-018",
           "guards": [
-            "L1324 TRUE: revision_errors"
+            "L1336 TRUE: revision_errors"
           ],
           "call": "add('CP2-018', CheckStatus.FAIL, '사람 승인용 SRS 개정 제안이 입력 근거와 맞지 않습니다: ' + '; '.join(revision_errors))"
         },
         {
-          "line": 1332,
-          "end_line": 1339,
+          "line": 1344,
+          "end_line": 1351,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-018",
           "guards": [
-            "L1324 FALSE: revision_errors"
+            "L1336 FALSE: revision_errors"
           ],
           "call": "add('CP2-018', CheckStatus.PASS, '현재 SRS에 이미 반영되어 개정 불필요=' + ','.join(sorted(already_reflected_ids)) + '; 나머지 개정안의 전·후 문구와 근거를 확인했습니다. 시험 완료·사람 승인을 뜻하지 않습니다.' if already_reflected_ids else 'SRS 개정 필요 범위와 제출된 제안을 확인했습니다. 기존 기준 시험만이면 제안이 없어도 됩니다.')"
         },
         {
-          "line": 1343,
-          "end_line": 1345,
+          "line": 1355,
+          "end_line": 1357,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-020",
           "guards": [],
           "call": "add('CP2-020', CheckStatus.FAIL if detail_errors else CheckStatus.PASS, 'TC 상세화 필요: ' + '; '.join(detail_errors) if detail_errors else '기대결과 확인 대상·판정 단계 연결을 확인했습니다. 상세 문체는 작성 지침으로 유지합니다.')"
         },
         {
-          "line": 1358,
-          "end_line": 1359,
+          "line": 1370,
+          "end_line": 1371,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-022",
           "guards": [],
           "call": "add('CP2-022', CheckStatus.FAIL if policy_errors else CheckStatus.PASS, '; '.join(policy_errors) if policy_errors else '조회·변경·차단 유형별 복원 정책을 확인했습니다.')"
         },
         {
-          "line": 1363,
-          "end_line": 1364,
+          "line": 1375,
+          "end_line": 1376,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-023",
           "guards": [],
           "call": "add('CP2-023', CheckStatus.FAIL if errors else CheckStatus.PASS, '; '.join(errors) if errors else '복원 조작·대상 ER·관찰 기준·확인 시점의 구조화 연결을 확인했습니다.')"
         },
         {
-          "line": 1383,
-          "end_line": 1385,
+          "line": 1385,
+          "end_line": 1386,
+          "scope": "evaluate_checkpoint2",
+          "rule_id": "CP2-LANG",
+          "guards": [
+            "L1384 TRUE: errors"
+          ],
+          "call": "add('CP2-LANG', CheckStatus.FAIL, '한국어로 다시 작성해야 하는 TC 문장(한자·일본 문자 포함): ' + '; '.join(errors))"
+        },
+        {
+          "line": 1405,
+          "end_line": 1407,
           "scope": "evaluate_checkpoint2",
           "rule_id": "CP2-TC-REVISION",
           "guards": [
-            "L1366 TRUE: design.existing_tc_revisions"
+            "L1388 TRUE: design.existing_tc_revisions"
           ],
           "call": "add('CP2-TC-REVISION', CheckStatus.FAIL if errors else CheckStatus.PASS, '; '.join(errors) if errors else '기존 TC 고쳐 쓰기 기록이 제공된 TC와 신규 후보에 연결됩니다. 교체는 사람 승인 전까지 확정되지 않습니다.')"
         }
@@ -9229,127 +9321,134 @@
           "declaration": "errors = []"
         },
         {
-          "line": 643,
-          "end_line": 643,
+          "line": 629,
+          "end_line": 629,
+          "scope": "<module>",
+          "kind": "Assign",
+          "declaration": "_FOREIGN_SCRIPT = re.compile('[\\u3040-ヿ㐀-䶿一-\\u9fff]')"
+        },
+        {
+          "line": 655,
+          "end_line": 655,
           "scope": "evaluate_checkpoint2",
           "kind": "AnnAssign",
           "declaration": "checks: list[CheckResult] = []"
         },
         {
-          "line": 722,
-          "end_line": 722,
+          "line": 734,
+          "end_line": 734,
           "scope": "evaluate_checkpoint2",
           "kind": "AnnAssign",
           "declaration": "trace_errors: list[str] = []"
         },
         {
-          "line": 751,
-          "end_line": 751,
+          "line": 763,
+          "end_line": 763,
           "scope": "evaluate_checkpoint2",
           "kind": "AnnAssign",
           "declaration": "policy_errors: list[str] = []"
         },
         {
-          "line": 812,
-          "end_line": 812,
+          "line": 824,
+          "end_line": 824,
           "scope": "evaluate_checkpoint2",
           "kind": "AnnAssign",
           "declaration": "path_errors: list[str] = []"
         },
         {
-          "line": 850,
-          "end_line": 850,
+          "line": 862,
+          "end_line": 862,
           "scope": "evaluate_checkpoint2",
           "kind": "AnnAssign",
           "declaration": "required_change_paths: list[tuple[str, ControlPath]] = []"
         },
         {
-          "line": 887,
-          "end_line": 887,
+          "line": 899,
+          "end_line": 899,
           "scope": "evaluate_checkpoint2",
           "kind": "Assign",
           "declaration": "details = []"
         },
         {
-          "line": 956,
-          "end_line": 956,
+          "line": 968,
+          "end_line": 968,
           "scope": "evaluate_checkpoint2",
           "kind": "AnnAssign",
           "declaration": "tier_errors: list[str] = []"
         },
         {
-          "line": 957,
-          "end_line": 957,
+          "line": 969,
+          "end_line": 969,
           "scope": "evaluate_checkpoint2",
           "kind": "AnnAssign",
           "declaration": "invalid_feature_links: list[str] = []"
         },
         {
-          "line": 958,
-          "end_line": 962,
+          "line": 970,
+          "end_line": 974,
           "scope": "evaluate_checkpoint2",
           "kind": "Assign",
           "declaration": "expected_common_by_type = {TcType.NORMAL: CommonQaCriterion.NORMAL_FLOW, TcType.BOUNDARY: CommonQaCriterion.BOUNDARY_VALUE, TcType.EXCEPTION: CommonQaCriterion.EXCEPTION_HANDLING}"
         },
         {
-          "line": 1027,
-          "end_line": 1027,
+          "line": 1039,
+          "end_line": 1039,
           "scope": "evaluate_checkpoint2",
           "kind": "AnnAssign",
           "declaration": "details: list[str] = []"
         },
         {
-          "line": 1047,
-          "end_line": 1047,
+          "line": 1059,
+          "end_line": 1059,
           "scope": "evaluate_checkpoint2",
           "kind": "AnnAssign",
           "declaration": "grouping_errors: list[str] = []"
         },
         {
-          "line": 1167,
-          "end_line": 1167,
+          "line": 1179,
+          "end_line": 1179,
           "scope": "evaluate_checkpoint2",
           "kind": "AnnAssign",
           "declaration": "existing_selection_errors: list[str] = []"
         },
         {
-          "line": 1237,
-          "end_line": 1237,
+          "line": 1249,
+          "end_line": 1249,
           "scope": "evaluate_checkpoint2",
           "kind": "AnnAssign",
           "declaration": "minimality_errors: list[str] = []"
         },
         {
-          "line": 1266,
-          "end_line": 1266,
+          "line": 1278,
+          "end_line": 1278,
           "scope": "evaluate_checkpoint2",
           "kind": "AnnAssign",
           "declaration": "revision_errors: list[str] = []"
         },
         {
-          "line": 1347,
-          "end_line": 1347,
+          "line": 1359,
+          "end_line": 1359,
           "scope": "evaluate_checkpoint2",
           "kind": "Assign",
           "declaration": "policy_errors = []"
         },
         {
-          "line": 1369,
-          "end_line": 1369,
+          "line": 1391,
+          "end_line": 1391,
           "scope": "evaluate_checkpoint2",
           "kind": "Assign",
           "declaration": "errors = []"
         },
         {
-          "line": 1372,
-          "end_line": 1372,
+          "line": 1394,
+          "end_line": 1394,
           "scope": "evaluate_checkpoint2",
           "kind": "AnnAssign",
           "declaration": "seen: set[str] = set()"
         },
         {
-          "line": 1390,
-          "end_line": 1390,
+          "line": 1412,
+          "end_line": 1412,
           "scope": "<module>",
           "kind": "Assign",
           "declaration": "__all__ = [name for name in globals() if not name.startswith('__')]"
@@ -9604,21 +9703,21 @@
           "kind": "formatted_text_or_code_template"
         },
         {
-          "line": 637,
-          "end_line": 642,
+          "line": 649,
+          "end_line": 654,
           "scope": "evaluate_checkpoint2",
           "kind": "multiline_text_or_embedded_code",
           "sha256": "2eed7d04ace3e28258b975b7ed0d22edea87b80492377c3d977fe8c302905ce5"
         },
         {
-          "line": 950,
-          "end_line": 951,
+          "line": 962,
+          "end_line": 963,
           "scope": "evaluate_checkpoint2",
           "kind": "formatted_text_or_code_template"
         },
         {
-          "line": 1042,
-          "end_line": 1043,
+          "line": 1054,
+          "end_line": 1055,
           "scope": "evaluate_checkpoint2",
           "kind": "formatted_text_or_code_template"
         }
@@ -9627,13 +9726,13 @@
         "BoolOp": 66,
         "Continue": 7,
         "ExceptHandler": 1,
-        "For": 33,
-        "If": 124,
+        "For": 36,
+        "If": 125,
         "IfExp": 18,
         "Raise": 3,
         "Return": 22,
         "Try": 1,
-        "comprehension": 122
+        "comprehension": 124
       }
     },
     "src/qa_pipeline_agent3.py": {
@@ -71010,8 +71109,8 @@
       ],
       "javascript": {
         "parser_source": "node-bundled-acorn",
-        "parser_version": "8.16.0",
-        "node_version": "v24.17.0",
+        "parser_version": "8.15.0",
+        "node_version": "v24.11.1",
         "blocks": [
           {
             "line": 1680,
@@ -79870,724 +79969,724 @@
       "coverage": "Inline JavaScript and event handlers parsed only; external script dependencies not included."
     },
     "project.html": {
-      "sha256": "f97d10da9d8689f357868e74544f51eb272fa81f9822a1f4ceb5367d29ab869a",
+      "sha256": "97be3ccb115759a6ac779cfa58420401426c96657db33fecbe546b2995d8cb6c",
       "script_spans": [
         {
-          "line": 849,
+          "line": 850,
           "attributes": {},
-          "end_line": 876
+          "end_line": 877
         },
         {
-          "line": 878,
+          "line": 879,
           "attributes": {},
-          "end_line": 904
+          "end_line": 905
         },
         {
-          "line": 905,
+          "line": 906,
           "attributes": {},
-          "end_line": 946
+          "end_line": 947
         }
       ],
       "event_handlers": [],
       "javascript": {
         "parser_source": "node-bundled-acorn",
-        "parser_version": "8.16.0",
-        "node_version": "v24.17.0",
+        "parser_version": "8.15.0",
+        "node_version": "v24.11.1",
         "blocks": [
           {
-            "line": 849,
+            "line": 850,
             "handler": false,
             "definitions": [
               {
-                "line": 850,
+                "line": 851,
                 "column": 1,
-                "end_line": 875,
+                "end_line": 876,
                 "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:850:1>"
-              },
-              {
-                "line": 852,
-                "column": 1,
-                "end_line": 861,
-                "kind": "FunctionDeclaration",
-                "name": "<script>.<anonymous:850:1>.select"
+                "name": "<script>.<anonymous:851:1>"
               },
               {
                 "line": 853,
-                "column": 15,
-                "end_line": 859,
-                "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:850:1>.select.<anonymous:853:15>"
+                "column": 1,
+                "end_line": 862,
+                "kind": "FunctionDeclaration",
+                "name": "<script>.<anonymous:851:1>.select"
               },
               {
-                "line": 862,
-                "column": 14,
-                "end_line": 873,
+                "line": 854,
+                "column": 15,
+                "end_line": 860,
                 "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:850:1>.<anonymous:862:14>"
+                "name": "<script>.<anonymous:851:1>.select.<anonymous:854:15>"
               },
               {
                 "line": 863,
-                "column": 31,
-                "end_line": 863,
+                "column": 14,
+                "end_line": 874,
                 "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:850:1>.<anonymous:862:14>.<anonymous:863:31>"
+                "name": "<script>.<anonymous:851:1>.<anonymous:863:14>"
               },
               {
                 "line": 864,
-                "column": 33,
-                "end_line": 872,
+                "column": 31,
+                "end_line": 864,
                 "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:850:1>.<anonymous:862:14>.<anonymous:864:33>"
+                "name": "<script>.<anonymous:851:1>.<anonymous:863:14>.<anonymous:864:31>"
+              },
+              {
+                "line": 865,
+                "column": 33,
+                "end_line": 873,
+                "kind": "ArrowFunctionExpression",
+                "name": "<script>.<anonymous:851:1>.<anonymous:863:14>.<anonymous:865:33>"
               }
             ],
             "control_nodes": [
               {
-                "line": 857,
+                "line": 858,
                 "column": 17,
-                "end_line": 857,
+                "end_line": 858,
                 "kind": "ConditionalExpression",
-                "scope": "<script>.<anonymous:850:1>.select.<anonymous:853:15>",
+                "scope": "<script>.<anonymous:851:1>.select.<anonymous:854:15>",
                 "condition_or_value": "active",
                 "guards": []
               },
               {
-                "line": 860,
+                "line": 861,
                 "column": 2,
-                "end_line": 860,
+                "end_line": 861,
                 "kind": "IfStatement",
-                "scope": "<script>.<anonymous:850:1>.select",
+                "scope": "<script>.<anonymous:851:1>.select",
                 "condition_or_value": "focus",
                 "guards": []
               },
               {
-                "line": 866,
+                "line": 867,
                 "column": 3,
-                "end_line": 870,
+                "end_line": 871,
                 "kind": "IfStatement",
-                "scope": "<script>.<anonymous:850:1>.<anonymous:862:14>.<anonymous:864:33>",
+                "scope": "<script>.<anonymous:851:1>.<anonymous:863:14>.<anonymous:865:33>",
                 "condition_or_value": "event.key==='ArrowRight'",
                 "guards": []
               },
               {
-                "line": 867,
-                "column": 8,
-                "end_line": 870,
-                "kind": "IfStatement",
-                "scope": "<script>.<anonymous:850:1>.<anonymous:862:14>.<anonymous:864:33>",
-                "condition_or_value": "event.key==='ArrowLeft'",
-                "guards": [
-                  "L866 FALSE: event.key==='ArrowRight'"
-                ]
-              },
-              {
                 "line": 868,
                 "column": 8,
-                "end_line": 870,
+                "end_line": 871,
                 "kind": "IfStatement",
-                "scope": "<script>.<anonymous:850:1>.<anonymous:862:14>.<anonymous:864:33>",
-                "condition_or_value": "event.key==='Home'",
+                "scope": "<script>.<anonymous:851:1>.<anonymous:863:14>.<anonymous:865:33>",
+                "condition_or_value": "event.key==='ArrowLeft'",
                 "guards": [
-                  "L866 FALSE: event.key==='ArrowRight'",
-                  "L867 FALSE: event.key==='ArrowLeft'"
+                  "L867 FALSE: event.key==='ArrowRight'"
                 ]
               },
               {
                 "line": 869,
                 "column": 8,
-                "end_line": 870,
+                "end_line": 871,
                 "kind": "IfStatement",
-                "scope": "<script>.<anonymous:850:1>.<anonymous:862:14>.<anonymous:864:33>",
-                "condition_or_value": "event.key==='End'",
+                "scope": "<script>.<anonymous:851:1>.<anonymous:863:14>.<anonymous:865:33>",
+                "condition_or_value": "event.key==='Home'",
                 "guards": [
-                  "L866 FALSE: event.key==='ArrowRight'",
-                  "L867 FALSE: event.key==='ArrowLeft'",
-                  "L868 FALSE: event.key==='Home'"
+                  "L867 FALSE: event.key==='ArrowRight'",
+                  "L868 FALSE: event.key==='ArrowLeft'"
                 ]
               },
               {
                 "line": 870,
                 "column": 8,
-                "end_line": 870,
+                "end_line": 871,
+                "kind": "IfStatement",
+                "scope": "<script>.<anonymous:851:1>.<anonymous:863:14>.<anonymous:865:33>",
+                "condition_or_value": "event.key==='End'",
+                "guards": [
+                  "L867 FALSE: event.key==='ArrowRight'",
+                  "L868 FALSE: event.key==='ArrowLeft'",
+                  "L869 FALSE: event.key==='Home'"
+                ]
+              },
+              {
+                "line": 871,
+                "column": 8,
+                "end_line": 871,
                 "kind": "ReturnStatement",
-                "scope": "<script>.<anonymous:850:1>.<anonymous:862:14>.<anonymous:864:33>",
+                "scope": "<script>.<anonymous:851:1>.<anonymous:863:14>.<anonymous:865:33>",
                 "condition_or_value": null,
                 "guards": [
-                  "L866 FALSE: event.key==='ArrowRight'",
-                  "L867 FALSE: event.key==='ArrowLeft'",
-                  "L868 FALSE: event.key==='Home'",
-                  "L869 FALSE: event.key==='End'"
+                  "L867 FALSE: event.key==='ArrowRight'",
+                  "L868 FALSE: event.key==='ArrowLeft'",
+                  "L869 FALSE: event.key==='Home'",
+                  "L870 FALSE: event.key==='End'"
                 ]
               }
             ],
             "declarations": [
               {
-                "line": 851,
+                "line": 852,
                 "column": 1,
-                "end_line": 851,
+                "end_line": 852,
                 "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:850:1>",
+                "scope": "<script>.<anonymous:851:1>",
                 "declaration": "const tabs=[...document.querySelectorAll('.arch-step')];"
               },
               {
-                "line": 854,
+                "line": 855,
                 "column": 3,
-                "end_line": 854,
+                "end_line": 855,
                 "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:850:1>.select.<anonymous:853:15>",
+                "scope": "<script>.<anonymous:851:1>.select.<anonymous:854:15>",
                 "declaration": "const active=item===tab;"
               },
               {
-                "line": 865,
+                "line": 866,
                 "column": 3,
-                "end_line": 865,
+                "end_line": 866,
                 "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:850:1>.<anonymous:862:14>.<anonymous:864:33>",
+                "scope": "<script>.<anonymous:851:1>.<anonymous:863:14>.<anonymous:865:33>",
                 "declaration": "let next;"
               }
             ]
           },
           {
-            "line": 878,
+            "line": 879,
             "handler": false,
             "definitions": [
               {
-                "line": 879,
+                "line": 880,
                 "column": 1,
-                "end_line": 903,
+                "end_line": 904,
                 "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:879:1>"
-              },
-              {
-                "line": 881,
-                "column": 1,
-                "end_line": 889,
-                "kind": "FunctionDeclaration",
-                "name": "<script>.<anonymous:879:1>.select"
+                "name": "<script>.<anonymous:880:1>"
               },
               {
                 "line": 882,
-                "column": 15,
-                "end_line": 887,
-                "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:879:1>.select.<anonymous:882:15>"
+                "column": 1,
+                "end_line": 890,
+                "kind": "FunctionDeclaration",
+                "name": "<script>.<anonymous:880:1>.select"
               },
               {
-                "line": 890,
-                "column": 14,
-                "end_line": 901,
+                "line": 883,
+                "column": 15,
+                "end_line": 888,
                 "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:879:1>.<anonymous:890:14>"
+                "name": "<script>.<anonymous:880:1>.select.<anonymous:883:15>"
               },
               {
                 "line": 891,
-                "column": 31,
-                "end_line": 891,
+                "column": 14,
+                "end_line": 902,
                 "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:879:1>.<anonymous:890:14>.<anonymous:891:31>"
+                "name": "<script>.<anonymous:880:1>.<anonymous:891:14>"
               },
               {
                 "line": 892,
-                "column": 33,
-                "end_line": 900,
+                "column": 31,
+                "end_line": 892,
                 "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:879:1>.<anonymous:890:14>.<anonymous:892:33>"
+                "name": "<script>.<anonymous:880:1>.<anonymous:891:14>.<anonymous:892:31>"
+              },
+              {
+                "line": 893,
+                "column": 33,
+                "end_line": 901,
+                "kind": "ArrowFunctionExpression",
+                "name": "<script>.<anonymous:880:1>.<anonymous:891:14>.<anonymous:893:33>"
               }
             ],
             "control_nodes": [
               {
-                "line": 885,
+                "line": 886,
                 "column": 17,
-                "end_line": 885,
+                "end_line": 886,
                 "kind": "ConditionalExpression",
-                "scope": "<script>.<anonymous:879:1>.select.<anonymous:882:15>",
+                "scope": "<script>.<anonymous:880:1>.select.<anonymous:883:15>",
                 "condition_or_value": "active",
                 "guards": []
               },
               {
-                "line": 888,
+                "line": 889,
                 "column": 2,
-                "end_line": 888,
+                "end_line": 889,
                 "kind": "IfStatement",
-                "scope": "<script>.<anonymous:879:1>.select",
+                "scope": "<script>.<anonymous:880:1>.select",
                 "condition_or_value": "focus",
                 "guards": []
               },
               {
-                "line": 894,
+                "line": 895,
                 "column": 3,
-                "end_line": 898,
+                "end_line": 899,
                 "kind": "IfStatement",
-                "scope": "<script>.<anonymous:879:1>.<anonymous:890:14>.<anonymous:892:33>",
+                "scope": "<script>.<anonymous:880:1>.<anonymous:891:14>.<anonymous:893:33>",
                 "condition_or_value": "event.key==='ArrowRight'",
                 "guards": []
               },
               {
-                "line": 895,
-                "column": 8,
-                "end_line": 898,
-                "kind": "IfStatement",
-                "scope": "<script>.<anonymous:879:1>.<anonymous:890:14>.<anonymous:892:33>",
-                "condition_or_value": "event.key==='ArrowLeft'",
-                "guards": [
-                  "L894 FALSE: event.key==='ArrowRight'"
-                ]
-              },
-              {
                 "line": 896,
                 "column": 8,
-                "end_line": 898,
+                "end_line": 899,
                 "kind": "IfStatement",
-                "scope": "<script>.<anonymous:879:1>.<anonymous:890:14>.<anonymous:892:33>",
-                "condition_or_value": "event.key==='Home'",
+                "scope": "<script>.<anonymous:880:1>.<anonymous:891:14>.<anonymous:893:33>",
+                "condition_or_value": "event.key==='ArrowLeft'",
                 "guards": [
-                  "L894 FALSE: event.key==='ArrowRight'",
-                  "L895 FALSE: event.key==='ArrowLeft'"
+                  "L895 FALSE: event.key==='ArrowRight'"
                 ]
               },
               {
                 "line": 897,
                 "column": 8,
-                "end_line": 898,
+                "end_line": 899,
                 "kind": "IfStatement",
-                "scope": "<script>.<anonymous:879:1>.<anonymous:890:14>.<anonymous:892:33>",
-                "condition_or_value": "event.key==='End'",
+                "scope": "<script>.<anonymous:880:1>.<anonymous:891:14>.<anonymous:893:33>",
+                "condition_or_value": "event.key==='Home'",
                 "guards": [
-                  "L894 FALSE: event.key==='ArrowRight'",
-                  "L895 FALSE: event.key==='ArrowLeft'",
-                  "L896 FALSE: event.key==='Home'"
+                  "L895 FALSE: event.key==='ArrowRight'",
+                  "L896 FALSE: event.key==='ArrowLeft'"
                 ]
               },
               {
                 "line": 898,
                 "column": 8,
-                "end_line": 898,
-                "kind": "ReturnStatement",
-                "scope": "<script>.<anonymous:879:1>.<anonymous:890:14>.<anonymous:892:33>",
-                "condition_or_value": null,
+                "end_line": 899,
+                "kind": "IfStatement",
+                "scope": "<script>.<anonymous:880:1>.<anonymous:891:14>.<anonymous:893:33>",
+                "condition_or_value": "event.key==='End'",
                 "guards": [
-                  "L894 FALSE: event.key==='ArrowRight'",
-                  "L895 FALSE: event.key==='ArrowLeft'",
-                  "L896 FALSE: event.key==='Home'",
-                  "L897 FALSE: event.key==='End'"
+                  "L895 FALSE: event.key==='ArrowRight'",
+                  "L896 FALSE: event.key==='ArrowLeft'",
+                  "L897 FALSE: event.key==='Home'"
                 ]
               },
               {
-                "line": 902,
+                "line": 899,
+                "column": 8,
+                "end_line": 899,
+                "kind": "ReturnStatement",
+                "scope": "<script>.<anonymous:880:1>.<anonymous:891:14>.<anonymous:893:33>",
+                "condition_or_value": null,
+                "guards": [
+                  "L895 FALSE: event.key==='ArrowRight'",
+                  "L896 FALSE: event.key==='ArrowLeft'",
+                  "L897 FALSE: event.key==='Home'",
+                  "L898 FALSE: event.key==='End'"
+                ]
+              },
+              {
+                "line": 903,
                 "column": 1,
-                "end_line": 902,
+                "end_line": 903,
                 "kind": "IfStatement",
-                "scope": "<script>.<anonymous:879:1>",
+                "scope": "<script>.<anonymous:880:1>",
                 "condition_or_value": "tabs.length",
                 "guards": []
               }
             ],
             "declarations": [
               {
-                "line": 880,
+                "line": 881,
                 "column": 1,
-                "end_line": 880,
+                "end_line": 881,
                 "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:879:1>",
+                "scope": "<script>.<anonymous:880:1>",
                 "declaration": "const tabs=[...document.querySelectorAll('#execution .artifact-tabs [role=\"tab\"]')];"
               },
               {
-                "line": 883,
+                "line": 884,
                 "column": 3,
-                "end_line": 883,
+                "end_line": 884,
                 "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:879:1>.select.<anonymous:882:15>",
+                "scope": "<script>.<anonymous:880:1>.select.<anonymous:883:15>",
                 "declaration": "const active=item===tab;"
               },
               {
-                "line": 893,
+                "line": 894,
                 "column": 3,
-                "end_line": 893,
+                "end_line": 894,
                 "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:879:1>.<anonymous:890:14>.<anonymous:892:33>",
+                "scope": "<script>.<anonymous:880:1>.<anonymous:891:14>.<anonymous:893:33>",
                 "declaration": "let next;"
               }
             ]
           },
           {
-            "line": 905,
+            "line": 906,
             "handler": false,
             "definitions": [
               {
-                "line": 906,
+                "line": 907,
                 "column": 1,
-                "end_line": 945,
+                "end_line": 946,
                 "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:906:1>"
+                "name": "<script>.<anonymous:907:1>"
               },
               {
-                "line": 908,
+                "line": 909,
                 "column": 1,
-                "end_line": 930,
+                "end_line": 931,
                 "kind": "FunctionDeclaration",
-                "name": "<script>.<anonymous:906:1>.reveal"
+                "name": "<script>.<anonymous:907:1>.reveal"
               },
               {
-                "line": 921,
+                "line": 922,
                 "column": 24,
-                "end_line": 929,
+                "end_line": 930,
                 "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:906:1>.reveal.<anonymous:921:24>"
+                "name": "<script>.<anonymous:907:1>.reveal.<anonymous:922:24>"
               },
               {
-                "line": 931,
+                "line": 932,
                 "column": 36,
-                "end_line": 942,
-                "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:906:1>.<anonymous:931:36>"
-              },
-              {
-                "line": 943,
-                "column": 39,
                 "end_line": 943,
                 "kind": "ArrowFunctionExpression",
-                "name": "<script>.<anonymous:906:1>.<anonymous:943:39>"
+                "name": "<script>.<anonymous:907:1>.<anonymous:932:36>"
+              },
+              {
+                "line": 944,
+                "column": 39,
+                "end_line": 944,
+                "kind": "ArrowFunctionExpression",
+                "name": "<script>.<anonymous:907:1>.<anonymous:944:39>"
               }
             ],
             "control_nodes": [
               {
-                "line": 910,
+                "line": 911,
                 "column": 2,
-                "end_line": 910,
+                "end_line": 911,
                 "kind": "TryStatement",
-                "scope": "<script>.<anonymous:906:1>.reveal",
+                "scope": "<script>.<anonymous:907:1>.reveal",
                 "condition_or_value": null,
                 "guards": []
               },
               {
-                "line": 910,
+                "line": 911,
                 "column": 50,
-                "end_line": 910,
+                "end_line": 911,
                 "kind": "CatchClause",
-                "scope": "<script>.<anonymous:906:1>.reveal",
+                "scope": "<script>.<anonymous:907:1>.reveal",
                 "condition_or_value": null,
                 "guards": []
               },
               {
-                "line": 910,
+                "line": 911,
                 "column": 58,
-                "end_line": 910,
+                "end_line": 911,
                 "kind": "ReturnStatement",
-                "scope": "<script>.<anonymous:906:1>.reveal",
+                "scope": "<script>.<anonymous:907:1>.reveal",
                 "condition_or_value": null,
                 "guards": []
-              },
-              {
-                "line": 912,
-                "column": 2,
-                "end_line": 912,
-                "kind": "IfStatement",
-                "scope": "<script>.<anonymous:906:1>.reveal",
-                "condition_or_value": "!target",
-                "guards": []
-              },
-              {
-                "line": 912,
-                "column": 15,
-                "end_line": 912,
-                "kind": "ReturnStatement",
-                "scope": "<script>.<anonymous:906:1>.reveal",
-                "condition_or_value": null,
-                "guards": [
-                  "L912 TRUE: !target"
-                ]
               },
               {
                 "line": 913,
                 "column": 2,
-                "end_line": 915,
-                "kind": "ForStatement",
-                "scope": "<script>.<anonymous:906:1>.reveal",
-                "condition_or_value": "node",
-                "guards": []
-              },
-              {
-                "line": 914,
-                "column": 3,
-                "end_line": 914,
+                "end_line": 913,
                 "kind": "IfStatement",
-                "scope": "<script>.<anonymous:906:1>.reveal",
-                "condition_or_value": "node.tagName === 'DETAILS'",
-                "guards": []
-              },
-              {
-                "line": 917,
-                "column": 2,
-                "end_line": 920,
-                "kind": "IfStatement",
-                "scope": "<script>.<anonymous:906:1>.reveal",
-                "condition_or_value": "tabPanel",
-                "guards": []
-              },
-              {
-                "line": 919,
-                "column": 3,
-                "end_line": 919,
-                "kind": "IfStatement",
-                "scope": "<script>.<anonymous:906:1>.reveal",
-                "condition_or_value": "tab",
-                "guards": [
-                  "L917 TRUE: tabPanel"
-                ]
-              },
-              {
-                "line": 923,
-                "column": 3,
-                "end_line": 928,
-                "kind": "IfStatement",
-                "scope": "<script>.<anonymous:906:1>.reveal.<anonymous:921:24>",
-                "condition_or_value": "focus",
-                "guards": []
-              },
-              {
-                "line": 924,
-                "column": 20,
-                "end_line": 924,
-                "kind": "ConditionalExpression",
-                "scope": "<script>.<anonymous:906:1>.reveal.<anonymous:921:24>",
-                "condition_or_value": "target.matches('details')",
-                "guards": [
-                  "L923 TRUE: focus"
-                ]
-              },
-              {
-                "line": 925,
-                "column": 4,
-                "end_line": 926,
-                "kind": "IfStatement",
-                "scope": "<script>.<anonymous:906:1>.reveal.<anonymous:921:24>",
-                "condition_or_value": "!control.matches('summary,a[href],button,input,select,textarea,[tabindex]') &&\r\n        !control.isContentEditable",
-                "guards": [
-                  "L923 TRUE: focus"
-                ]
-              },
-              {
-                "line": 925,
-                "column": 8,
-                "end_line": 926,
-                "kind": "LogicalExpression",
-                "scope": "<script>.<anonymous:906:1>.reveal.<anonymous:921:24>",
-                "condition_or_value": "!control.matches('summary,a[href],button,input,select,textarea,[tabindex]') &&\r\n        !control.isContentEditable",
-                "guards": [
-                  "L923 TRUE: focus"
-                ]
-              },
-              {
-                "line": 933,
-                "column": 2,
-                "end_line": 934,
-                "kind": "IfStatement",
-                "scope": "<script>.<anonymous:906:1>.<anonymous:931:36>",
-                "condition_or_value": "!link || event.defaultPrevented || event.button !== 0 ||\r\n      event.ctrlKey || event.metaKey || event.shiftKey || event.altKey",
-                "guards": []
-              },
-              {
-                "line": 933,
-                "column": 6,
-                "end_line": 934,
-                "kind": "LogicalExpression",
-                "scope": "<script>.<anonymous:906:1>.<anonymous:931:36>",
-                "condition_or_value": "!link || event.defaultPrevented || event.button !== 0 ||\r\n      event.ctrlKey || event.metaKey || event.shiftKey || event.altKey",
-                "guards": []
-              },
-              {
-                "line": 933,
-                "column": 6,
-                "end_line": 934,
-                "kind": "LogicalExpression",
-                "scope": "<script>.<anonymous:906:1>.<anonymous:931:36>",
-                "condition_or_value": "!link || event.defaultPrevented || event.button !== 0 ||\r\n      event.ctrlKey || event.metaKey || event.shiftKey",
-                "guards": []
-              },
-              {
-                "line": 933,
-                "column": 6,
-                "end_line": 934,
-                "kind": "LogicalExpression",
-                "scope": "<script>.<anonymous:906:1>.<anonymous:931:36>",
-                "condition_or_value": "!link || event.defaultPrevented || event.button !== 0 ||\r\n      event.ctrlKey || event.metaKey",
-                "guards": []
-              },
-              {
-                "line": 933,
-                "column": 6,
-                "end_line": 934,
-                "kind": "LogicalExpression",
-                "scope": "<script>.<anonymous:906:1>.<anonymous:931:36>",
-                "condition_or_value": "!link || event.defaultPrevented || event.button !== 0 ||\r\n      event.ctrlKey",
-                "guards": []
-              },
-              {
-                "line": 933,
-                "column": 6,
-                "end_line": 933,
-                "kind": "LogicalExpression",
-                "scope": "<script>.<anonymous:906:1>.<anonymous:931:36>",
-                "condition_or_value": "!link || event.defaultPrevented || event.button !== 0",
-                "guards": []
-              },
-              {
-                "line": 933,
-                "column": 6,
-                "end_line": 933,
-                "kind": "LogicalExpression",
-                "scope": "<script>.<anonymous:906:1>.<anonymous:931:36>",
-                "condition_or_value": "!link || event.defaultPrevented",
-                "guards": []
-              },
-              {
-                "line": 934,
-                "column": 72,
-                "end_line": 934,
-                "kind": "ReturnStatement",
-                "scope": "<script>.<anonymous:906:1>.<anonymous:931:36>",
-                "condition_or_value": null,
-                "guards": [
-                  "L933 TRUE: !link || event.defaultPrevented || event.button !== 0 ||\r\n      event.ctrlKey || event.metaKey || event.shiftKey || event.altKey"
-                ]
-              },
-              {
-                "line": 937,
-                "column": 2,
-                "end_line": 937,
-                "kind": "TryStatement",
-                "scope": "<script>.<anonymous:906:1>.<anonymous:931:36>",
-                "condition_or_value": null,
-                "guards": []
-              },
-              {
-                "line": 937,
-                "column": 79,
-                "end_line": 937,
-                "kind": "CatchClause",
-                "scope": "<script>.<anonymous:906:1>.<anonymous:931:36>",
-                "condition_or_value": null,
-                "guards": []
-              },
-              {
-                "line": 937,
-                "column": 87,
-                "end_line": 937,
-                "kind": "ReturnStatement",
-                "scope": "<script>.<anonymous:906:1>.<anonymous:931:36>",
-                "condition_or_value": null,
-                "guards": []
-              },
-              {
-                "line": 938,
-                "column": 2,
-                "end_line": 938,
-                "kind": "IfStatement",
-                "scope": "<script>.<anonymous:906:1>.<anonymous:931:36>",
+                "scope": "<script>.<anonymous:907:1>.reveal",
                 "condition_or_value": "!target",
                 "guards": []
               },
               {
-                "line": 938,
+                "line": 913,
                 "column": 15,
-                "end_line": 938,
+                "end_line": 913,
                 "kind": "ReturnStatement",
-                "scope": "<script>.<anonymous:906:1>.<anonymous:931:36>",
+                "scope": "<script>.<anonymous:907:1>.reveal",
                 "condition_or_value": null,
                 "guards": [
-                  "L938 TRUE: !target"
+                  "L913 TRUE: !target"
                 ]
               },
               {
-                "line": 940,
+                "line": 914,
                 "column": 2,
-                "end_line": 940,
+                "end_line": 916,
+                "kind": "ForStatement",
+                "scope": "<script>.<anonymous:907:1>.reveal",
+                "condition_or_value": "node",
+                "guards": []
+              },
+              {
+                "line": 915,
+                "column": 3,
+                "end_line": 915,
                 "kind": "IfStatement",
-                "scope": "<script>.<anonymous:906:1>.<anonymous:931:36>",
+                "scope": "<script>.<anonymous:907:1>.reveal",
+                "condition_or_value": "node.tagName === 'DETAILS'",
+                "guards": []
+              },
+              {
+                "line": 918,
+                "column": 2,
+                "end_line": 921,
+                "kind": "IfStatement",
+                "scope": "<script>.<anonymous:907:1>.reveal",
+                "condition_or_value": "tabPanel",
+                "guards": []
+              },
+              {
+                "line": 920,
+                "column": 3,
+                "end_line": 920,
+                "kind": "IfStatement",
+                "scope": "<script>.<anonymous:907:1>.reveal",
+                "condition_or_value": "tab",
+                "guards": [
+                  "L918 TRUE: tabPanel"
+                ]
+              },
+              {
+                "line": 924,
+                "column": 3,
+                "end_line": 929,
+                "kind": "IfStatement",
+                "scope": "<script>.<anonymous:907:1>.reveal.<anonymous:922:24>",
+                "condition_or_value": "focus",
+                "guards": []
+              },
+              {
+                "line": 925,
+                "column": 20,
+                "end_line": 925,
+                "kind": "ConditionalExpression",
+                "scope": "<script>.<anonymous:907:1>.reveal.<anonymous:922:24>",
+                "condition_or_value": "target.matches('details')",
+                "guards": [
+                  "L924 TRUE: focus"
+                ]
+              },
+              {
+                "line": 926,
+                "column": 4,
+                "end_line": 927,
+                "kind": "IfStatement",
+                "scope": "<script>.<anonymous:907:1>.reveal.<anonymous:922:24>",
+                "condition_or_value": "!control.matches('summary,a[href],button,input,select,textarea,[tabindex]') &&\r\n        !control.isContentEditable",
+                "guards": [
+                  "L924 TRUE: focus"
+                ]
+              },
+              {
+                "line": 926,
+                "column": 8,
+                "end_line": 927,
+                "kind": "LogicalExpression",
+                "scope": "<script>.<anonymous:907:1>.reveal.<anonymous:922:24>",
+                "condition_or_value": "!control.matches('summary,a[href],button,input,select,textarea,[tabindex]') &&\r\n        !control.isContentEditable",
+                "guards": [
+                  "L924 TRUE: focus"
+                ]
+              },
+              {
+                "line": 934,
+                "column": 2,
+                "end_line": 935,
+                "kind": "IfStatement",
+                "scope": "<script>.<anonymous:907:1>.<anonymous:932:36>",
+                "condition_or_value": "!link || event.defaultPrevented || event.button !== 0 ||\r\n      event.ctrlKey || event.metaKey || event.shiftKey || event.altKey",
+                "guards": []
+              },
+              {
+                "line": 934,
+                "column": 6,
+                "end_line": 935,
+                "kind": "LogicalExpression",
+                "scope": "<script>.<anonymous:907:1>.<anonymous:932:36>",
+                "condition_or_value": "!link || event.defaultPrevented || event.button !== 0 ||\r\n      event.ctrlKey || event.metaKey || event.shiftKey || event.altKey",
+                "guards": []
+              },
+              {
+                "line": 934,
+                "column": 6,
+                "end_line": 935,
+                "kind": "LogicalExpression",
+                "scope": "<script>.<anonymous:907:1>.<anonymous:932:36>",
+                "condition_or_value": "!link || event.defaultPrevented || event.button !== 0 ||\r\n      event.ctrlKey || event.metaKey || event.shiftKey",
+                "guards": []
+              },
+              {
+                "line": 934,
+                "column": 6,
+                "end_line": 935,
+                "kind": "LogicalExpression",
+                "scope": "<script>.<anonymous:907:1>.<anonymous:932:36>",
+                "condition_or_value": "!link || event.defaultPrevented || event.button !== 0 ||\r\n      event.ctrlKey || event.metaKey",
+                "guards": []
+              },
+              {
+                "line": 934,
+                "column": 6,
+                "end_line": 935,
+                "kind": "LogicalExpression",
+                "scope": "<script>.<anonymous:907:1>.<anonymous:932:36>",
+                "condition_or_value": "!link || event.defaultPrevented || event.button !== 0 ||\r\n      event.ctrlKey",
+                "guards": []
+              },
+              {
+                "line": 934,
+                "column": 6,
+                "end_line": 934,
+                "kind": "LogicalExpression",
+                "scope": "<script>.<anonymous:907:1>.<anonymous:932:36>",
+                "condition_or_value": "!link || event.defaultPrevented || event.button !== 0",
+                "guards": []
+              },
+              {
+                "line": 934,
+                "column": 6,
+                "end_line": 934,
+                "kind": "LogicalExpression",
+                "scope": "<script>.<anonymous:907:1>.<anonymous:932:36>",
+                "condition_or_value": "!link || event.defaultPrevented",
+                "guards": []
+              },
+              {
+                "line": 935,
+                "column": 72,
+                "end_line": 935,
+                "kind": "ReturnStatement",
+                "scope": "<script>.<anonymous:907:1>.<anonymous:932:36>",
+                "condition_or_value": null,
+                "guards": [
+                  "L934 TRUE: !link || event.defaultPrevented || event.button !== 0 ||\r\n      event.ctrlKey || event.metaKey || event.shiftKey || event.altKey"
+                ]
+              },
+              {
+                "line": 938,
+                "column": 2,
+                "end_line": 938,
+                "kind": "TryStatement",
+                "scope": "<script>.<anonymous:907:1>.<anonymous:932:36>",
+                "condition_or_value": null,
+                "guards": []
+              },
+              {
+                "line": 938,
+                "column": 79,
+                "end_line": 938,
+                "kind": "CatchClause",
+                "scope": "<script>.<anonymous:907:1>.<anonymous:932:36>",
+                "condition_or_value": null,
+                "guards": []
+              },
+              {
+                "line": 938,
+                "column": 87,
+                "end_line": 938,
+                "kind": "ReturnStatement",
+                "scope": "<script>.<anonymous:907:1>.<anonymous:932:36>",
+                "condition_or_value": null,
+                "guards": []
+              },
+              {
+                "line": 939,
+                "column": 2,
+                "end_line": 939,
+                "kind": "IfStatement",
+                "scope": "<script>.<anonymous:907:1>.<anonymous:932:36>",
+                "condition_or_value": "!target",
+                "guards": []
+              },
+              {
+                "line": 939,
+                "column": 15,
+                "end_line": 939,
+                "kind": "ReturnStatement",
+                "scope": "<script>.<anonymous:907:1>.<anonymous:932:36>",
+                "condition_or_value": null,
+                "guards": [
+                  "L939 TRUE: !target"
+                ]
+              },
+              {
+                "line": 941,
+                "column": 2,
+                "end_line": 941,
+                "kind": "IfStatement",
+                "scope": "<script>.<anonymous:907:1>.<anonymous:932:36>",
                 "condition_or_value": "location.hash !== hash",
                 "guards": []
               },
               {
-                "line": 944,
+                "line": 945,
                 "column": 1,
-                "end_line": 944,
+                "end_line": 945,
                 "kind": "IfStatement",
-                "scope": "<script>.<anonymous:906:1>",
+                "scope": "<script>.<anonymous:907:1>",
                 "condition_or_value": "location.hash",
                 "guards": []
               }
             ],
             "declarations": [
               {
-                "line": 909,
+                "line": 910,
                 "column": 2,
-                "end_line": 909,
+                "end_line": 910,
                 "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:906:1>.reveal",
+                "scope": "<script>.<anonymous:907:1>.reveal",
                 "declaration": "let id;"
               },
               {
-                "line": 911,
+                "line": 912,
                 "column": 2,
-                "end_line": 911,
+                "end_line": 912,
                 "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:906:1>.reveal",
+                "scope": "<script>.<anonymous:907:1>.reveal",
                 "declaration": "const target = document.getElementById(id);"
               },
               {
-                "line": 913,
+                "line": 914,
                 "column": 7,
-                "end_line": 913,
+                "end_line": 914,
                 "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:906:1>.reveal",
+                "scope": "<script>.<anonymous:907:1>.reveal",
                 "declaration": "let node = target"
               },
               {
-                "line": 916,
+                "line": 917,
                 "column": 2,
-                "end_line": 916,
+                "end_line": 917,
                 "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:906:1>.reveal",
+                "scope": "<script>.<anonymous:907:1>.reveal",
                 "declaration": "const tabPanel = target.closest('[role=\"tabpanel\"]');"
               },
               {
-                "line": 918,
+                "line": 919,
                 "column": 3,
-                "end_line": 918,
+                "end_line": 919,
                 "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:906:1>.reveal",
+                "scope": "<script>.<anonymous:907:1>.reveal",
                 "declaration": "const tab = document.getElementById(tabPanel.getAttribute('aria-labelledby'));"
               },
               {
-                "line": 924,
+                "line": 925,
                 "column": 4,
-                "end_line": 924,
+                "end_line": 925,
                 "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:906:1>.reveal.<anonymous:921:24>",
+                "scope": "<script>.<anonymous:907:1>.reveal.<anonymous:922:24>",
                 "declaration": "const control = target.matches('details') ? target.querySelector('summary') : target;"
               },
               {
-                "line": 932,
+                "line": 933,
                 "column": 2,
-                "end_line": 932,
+                "end_line": 933,
                 "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:906:1>.<anonymous:931:36>",
+                "scope": "<script>.<anonymous:907:1>.<anonymous:932:36>",
                 "declaration": "const link = event.target.closest('a[href^=\"#\"]');"
-              },
-              {
-                "line": 935,
-                "column": 2,
-                "end_line": 935,
-                "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:906:1>.<anonymous:931:36>",
-                "declaration": "const hash = link.getAttribute('href');"
               },
               {
                 "line": 936,
                 "column": 2,
                 "end_line": 936,
                 "kind": "VariableDeclaration",
-                "scope": "<script>.<anonymous:906:1>.<anonymous:931:36>",
+                "scope": "<script>.<anonymous:907:1>.<anonymous:932:36>",
+                "declaration": "const hash = link.getAttribute('href');"
+              },
+              {
+                "line": 937,
+                "column": 2,
+                "end_line": 937,
+                "kind": "VariableDeclaration",
+                "scope": "<script>.<anonymous:907:1>.<anonymous:932:36>",
                 "declaration": "let target;"
               }
             ]

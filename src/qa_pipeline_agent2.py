@@ -626,6 +626,18 @@ def _tc_restore_basis_errors(tc: ProductTestCaseCandidate) -> list[str]:
     return errors
 
 
+_FOREIGN_SCRIPT = re.compile(r"[぀-ヿ㐀-䶿一-鿿]")
+
+
+def _human_tc_texts(tc):
+    yield "제목", tc.title
+    for label, items in (("준비", tc.preconditions), ("절차", tc.steps), ("복원", tc.restore_steps)):
+        for text in items:
+            yield label, text
+    for result in tc.expected_results:
+        yield "기대결과", result.statement
+
+
 def evaluate_checkpoint2(
     request: ChangeRequest,
     analysis: Agent1Analysis,
@@ -1362,6 +1374,16 @@ def evaluate_checkpoint2(
               for error in _structured_restoration_errors(tc)]
     add("CP2-023", CheckStatus.FAIL if errors else CheckStatus.PASS,
         "; ".join(errors) if errors else "복원 조작·대상 ER·관찰 기준·확인 시점의 구조화 연결을 확인했습니다.")
+
+    # 2026-10-23 사람 대조: a live TC title came back in Chinese while the body was Korean,
+    # and neither review AI nor judge flagged it. People read these TCs, so reject
+    # Han ideographs and Japanese kana in the human-facing TC text. Reported only on a
+    # violation (like CP2-TC-REVISION) so saved Korean designs recompute the same checkpoint.
+    errors = [f"{tc.tc_id}: {label} '{text[:40]}'" for tc in design.test_cases
+              for label, text in _human_tc_texts(tc) if _FOREIGN_SCRIPT.search(text)]
+    if errors:
+        add("CP2-LANG", CheckStatus.FAIL,
+            "한국어로 다시 작성해야 하는 TC 문장(한자·일본 문자 포함): " + "; ".join(errors))
 
     if design.existing_tc_revisions:
         # H-3 (2026-10-17). Added only when a revision is declared, so earlier
