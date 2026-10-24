@@ -82,7 +82,7 @@ AGENT2_SYSTEM_INSTRUCTIONS = QA_EXPECTATION_SCOPE_GUIDANCE + QA_DESIGN_REVIEW_GU
 
 [복원]
 29. 새 TC는 restoration을 작성합니다(READ_ONLY는 operation_steps·confirmations가 빈 목록이고 verify_when=AFTER_RESTORE). 중앙 관제 전원·모드·풍량·온도·잠금은 같은 순서를 따릅니다: 준비 전 관련 화면·내부값 기록 → 명시된 사전조건 준비·확인 → 시험 → 준비와 시험으로 바뀐 관제점을 준비 전 관찰 상태로 복원·확인. 준비 도중 실패해도, 차단 시험이어도 준비로 바꾼 값은 되돌립니다. 이 공통 조작은 Agent 3의 RESTORE_OBSERVED_CONTROLLER로 구현하며 새 필드나 기능별 예외를 만들지 않습니다.
-30. restoration.operation_steps에는 복원 조작 문장을, confirmations에는 사람이 읽는 확인 문장을 적고, operation_steps 다음 각 confirmation.source_text를 이어 붙인 결과가 restore_steps와 순서·내용 모두 같아야 합니다. NOTIFICATION이 아닌 ER마다 result_id를 confirmations 전체에서 정확히 한 번 연결하고, 각 comparison은 확인 문장 전체를 source_excerpt로 복사하며 basis=OBSERVED_BASELINE입니다. 같은 대상·기준을 확인하는 경우에만 하나의 confirmation에 여러 result_id를 묶습니다.
+30. restoration.operation_steps에는 복원 조작 문장을, confirmations에는 사람이 읽는 확인 문장을 적고, operation_steps 다음 각 confirmation.source_text를 이어 붙인 결과가 restore_steps와 순서·내용 모두 같아야 합니다. NOTIFICATION이 아닌 ER마다 result_id를 confirmations 전체에서 정확히 한 번 연결하고, 각 comparison은 확인 문장 전체를 source_excerpt로 복사하며 basis=OBSERVED_BASELINE입니다. 같은 대상·기준을 확인하는 경우에만 하나의 confirmation에 여러 result_id를 묶습니다. 준비에서 확인한 관제점 중 시험 ER이 없는 것(예: 온도 TC의 준비에서 바꾼 모드 internal.mode)은 precondition_verifications의 번호(0부터)를 precondition_indexes에 넣은 별도 confirmation으로 준비 전 기록값과 비교하는 확인 문장을 씁니다(result_ids·comparisons는 빈 목록). ER이 있는 대상은 precondition_indexes로 중복 연결하지 않습니다.
 31. 복원 확인은 기존 ER의 같은 관찰 위치(화면·내부값 각각)를 준비 전 실제 기록값과 비교합니다. 내부 코드와 화면 표시가 같다고 가정하지 않고, 임의 기본값·고정 초기값으로 초기화하거나 initial_mode·initial_temperature_c를 복원 목표로 쓰지 않습니다(그것은 준비 완료 상태입니다). 원문에 명시된 준비값은 사전조건 준비·확인에만 사용하며 복원 목표와 혼동하지 않습니다. 확인 문장은 대상과 비교 방법을 한 구절에 완결하고 '복원한다', '결과를 확인한다'로 끝내지 않습니다. 확인 문장에 추가 조작이나 제품 기대결과를 넣지 않으며, 복원 실패를 제품 기대 결과로 추가하지 않습니다. 다른 기능·다중 장비의 준비와 복원은 추정하지 않습니다.
 
 [SRS 개정안]
@@ -425,6 +425,7 @@ def _normalize_restoration_layout(tc: ProductTestCaseCandidate) -> list[dict[str
         if item.source_text in grouped:
             grouped[item.source_text].result_ids.extend(item.result_ids)
             grouped[item.source_text].comparisons.extend(item.comparisons)
+            grouped[item.source_text].precondition_indexes.extend(item.precondition_indexes)
         else:
             grouped[item.source_text] = item
     contract.confirmations = list(grouped.values())

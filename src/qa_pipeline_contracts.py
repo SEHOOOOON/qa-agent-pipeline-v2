@@ -344,10 +344,23 @@ class RestoreComparison(StrictModel):
 
 
 class RestoreConfirmation(StrictModel):
-    """Reference existing ER readers; never introduce a new selector or value."""
+    """Reference existing ER readers or preparation checks; never introduce a new selector or value."""
     source_text: NonEmptyStr
-    result_ids: list[Annotated[str, StringConstraints(pattern=r"^ER-\d{3}$")]] = Field(min_length=1)
+    result_ids: list[Annotated[str, StringConstraints(pattern=r"^ER-\d{3}$")]] = Field(default_factory=list)
     comparisons: list[RestoreComparison] = Field(default_factory=list)
+    # 2026-10-24 IMP-015: a controller field changed only in preparation (mode in a
+    # temperature TC) has no product ER, so its restore check links the preparation check.
+    precondition_indexes: list[Annotated[int, Field(ge=0)]] = Field(
+        default_factory=list,
+        description="execution_spec.precondition_verifications 번호(0부터). 시험 ER이 없는 준비 관제점의 복원 확인에만 사용.")
+
+    @model_serializer(mode="wrap")
+    def omit_empty_precondition_indexes(self, handler):
+        # Historical artifacts keep their digests.
+        result = handler(self)
+        if not self.precondition_indexes:
+            result.pop("precondition_indexes", None)
+        return result
 
 
 class RestoreVerificationTiming(str, Enum):
@@ -460,6 +473,36 @@ def _structured_restoration_errors(tc: ProductTestCaseCandidate) -> list[str]:
                 errors.append("설명 원문은 자르거나 재해석하지 않고 전체 문장을 연결해야 합니다")
     if not required or set(linked) != required or len(linked) != len(set(linked)):
         errors.append("상태 ER마다 복원 비교를 정확히 하나씩 연결해야 합니다")
+    errors.extend(_preparation_restore_errors(tc))
+    return errors
+
+
+_RESTORABLE_CONTROLLER_FIELDS = {"status", "mode", "fanSpeed", "setTemp", "locked"}
+
+
+def _preparation_restore_errors(tc: ProductTestCaseCandidate) -> list[str]:
+    """IMP-015: every controller field confirmed in preparation without a product ER needs its own restore check."""
+    confirmations = tc.restoration.confirmations
+    if any(not c.result_ids and not c.precondition_indexes for c in confirmations):
+        return ["복원 확인은 ER 또는 준비 확인을 하나 이상 참조해야 합니다"]
+    spec = tc.execution_spec
+    # Only the controller map names each check's field; older specs cannot tell which field has an ER.
+    mapped = spec is not None and spec.binding_contract == "controller-map-1.0"
+    checks = spec.precondition_verifications if mapped else []
+    er_fields = {v.target.rpartition(".")[2] for v in spec.verifications if v.target} if mapped else set()
+    required = {i for i, check in enumerate(checks)
+                if check.read_kind in (PreconditionReadKind.CONTROLLER_UI_FIELD, PreconditionReadKind.INTERNAL_VALUE)
+                and check.observation_target.rpartition(".")[2] in _RESTORABLE_CONTROLLER_FIELDS
+                and check.observation_target.rpartition(".")[2] not in er_fields}
+    linked = [i for c in confirmations for i in c.precondition_indexes]
+    errors = []
+    if set(linked) - required:
+        errors.append("복원 확인의 준비 확인 번호는 시험 ER이 없는 관제점의 준비 확인만 가리킬 수 있습니다")
+    missing = sorted(required - set(linked))
+    if missing or len(linked) != len(set(linked)):
+        targets = ", ".join(checks[i].observation_target for i in missing)
+        errors.append("준비에서 확인한 관제점(시험 ER 없음)마다 precondition_indexes로 복원 확인을 정확히 한 번 연결해야 합니다"
+                      + (f" (누락: {targets})" if targets else ""))
     return errors
 
 

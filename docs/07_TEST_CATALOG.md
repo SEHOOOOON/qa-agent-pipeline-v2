@@ -167,6 +167,8 @@ V1 기준 제품 테스트는 [test_controller.py](../product_baseline/tests/tes
 
 TC 문장 언어 검사(2026-10-23): `tests/test_agent2.py`의 `test_tc_text_must_be_korean`이 실제 10-23 풍량 제목(중국어)·한자 한 글자·일본어는 CP2-LANG FAIL, 한국어+°C·영문 코드 문장은 검사 항목 자체가 나오지 않는지(저장된 한국어 설계가 같은 결과로 재계산되도록) 확인한다.
 
+준비 관제점 복원 확인(2026-10-24, P2 IMP-015): `tests/test_agent2.py`의 `test_preparation_only_field_needs_its_own_restore_check`가 온도 TC에서 준비로 바꾼 모드(시험 ER 없음)의 복원 확인 누락·중복·ER 대상 중복 연결·빈 확인을 CP2-023 실패로, 준비 확인 번호로 연결하면 통과로 확인한다. 공통 관제점 복원(전체 비교)이 없으면 Agent 3 대조에서 실패, controller-map이 아닌 예전 형식에는 적용하지 않음. 새 형식 고정 자료(`mapped_tc_fixture`)도 준비에서 바꾼 관제점의 복원 확인을 포함하도록 보완. `test_precondition_indexes_keep_historical_digests_and_strict_schema`는 빈 목록이면 저장 형식(해시)이 그대로인지 확인한다. 저장된 실제 설계 17개 재검사: 전원·풍량·모드 9개 통과, 온도 8개 모두 모드 누락으로 실패(사람·P2 판단과 일치).
+
 기존 TC 고쳐 쓰기 검사(2026-10-18): `tests/test_agent2.py`의 `test_empty_revision_list_keeps_historical_design_serialization`은 `기존_TC_수정`이 비어 있으면 저장 형태에 나타나지 않는지, `test_existing_tc_revision_is_checked_against_catalog_and_candidates`는 목록에 없는 TC·없는 후보·그대로 재사용한 TC를 CP2-TC-REVISION FAIL로 보고하는지, `test_revision_rule_reaches_the_writer_but_not_the_shared_review_rules`는 고쳐 쓰기 지침이 작성 AI에만 들어가는지 확인한다. `tests/test_agent4_reporting.py`의 `test_human_review_row_names_the_existing_tc_a_candidate_revises`는 사람 검토서 출처 표시를 확인한다. AI가 실제로 고쳐 쓰기를 선택하는지는 측정하지 않는다.
 
 절차 작성·검토서 경고 검사(2026-10-18): `test_writer_is_told_not_to_mix_operation_and_check_in_one_step`은 "조작 문장에 확인 내용을 붙이지 않는다" 지침이 작성 AI에 들어가는지, `test_human_review_lists_review_ai_warnings_that_did_not_stop_the_run`은 CP1·CP2의 `[경고]`가 사람 검토서 "2-1. 검토 AI 경고" 표로 나뉘어 나오고 없으면 "없습니다"로 표시되는지 확인한다.

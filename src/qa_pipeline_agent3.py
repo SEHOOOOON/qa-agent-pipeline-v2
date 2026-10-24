@@ -1854,6 +1854,11 @@ def _structured_restore_plan_coverage(test_case, plan) -> tuple[set[str], list[s
                     or assertion.observation_layer != result.observation_layer
                     or not _restoration_read_expression(assertion, plan.target_device_id)):
                 errors.append(f"{result_id}: 동일 대상의 실제 복원 비교 reader 누락")
+    # IMP-015: preparation-only fields have no ER reader; the full controller snapshot
+    # comparison after RESTORE_OBSERVED_CONTROLLER is what checks them.
+    if (any(c.precondition_indexes for c in contract.confirmations)
+            and not any(a.action_type == AutomationActionType.RESTORE_OBSERVED_CONTROLLER for a in plan.actions)):
+        errors.append("준비 확인을 연결한 복원 확인은 공통 관제점 복원(전체 비교)으로만 구현할 수 있습니다")
     errors.extend(_state_restoration_plan_errors(test_case, plan))
     return {_normalize(line) for line in sources}, errors
 

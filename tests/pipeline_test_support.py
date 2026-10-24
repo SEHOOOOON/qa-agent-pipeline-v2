@@ -1138,6 +1138,9 @@ def frozen_tc_and_bindings(case, plan):
 def repeated_restoration_fixture(field="setTemp", initial=27, requested=21):
     """Same reader used by separate ERs; no altered product expectations."""
     case, _ = mapped_tc_fixture(field, initial, requested)
+    # Preparation-only checks (IMP-015) have no ER to repeat; keep them last.
+    preparation = [c for c in case.restoration.confirmations if c.precondition_indexes]
+    case.restoration.confirmations = [c for c in case.restoration.confirmations if not c.precondition_indexes]
     for index, (er, check, confirmation) in enumerate(zip(
             list(case.expected_results), list(case.execution_spec.verifications),
             list(case.restoration.confirmations)), 97):
@@ -1148,6 +1151,7 @@ def repeated_restoration_fixture(field="setTemp", initial=27, requested=21):
         duplicate.result_ids = [rid]
         duplicate.comparisons[0].result_id = rid
         case.restoration.confirmations.append(duplicate)
+    case.restoration.confirmations += preparation
     case.restore_steps = case.restoration.operation_steps + [c.source_text for c in case.restoration.confirmations]
     return case
 
@@ -1167,6 +1171,15 @@ def mapped_tc_fixture(field="setTemp", initial=27, requested=21, **kwargs):
     for check, proof in zip(case.execution_spec.precondition_verifications, plan.precondition_checks):
         check.observation_target = next(key for key, (kind, selector) in catalog["preconditions"].items()
             if kind == proof.read_kind.value and selector == proof.selector)
+    # IMP-015: a field set in preparation without its own ER (mode in a temperature TC) gets a restore check.
+    indexes = [i for i, check in enumerate(case.execution_spec.precondition_verifications)
+               if check.read_kind.value in {"CONTROLLER_UI_FIELD", "INTERNAL_VALUE"}
+               and check.observation_target.rpartition(".")[2] not in {"selected", field}]
+    if indexes and case.restoration is not None:
+        case.restoration.confirmations.append(pipeline.RestoreConfirmation(
+            source_text="준비에서 바꾼 관제점 값을 준비 전 관찰값과 비교한다.", precondition_indexes=indexes))
+        case.restore_steps = case.restoration.operation_steps + [c.source_text for c in case.restoration.confirmations]
+        plan.restore_confirmations = case.restoration.confirmations
     return case, plan
 
 

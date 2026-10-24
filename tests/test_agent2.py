@@ -8,6 +8,8 @@ from pipeline_test_support import *
 def test_live_restoration_layout_preserves_every_reader(field, initial, target, layout):
     from qa_pipeline_agent2 import _normalize_agent2_live_design
     case = repeated_restoration_fixture(field, initial, target)
+    preparation = [c for c in case.restoration.confirmations if c.precondition_indexes]
+    case.restoration.confirmations = [c for c in case.restoration.confirmations if not c.precondition_indexes]
     if layout == "different_prose":
         for index, c in enumerate(case.restoration.confirmations):
             c.source_text += f" (확인 {index + 1})"
@@ -22,6 +24,7 @@ def test_live_restoration_layout_preserves_every_reader(field, initial, target, 
             a.result_ids += b.result_ids
             a.comparisons = b.comparisons + a.comparisons
         case.restoration.confirmations = [first, second]
+    case.restoration.confirmations += preparation
     case.restore_steps = case.restoration.operation_steps + [c.source_text for c in case.restoration.confirmations]
     before = case.model_dump(mode="json")
     design = cp2_valid_design().model_copy(update={"test_cases": [case]})
@@ -50,7 +53,9 @@ def test_live_restoration_layout_does_not_repair_broken_contract(fault):
     case = repeated_restoration_fixture()
     c = case.restoration.confirmations[0]
     if fault == "missing_er":
-        case.restoration.confirmations.pop()
+        # Drop an ER-linked check; the last one may be the preparation-only check (IMP-015).
+        last_er = max(i for i, x in enumerate(case.restoration.confirmations) if x.result_ids)
+        case.restoration.confirmations.pop(last_er)
     elif fault == "duplicate_er":
         case.restoration.confirmations.append(c.model_copy(deep=True))
     elif fault == "unknown_er":
@@ -700,6 +705,63 @@ def test_structured_restoration_read_only_and_strict_api_schema():
     assert set(schema["$defs"]["StructuredRestoration"]["required"]) == {"operation_steps", "confirmations", "verify_when"}
     case.restoration.operation_steps = ["변경"]
     assert pipeline._structured_restoration_errors(case)
+
+
+@pytest.mark.parametrize("variant", ["missing", "linked", "linked_er_target", "duplicate", "empty"])
+def test_preparation_only_field_needs_its_own_restore_check(variant):
+    """IMP-015 (2026-10-24): temperature TCs set the mode in preparation, have no mode ER,
+    and the contract could not link a mode restore check (4 of 4 live designs)."""
+    case, plan = controller_lifecycle_fixture("setTemp", 27, 21)
+    check = lambda target, value: pipeline.TcPreconditionVerification(
+        source_text=case.preconditions[0], read_kind="INTERNAL_VALUE", expected_value=value, observation_target=target)
+    case.execution_spec = pipeline.TcExecutionSpec(
+        operations=[], precondition_verifications=[
+            pipeline.TcPreconditionVerification(source_text=case.preconditions[0], read_kind="BASELINE_CONTEXT",
+                                                expected_value=True, observation_target="context.online"),
+            check("internal.mode", "COOL"), check("internal.setTemp", 27)],
+        verifications=[pipeline.TcVerification(result_id=r.result_id, observation_layer=r.observation_layer,
+                                                strategy="INTERNAL_SET_TEMP", target=target)
+                       for r, target in zip(case.expected_results, ["card.setTemp", "internal.setTemp"])],
+        binding_contract="controller-map-1.0")
+    mode = pipeline.RestoreConfirmation(source_text="대상 장비의 내부 모드 값을 준비 전 관찰값과 비교한다.",
+                                        precondition_indexes=[1])
+    if variant == "linked_er_target":
+        mode.precondition_indexes = [1, 2]
+    elif variant == "duplicate":
+        mode.precondition_indexes = [1, 1]
+    elif variant == "empty":
+        mode.precondition_indexes = []
+    if variant != "missing":
+        case.restoration.confirmations.append(mode)
+    case.restore_steps = case.restoration.operation_steps + [c.source_text for c in case.restoration.confirmations]
+    plan.restore_confirmations = case.restoration.confirmations
+    errors = pipeline._structured_restoration_errors(case)
+    _, plan_errors = pipeline._structured_restore_plan_coverage(case, plan)
+    assert (not errors) is (variant == "linked"), errors
+    assert all(error in plan_errors for error in errors)
+    if variant == "missing":
+        assert errors == ["준비에서 확인한 관제점(시험 ER 없음)마다 precondition_indexes로 복원 확인을 "
+                          "정확히 한 번 연결해야 합니다 (누락: internal.mode)"]
+    if variant == "linked":
+        # Older specs without the controller map do not name fields, so the rule cannot apply.
+        unmapped = case.model_copy(deep=True)
+        unmapped.execution_spec.binding_contract = None
+        unmapped.restoration.confirmations.pop()
+        unmapped.restore_steps.pop()
+        assert pipeline._structured_restoration_errors(unmapped) == []
+        # Only the full controller snapshot comparison can check a field without an ER reader.
+        plan.actions = [a for a in plan.actions if a.action_type != "RESTORE_OBSERVED_CONTROLLER"]
+        assert any("공통 관제점 복원" in e for e in pipeline._structured_restore_plan_coverage(case, plan)[1])
+
+
+def test_precondition_indexes_keep_historical_digests_and_strict_schema():
+    from openai.lib._pydantic import to_strict_json_schema
+    plain = pipeline.RestoreConfirmation(source_text="확인", result_ids=["ER-001"])
+    assert "precondition_indexes" not in plain.model_dump(mode="json")
+    linked = pipeline.RestoreConfirmation(source_text="확인", precondition_indexes=[2])
+    assert linked.model_dump(mode="json")["precondition_indexes"] == [2]
+    schema = to_strict_json_schema(Agent2TestDesign)["$defs"]["RestoreConfirmation"]
+    assert "precondition_indexes" in schema["required"]
 
 
 def test_structured_restoration_id_normalization_keeps_local_references():
