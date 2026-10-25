@@ -20,7 +20,7 @@ from qa_pipeline_contracts import (
     QA_EXECUTION_CONTRACT, QA_REVIEW_RESPONSIBILITIES, QA_TASK_BOUNDARIES,
     QA_PRODUCT_VERDICT_CONTRACT, QA_EXPECTATION_SCOPE_GUIDANCE, QA_DESIGN_REVIEW_GUIDANCE,
     QA_HUMAN_JUDGMENT_EXAMPLES, QA_CONTROLLER_BASELINE_GUIDANCE, QA_RANGE_CHANGE_RULES,
-    QA_CONFIRMED_RULES, QA_REVIEW_SEVERITY_GUIDANCE,
+    QA_CONFIRMED_RULES, QA_REVIEW_SEVERITY_GUIDANCE, QA_LANGUAGE_RULE, foreign_script_texts,
 )
 from qa_pipeline_agent1 import _response_usage_summary
 
@@ -597,7 +597,10 @@ def evaluate_grounding_review(payload, review):
         invalid_review.append("검토 대상 누락·중복 또는 ID 불일치")
     kinds = {i["item_id"]: i["kind"] for i in payload["items"]}
     host_ids = {"TASK_BOUNDARIES", "EXECUTION_CONTRACT", "REVIEW_RESPONSIBILITIES"}
+    language = []
     for result in review.items:
+        if foreign_script_texts({"reason": result.reason}, list(sources.values())):
+            language.append(result.item_id)
         for citation in result.citations:
             if citation.source_id not in sources or citation.quote not in sources[citation.source_id]:
                 # Only host-authored contract documents share this authority.
@@ -637,6 +640,9 @@ def evaluate_grounding_review(payload, review):
         "전체 항목의 모델 근거 검토·인용 존재·연결 검사를 통과했습니다. 의미 정확성의 보장은 아닙니다.")
     if warnings:
         message += " 경고(진행, 사람 확인 권장): " + "; ".join(warnings)
+    if language:
+        # 2026-10-25: reported only on a violation, so saved reviews recompute the same message.
+        message += " 검토 이유에 한자·일본 문자(사람 확인 권장): " + ", ".join(language)
     if resolved_citations:
         message += " 계약 인용 위치 보정(원본 응답 보존): " + "; ".join(resolved_citations)
     return CheckResult(rule_id=f"{stage}-GROUNDING", status=status, message=message)
@@ -684,6 +690,8 @@ class OpenAIGroundingReviewer:
             instructions = REVIEW_INSTRUCTIONS + "\n" + QA_REVIEW_SEVERITY_GUIDANCE
         else:
             instructions = REVIEW_INSTRUCTIONS
+        # 2026-10-25: review reasons reach the human review document as warnings.
+        instructions += "\n" + QA_LANGUAGE_RULE
         if indexed:
             instructions = _indexed_review_instructions(instructions)
         response = self.client.responses.parse(model=self.model, reasoning={"effort": "medium"},

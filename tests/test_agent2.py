@@ -2192,3 +2192,6 @@ def test_language_check_allows_korean_separators_and_names_the_offending_text():
     found = foreign_script_texts({"a": "가" * 50 + " 冷房 확인"})
     assert len(found) == 1 and "冷房" in found[0]
     assert foreign_script_texts({"a": "ｶﾀｶﾅ"}) and foreign_script_texts({"a": "々"})
+    # A whole quoted word passes; one character cut out of it does not.
+    assert foreign_script_texts({"a": "冷房 확인"}, ["요청: 冷房 설정"]) == []
+    assert foreign_script_texts({"a": "冷 확인"}, ["요청: 冷房 설정"])

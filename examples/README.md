@@ -11,7 +11,7 @@
 | [MED 요청](change_request.success-medium-fan.json) | 과거 중풍 변경·기존 강풍 유지 입력. 관련 공식 TC-V2-002는 이미 등록됨 |
 | [난방 범위 요청](change_request.heat-range-narrowing.json) | 2026-10-15 추가. 대표 온도 요청·참고 사례 R01~R08과 다른 모드·양쪽 경계 변경. **미실행**, 제품 미변경이라 실행하면 경계 시험은 불일치 후보가 예상됨 |
 | [AUTO 풍량 표시 요청](change_request.auto-fan-label.json) | 2026-10-15 추가. HIGH·MED와 다른 값의 표시 라벨 변경. **미실행** |
-| [대표 모드 전환 요청](change_request.representative-mode.json) | 2026-10-10 선정 대표 요청 5개 중 2번(냉방 26°C → 제습 → 냉방, 온도 입력 비활성·`---`·내부 26 유지·복귀 후 재활성). 원문 `runs/manual_checks/representative-ai-20261010/requests/02-mode.json`과 해시 동일(2026-10-17 추가) |
+| [대표 모드 전환 요청](change_request.representative-mode.json) | 2026-10-10 선정 대표 요청 5개 중 2번(냉방 26°C → 제습 → 냉방, 온도 입력 비활성·`---`·내부 26 유지·복귀 후 재활성). 원문(로컬 실행 기록, Git 제외)과 해시 동일(2026-10-17 추가) |
 | [대표 전원 요청](change_request.representative-power.json) · [대표 풍량 요청](change_request.representative-fan.json) · [대표 잠금 요청](change_request.representative-lock.json) | 2026-10-18 추가. 대표 요청 5개 중 전원 정지·풍량 강풍·잠금 정책 미정(잠금은 질문을 남기고 멈추는 것이 정상). 원문과 내용 동일 |
 | [대표 온도 요청](change_request.representative-temperature.json) | 대표 요청 5개 중 온도 범위 변경(냉방 20~30°C). 2026-10-23 H-6으로 난방 시험을 '16°C 적용 1개'로 변경해 그 전 실행과 요청서가 다름 |
 | [전원 정지 평가 요청](change_request.power-stop-evaluation.json) | 2026-10-05 평가용 전원 운전→정지 전환 요청. 제품 기준 변경이 아님 |

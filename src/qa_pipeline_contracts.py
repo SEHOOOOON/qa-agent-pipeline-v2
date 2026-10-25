@@ -917,7 +917,13 @@ def foreign_script_texts(value, sources=()) -> list[str]:
 
     Walks every string of a model dump, so newly added fields are covered too.
     """
-    corpus = "\n".join(sources)
+    # A quote must match a source run exactly or be a 2+ character part of one; a single
+    # character cut out of a quoted word (冷 from 冷房) is not a quote (2026-10-25).
+    source_runs = _FOREIGN_SCRIPT_RUN.findall("\n".join(sources))
+    exact = set(source_runs)
+
+    def quoted(run):
+        return run in exact or (len(run) >= 2 and any(run in source for source in source_runs))
     found = []
 
     def walk(item, path):
@@ -929,7 +935,7 @@ def foreign_script_texts(value, sources=()) -> list[str]:
                 walk(child, f"{path}[{index}]")
         elif isinstance(item, str):
             # Show the offending characters; a 40-character prefix could hide them.
-            unquoted = [run for run in _FOREIGN_SCRIPT_RUN.findall(item) if run not in corpus]
+            unquoted = [run for run in _FOREIGN_SCRIPT_RUN.findall(item) if not quoted(run)]
             if unquoted:
                 found.append(f"{path}: '{' '.join(unquoted)[:30]}' (문장 '{item[:30]}')")
     walk(value, "")

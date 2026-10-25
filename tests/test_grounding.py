@@ -1188,7 +1188,7 @@ def test_real_reviewer_adapter_with_fake_sdk(result_kind):
             verdict="SUPPORTED", single_fact=True, source_ids=["NOT-PROVIDED"], reason="test")]))
     assert calls[0]["prompt_cache_key"] == "qa-v2-grounding-1-17"
     instructions = calls[0]["input"][0]["content"]
-    assert instructions == grounding.REVIEW_INSTRUCTIONS
+    assert instructions == grounding.REVIEW_INSTRUCTIONS + "\n" + grounding.QA_LANGUAGE_RULE  # 2026-10-25
     assert "task_boundary_contract=1.1/1.2/1.3에서는 UNSUPPORTED도" in instructions
     assert "같은 관찰 위치에서 그 실제 기록값과 비교" in instructions
     assert "source_documents 원문을 인용" in instructions
@@ -1561,3 +1561,15 @@ def test_review_severity_stops_only_critical_findings(reason, status):
     assert result.status == status
     if status == CheckStatus.PASS:
         assert "경고(진행" in result.message and reason in result.message
+
+
+def test_review_reason_in_chinese_or_japanese_is_shown_to_a_person():
+    """2026-10-25: review reasons reach the human review document; the verdict is unchanged."""
+    payload = focused_agent2_payload()
+    record = fake_grounding_record(payload)
+    assert "검토 이유에 한자" not in grounding.check_review_record(payload, record).message
+    item = record["review"]["items"][0]
+    item.update(reason="条件与设计一致")
+    checked = grounding.check_review_record(payload, record)
+    assert checked.status.value == "PASS" and "검토 이유에 한자" in checked.message and item["item_id"] in checked.message
+    assert "작성 언어" in grounding.QA_LANGUAGE_RULE

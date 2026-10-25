@@ -171,6 +171,8 @@ TC 문장 언어 검사(2026-10-23): `tests/test_agent2.py`의 `test_tc_text_mus
 
 변경 전체 점검 반영(2026-10-25): `test_language_check_allows_korean_separators_and_names_the_offending_text`(한국어 구분자 `・`·`ー` 허용, 위반 메시지에 문제 글자 표시, 반각 가나·`々` 검출), `test_live_restoration_layout_merges_split_preparation_checks`(같은 문장 묶기에서 precondition_indexes 합치기). CP1-LANG 시험 `test_agent1_analysis_must_be_korean`은 `tests/test_srs_agent1.py`로 옮김.
 
+남은 항목 처리(2026-10-25): `test_review_reason_in_chinese_or_japanese_is_shown_to_a_person`(근거 검토 이유의 한자·일본 문자는 판정을 바꾸지 않고 메시지에 표시), 구분자 시험에 '원문 단어 전체 인용은 통과, 한 글자 떼어 쓰기는 실패' 추가. 근거 검토 어댑터 시험은 지침 끝에 작성 언어 규칙이 붙는 것으로 기대값 변경.
+
 준비 관제점 복원 확인(2026-10-24, P2 IMP-015): `tests/test_agent2.py`의 `test_preparation_only_field_needs_its_own_restore_check`가 온도 TC에서 준비로 바꾼 모드(시험 ER 없음)의 복원 확인 누락·중복·ER 대상 중복 연결·빈 확인을 CP2-023 실패로, 준비 확인 번호로 연결하면 통과로 확인한다. 공통 관제점 복원(전체 비교)이 없으면 Agent 3 대조에서 실패, controller-map이 아닌 예전 형식에는 적용하지 않음. 새 형식 고정 자료(`mapped_tc_fixture`)도 준비에서 바꾼 관제점의 복원 확인을 포함하도록 보완. `test_precondition_indexes_keep_historical_digests_and_strict_schema`는 빈 목록이면 저장 형식(해시)이 그대로인지 확인한다. 저장된 실제 설계 17개 재검사: 전원·풍량·모드 9개 통과, 온도 8개 모두 모드 누락으로 실패(사람·P2 판단과 일치).
 
 기존 TC 고쳐 쓰기 검사(2026-10-18): `tests/test_agent2.py`의 `test_empty_revision_list_keeps_historical_design_serialization`은 `기존_TC_수정`이 비어 있으면 저장 형태에 나타나지 않는지, `test_existing_tc_revision_is_checked_against_catalog_and_candidates`는 목록에 없는 TC·없는 후보·그대로 재사용한 TC를 CP2-TC-REVISION FAIL로 보고하는지, `test_revision_rule_reaches_the_writer_but_not_the_shared_review_rules`는 고쳐 쓰기 지침이 작성 AI에만 들어가는지 확인한다. `tests/test_agent4_reporting.py`의 `test_human_review_row_names_the_existing_tc_a_candidate_revises`는 사람 검토서 출처 표시를 확인한다. AI가 실제로 고쳐 쓰기를 선택하는지는 측정하지 않는다.
