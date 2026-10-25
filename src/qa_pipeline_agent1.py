@@ -68,6 +68,7 @@ AGENT1_SYSTEM_INSTRUCTIONS += """
 # 2026-10-20: the Agent 1 impact analysis once wrote "panel re-display is not checked
 # separately" for a fan request, contradicting confirmed rule F-1 that Agent 2 follows.
 AGENT1_SYSTEM_INSTRUCTIONS += "\n" + QA_AGENT1_RULES_NOTE + "\n" + QA_CONFIRMED_RULES
+AGENT1_SYSTEM_INSTRUCTIONS += "\n" + QA_LANGUAGE_RULE
 
 
 class Agent1Error(RuntimeError):
@@ -739,6 +740,14 @@ def evaluate_checkpoint1(
     else:
         add("CP1-011", CheckStatus.PASS,
             "범위 근거의 출처·연결을 확인했습니다. 범위의 의미는 별도 근거 검토에서 확인합니다.")
+
+    # 2026-10-25: user questions and analysis text are read by people. Reported only on a
+    # violation, so saved Korean analyses recompute the same checkpoint.
+    foreign = foreign_script_texts(
+        analysis.model_dump(mode="json"),
+        [request.model_dump_json(), *(r.model_dump_json() for r in requirements.values())])
+    if foreign:
+        add("CP1-LANG", CheckStatus.FAIL, "한국어로 다시 작성해야 하는 분석 문장(한자·일본 문자 포함): " + "; ".join(foreign[:8]))
 
     status = _aggregate_check_status(check.status for check in checks)
     if status in {CheckStatus.FAIL, CheckStatus.ERROR}:

@@ -77,15 +77,9 @@ python -m pytest -q
 | [제품 SRS](docs/01_PRODUCT_SRS.md) · [시험 목록](docs/07_TEST_CATALOG.md) | 제품 기준, 자동 시험 설명 |
 | [의사결정 기록](DECISION_LOG.md) · [보관 자료](archive/README.md) | 과거 결정과 이력 |
 
-## 최근 결과 (2026-10-23~24)
+## 최근 결과
 
-| 확인 | 결과 |
-|---|---|
-| 대표 요청 5개 전체 실행 1회씩 | 전원·풍량·모드·온도 완주, 잠금은 정책이 정해지지 않아 질문을 남기고 멈춤(의도한 동작) |
-| 시험 설계 반복(시나리오별 3회) | 전원·풍량·모드는 3번 모두 같은 정답 구조. 온도는 필수 시험 5개를 8번 모두 채움 |
-| 평가에서 찾아 고친 문제 | 준비 단계에서 바꾼 모드의 복원 확인이 TC에서 빠짐(4번 중 4번) → 원인인 복원 계약을 고쳐 3번 중 3번 포함, 실제 실행 복원 정상 |
-
-표본이 작아(시나리오당 1~3회) 반복 안정성을 단정하지 않습니다. 평가 방법과 개선 기록은 평가 저장소의 [개선 이력](https://github.com/SEHOOOOON/agent-evaluation-framework/blob/claude/fixes-20261015/improvements/README.md)에 있습니다.
+최신 실행 결과와 수치는 [인계 문서 요약](PROJECT_HANDOFF.md)에 있습니다(문서 규칙상 수치는 인계 문서에만 둠). 평가 방법과 평가에서 찾아 고친 문제는 평가 저장소의 [개선 이력](https://github.com/SEHOOOOON/agent-evaluation-framework/blob/claude/fixes-20261015/improvements/README.md)에 있습니다.
 
 ## 구현 범위
 

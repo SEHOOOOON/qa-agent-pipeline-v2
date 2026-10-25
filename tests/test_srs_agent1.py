@@ -1201,3 +1201,16 @@ def test_agent1_sees_confirmed_rules_with_a_guard_against_contradicting_them():
     assert "제외하지 않습니다" in QA_AGENT1_RULES_NOTE and "confirmed_conditions를 새로 만들지 않습니다" in QA_AGENT1_RULES_NOTE
     fan_rule = next(line for line in QA_CONFIRMED_RULES.splitlines() if line.startswith("F-1"))
     assert "세 곳" in fan_rule
+
+
+def test_agent1_analysis_must_be_korean():
+    """2026-10-25: CP1-LANG. User questions and analysis are read by people."""
+    request, analysis = cp1_request(), cp1_valid_analysis()
+    clean = pipeline.evaluate_checkpoint1(request, analysis, cp1_requirements())
+    assert not [c for c in clean.checks if c.rule_id == "CP1-LANG"]
+    analysis.change_summary = "AUTO 模式 하한을 18°C로 변경한다."
+    result = pipeline.evaluate_checkpoint1(request, analysis, cp1_requirements())
+    lang = [c for c in result.checks if c.rule_id == "CP1-LANG"]
+    assert lang and lang[0].status == CheckStatus.FAIL and result.status == CheckStatus.FAIL
+    assert "change_summary" in lang[0].message
+    assert "작성 언어" in pipeline.AGENT1_SYSTEM_INSTRUCTIONS and "작성 언어" in pipeline.AGENT2_SYSTEM_INSTRUCTIONS

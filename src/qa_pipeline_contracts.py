@@ -898,6 +898,44 @@ QA_TC_REVISION_RULE = """기존 TC 고쳐 쓰기 (H-3, 2026-10-17 사람 확정)
 대상·목적·확인 범위가 실제로 다른 기존 TC는 고쳐 쓰기 대상이 아니며 coverage_notes에 미선택 이유만 남깁니다. 기존 TC 교체는 사람이 승인해야 하며 자동으로 대체됐다고 쓰지 않습니다.
 """
 
+# 2026-10-25 (P2 IMP-018): the instructions never asked for Korean. A Chinese TC title,
+# a Japanese independence_reason and a Chinese judge reason appeared in saved runs.
+QA_LANGUAGE_RULE = """작성 언어 (2026-10-25):
+사람이 읽는 모든 문장(분석·질문·TC 제목·준비·절차·기대결과·복원·이유·설명·SRS 개정안)은 한국어로 씁니다. 중국어·일본어·한자를 쓰지 않습니다.
+제품 코드값(COOL·HIGH·setTemp 등)·ID·단위는 그대로 둘 수 있습니다. 요청·SRS·기존 TC 원문을 인용할 때는 원문 그대로 둡니다.
+"""
+
+# Kana, CJK ideographs (incl. compatibility, iteration mark, half-width kana). U+30FB and
+# U+30FC are excluded: Korean text uses them as separators (2026-10-25 review). Same range as
+# the P2 judge check.
+_FOREIGN_SCRIPT_RUN = re.compile(
+    r"[々぀-ヺヽ-ヿ㐀-䶿一-鿿豈-﫿ｦ-ﾟ]+")
+
+
+def foreign_script_texts(value, sources=()) -> list[str]:
+    """Paths of strings holding Han/Kana that are not quoted from the given source texts.
+
+    Walks every string of a model dump, so newly added fields are covered too.
+    """
+    corpus = "\n".join(sources)
+    found = []
+
+    def walk(item, path):
+        if isinstance(item, dict):
+            for key, child in item.items():
+                walk(child, f"{path}.{key}" if path else str(key))
+        elif isinstance(item, (list, tuple)):
+            for index, child in enumerate(item):
+                walk(child, f"{path}[{index}]")
+        elif isinstance(item, str):
+            # Show the offending characters; a 40-character prefix could hide them.
+            unquoted = [run for run in _FOREIGN_SCRIPT_RUN.findall(item) if run not in corpus]
+            if unquoted:
+                found.append(f"{path}: '{' '.join(unquoted)[:30]}' (문장 '{item[:30]}')")
+    walk(value, "")
+    return found
+
+
 # 2026-10-17 사용자 결정: 치명만 멈추고 나머지는 기록 후 진행한다(저장 사례 8건 판정).
 QA_REVIEW_SEVERITY_GUIDANCE = """반려 등급 (review_severity_contract 1.0):
 UNSUPPORTED 판정의 reason은 반드시 [치명] 또는 [경고]로 시작합니다. 표시가 없으면 [치명]으로 처리됩니다.

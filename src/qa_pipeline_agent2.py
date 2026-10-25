@@ -82,7 +82,7 @@ AGENT2_SYSTEM_INSTRUCTIONS = QA_EXPECTATION_SCOPE_GUIDANCE + QA_DESIGN_REVIEW_GU
 
 [복원]
 29. 새 TC는 restoration을 작성합니다(READ_ONLY는 operation_steps·confirmations가 빈 목록이고 verify_when=AFTER_RESTORE). 중앙 관제 전원·모드·풍량·온도·잠금은 같은 순서를 따릅니다: 준비 전 관련 화면·내부값 기록 → 명시된 사전조건 준비·확인 → 시험 → 준비와 시험으로 바뀐 관제점을 준비 전 관찰 상태로 복원·확인. 준비 도중 실패해도, 차단 시험이어도 준비로 바꾼 값은 되돌립니다. 이 공통 조작은 Agent 3의 RESTORE_OBSERVED_CONTROLLER로 구현하며 새 필드나 기능별 예외를 만들지 않습니다.
-30. restoration.operation_steps에는 복원 조작 문장을, confirmations에는 사람이 읽는 확인 문장을 적고, operation_steps 다음 각 confirmation.source_text를 이어 붙인 결과가 restore_steps와 순서·내용 모두 같아야 합니다. NOTIFICATION이 아닌 ER마다 result_id를 confirmations 전체에서 정확히 한 번 연결하고, 각 comparison은 확인 문장 전체를 source_excerpt로 복사하며 basis=OBSERVED_BASELINE입니다. 같은 대상·기준을 확인하는 경우에만 하나의 confirmation에 여러 result_id를 묶습니다. 준비에서 확인한 관제점 중 시험 ER이 없는 것(예: 온도 TC의 준비에서 바꾼 모드 internal.mode)은 precondition_verifications의 번호(0부터)를 precondition_indexes에 넣은 별도 confirmation으로 준비 전 기록값과 비교하는 확인 문장을 씁니다(result_ids·comparisons는 빈 목록). ER이 있는 대상은 precondition_indexes로 중복 연결하지 않습니다.
+30. restoration.operation_steps에는 복원 조작 문장을, confirmations에는 사람이 읽는 확인 문장을 적고, operation_steps 다음 각 confirmation.source_text를 이어 붙인 결과가 restore_steps와 순서·내용 모두 같아야 합니다. NOTIFICATION이 아닌 ER마다 result_id를 confirmations 전체에서 정확히 한 번 연결하고, 각 comparison은 확인 문장 전체를 source_excerpt로 복사하며 basis=OBSERVED_BASELINE입니다. 같은 대상·기준을 확인하는 경우에만 하나의 confirmation에 여러 result_id를 묶습니다. execution_spec(controller-map-1.0)이 있는 TC에서 준비에서 확인한 관제점 중 시험 ER이 없는 것(예: 온도 TC의 준비에서 바꾼 모드 internal.mode)은 precondition_verifications의 번호(0부터)를 precondition_indexes에 넣은 별도 confirmation으로 준비 전 기록값과 비교하는 확인 문장을 씁니다(result_ids·comparisons는 빈 목록). ER이 있는 대상은 precondition_indexes로 중복 연결하지 않습니다.
 31. 복원 확인은 기존 ER의 같은 관찰 위치(화면·내부값 각각)를 준비 전 실제 기록값과 비교합니다. 내부 코드와 화면 표시가 같다고 가정하지 않고, 임의 기본값·고정 초기값으로 초기화하거나 initial_mode·initial_temperature_c를 복원 목표로 쓰지 않습니다(그것은 준비 완료 상태입니다). 원문에 명시된 준비값은 사전조건 준비·확인에만 사용하며 복원 목표와 혼동하지 않습니다. 확인 문장은 대상과 비교 방법을 한 구절에 완결하고 '복원한다', '결과를 확인한다'로 끝내지 않습니다. 확인 문장에 추가 조작이나 제품 기대결과를 넣지 않으며, 복원 실패를 제품 기대 결과로 추가하지 않습니다. 다른 기능·다중 장비의 준비와 복원은 추정하지 않습니다.
 
 [SRS 개정안]
@@ -107,7 +107,7 @@ restore_steps(= restoration 조작 + 확인):
 - 대상 장비 카드의 풍량 표시를 준비 전 관찰값과 비교한다. (ER-001, OBSERVED_BASELINE)
 - 대상 장비의 내부 fanSpeed를 준비 전 관찰값과 비교한다. (ER-002, OBSERVED_BASELINE)
 대상 선택 성공·알림·선택 색상·LOW의 한글 표시를 새 expected_results로 만들지 않습니다. HIGH 유지 조건을 검증하는 승인 TC가 있다면 관련_기존_TC로 재사용합니다.
-예시 B: 입력이 '초기 설정 온도 24°C, 30°C 적용 후 카드·내부 설정 온도 30°C'를 요구하면 대상 선택 → 설정 온도를 30°C로 조절 → 적용으로 작성합니다. 입력창이 명시된 경우만 '30°C를 입력한다', 1회당 1°C인 증가 버튼과 현재 24°C가 근거로 제공된 경우만 '증가 버튼을 6회 누른다'고 구체화합니다. 조작 수단이 없는 입력에서 버튼·횟수를 추정하지 않습니다. 적용 직후 카드 설정 온도와 내부 설정 온도를 각각 확인하고, 복원은 예시 A와 같이 준비 전 관찰값과 비교합니다. 예시 A의 풍량·MED·LOW·문구를 복사하지 않습니다.
+예시 B: 입력이 '초기 설정 온도 24°C, 30°C 적용 후 카드·내부 설정 온도 30°C'를 요구하면 대상 선택 → 설정 온도를 30°C로 조절 → 적용으로 작성합니다. 입력창이 명시된 경우만 '30°C를 입력한다', 1회당 1°C인 증가 버튼과 현재 24°C가 근거로 제공된 경우만 '증가 버튼을 6회 누른다'고 구체화합니다. 조작 수단이 없는 입력에서 버튼·횟수를 추정하지 않습니다. 적용 직후 카드 설정 온도와 내부 설정 온도를 각각 확인하고, 복원은 예시 A와 같이 준비 전 관찰값과 비교합니다. 준비에서 모드를 바꿨다면 시험 결과 항목이 없는 모드도 복원 확인 문장을 쓰고 precondition_indexes로 그 준비 확인에 연결합니다. 예시 A의 풍량·MED·LOW·문구를 복사하지 않습니다.
 예시 C: 입력이 현재 상태를 조회하는 읽기 전용 시험이면 조회 단계와 그 단계의 기대결과만 작성합니다. 대상 선택이 실제로 필요한 경우만 기록하며 값 입력·적용·복원을 억지로 추가하지 않습니다.
 세 예시는 상세한 작성 방식만 보여줍니다. 값·화면명·필드명·조건 ID·초기 상태는 반드시 현재 입력에서 가져오며, 예시를 근거로 제품 판정이나 시험 범위를 추가하지 않습니다.
 """.strip()
@@ -119,6 +119,7 @@ AGENT2_SYSTEM_INSTRUCTIONS += "\n" + QA_TASK_BOUNDARIES
 AGENT2_SYSTEM_INSTRUCTIONS += "\n" + QA_RANGE_CHANGE_RULES
 AGENT2_SYSTEM_INSTRUCTIONS += "\n" + QA_CONFIRMED_RULES
 AGENT2_SYSTEM_INSTRUCTIONS += "\n" + QA_TC_REVISION_RULE
+AGENT2_SYSTEM_INSTRUCTIONS += "\n" + QA_LANGUAGE_RULE
 
 
 class Agent2Error(RuntimeError):
@@ -625,18 +626,6 @@ def _tc_restore_basis_errors(tc: ProductTestCaseCandidate) -> list[str]:
                     errors.append(f"{tc.tc_id}/{result.result_id}: 내부 코드를 화면 초기 표시로 가정하지 마세요. "
                                   "화면 표시 근거가 없으면 이 대상의 실행 전 관찰 상태와 비교한다고 명시하세요.")
     return errors
-
-
-_FOREIGN_SCRIPT = re.compile(r"[぀-ヿ㐀-䶿一-鿿]")
-
-
-def _human_tc_texts(tc):
-    yield "제목", tc.title
-    for label, items in (("준비", tc.preconditions), ("절차", tc.steps), ("복원", tc.restore_steps)):
-        for text in items:
-            yield label, text
-    for result in tc.expected_results:
-        yield "기대결과", result.statement
 
 
 def evaluate_checkpoint2(
@@ -1380,11 +1369,16 @@ def evaluate_checkpoint2(
     # and neither review AI nor judge flagged it. People read these TCs, so reject
     # Han ideographs and Japanese kana in the human-facing TC text. Reported only on a
     # violation (like CP2-TC-REVISION) so saved Korean designs recompute the same checkpoint.
-    errors = [f"{tc.tc_id}: {label} '{text[:40]}'" for tc in design.test_cases
-              for label, text in _human_tc_texts(tc) if _FOREIGN_SCRIPT.search(text)]
+    # 2026-10-25: widened from five TC text kinds to every design string (a Japanese
+    # independence_reason passed the narrower check). Quotes of request/SRS/existing TC
+    # text are allowed.
+    errors = foreign_script_texts(
+        design.model_dump(mode="json"),
+        [request.model_dump_json(), *(r.model_dump_json() for r in requirements.values()),
+         *(repr(item) for item in existing_catalog)])
     if errors:
         add("CP2-LANG", CheckStatus.FAIL,
-            "한국어로 다시 작성해야 하는 TC 문장(한자·일본 문자 포함): " + "; ".join(errors))
+            "한국어로 다시 작성해야 하는 설계 문장(한자·일본 문자 포함): " + "; ".join(errors[:8]))
 
     if design.existing_tc_revisions:
         # H-3 (2026-10-17). Added only when a revision is declared, so earlier

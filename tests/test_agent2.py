@@ -2139,4 +2139,56 @@ def test_tc_text_must_be_korean(field, text, ok):
         assert not lang
     else:
         assert lang[0].status == CheckStatus.FAIL and result.status == CheckStatus.FAIL
-        assert tc.tc_id in lang[0].message and "한국어로 다시 작성" in lang[0].message
+        assert f"test_cases[0].{field}" in lang[0].message and "한국어로 다시 작성" in lang[0].message
+
+
+@pytest.mark.parametrize("where,ok", [
+    ("independence_reason", False),   # 2026-10-24 live temperature run: Japanese passed the old check
+    ("coverage_notes", False),
+    ("srs_revision", False),          # goes into the official SRS after human approval
+    ("quoted_from_request", True),    # Han copied from the request is a quote, not a language slip
+])
+def test_language_check_covers_every_design_sentence(where, ok):
+    """2026-10-25: CP2-LANG walks every design string, not five TC text kinds."""
+    request, design = cp1_request(), cp2_valid_design()
+    tc = design.test_cases[0]
+    if where == "independence_reason":
+        tc.independent_execution, tc.independence_reason = True, "この候補内で対象選択을 수행한다."
+    elif where == "coverage_notes":
+        design.coverage_notes = ["范围外 확인은 하지 않는다."]
+    elif where == "srs_revision":
+        design.srs_revision_proposals[0].proposed_acceptance_criteria = "冷房 20~30°C 요청을 허용한다."
+    else:
+        request = request.model_copy(update={"description": request.description + " (冷房)"})
+        design.coverage_notes = ["요청의 (冷房) 표기를 그대로 인용한다."]
+    result = evaluate_checkpoint2(request, cp2_analysis(), design, cp2_requirements())
+    lang = [c for c in result.checks if c.rule_id == "CP2-LANG"]
+    assert (not lang) is ok, [c.message for c in lang]
+
+
+def test_live_restoration_layout_merges_split_preparation_checks():
+    """The normalizer groups confirmations with the same sentence; precondition_indexes must merge too."""
+    from qa_pipeline_agent2 import _normalize_agent2_live_design
+    case, _ = mapped_tc_fixture("setTemp", 27, 21, blocked=True)
+    prep = next(c for c in case.restoration.confirmations if c.precondition_indexes)
+    assert len(prep.precondition_indexes) == 2
+    first, second = prep.precondition_indexes
+    prep.precondition_indexes = [first]
+    case.restoration.confirmations.append(prep.model_copy(update={"precondition_indexes": [second]}, deep=True))
+    case.restore_steps = case.restoration.operation_steps + [c.source_text for c in case.restoration.confirmations]
+    assert pipeline._structured_restoration_errors(case)  # duplicate sentence before grouping
+    design = cp2_valid_design().model_copy(update={"test_cases": [case]})
+    normalized, changes = _normalize_agent2_live_design(design)
+    after = normalized.test_cases[0]
+    merged = [c for c in after.restoration.confirmations if c.precondition_indexes]
+    assert changes and len(merged) == 1 and sorted(merged[0].precondition_indexes) == [first, second]
+    assert pipeline._structured_restoration_errors(after) == []
+
+
+def test_language_check_allows_korean_separators_and_names_the_offending_text():
+    """2026-10-25 review: U+30FB/U+30FC are separators in Korean text; show the bad characters."""
+    from qa_pipeline_contracts import foreign_script_texts
+    assert foreign_script_texts({"a": "패널・카드 확인", "b": "길이ー표시"}) == []
+    found = foreign_script_texts({"a": "가" * 50 + " 冷房 확인"})
+    assert len(found) == 1 and "冷房" in found[0]
+    assert foreign_script_texts({"a": "ｶﾀｶﾅ"}) and foreign_script_texts({"a": "々"})
