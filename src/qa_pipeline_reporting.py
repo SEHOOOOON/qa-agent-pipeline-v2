@@ -536,6 +536,7 @@ def _human_review_observation(
 
 
 REVIEW_WARNING_MARKER = " 경고(진행, 사람 확인 권장): "
+REVIEW_LANGUAGE_MARKER = " 검토 이유에 한자·일본 문자(사람 확인 권장): "
 
 
 def _review_warning_lines(run_dir: Path) -> list[str]:
@@ -548,9 +549,16 @@ def _review_warning_lines(run_dir: Path) -> list[str]:
             continue
         for check in checks:
             message = check.get("message") or "" if isinstance(check, dict) else ""
-            if REVIEW_WARNING_MARKER not in message:
+            # 2026-10-25 review: CP1-011 starts its message with the marker (no leading space),
+            # so match the marker text itself. Review-reason language notes are shown as well.
+            marker = REVIEW_WARNING_MARKER.strip() + " "
+            language = message.split(REVIEW_LANGUAGE_MARKER, 1)
+            if len(language) == 2:
+                rows.append((stage, "검토 이유에 한자·일본 문자: " + language[1].strip()))
+                message = language[0]
+            if marker not in message:
                 continue
-            tail = message.split(REVIEW_WARNING_MARKER, 1)[1].split(" 계약 인용 위치 보정(원본 응답 보존): ", 1)[0]
+            tail = message.split(marker, 1)[1].split(" 계약 인용 위치 보정(원본 응답 보존): ", 1)[0]
             rows += [(stage, item) for item in re.split(r"; (?=\S+: \[경고\])", tail) if item.strip()]
     lines = ["## 2-1. 검토 AI 경고 (진행했지만 사람 확인 권장)", ""]
     if not rows:

@@ -2195,3 +2195,45 @@ def test_language_check_allows_korean_separators_and_names_the_offending_text():
     # A whole quoted word passes; one character cut out of it does not.
     assert foreign_script_texts({"a": "冷房 확인"}, ["요청: 冷房 설정"]) == []
     assert foreign_script_texts({"a": "冷 확인"}, ["요청: 冷房 설정"])
+
+def _blocked_then_increase_design():
+    """2026-10-25 review: 18 set in preparation, decrease to 17 is refused (kept 18), then increase -> 19."""
+    def op(i, phase, target, value=None):
+        return {"action_id": f"ACT-{i:03}", "phase": phase, "target": target, "value": value}
+    def check(rid, after, location, value):
+        return {"result_id": rid, "after_action_id": after, "target": f"{location}.setTemp", "expected_number": value}
+    blocked = {"tc_id": "TC-CAND-001", "execution_spec": {
+        "operations": [op(1, "PRECONDITION", "mode.cool"), op(2, "PRECONDITION", "temperature.set", 18),
+                       op(3, "TEST", "temperature.decrease"), op(4, "TEST", "command.apply"),
+                       op(5, "TEST", "temperature.increase"), op(6, "TEST", "command.apply")],
+        "verifications": [check("ER-001", "ACT-004", "internal", 18), check("ER-002", "ACT-006", "internal", 19)]}}
+    applied = {"tc_id": "TC-CAND-002", "execution_spec": {
+        "operations": [op(1, "PRECONDITION", "mode.cool"), op(2, "TEST", "temperature.set", 18), op(3, "TEST", "command.apply")],
+        "verifications": [check("ER-003", "ACT-003", loc, 18) for loc in ("internal", "panel", "card")]}}
+    return {"test_cases": [blocked, applied]}
+
+
+def test_range_checklist_starts_after_a_blocked_attempt_from_the_kept_value():
+    from qa_pipeline_range_checklist import _probes, compare
+    probes = _probes(_blocked_then_increase_design())
+    assert [(p["tc_id"], p["attempted"]) for p in probes] == [
+        ("TC-CAND-001", 17), ("TC-CAND-001", 19), ("TC-CAND-002", 18)]
+    # The applied 18 in the second TC is not shadowed by a mis-tracked first TC.
+    row = {"id": "T-1:APPLY:COOL:18", "kind": "APPLY", "mode": "COOL", "attempted": 18, "expected": 18}
+    assert compare([row], _blocked_then_increase_design()) == []
+
+
+
+def test_range_checklist_warns_about_a_wrong_tc_when_another_tc_meets_the_row():
+    from qa_pipeline_range_checklist import compare
+    design = _blocked_then_increase_design()
+    import copy
+    wrong = copy.deepcopy(design["test_cases"][1])
+    wrong["tc_id"] = "TC-CAND-003"
+    for check in wrong["execution_spec"]["verifications"]:
+        check["expected_number"] = 19
+    design["test_cases"].append(wrong)
+    row = {"id": "T-1:APPLY:COOL:18", "kind": "APPLY", "mode": "COOL", "attempted": 18, "expected": 18}
+    warnings = []
+    assert compare([row], design, warnings) == []
+    assert len(warnings) == 1 and "TC-CAND-003" in warnings[0]

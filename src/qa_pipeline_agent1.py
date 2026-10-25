@@ -711,7 +711,8 @@ def evaluate_checkpoint1(
             scope_errors.append(f"{label}: 요청과 연결된 검사 범위 근거 누락")
             continue
         sources = [conditions_by_id.get(key) for key in proof.request_condition_ids]
-        if (len(set(proof.request_condition_ids)) != len(proof.request_condition_ids)
+        if (not proof.request_condition_ids
+                or len(set(proof.request_condition_ids)) != len(proof.request_condition_ids)
                 or not all(
                     item is not None
                     and item.source_type == ConditionSource.CHANGE_REQUEST

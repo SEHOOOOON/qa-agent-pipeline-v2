@@ -133,14 +133,19 @@ def test_single_requirement_map_schema_cannot_write_reverse_links():
 @pytest.mark.parametrize("mutation", ["missing_link", "srs_only"])
 def test_single_requirement_map_does_not_invent_missing_request_links(mutation):
     from qa_pipeline_contracts import agent1_link_draft, bind_agent1_requirement_links
-    _, analysis, _ = cp1_scope_case(direct=True, requirement_id="REQ-STATE-001")
+    request, analysis, requirements = cp1_scope_case(direct=True, requirement_id="REQ-STATE-001")
     draft = agent1_link_draft(analysis)
     if mutation == "missing_link":
         draft.confirmed_conditions[-1].requirement_ids = [draft.target_requirement_id]
     else:
         draft.confirmed_conditions[-1].source_type = ConditionSource.SRS
-    with pytest.raises(ValidationError):
-        bind_agent1_requirement_links(draft)
+    # 2026-10-25 review: no link is invented, and the empty link is a CP1-011 finding
+    # instead of an exception that skipped the CP1 record and the one rewrite.
+    bound = bind_agent1_requirement_links(draft)
+    effect = next(e for e in bound.requirement_effects if e.requirement_id == "REQ-STATE-001")
+    assert effect.scope_evidence.request_condition_ids == []
+    message = cp1_check(pipeline.evaluate_checkpoint1(request, bound, requirements), "CP1-011").message
+    assert "REQ-STATE-001" in message and "연결되지 않은" in message
 
 
 @pytest.mark.parametrize("mutation", ["unknown_requirement", "forged_source", "no_impact"])
@@ -1214,3 +1219,17 @@ def test_agent1_analysis_must_be_korean():
     assert lang and lang[0].status == CheckStatus.FAIL and result.status == CheckStatus.FAIL
     assert "change_summary" in lang[0].message
     assert "작성 언어" in pipeline.AGENT1_SYSTEM_INSTRUCTIONS and "작성 언어" in pipeline.AGENT2_SYSTEM_INSTRUCTIONS
+
+
+def test_scope_evidence_without_request_link_is_a_cp1_finding_not_a_crash():
+    """2026-10-25 review: an empty derived request_condition_ids raised inside analyze()."""
+    draft_data = cp1_valid_analysis().model_dump(mode="json")
+    effect = next(e for e in draft_data["requirement_effects"] if e["requirement_id"] == "REQ-CONTROL-001")
+    effect.update(relation="VERIFY", scope_evidence={"basis": "CHANGE_DEPENDENCY", "srs_source_text": "적용"})
+    draft = pipeline.Agent1AnalysisDraft.model_validate(draft_data)
+    analysis = pipeline.bind_agent1_requirement_links(draft)   # no ValidationError any more
+    proof = next(e for e in analysis.requirement_effects if e.requirement_id == "REQ-CONTROL-001").scope_evidence
+    assert proof.request_condition_ids == []
+    result = pipeline.evaluate_checkpoint1(cp1_request(), analysis, cp1_requirements())
+    message = cp1_check(result, "CP1-011").message
+    assert "REQ-CONTROL-001" in message and "연결되지 않은" in message

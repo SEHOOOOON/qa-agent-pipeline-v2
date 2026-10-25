@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-VERSION = "range-checklist-1.1"
+VERSION = "range-checklist-1.2"  # 1.2 (2026-10-25): start after a blocked attempt, any correct probe passes
 LOCATIONS = ("panel", "card", "internal")
 MODE_WORDS = {"COOL": ("COOL", "냉방"), "HEAT": ("HEAT", "난방"), "AUTO": ("AUTO", "자동"),
               "DRY": ("DRY", "제습"), "FAN": ("FAN", "송풍")}
@@ -124,6 +124,24 @@ def _expected_temp(verification: dict):
     return location, None
 
 
+def _settled(spec: dict, window: list) -> float | None:
+    """setTemp the TC expects right after the latest TEST attempt (internal value first).
+
+    2026-10-25 review: after a blocked attempt (18 -> 17 refused) the next button press
+    starts from the kept 18, not from the attempted 17.
+    """
+    found = {}
+    for v in spec.get("verifications") or []:
+        if v.get("after_action_id") in window:
+            hit = _expected_temp(v)
+            if hit and hit[1] is not None:
+                found.setdefault(hit[0], hit[1])
+    for location in ("internal", "panel", "card"):
+        if location in found:
+            return found[location]
+    return None
+
+
 def _probes(design: dict) -> list[dict]:
     """TEST-phase temperature attempts per TC, with the setTemp checks bound to them."""
     probes = []
@@ -142,7 +160,8 @@ def _probes(design: dict) -> list[dict]:
             if target == "temperature.set":
                 attempted = _number(op.get("value"))
             elif target in {"temperature.increase", "temperature.decrease"} and temp is not None:
-                attempted = temp + (1 if target.endswith("increase") else -1)
+                start = _settled(spec, current[-1]["window"]) if current else None
+                attempted = (temp if start is None else start) + (1 if target.endswith("increase") else -1)
             if attempted is None:
                 if phase == "TEST" and current:
                     current[-1]["window"].append(op.get("action_id"))
@@ -180,8 +199,12 @@ def _asked(design: dict, mode: str, kept_modes) -> bool:
     return False
 
 
-def compare(rows, design: dict) -> list[dict[str, str]]:
-    """Missing or wrong checklist items; empty means every required item is present."""
+def compare(rows, design: dict, warnings: list | None = None) -> list[dict[str, str]]:
+    """Missing or wrong checklist items; empty means every required item is present.
+
+    ``warnings`` collects wrong expectations in other TCs when one TC already meets the
+    row (2026-10-25: the row passes, but the wrong TC must still reach a person).
+    """
     probes, problems = _probes(design), []
     for row in rows:
         if row["kind"] == "QUESTION":
@@ -192,19 +215,22 @@ def compare(rows, design: dict) -> list[dict[str, str]]:
         if not matches:
             problems.append(dict(id=row["id"], reason="TEST 단계에 이 값을 시도하는 조작이 없음"))
             continue
-        best = None
+        # Any correct probe satisfies the row; otherwise report a wrong value before a gap.
+        wrongs, gaps = [], []
         for p in matches:
             wrong = {loc: v for loc, v in p["expected"].items() if v is not None and v != row["expected"]}
             missing = [loc for loc in LOCATIONS if p["expected"].get(loc) != row["expected"]]
             if wrong:
-                best = f"{p['tc_id']}: 기대값 {wrong}, 정답 {row['expected']}"
-                break
-            if not missing:
-                best = None
-                break
-            best = f"{p['tc_id']}: {', '.join(missing)} 확인 없음"
-        if best:
-            problems.append(dict(id=row["id"], reason=best))
+                wrongs.append(f"{p['tc_id']}: 기대값 {wrong}, 정답 {row['expected']}")
+            elif missing:
+                gaps.append(f"{p['tc_id']}: {', '.join(missing)} 확인 없음")
+        met = len(wrongs) + len(gaps) < len(matches)
+        if met:
+            if warnings is not None:
+                warnings += [f"{row['id']} {item}" for item in wrongs]
+            wrongs = gaps = []
+        if wrongs or gaps:
+            problems.append(dict(id=row["id"], reason=(wrongs or gaps)[0]))
     return problems
 
 
@@ -216,10 +242,13 @@ def range_checklist_check(analysis, design):
         return None
     rows = checklist(table, excluded_switch_modes(analysis))
     data = design.model_dump(mode="json", by_alias=True) if hasattr(design, "model_dump") else design
-    problems = compare(rows, data)
+    warnings = []
+    problems = compare(rows, data, warnings)
     if problems:
         return CheckResult(rule_id="CP2-RANGE-CHECKLIST", status=CheckStatus.FAIL,
                            message="[치명] 코드가 계산한 필수 확인 목록 누락: " + "; ".join(
                                f"{p['id']} {p['reason']}" for p in problems))
-    return CheckResult(rule_id="CP2-RANGE-CHECKLIST", status=CheckStatus.PASS,
-                       message=f"코드가 계산한 필수 확인 목록 {len(rows)}개가 설계에 있습니다({VERSION}).")
+    message = f"코드가 계산한 필수 확인 목록 {len(rows)}개가 설계에 있습니다({VERSION})."
+    if warnings:
+        message += " 경고(진행, 사람 확인 권장): 같은 시도를 다른 TC가 틀린 기대값으로 확인함 — " + "; ".join(warnings)
+    return CheckResult(rule_id="CP2-RANGE-CHECKLIST", status=CheckStatus.PASS, message=message)

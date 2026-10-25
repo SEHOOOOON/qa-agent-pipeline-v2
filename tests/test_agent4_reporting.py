@@ -1312,3 +1312,16 @@ def test_human_review_lists_review_ai_warnings_that_did_not_stop_the_run(tmp_pat
     rows = [line for line in lines if line.startswith("| 시험 설계")]
     assert len(rows) == 2 and "COND-002" in rows[0] and "표현 보완 권장" in rows[1]
     assert "검토 AI가 남긴 경고는 없습니다." in pipeline_reporting._review_warning_lines(tmp_path / "none")
+
+
+def test_human_review_shows_cp1_scope_warning_and_review_language_note(tmp_path):
+    """2026-10-25 review: the CP1-011 warning starts its message with the marker (no leading
+    space) and never reached section 2-1; review-reason language notes are shown too."""
+    _write_json(tmp_path / "checkpoint1.json", {"checks": [
+        {"rule_id": "CP1-011", "status": "PASS",
+         "message": "경고(진행, 사람 확인 권장): 범위 근거 보완 필요 — REQ-STATE-001: 긍정 변경 요청 원문 조건에 연결되지 않은 범위 근거"},
+        {"rule_id": "AGENT1-GROUNDING", "status": "PASS",
+         "message": "근거 검토를 통과했습니다. 검토 이유에 한자·일본 문자(사람 확인 권장): COND-001"}]})
+    rows = [line for line in pipeline_reporting._review_warning_lines(tmp_path) if line.startswith("| 분석")]
+    assert len(rows) == 2
+    assert any("REQ-STATE-001" in row for row in rows) and any("COND-001" in row for row in rows)

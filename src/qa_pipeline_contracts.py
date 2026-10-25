@@ -160,7 +160,9 @@ class ScopeBasis(str, Enum):
 
 class RequirementScopeEvidence(StrictModel):
     basis: ScopeBasis
-    request_condition_ids: list[NonEmptyStr] = Field(min_length=1)
+    # The host derives these; an empty list used to raise inside analyze() with no CP1
+    # record or rewrite (2026-10-25 review). CP1-011 now reports it instead.
+    request_condition_ids: list[NonEmptyStr]
     srs_source_text: NonEmptyStr
 
 
