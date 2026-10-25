@@ -76,11 +76,12 @@ def test_public_power_observations_match_the_preserved_raw_log():
 
 def test_trimmed_portfolio_keeps_core_story_and_evidence():
     """2026-10-16 사용자 결정: 프로젝트1 소개는 한 페이지에 핵심만 남긴다.
-    전원 정지 상세 표·TC 설계 기준 패널은 본문에서 뺐고, 원본 증거 파일은 그대로 둔다."""
+    전원 정지 상세 표·TC 설계 기준 패널은 본문에서 뺐고, 원본 증거 파일은 그대로 둔다.
+    2026-10-25: 대표 사례는 날짜 대신 '무엇이 바뀌나 → 정답 시험 → 실행 결과' 순서로 쓴다."""
     html = (ROOT / 'project.html').read_text(encoding='utf-8')
     for text in ('분석 → 시험 설계 → 실행 → 보고 → 사람 판단', '기준을 정해도 AI의 해석은 달랐습니다',
-                 '실행 결과 · 2026.10.15', '확인한 범위와 남은 한계', 'AI에게 QA 기준을 알려 주는 일',
-                 '이후 확인한 것 · 2026.10.17', '필수 시험 5개 중 3개'):
+                 '무엇이 바뀌나', '정답: 꼭 있어야 하는 시험 5개', '확인한 범위와 남은 한계',
+                 'AI에게 QA 기준을 알려 주는 일', '정답 시험 5개 중 3개만', '8번 모두 5개가 다 있었습니다'):
         assert text in html
     # 2026-10-22 portfolio review: the 10/15 run was a DRY_RUN report, and the
     # status box must not carry an older date than the runs it lists.
