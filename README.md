@@ -16,11 +16,11 @@
 
 ## AI와 프로그램의 역할
 
-- **AI가 하는 일**: Agent 1·2의 분석·설계(OpenAI API), 단계별 근거 검토.
+- **AI가 하는 일**: Agent 1·2의 분석·설계, 단계별 근거 검토(OpenAI `gpt-6.1-sol`, 추론 `medium`).
 - **프로그램이 하는 일**: 단계 간 파일 해시 확인, 필수 시험 목록 계산·대조(예: 온도 범위가 바뀌면 새 하한·상한 적용과 한 칸 밖 차단), 자동화 코드 생성, 실제 화면 시험·복원, 결과 분류(Agent 4는 규칙 기반).
 - **사람이 하는 일**: 애매한 요구사항에 대한 답, 최종 등록·교체·SRS 수정 결정.
 
-AI가 기대값이나 시험 범위를 임의로 바꾸지 못하게 하고, 근거 없는 내용은 검토에서 막습니다. 다만 AI 판단에는 여전히 오판 가능성이 있어서, 사람이 정한 정답과 비교하는 평가를 별도 평가 저장소(agent-evaluation-framework)에서 합니다.
+AI가 기대값이나 시험 범위를 임의로 바꾸지 못하게 하고, 근거 없는 내용은 검토에서 막습니다. 다만 AI 판단에는 여전히 오판 가능성이 있어서, 사람이 정한 정답과 비교하는 평가를 별도 평가 저장소([agent-evaluation-framework](https://github.com/SEHOOOOON/agent-evaluation-framework))에서 합니다. 채점은 생성과 다른 회사의 모델(Claude)로 합니다.
 
 ## 주요 안전장치
 
@@ -77,13 +77,23 @@ python -m pytest -q
 | [제품 SRS](docs/01_PRODUCT_SRS.md) · [시험 목록](docs/07_TEST_CATALOG.md) | 제품 기준, 자동 시험 설명 |
 | [의사결정 기록](DECISION_LOG.md) · [보관 자료](archive/README.md) | 과거 결정과 이력 |
 
+## 최근 결과 (2026-10-23~24)
+
+| 확인 | 결과 |
+|---|---|
+| 대표 요청 5개 전체 실행 1회씩 | 전원·풍량·모드·온도 완주, 잠금은 정책이 정해지지 않아 질문을 남기고 멈춤(의도한 동작) |
+| 시험 설계 반복(시나리오별 3회) | 전원·풍량·모드는 3번 모두 같은 정답 구조. 온도는 필수 시험 5개를 8번 모두 채움 |
+| 평가에서 찾아 고친 문제 | 준비 단계에서 바꾼 모드의 복원 확인이 TC에서 빠짐(4번 중 4번) → 원인인 복원 계약을 고쳐 3번 중 3번 포함, 실제 실행 복원 정상 |
+
+표본이 작아(시나리오당 1~3회) 반복 안정성을 단정하지 않습니다. 평가 방법과 개선 기록은 평가 저장소의 [개선 이력](https://github.com/SEHOOOOON/agent-evaluation-framework/blob/claude/fixes-20261015/improvements/README.md)에 있습니다.
+
 ## 구현 범위
 
 가상 중앙제어의 전원·모드·풍량·온도·잠금, 기존 기능을 바꾸는 요청(MODIFIED)이 대상입니다. 실제 장비 통신, 임의의 웹사이트, 전체 회귀 시험, 기능 추가·삭제 요청은 범위 밖입니다.
 
-## 공개 자료
+## 포트폴리오
 
-- [공개 포트폴리오](https://sehooooon.github.io/qa-agent-pipeline-v2/project.html)
-- 과거 실행 증거: [중풍 성공](examples/results/agent1-agent2-agent3-agent4-medium-fan/README.md) · [잠금 불일치](examples/results/agent1-agent2-agent3-agent4-lock-disable/README.md) · [미정 조건](examples/results/agent1-agent2-agent3-agent4-partial-information/README.md)
+- [프로젝트 1 소개 페이지](https://htmlpreview.github.io/?https://github.com/SEHOOOOON/qa-agent-pipeline-v2/blob/claude/fixes-20261015/project.html) (작업 브랜치 미리보기, 공개 사이트 배포 전)
+- 9월 실행 기록 예시: [중풍 성공](examples/results/agent1-agent2-agent3-agent4-medium-fan/README.md) · [잠금 불일치](examples/results/agent1-agent2-agent3-agent4-lock-disable/README.md) · [미정 조건](examples/results/agent1-agent2-agent3-agent4-partial-information/README.md)
 
-공개 실행 증거는 **실행 당시의 기록**이며, 최신 코드 전체를 다시 검증한 것은 아닙니다.
+예시 실행 기록은 **실행 당시의 코드** 결과이며, 최신 코드로 다시 검증한 것은 아닙니다.
