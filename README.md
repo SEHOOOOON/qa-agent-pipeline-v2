@@ -79,7 +79,7 @@ python -m pytest -q
 
 ## 최근 결과
 
-최신 실행 결과와 수치는 [인계 문서 요약](PROJECT_HANDOFF.md)에 있습니다. 평가 방법과 평가에서 찾아 고친 문제는 평가 저장소의 [개선 이력](https://github.com/SEHOOOOON/agent-evaluation-framework/blob/claude/fixes-20261015/improvements/README.md)에 있습니다.
+최신 실행 결과와 수치는 [인계 문서 요약](PROJECT_HANDOFF.md)에 있습니다. 평가 방법과 평가에서 찾아 고친 문제는 평가 저장소의 [개선 이력](https://github.com/SEHOOOOON/agent-evaluation-framework/blob/main/improvements/README.md)에 있습니다.
 
 ## 구현 범위
 
@@ -87,7 +87,8 @@ python -m pytest -q
 
 ## 포트폴리오
 
-- [프로젝트 1 소개 페이지](https://htmlpreview.github.io/?https://github.com/SEHOOOOON/qa-agent-pipeline-v2/blob/claude/fixes-20261015/project.html) (작업 브랜치 미리보기, 공개 사이트 배포 전)
+- [프로젝트 1 소개 페이지](https://sehooooon.github.io/qa-agent-pipeline-v2/project.html) · [포트폴리오 메인](https://sehooooon.github.io/qa-agent-pipeline/main.html)
+- [대표 사례 실행 영상](assets/video/qa-pipeline-v2-demo-real-run.mp4): 저장된 온도 실행의 결과 화면과, 그 실행이 만든 자동화 코드를 다시 돌린 화면(약 1분)
 - 9월 실행 기록 예시: [중풍 성공](examples/results/agent1-agent2-agent3-agent4-medium-fan/README.md) · [잠금 불일치](examples/results/agent1-agent2-agent3-agent4-lock-disable/README.md) · [미정 조건](examples/results/agent1-agent2-agent3-agent4-partial-information/README.md)
 
 예시 실행 기록은 **실행 당시의 코드** 결과이며, 최신 코드로 다시 검증한 것은 아닙니다.
