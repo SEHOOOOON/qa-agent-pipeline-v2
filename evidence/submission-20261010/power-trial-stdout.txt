@@ -1,0 +1,21 @@
+.                                                                        [100%]
+=================================== PASSES ====================================
+______________________________ test_tc_cand_001 _______________________________
+---------------------------- Captured stdout call -----------------------------
+CONTROLLER_ORIGINAL: {'state': {'status': 'STOP', 'mode': 'COOL', 'fanSpeed': 'LOW', 'setTemp': 24, 'locked': False}, 'ui': {'status': {'#det-power-on-btn': False, '#det-power-off-btn': True}, 'mode': {'#det-mode-auto': False, '#det-mode-cool': True, '#det-mode-heat': False, '#det-mode-fan': False, '#det-mode-dry': False}, 'fanSpeed': {'#det-fan-low': True, '#det-fan-med': False, '#det-fan-high': False, '#det-fan-auto': False}, 'locked': {'#det-lock-on-btn': False, '#det-lock-off-btn': True}, 'temperature': '24.0°C', 'temperature_enabled': [True, True], 'card_classes': ['ac-device-card', 'mode-cool', 'state-stop'], 'card_values': ['❄️ 냉방', '약풍', '24.0°C'], 'card_locked': False}}
+CONTROLLER_PREPARED: {'state': {'status': 'OPERATION', 'mode': 'COOL', 'fanSpeed': 'LOW', 'setTemp': 24, 'locked': False}, 'ui': {'status': {'#det-power-on-btn': True, '#det-power-off-btn': False}, 'mode': {'#det-mode-auto': False, '#det-mode-cool': True, '#det-mode-heat': False, '#det-mode-fan': False, '#det-mode-dry': False}, 'fanSpeed': {'#det-fan-low': True, '#det-fan-med': False, '#det-fan-high': False, '#det-fan-auto': False}, 'locked': {'#det-lock-on-btn': False, '#det-lock-off-btn': True}, 'temperature': '24.0°C', 'temperature_enabled': [True, True], 'card_classes': ['ac-device-card', 'mode-cool', 'state-run'], 'card_values': ['❄️ 냉방', '약풍', '24.0°C'], 'card_locked': False}}
+PRECONDITION_OBSERVED: 1 True
+PRECONDITION_OBSERVED: 2 True
+PRECONDITION_OBSERVED: 3 True
+PRECONDITION_OBSERVED: 4 True
+PRECONDITION_OBSERVED: 5 'OPERATION'
+PRECONDITION_OBSERVED: 6 'OPERATION'
+PRECONDITION_OBSERVED: 7 'OPERATION'
+PRECONDITIONS_VERIFIED: 7
+QA_ASSERTION_OBSERVED: {"version": "assertion-observations-1.0", "run_id": "RUN-20261009-103040-2FC290", "tc_id": "TC-CAND-001", "target_device_id": 1, "assertion": {"result_id": "ER-001", "observation_layer": "UI", "strategy": "CONTROLLER_UI_FIELDS_EQUALS", "selector": ".detail-panel", "expected_number": null, "expected_text": null, "expected_value": null, "expected_fields": [{"field_name": "status", "expected_value": "STOP"}], "after_action_id": "ACT-005"}, "actual": {"status": "STOP"}, "matched": true}
+QA_ASSERTION_OBSERVED: {"version": "assertion-observations-1.0", "run_id": "RUN-20261009-103040-2FC290", "tc_id": "TC-CAND-001", "target_device_id": 1, "assertion": {"result_id": "ER-002", "observation_layer": "UI", "strategy": "CONTROLLER_UI_FIELDS_EQUALS", "selector": "#device-card-1", "expected_number": null, "expected_text": null, "expected_value": null, "expected_fields": [{"field_name": "status", "expected_value": "STOP"}], "after_action_id": "ACT-005"}, "actual": {"status": "STOP"}, "matched": true}
+QA_ASSERTION_OBSERVED: {"version": "assertion-observations-1.0", "run_id": "RUN-20261009-103040-2FC290", "tc_id": "TC-CAND-001", "target_device_id": 1, "assertion": {"result_id": "ER-003", "observation_layer": "INTERNAL_STATE", "strategy": "INTERNAL_DEVICE_FIELDS_EQUALS", "selector": "window.__vccs.devices", "expected_number": null, "expected_text": null, "expected_value": null, "expected_fields": [{"field_name": "status", "expected_value": "STOP"}], "after_action_id": "ACT-005"}, "actual": {"status": "STOP"}, "matched": true}
+QA_ASSERTIONS_COMPLETE: {"version": "assertion-observations-1.0", "run_id": "RUN-20261009-103040-2FC290", "tc_id": "TC-CAND-001"}
+RESTORE_STATUS: RESTORED
+RESTORE_CONFIRMATIONS_VERIFIED: ER-001,ER-002,ER-003
+1 passed in 21.20s

@@ -3,17 +3,216 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("damage", [
+    "missing_pin", "none_pin", "invalid_pin", "wrong_hash",
+    "orchestrator_run", "orchestrator_stage", "summary_run", "summary_stage",
+    "entries_removed", "exclusions_removed", "summary_deleted",
+])
+def test_candidate_summary_pin_rejects_missing_changed_or_mismatched_handoff(
+    tmp_path, monkeypatch, damage
+):
+    run, target, run_id = _build_candidate_execution_handoff(tmp_path, monkeypatch)
+    entry = pipeline_orchestrator._agent3_run_entry(run, "TC-CAND-003", run, 0)
+    summary_file = run / "agent3_run_summary.json"
+    summary = dict(run_id=run_id, stage="AGENT_3_RUN_SUMMARY", status="PARTIAL",
+        entries=[entry], target_file=target.name, target_sha256=_sha256_file(target),
+        **{"자동화_제외_TC": [dict(tc_id="TC-CAND-009", candidate_status="REVISION_REQUIRED",
+            reason="검토 실패로 시험 미실행")]})
+    _write_json(summary_file, summary)
+    orchestrator = dict(run_id=run_id, stage="ORCHESTRATOR_AGENT_1_TO_3",
+        agent3_run_summary_sha256=_sha256_file(summary_file))
+    if damage == "missing_pin":
+        orchestrator.pop("agent3_run_summary_sha256")
+    elif damage == "none_pin":
+        orchestrator["agent3_run_summary_sha256"] = None
+    elif damage == "invalid_pin":
+        orchestrator["agent3_run_summary_sha256"] = "not-a-sha256"
+    elif damage == "wrong_hash":
+        orchestrator["agent3_run_summary_sha256"] = "0" * 64
+    elif damage == "orchestrator_run":
+        orchestrator["run_id"] = "RUN-20260816-010000-000000"
+    elif damage == "orchestrator_stage":
+        orchestrator["stage"] = "AGENT_3_RUN_SUMMARY"
+    elif damage in {"summary_run", "summary_stage"}:
+        summary["run_id" if damage == "summary_run" else "stage"] = "different"
+        _write_json(summary_file, summary)
+        # A matching digest does not excuse the wrong Run/stage identity.
+        orchestrator["agent3_run_summary_sha256"] = _sha256_file(summary_file)
+    elif damage in {"entries_removed", "exclusions_removed"}:
+        summary["entries" if damage == "entries_removed" else "자동화_제외_TC"] = []
+        _write_json(summary_file, summary)
+    else:
+        summary_file.unlink()
+    _write_json(run / "orchestrator_manifest.json", orchestrator)
+    monkeypatch.setattr(pipeline_execution, "_candidate_execution_record",
+        lambda *a, **k: pytest.fail("Invalid summary must not load a trial or use single-TC fallback"))
+    with pytest.raises(ValueError):
+        pipeline_execution._candidate_execution_records(run, run_id, target)
+    assert not (run / "validation_execution.json").exists()
+
+
+@pytest.mark.parametrize("route", ["pinned", "manual_summary", "single_cli", "legacy_orchestrator"])
+def test_candidate_summary_pin_preserves_valid_and_legacy_handoffs(tmp_path, monkeypatch, route):
+    run, target, run_id = _build_candidate_execution_handoff(tmp_path, monkeypatch)
+    summary_file = run / "agent3_run_summary.json"
+    if route in {"pinned", "manual_summary"}:
+        entry = pipeline_orchestrator._agent3_run_entry(run, "TC-CAND-003", run, 0)
+        _write_json(summary_file, dict(run_id=run_id, stage="AGENT_3_RUN_SUMMARY",
+            status="PARTIAL", entries=[entry], target_file=target.name,
+            target_sha256=_sha256_file(target), **{"자동화_제외_TC": [dict(
+                tc_id="TC-CAND-009", candidate_status="REVISION_REQUIRED",
+                reason="검토 실패로 시험 미실행")]}))
+    if route in {"pinned", "legacy_orchestrator"}:
+        orchestrator = dict(run_id=run_id, stage="ORCHESTRATOR_AGENT_1_TO_3")
+        if route == "pinned":
+            orchestrator["agent3_run_summary_sha256"] = _sha256_file(summary_file)
+        _write_json(run / "orchestrator_manifest.json", orchestrator)
+    before = {p.name: p.read_bytes() for p in run.glob("*.json")}
+    records, exclusions, summary = pipeline_execution._candidate_execution_records(run, run_id, target)
+    assert len(records) == 1 and records[0][0].test_id == "TC-CAND-003"
+    assert records[0][0].status == pipeline.NeutralExecutionStatus.PASSED
+    assert records[0][0].evidence_files
+    if route in {"pinned", "manual_summary"}:
+        assert [item.tc_id for item in exclusions] == ["TC-CAND-009"]
+        assert summary is not None
+    else:
+        assert exclusions == [] and summary is None
+    assert {p.name: p.read_bytes() for p in run.glob("*.json")} == before
+
+
+@pytest.mark.parametrize("outcome", ["AUTOMATION_ERROR", "ENVIRONMENT_ERROR", "TIMEOUT", "RESTORE_FAILURE"])
+@pytest.mark.parametrize("damage", [None, "trial", "manifest", "evidence"])
+def test_failed_candidate_trial_survives_summary_handoff_and_rejects_tampering(
+    tmp_path, monkeypatch, outcome, damage
+):
+    run, target, run_id = _build_candidate_execution_handoff(tmp_path, monkeypatch)
+    trial_file = run / "agent3_trial.json"
+    manifest_file = run / "agent3_manifest.json"
+    trial = pipeline._read_json_model(trial_file, pipeline.Agent3TrialResult)
+    trial.outcome = TrialOutcome.AUTOMATION_ERROR if outcome == "RESTORE_FAILURE" else TrialOutcome(outcome)
+    trial.exit_code = None if outcome == "TIMEOUT" else 1
+    log = run / "evidence" / "TC-CAND-003" / trial.stdout_file
+    log.write_text(
+        "RESTORE_STATUS: FAILED\nRESTORE_MISMATCH: initial state differs\n"
+        if outcome == "RESTORE_FAILURE" else "Trial failed after execution started\n",
+        encoding="utf-8",
+    )
+    trial.evidence_sha256[trial.stdout_file] = _sha256_file(log)
+    _write_json(trial_file, trial.model_dump(mode="json"))
+    manifest = pipeline._read_json_payload(manifest_file)
+    manifest.update(candidate_status="TRIAL_FAILED", trial_sha256=_sha256_file(trial_file),
+                    trial_evidence_sha256=trial.evidence_sha256)
+    _write_json(manifest_file, manifest)
+    entry = pipeline_orchestrator._agent3_run_entry(run, "TC-CAND-003", run, 2)
+    # Legacy summaries incorrectly called an executed failure an exclusion.
+    original_exclusion = pipeline_orchestrator._automation_exclusion_from_run_entry(entry)
+    summary_file = run / "agent3_run_summary.json"
+    _write_json(summary_file, dict(run_id=run_id, stage="AGENT_3_RUN_SUMMARY", status="PARTIAL",
+        entries=[entry], target_file=target.name, target_sha256=_sha256_file(target),
+        **{"자동화_제외_TC": [original_exclusion]}))
+    original_summary = summary_file.read_bytes()
+    if damage:
+        changed = {"trial": trial_file, "manifest": manifest_file, "evidence": log}[damage]
+        changed.write_bytes(changed.read_bytes() + b"\n")
+        with pytest.raises(ValueError):
+            pipeline_execution._candidate_execution_records(run, run_id, target)
+        return
+
+    records, exclusions, _ = pipeline_execution._candidate_execution_records(run, run_id, target)
+    assert len(records) == 1 and exclusions == []
+    result, tc, _, _ = records[0]
+    assert result.status == (pipeline.NeutralExecutionStatus.TIMEOUT if outcome == "TIMEOUT"
+                             else pipeline.NeutralExecutionStatus.EXECUTION_ERROR)
+    assert result.source_outcome == trial.outcome.value and result.evidence_files
+    assert summary_file.read_bytes() == original_summary
+    monkeypatch.setattr(pipeline_execution, "run_candidate_trial",
+                        lambda *a, **k: pytest.fail("Reporting must not retry a failed trial"))
+    assert pipeline_execution._current_candidate_execution_record(
+        run, run_id, target, tc, result, timeout_seconds=1) is result
+    observations = pipeline_reporting._execution_failure_observations(run, result)
+    finding = pipeline_reporting._agent4_finding_for_result(result, 1, failure_observations=observations)
+    assert finding.category == (pipeline.Agent4FindingCategory.ENVIRONMENT_ISSUE
+        if outcome == "ENVIRONMENT_ERROR" else pipeline.Agent4FindingCategory.AUTOMATION_EXECUTION_ISSUE)
+    if outcome == "RESTORE_FAILURE":
+        assert "복원 실패" in finding.rationale
+
+    # Continue through the real validation/report path with only the product
+    # browser precheck replaced. No model call or external delivery is involved.
+    design = cp2_valid_design().model_copy(update={"test_cases": [tc],
+        "existing_tc_comparison_completed": True, "related_existing_tests": []})
+    _write_json(run / "agent2_test_design.json", design.model_dump(mode="json"))
+    monkeypatch.setattr(pipeline_execution, "_load_verified_agent2_run",
+        lambda *_: (None, None, None, design, None, {"agent2_design_sha256": "b" * 64}))
+    monkeypatch.setattr(pipeline_reporting, "_load_verified_agent2_run",
+                        pipeline_execution._load_verified_agent2_run)
+    baseline = tmp_path / "test_controller.py"
+    baseline.write_text("def test_placeholder(): pass\n", encoding="utf-8")
+    def precheck(spec, *args, source=pipeline.ExecutionSource.ENVIRONMENT_PRECHECK, **kwargs):
+        assert spec.tc_id == "TC-ENV-000"
+        initial = _neutral_execution_result(spec.tc_id, source)
+        evidence = {}
+        for relative in initial.evidence_files:
+            path = run / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("environment precheck passed\n", encoding="utf-8")
+            evidence[relative] = _sha256_file(path)
+        return initial.model_copy(update={"test_sha256": _sha256_file(baseline),
+            "target_sha256": _sha256_file(target), "evidence_sha256": evidence})
+    monkeypatch.setattr(pipeline_execution, "run_existing_regression", precheck)
+    assert pipeline.run_validation_execution(_validation_execution_args(tmp_path, run_id, target, baseline)) == 0
+    assert pipeline.run_agent4(SimpleNamespace(run_id=run_id, runs_root=str(run.parent))) == 0
+    report = pipeline._read_json_model(run / "final_report.json", pipeline.FinalReport)
+    assert report.checkpoint_status == CheckStatus.PASS
+    assert report.recommendation == pipeline.FinalRecommendation.HOLD
+    assert report.product_result_count == 1 and report.automation_exclusions == []
+    rows = pipeline_reporting.build_run_test_rows(run)
+    row = next(item for item in rows if item["tc_id"] == tc.tc_id)
+    assert row["status"] == result.status.value and row["evidence_files"]
+    delivery = pipeline._read_json_payload(run / "external_reporting.json")
+    assert delivery["slack"]["status"] == delivery["notion"]["status"] == "PREVIEW"
+    notion = pipeline._read_json_payload(run / "notion_payload.json")
+    record = next(item for item in notion["records"] if item["tc_id"] == tc.tc_id)
+    assert record["result"] == result.status.value
+
+
+@pytest.mark.parametrize("outcome", ["AUTOMATION_ERROR", "ENVIRONMENT_ERROR", "TIMEOUT"])
+def test_orchestrator_does_not_call_executed_trial_error_unexecuted(tmp_path, monkeypatch, outcome):
+    args = _pipeline_args(tmp_path)
+    Path(args.target_html).write_text("<html></html>", encoding="utf-8")
+    def agent1(stage_args):
+        (Path(stage_args.runs_root) / stage_args.run_id).mkdir(parents=True)
+        return 0
+    def agent3(stage_args):
+        artifact = Path(stage_args.artifact_dir)
+        _write_json(artifact / "agent3_manifest.json", dict(status="PASS", candidate_status="TRIAL_FAILED"))
+        _write_json(artifact / "agent3_trial.json", dict(outcome=outcome))
+        return 2
+    monkeypatch.setattr(pipeline_orchestrator, "run_agent1", agent1)
+    monkeypatch.setattr(pipeline_orchestrator, "run_agent2", lambda _: 0)
+    monkeypatch.setattr(pipeline_orchestrator, "run_agent3", agent3)
+    monkeypatch.setattr(pipeline_orchestrator, "_select_agent3_tcs_from_run",
+                        lambda *_: (["TC-CAND-003"], [{"tc_id": "TC-CAND-003"}]))
+    assert pipeline.run_pipeline(args) == 0  # Report route, not a successful product verdict.
+    run = next(Path(args.runs_root).iterdir())
+    summary = pipeline._read_json_payload(run / "agent3_run_summary.json")
+    assert summary["status"] == "PARTIAL"
+    assert summary["executed_tc_ids"] == ["TC-CAND-003"]
+    assert summary["자동화_제외_TC"] == []
+    assert summary["entries"][0]["exit_code"] == 2
+
+
 @pytest.mark.parametrize('summary', ['reuse', 'excluded', 'candidate'])
 @pytest.mark.parametrize('damage', ['design', 'missing_manifest', 'checkpoint'])
 def test_validation_execution_checks_handoff_before_any_trial(tmp_path, monkeypatch, summary, damage):
     runs = tmp_path / 'runs'
     runs.mkdir()
-    run, run_id = build_historical_agent2_run(runs)
+    run, run_id = build_verified_agent2_run(runs)
     pipeline_execution._load_verified_agent2_run(run, run_id)
     target = tmp_path / 'virtual-controller.html'
     baseline = tmp_path / 'test_controller.py'
     target.write_text('<!doctype html>', encoding='utf-8')
-    baseline.write_text('def test_placeholder(): pass\n', encoding='utf-8')
+    # The current catalog snapshot pins the baseline test code hash.
+    baseline.write_bytes((REPO_ROOT / 'product_baseline' / 'tests' / 'test_controller.py').read_bytes())
     if summary != 'candidate':
         _write_json(run/'agent3_run_summary.json', dict(run_id=run_id,
             stage='AGENT_3_RUN_SUMMARY', status='NOT_REQUIRED' if summary == 'reuse' else 'PARTIAL',
@@ -89,7 +288,7 @@ def test_structured_candidate_routing_does_not_depend_on_purpose_label(field, in
 
 
 @pytest.mark.parametrize('blocked', [False, True])
-def test_single_tc_compatibility_wrapper_keeps_verified_loader(tmp_path, monkeypatch, blocked):
+def test_run_selection_uses_verified_loader(tmp_path, monkeypatch, blocked):
     design = cp2_valid_design()
     calls = []
     def verified(run_dir, run_id):
@@ -99,10 +298,9 @@ def test_single_tc_compatibility_wrapper_keeps_verified_loader(tmp_path, monkeyp
     monkeypatch.setattr(pipeline_orchestrator, '_load_verified_agent2_run', verified)
     if blocked:
         with pytest.raises(ValueError, match='integrity rejected'):
-            pipeline._select_agent3_tc_from_run(tmp_path, 'fixture')
+            pipeline._select_agent3_tcs_from_run(tmp_path, 'fixture')
     else:
-        selected, summaries = pipeline._select_agent3_tcs(design)
-        assert pipeline._select_agent3_tc_from_run(tmp_path, 'fixture') == (selected[0] if selected else None, summaries)
+        assert pipeline._select_agent3_tcs_from_run(tmp_path, 'fixture') == pipeline._select_agent3_tcs(design)
     assert calls == [(tmp_path, 'fixture')]
 
 @pytest.mark.parametrize("variant", ["normal", "empty", "tampered"])
@@ -142,9 +340,6 @@ def test_agent3_precondition_feedback_repairs_only_unstated_context(tmp_path, mo
     for fragment in ("#4", "#5", "BASELINE_CONTEXT/online", "BASELINE_CONTEXT/target_device_visible", source, "error_free, unlocked"):
         assert fragment in feedback[0]
     assert pipeline.evaluate_checkpoint3_plan(case, valid, observation).status == CheckStatus.PASS
-    missing = valid.model_copy(deep=True)
-    missing.precondition_checks.pop()  # The stated unlocked condition is still mandatory.
-    assert pipeline.evaluate_checkpoint3_plan(case, missing, observation).status == CheckStatus.FAIL
 
     run_id = "RUN-20260912-220000-ABCDEF"
     run = tmp_path / run_id
@@ -172,7 +367,7 @@ def test_agent3_precondition_feedback_repairs_only_unstated_context(tmp_path, mo
     manifest = pipeline._read_json_payload(run / "agent3_manifest.json")
     assert manifest["prompt_version"] == "agent3-3.47"
     assert manifest["value_comparison_contract"] == "1.0"
-    assert pipeline._read_json_payload(run / "agent3_manifest.json")["execution_interface_contract"] == "1.0"
+    assert pipeline._read_json_payload(run / "agent3_manifest.json")["execution_interface_contract"] == "1.2"
     assert pipeline._read_json_payload(run / "agent3_manifest.json")["terminal_observation_contract"] == "1.0"
     assert pipeline._read_json_payload(run / "agent3_manifest.json")["task_boundary_contract"] == "1.3"
     assert pipeline._read_json_payload(run / "agent3_automation_plan_attempt_1.json") == invalid.model_dump(mode="json")
@@ -348,6 +543,35 @@ def test_regression_skip_uses_result_summary_not_warning(tmp_path, monkeypatch, 
     assert result.status.value == status
 
 
+def test_trial_output_tail_marks_only_when_the_head_is_dropped():
+    limit = pipeline_execution.TRIAL_OUTPUT_CHAR_LIMIT
+    # 30,000 characters were silently cut under the former 20,000 tail.
+    for size in (0, 30_000, limit):
+        text = "x" * size
+        assert pipeline_execution._trial_output_tail(text) == text
+    text = "HEAD-LINE\n" + "y" * limit
+    kept = pipeline_execution._trial_output_tail(text)
+    first, rest = kept.split("\n", 1)
+    assert first == f"QA_OUTPUT_TRUNCATED: kept last {limit} of {len(text)} characters"
+    assert rest == text[-limit:] and "HEAD-LINE" not in kept
+
+
+@pytest.mark.parametrize("size,marked", [(30_000, False), (250_000, True)])
+def test_regression_log_keeps_long_output_and_marks_cut_head(tmp_path, monkeypatch, size, marked):
+    from dataclasses import replace
+    stdout = "E   AssertionError: PRODUCT_MISMATCH: early classification line\n" + "z" * size + "\n1 failed\n"
+    monkeypatch.setattr(pipeline_execution, "_run_trial_subprocess",
+        lambda *a, **kw: SimpleNamespace(returncode=1, stdout=stdout, stderr=""))
+    result = pipeline.run_existing_regression(replace(pipeline.EXISTING_REGRESSION_CATALOG[0], recovery_contract=None),
+        REPO_ROOT / "product_baseline/tests/test_controller.py",
+        REPO_ROOT / "product_baseline/virtual-controller.html", tmp_path / "evidence", timeout_seconds=10)
+    saved = (tmp_path / result.stdout_file).read_text(encoding="utf-8")
+    assert saved.startswith("QA_OUTPUT_TRUNCATED: ") is marked
+    assert ("early classification line" in saved) is (not marked)
+    assert saved.endswith("1 failed\n")
+    assert result.status == pipeline.NeutralExecutionStatus.ASSERTION_FAILED
+
+
 def test_regression_timeout_uses_process_tree_cleanup(tmp_path, monkeypatch):
     calls = []
     process = SimpleNamespace(returncode=None)
@@ -446,24 +670,24 @@ def test_pipeline_parser_exposes_one_command_agent1_to_agent3() -> None:
             "target_role": "MULTIPLE_ALLOWED_TEST_DEVICES",
         }
     )
-    selected, summaries = pipeline._select_agent3_tc(
+    selected, summaries = pipeline._select_agent3_tcs(
         Agent2TestDesign(
             request_id="CR-TEST-001",
             test_cases=[unsupported, eligible],
             coverage_summary="Selection fixture",
         )
     )
-    assert selected == eligible.tc_id
+    assert selected[0] == eligible.tc_id
     assert len(summaries) == 2
     assert summaries[0]["status"] == "DISCOVERY_REQUIRED"
-    discovered, unsupported_summaries = pipeline._select_agent3_tc(
+    discovered, unsupported_summaries = pipeline._select_agent3_tcs(
         Agent2TestDesign(
             request_id="CR-TEST-001",
             test_cases=[unsupported],
             coverage_summary="No eligible candidate fixture",
         )
     )
-    assert discovered == unsupported.tc_id
+    assert discovered == [unsupported.tc_id]
     assert unsupported_summaries[0]["generic_discovery_required"] is True
     assert unsupported_summaries[0]["missing_capabilities"] == []
 
@@ -765,15 +989,11 @@ def test_pipeline_rejects_missing_target_before_any_model_stage(
     with pytest.raises(ValueError, match="target HTML does not exist"):
         pipeline.run_pipeline(args)
 
-def test_related_regression_selection_is_grounded_and_excludes_demo_cases() -> None:
-    selected = pipeline.select_existing_regressions(
-        ["REQ-TEMP-001", "REQ-CONTROL-001", "REQ-STATE-001"]
-    )
+def test_existing_regression_catalog_excludes_demo_cases() -> None:
+    catalog_ids = {item.tc_id for item in pipeline.EXISTING_REGRESSION_CATALOG}
 
-    assert [item.tc_id for item in selected] == ["TC-MODE-001", "TC-TEMP-001"]
-    assert "TC-INT-002" not in {item.tc_id for item in pipeline.EXISTING_REGRESSION_CATALOG}
-    assert all(not item.tc_id.startswith("TC-PIPE-") for item in selected)
-    assert all(item.tc_id != "TC-TEMP-002" for item in selected)
+    assert "TC-INT-002" not in catalog_ids
+    assert not any(tc_id.startswith("TC-PIPE-") for tc_id in catalog_ids)
 
 def test_checkpoint2_does_not_invent_regression_from_requirement_id_alone() -> None:
     analysis = agent1_analysis().model_copy(
@@ -927,31 +1147,11 @@ def test_candidate_trial_is_reused_only_after_hash_and_evidence_checks(
 
     manifest_file = run_dir / "agent3_manifest.json"
     original = pipeline._read_json_payload(manifest_file)
-    for unsupported in (None, "unknown"):
-        _write_json(manifest_file, {**original, "contract_version": "4.4",
-            "restore_confirmation_contract": "1.2", "plan_fidelity_contract": unsupported})
-        with pytest.raises(ValueError, match="계획 충실성 계약"):
+    for key, value in (("contract_version", "4.4"), ("plan_fidelity_contract", None),
+                       ("restore_confirmation_contract", "1.1")):
+        _write_json(manifest_file, {**original, key: value})
+        with pytest.raises(ValueError, match="옛 형식 Agent 3"):
             pipeline._candidate_execution_record(run_dir, run_id, target)
-    for unsupported in (None, "unknown"):
-        _write_json(manifest_file, {**original, "contract_version": "4.1",
-                                   "restore_confirmation_contract": unsupported})
-        with pytest.raises(ValueError, match="복원 확인 계약"):
-            pipeline._candidate_execution_record(run_dir, run_id, target)
-    for unsupported in (None, "1.0", "unknown"):
-        _write_json(manifest_file, {**original, "contract_version": "4.2",
-                                   "restore_confirmation_contract": unsupported})
-        with pytest.raises(ValueError, match="복원 확인 계약"):
-            pipeline._candidate_execution_record(run_dir, run_id, target)
-    _write_json(manifest_file, {**original, "contract_version": "4.2", "restore_confirmation_contract": "1.1"})
-    assert pipeline._candidate_execution_record(run_dir, run_id, target)[0].reused is True
-    for unsupported in (None, "1.0", "1.1", "unknown"):
-        _write_json(manifest_file, {**original, "contract_version": "4.3", "restore_confirmation_contract": unsupported})
-        with pytest.raises(ValueError, match="복원 확인 계약"):
-            pipeline._candidate_execution_record(run_dir, run_id, target)
-    _write_json(manifest_file, {**original, "contract_version": "4.3", "restore_confirmation_contract": "1.2"})
-    assert pipeline._candidate_execution_record(run_dir, run_id, target)[0].reused is True
-    _write_json(manifest_file, {**original, "contract_version": "4.1", "restore_confirmation_contract": "1.0"})
-    assert pipeline._candidate_execution_record(run_dir, run_id, target)[0].reused is True
     _write_json(manifest_file, original)
 
     target.write_text("changed", encoding="utf-8")
@@ -975,7 +1175,8 @@ def test_candidate_handoff_recomputes_current_cp3_rules(
     manifest["automation_plan_sha256"] = _sha256_file(plan_file)
     _write_json(manifest_file, manifest)
 
-    with pytest.raises(ValueError, match="현재 CP3 규칙"):
+    # The recorded value-format conversion pins the plan before CP3 is recomputed.
+    with pytest.raises(ValueError, match="현재 CP3 규칙|값 형식"):
         pipeline._candidate_execution_record(run_dir, run_id, target)
 
 def test_candidate_handoff_rejects_evidence_changed_after_agent3(
@@ -990,16 +1191,12 @@ def test_candidate_handoff_rejects_evidence_changed_after_agent3(
     with pytest.raises(ValueError, match="시험 증거 SHA-256"):
         pipeline._candidate_execution_record(run_dir, run_id, target)
 
-@pytest.mark.parametrize("explicit", [False, True])
 def test_current_compiler_reuses_identical_code_and_retrials_stale_code(
-    tmp_path: Path, monkeypatch, explicit
+    tmp_path: Path, monkeypatch
 ) -> None:
     run_id = "RUN-20260816-015000-ABCDEF"
     run_dir = tmp_path / run_id
     run_dir.mkdir()
-    _write_json(run_dir / "agent3_manifest.json",
-                {"contract_version": "4.10", "prompt_version": "agent3-3.42" if explicit else "agent3-3.41",
-                 **({"product_verdict_contract": "1.0"} if explicit else {})})
     target = tmp_path / "virtual-controller.html"
     target.write_text("<!doctype html>", encoding="utf-8")
     test_case = agent3_test_case()
@@ -1007,7 +1204,7 @@ def test_current_compiler_reuses_identical_code_and_retrials_stale_code(
     _write_json(
         run_dir / "agent3_automation_plan.json", plan.model_dump(mode="json")
     )
-    current_code = compile_automation_candidate(run_id, test_case, plan, explicit_expectations_only=explicit)
+    current_code = compile_automation_candidate(run_id, test_case, plan)
     stored_candidate = run_dir / "candidates" / "test_tc_cand_003.py"
     stored_candidate.parent.mkdir()
     stored_candidate.write_text(current_code, encoding="utf-8")

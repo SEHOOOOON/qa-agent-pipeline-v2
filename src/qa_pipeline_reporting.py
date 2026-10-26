@@ -1,30 +1,19 @@
 from __future__ import annotations
 
 import argparse
-import ast
 import hashlib
 import json
 import os
 import re
-import shutil
-import subprocess
-import sys
-import tempfile
-import time
 import urllib.error
 import urllib.request
 import urllib.parse
 import uuid
-import zipfile
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from enum import Enum
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Any
 
-from openai import OpenAI
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, model_validator
-from qa_pipeline_trace import redact_playwright_trace as _redact_playwright_trace
+from pydantic import ValidationError
 from qa_pipeline_io import *
 from qa_pipeline_contracts import *
 from qa_pipeline_agent1 import *
@@ -438,6 +427,87 @@ def _execution_failure_observations(
     return observations
 
 
+def _assertion_observations(
+    run_dir: Path, result: NeutralExecutionResult, run_id: str
+) -> dict[str, list[dict[str, Any]]]:
+    """ER별 QA_ASSERTION_OBSERVED 기록(해시가 일치하는 stdout, 같은 Run·TC만)."""
+    observed: dict[str, list[dict[str, Any]]] = {}
+    relative_name = result.stdout_file
+    if not relative_name:
+        return observed
+    candidate = (run_dir / relative_name).resolve()
+    try:
+        candidate.relative_to(run_dir.resolve())
+    except ValueError:
+        return observed
+    if (
+        not candidate.is_file()
+        or relative_name not in result.evidence_files
+        or _sha256_file(candidate) != result.evidence_sha256.get(relative_name)
+    ):
+        return observed
+    text = candidate.read_text(encoding="utf-8", errors="replace")
+    for line in re.findall(r"^QA_ASSERTION_OBSERVED: (\{[^\r\n]*\})$", text, flags=re.MULTILINE):
+        try:
+            item = json.loads(line)
+        except ValueError:
+            continue
+        assertion = item.get("assertion") if isinstance(item, dict) else None
+        if (
+            not isinstance(assertion, dict)
+            or item.get("run_id") != run_id
+            or item.get("tc_id") != result.test_id
+            or not isinstance(item.get("matched"), bool)
+            or not isinstance(assertion.get("result_id"), str)
+        ):
+            continue
+        observed.setdefault(assertion["result_id"], []).append(item)
+    return observed
+
+
+def _observed_value_text(actual: Any) -> str:
+    """사람이 읽는 관찰값 표기. 19.0과 19는 같은 값으로, 값 하나뿐인 기록은 값만 보입니다."""
+
+    def plain(value: Any) -> str:
+        if isinstance(value, float) and value.is_integer():
+            return str(int(value))
+        if isinstance(value, (str, int, float)) and not isinstance(value, bool):
+            return str(value)
+        return json.dumps(value, ensure_ascii=False)
+
+    if isinstance(actual, dict) and actual:
+        if len(actual) == 1:
+            return plain(next(iter(actual.values())))
+        return ", ".join(f"{key} {plain(value)}" for key, value in actual.items())
+    return plain(actual)
+
+
+def _expected_result_summary(
+    expected_ids: list[str],
+    observed: dict[str, list[dict[str, Any]]],
+    mismatch_result_ids: set[str],
+) -> list[str]:
+    """실패한 TC 안에서 ER별 관찰 기록을 통과/불일치/미확인으로 나눕니다."""
+    lines = []
+    for result_id in expected_ids:
+        records = observed.get(result_id, [])
+        verdicts = {record["matched"] for record in records}
+        actual = ", ".join(
+            dict.fromkeys(_markdown_text(_observed_value_text(record.get("actual")))[:80] for record in records)
+        )
+        if verdicts == {True}:
+            lines.append(f"- `{result_id}`: 관찰 기록상 통과 (관찰값 {actual})")
+        elif verdicts == {False}:
+            lines.append(f"- `{result_id}`: 관찰 기록상 불일치 (관찰값 {actual})")
+        elif verdicts:
+            lines.append(f"- `{result_id}`: 관찰 기록이 서로 다릅니다 (관찰값 {actual}). 원본 실행 증거를 확인해 주세요.")
+        elif result_id not in mismatch_result_ids:
+            lines.append(
+                f"- `{result_id}`: 이 요약에서 개별 판정이 확인되지 않습니다. 원본 실행 증거를 확인해 주세요."
+            )
+    return lines
+
+
 def _human_review_observation(
     run_dir: Path, result: NeutralExecutionResult | None
 ) -> str:
@@ -463,6 +533,39 @@ def _human_review_observation(
     if parts:
         return " / ".join(parts)
     return _markdown_text(result.raw_message or result.source_outcome)
+
+
+REVIEW_WARNING_MARKER = " 경고(진행, 사람 확인 권장): "
+REVIEW_LANGUAGE_MARKER = " 검토 이유에 한자·일본 문자(사람 확인 권장): "
+
+
+def _review_warning_lines(run_dir: Path) -> list[str]:
+    """Review-AI warnings that did not stop the Run (2026-10-17 tiers), shown to the person."""
+    rows = []
+    for name, stage in (("checkpoint1.json", "분석(Agent 1)"), ("checkpoint2.json", "시험 설계(Agent 2)")):
+        try:
+            checks = json.loads((run_dir / name).read_text(encoding="utf-8")).get("checks", [])
+        except (OSError, ValueError, AttributeError):
+            continue
+        for check in checks:
+            message = check.get("message") or "" if isinstance(check, dict) else ""
+            # 2026-10-25 review: CP1-011 starts its message with the marker (no leading space),
+            # so match the marker text itself. Review-reason language notes are shown as well.
+            marker = REVIEW_WARNING_MARKER.strip() + " "
+            language = message.split(REVIEW_LANGUAGE_MARKER, 1)
+            if len(language) == 2:
+                rows.append((stage, "검토 이유에 한자·일본 문자: " + language[1].strip()))
+                message = language[0]
+            if marker not in message:
+                continue
+            tail = message.split(marker, 1)[1].split(" 계약 인용 위치 보정(원본 응답 보존): ", 1)[0]
+            rows += [(stage, item) for item in re.split(r"; (?=\S+: \[경고\])", tail) if item.strip()]
+    lines = ["## 2-1. 검토 AI 경고 (진행했지만 사람 확인 권장)", ""]
+    if not rows:
+        return lines + ["검토 AI가 남긴 경고는 없습니다.", ""]
+    lines += ["| 단계 | 경고 |", "|---|---|"]
+    lines += [f"| {stage} | {_markdown_text(item)} |" for stage, item in rows]
+    return lines + [""]
 
 
 def _human_review_markdown(
@@ -520,6 +623,7 @@ def _human_review_markdown(
         f"| 정보 부족으로 제외 | {len(report.excluded_information_gaps)}건 |",
         "| 공식 SRS·TC 승인 | 자동 실행 판정과 별개 · 현재 등록 상태는 승인 화면에서 확인 |",
         "",
+        *_review_warning_lines(run_dir),
         "## 3. 항목별 사람 판정",
         "",
     ]
@@ -589,11 +693,14 @@ def _human_review_markdown(
             and result.status == NeutralExecutionStatus.ASSERTION_FAILED
         ):
             mismatch_result_ids = set(re.findall(r"ER-\d{3}", observation_detail))
-            lines.extend(
-                f"- `{expected['result_id']}`: 이 요약에서 개별 판정이 확인되지 않습니다. 원본 실행 증거를 확인해 주세요."
-                for expected in test_case.get("expected_results", [])
-                if expected["result_id"] not in mismatch_result_ids
-            )
+            observed = _assertion_observations(run_dir, result, report.run_id)
+            if observed:
+                lines.extend(["", "#### 기대 결과별 관찰 (QA_ASSERTION_OBSERVED)", ""])
+            lines.extend(_expected_result_summary(
+                [expected["result_id"] for expected in test_case.get("expected_results", [])],
+                observed,
+                mismatch_result_ids,
+            ))
         lines.extend(["", "#### 실행 증거", ""])
         evidence_files = finding.evidence_files or (
             result.evidence_files if result is not None else []
@@ -836,7 +943,10 @@ def _slack_report_payload(report: FinalReport, run_dir: Path | None = None) -> d
               "SKIPPED": "⏭️ 건너뜀", "NOT_EXECUTED": "⏸️ 미실행", "MANUAL_REVIEW": "👤 수동 확인"}
     lines = []
     for row in products[:8]:
-        lines.append(safe(row["tc_id"]) + " · " + labels.get(row["status"], "확인 필요"))
+        exclusion = next((e for e in report.automation_exclusions if e.tc_id == row["tc_id"]), None)
+        review_failed = row["status"] == "NOT_EXECUTED" and exclusion is not None and exclusion.candidate_status.value == "REVISION_REQUIRED"
+        label = "⏸️ 검토 실패로 시험 미실행 — 제품 PASS/FAIL 판정 없음" if review_failed else labels.get(row["status"], "확인 필요")
+        lines.append(safe(row["tc_id"]) + " · " + label)
         if row["expected_results"]:
             lines.append("확인한 기준:" if row["status"] == "PASSED" else "확인할 기준:")
             lines.extend("  • " + readable(s) for s in row["expected_results"])
@@ -941,6 +1051,9 @@ def build_run_test_rows(run_dir: Path, *, approved_assets_root: Path = DEFAULT_A
     }
     types = {"NORMAL": "해피패스", "BOUNDARY": "엣지케이스", "EXCEPTION": "예외/결함", "STATE_CONSISTENCY": "상태 정합성"}
     selected = design.get("관련_기존_TC") or design.get("related_existing_tests") or []
+    # H-3 (2026-10-17): candidates declared as the revision of an existing TC.
+    revisions = {item["revised_by"]: item["tc_id"] for item in (
+        design.get("기존_TC_수정") or design.get("existing_tc_revisions") or [])}
     ids = list(dict.fromkeys([
         *(["TC-ENV-000"] if "TC-ENV-000" in results else []),
         *[item["tc_id"] for item in design.get("test_cases", [])],
@@ -977,7 +1090,9 @@ def build_run_test_rows(run_dir: Path, *, approved_assets_root: Path = DEFAULT_A
                 for item in case.get("expected_results", [])
             ],
             "requirement_ids": case.get("requirement_ids") or result.get("requirement_ids") or (list(spec.requirement_ids) if spec else []),
-            "source": "환경 점검" if tc_id == "TC-ENV-000" else "신규·수정 후보" if tc_id.startswith("TC-CAND-") else "기존 TC",
+            "source": "환경 점검" if tc_id == "TC-ENV-000"
+                      else f"{revisions[tc_id]} 고쳐 쓰기 후보(교체는 사람 승인)" if tc_id in revisions
+                      else "신규·수정 후보" if tc_id.startswith("TC-CAND-") else "기존 TC",
             "executed_at": bundle.get("created_at") if result else None,
             "duration_ms": result.get("duration_ms"),
             "evidence_files": [name for name in result.get("evidence_files", []) if _safe_run_file(run_dir, name)],
@@ -1018,6 +1133,26 @@ def _notion_report_records(
                 } if run_dir and (run_dir / "agent2_manifest.json").is_file() else {},
             }
         )
+    recorded_ids = {record["tc_id"] for record in records}
+    for exclusion in report.automation_exclusions:
+        if exclusion.tc_id in recorded_ids:
+            continue  # Never overwrite an actual execution result with an exclusion.
+        row = rows.get(exclusion.tc_id, {})
+        review_failed = exclusion.candidate_status.value == "REVISION_REQUIRED"
+        notice = "검토 실패로 시험 미실행 — 제품 PASS/FAIL 판정 없음" if review_failed else "자동화 제외로 시험 미실행 — 제품 PASS/FAIL 판정 없음"
+        records.append({
+            "run_id": report.run_id, "tc_id": exclusion.tc_id,
+            "source": "AUTOMATION_EXCLUSION", "requirement_ids": [],
+            "result": "NOT_EXECUTED", "finding_category": "NOT_EXECUTED",
+            "recommendation": report.recommendation.value,
+            "verification_scope_summary": verification_scope_summary(report.model_dump(mode="json", by_alias=True)),
+            "execution_notice": notice, "reason": exclusion.reason,
+            "evidence_complete": False, "title": row.get("title", exclusion.tc_id),
+            "test_category": row.get("category", "미분류"), "priority": row.get("priority", "미지정"),
+            "tc_detail": {key: row.get(key, []) for key in (
+                "preconditions", "steps", "expected_results", "expected_result_details", "restore_steps")},
+        })
+        recorded_ids.add(exclusion.tc_id)
     return records
 
 
@@ -1098,6 +1233,9 @@ def _notion_tc_blocks(record: dict[str, Any]) -> list[dict[str, Any]]:
             }})
 
     add("paragraph", "저장된 TC 설계입니다. 아래 기대결과는 실제 관찰값이 아닙니다. 실행 결과는 페이지 속성에서 확인하며, 통과가 공식 등록 승인을 뜻하지는 않습니다.")
+    if record.get("execution_notice"):
+        add("paragraph", record["execution_notice"])
+        add("paragraph", "사유: " + str(record.get("reason") or "상세 검토 기록 확인 필요"))
     add("heading_3", "사전조건")
     for value in detail.get("preconditions") or ["상세 사전조건이 기록되어 있지 않습니다."]:
         add("bulleted_list_item", value)
@@ -1243,6 +1381,7 @@ def _upsert_notion_reports(
                         {
                             "text": {
                                 "content": (
+                                    (f"{record['execution_notice']} | 사유: {record.get('reason', '')} | " if record.get('execution_notice') else "") +
                                     f"Run {record['run_id']} | {record['result']} | "
                                     f"{finding} | {record['recommendation']} | {record.get('verification_scope_summary', '')}"
                                 )[:2000]

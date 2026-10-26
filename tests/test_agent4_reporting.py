@@ -3,6 +3,72 @@
 from pipeline_test_support import *
 
 
+@pytest.mark.parametrize("candidate_status,notice", [
+    ("REVISION_REQUIRED", "검토 실패로 시험 미실행"),
+    ("NOT_AUTOMATABLE", "자동화 제외로 시험 미실행"),
+])
+def test_external_reports_include_unexecuted_without_product_fail(tmp_path, monkeypatch, candidate_status, notice):
+    exclusion = pipeline.AutomationExclusion(tc_id="TC-CAND-009",
+        candidate_status=candidate_status, reason="선택 전 기록과 선택 후 기록의 순서 충돌")
+    run, run_id = _write_agent4_inputs(tmp_path, automation_exclusions=[exclusion])
+    assert pipeline.run_agent4(SimpleNamespace(run_id=run_id, runs_root=str(tmp_path/'runs'))) == 0
+    report = pipeline.FinalReport.model_validate_json((run/'final_report.json').read_text(encoding='utf-8'))
+    bundle = pipeline.ValidationExecutionBundle.model_validate_json((run/'validation_execution.json').read_text(encoding='utf-8'))
+    records = pipeline_reporting._notion_report_records(bundle, report, run)
+    assert len({r['tc_id'] for r in records}) == len(records)
+    excluded = next(r for r in records if r['tc_id']=='TC-CAND-009')
+    assert excluded['result']=='NOT_EXECUTED' and not excluded['evidence_complete']
+    assert notice in excluded['execution_notice']
+    assert pipeline_reporting._notion_status_name(excluded['result'])=='Review Needed'
+    assert pipeline_reporting._notion_status_name('ASSERTION_FAILED')=='Fail'
+    assert '제품 PASS/FAIL 판정 없음' in json.dumps(pipeline_reporting._notion_tc_blocks(excluded),ensure_ascii=False)
+    monkeypatch.setattr(pipeline_reporting,'build_run_test_rows',lambda _: [dict(
+        tc_id='TC-CAND-009',source='신규·수정 후보',title='난방',status='NOT_EXECUTED',
+        expected_results=[],evidence_files=[])])
+    slack = json.dumps(pipeline_reporting._slack_report_payload(report,run),ensure_ascii=False)
+    assert ('검토 실패로 시험 미실행' in slack) == (candidate_status=='REVISION_REQUIRED')
+    assert '기대결과 불일치' not in slack
+
+
+@pytest.mark.parametrize('failed_destination', ['SLACK', 'NOTION'])
+@pytest.mark.parametrize('failure', ['http', 'response_lost'])
+def test_partial_delivery_failure_stays_separate_from_product_pass(tmp_path, monkeypatch, failed_destination, failure):
+    """Transport fakes only: no real send, no automatic retry on uncertain receipt."""
+    run_dir, run_id = _write_agent4_inputs(tmp_path)
+    args = SimpleNamespace(run_id=run_id, runs_root=str(tmp_path/'runs'))
+    assert pipeline.run_agent4(args) == 0
+    before = (run_dir/'final_report.json').read_bytes()
+    preview = (run_dir/'external_reporting.json').read_bytes()
+    monkeypatch.setenv('SLACK_WEBHOOK_URL', 'https://hooks.slack.com/services/test-only')
+    monkeypatch.setenv('NOTION_API_KEY', 'test-only-not-a-secret')
+    monkeypatch.setenv('NOTION_DATA_SOURCE_ID', 'test-source')
+    calls = []
+    def fake_http(method, url, payload=None, **kwargs):
+        dest = 'SLACK' if 'hooks.slack.com' in url else 'NOTION'
+        calls.append((dest, method, url))
+        if dest == failed_destination:
+            if failure == 'response_lost':
+                raise TimeoutError('Response lost; acceptance cannot be inferred')
+            return 503, {}
+        if url.endswith('/query'):
+            return 200, {'results': []}
+        if '/children' in url and method == 'GET':
+            return 200, {'results': [], 'has_more': False}
+        return 200, {'id': 'test-page'}
+    monkeypatch.setattr(pipeline_reporting, '_http_json_request', fake_http)
+    assert pipeline.run_external_reporting(SimpleNamespace(**vars(args), send=True)) == 3
+    attempts = list((run_dir/'external_reporting_attempts').iterdir())
+    assert len(attempts) == 1
+    delivery = json.loads((attempts[0]/'external_reporting.json').read_text(encoding='utf-8'))
+    for dest in ['SLACK', 'NOTION']:
+        assert delivery[dest.lower()]['status'] == ('FAILED' if dest == failed_destination else 'SENT')
+    assert len([call for call in calls if call[0] == failed_destination]) == 1
+    assert (run_dir/'final_report.json').read_bytes() == before
+    assert (run_dir/'external_reporting.json').read_bytes() == preview
+    stage = pipeline_ui.summarize_run(tmp_path/'runs', run_id)['stages']['agent4']
+    assert f"Slack: {delivery['slack']['status']} / Notion: {delivery['notion']['status']}" in stage['details']
+
+
 @pytest.mark.parametrize("status", ["PASSED", "ASSERTION_FAILED", "NOT_EXECUTED"])
 def test_slack_readable_terms_only_change_display(tmp_path, monkeypatch, status):
     import qa_pipeline_reporting as reporting
@@ -183,7 +249,7 @@ def test_notion_detail_preserves_saved_steps_results_and_restore(tmp_path):
     assert row["expected_result_details"][0]["result_id"] == tc.expected_results[0].result_id
     bundle = pipeline.ValidationExecutionBundle.model_validate_json((run_dir / "validation_execution.json").read_text(encoding="utf-8"))
     # Record rendering is separate from the CLI's upstream integrity gate.
-    report = SimpleNamespace(findings=[], run_id=run_id, recommendation=pipeline.FinalRecommendation.HUMAN_REVIEW,
+    report = SimpleNamespace(findings=[], automation_exclusions=[], run_id=run_id, recommendation=pipeline.FinalRecommendation.HUMAN_REVIEW,
                              model_dump=lambda **kwargs: {})
     records = pipeline_reporting._notion_report_records(bundle, report, run_dir)
     record = next(item for item in records if item["tc_id"] == tc.tc_id)
@@ -899,7 +965,8 @@ def test_existing_only_procedure_notes_reach_final_human_review(tmp_path: Path, 
         "existing_procedure_review_contract": "1.0", "request_sha256": _sha256_file(run_dir / "request.json"),
     })
     question = "적용 완료 알림에 적용할 목표 색상을 지정해 주세요."
-    analysis = agent1_analysis().model_copy(update={"user_questions": [question]})
+    analysis = agent1_analysis().model_copy(update={"user_questions": [question],
+                                                    "procedure_notes": request.acceptance_notes})
     _write_json(run_dir / "agent1_change_analysis.json", analysis.model_dump(mode="json", by_alias=True))
     _write_json(run_dir / "run_manifest.json", {"agent1_analysis_sha256": _sha256_file(run_dir / "agent1_change_analysis.json")})
     notes = pipeline._final_review_notes_for_validation(run_dir)
@@ -919,8 +986,8 @@ def test_existing_only_procedure_notes_reach_final_human_review(tmp_path: Path, 
     review = (run_dir / "사람_최종_검토.md").read_text(encoding="utf-8")
     assert question in review
     assert all(note in review for note in request.acceptance_notes)
-    assert "자동 확정하지 않았습니다" in review
-    _write_json(run_dir / "request.json", cp1_request().model_dump(mode="json"))
+    assert "실제 수행 증거를 확인해 주세요" in review
+    _write_json(run_dir / "agent1_change_analysis.json", agent1_analysis().model_dump(mode="json", by_alias=True))
     with pytest.raises(ValueError, match="변경"):
         pipeline._final_review_notes_for_validation(run_dir)
 
@@ -1160,3 +1227,101 @@ def test_agent4_parser_exposes_rules_only_report_command() -> None:
     )
     assert human_review.handler is pipeline.run_human_review_document
     assert human_review.refresh is False
+
+
+def _observation_line(result_id, matched, actual, *, run_id="RUN-20260817-030000-ABCDEF", tc_id="TC-CAND-003"):
+    payload = dict(version="assertion-observations-1.0", run_id=run_id, tc_id=tc_id,
+                   target_device_id="device-1", assertion={"result_id": result_id}, actual=actual, matched=matched)
+    return "QA_ASSERTION_OBSERVED: " + json.dumps(payload, ensure_ascii=True)
+
+
+def test_human_review_lists_expected_results_that_passed_inside_a_failed_tc(tmp_path: Path) -> None:
+    """2026-10-16: an ER that passed inside an ASSERTION_FAILED TC was shown as
+    "개별 판정이 확인되지 않습니다" although its observation record said matched."""
+    stdout = "\n".join([
+        _observation_line("ER-005", True, 30),
+        _observation_line("ER-006", False, 19),
+        _observation_line("ER-007", True, 30, run_id="RUN-OTHER"),      # other Run: ignored
+        _observation_line("ER-007", True, 30, tc_id="TC-OTHER"),        # other TC: ignored
+        "QA_ASSERTION_OBSERVED: {not json}",
+        "    print('QA_ASSERTION_OBSERVED: ' + json.dumps(observation))",  # source text: ignored
+    ]) + "\n"
+    run_dir, run_id = _write_agent4_inputs(
+        tmp_path, candidate_status=pipeline.NeutralExecutionStatus.ASSERTION_FAILED, candidate_stdout=stdout)
+    assert pipeline.run_agent4(SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))) == 0
+    review_text = (run_dir / "사람_최종_검토.md").read_text(encoding="utf-8")
+    assert "#### 기대 결과별 관찰 (QA_ASSERTION_OBSERVED)" in review_text
+    assert "- `ER-005`: 관찰 기록상 통과 (관찰값 30)" in review_text
+    assert "- `ER-006`: 관찰 기록상 불일치 (관찰값 19)" in review_text
+    assert "- `ER-007`: 이 요약에서 개별 판정이 확인되지 않습니다" in review_text
+    assert review_text.count("개별 판정이 확인되지 않습니다") == 1
+
+
+def test_assertion_summary_marks_conflicting_records() -> None:
+    observed = {"ER-001": [{"matched": True, "actual": 20}, {"matched": False, "actual": 19}]}
+    lines = pipeline_reporting._expected_result_summary(["ER-001", "ER-002"], observed, {"ER-002"})
+    assert lines == ["- `ER-001`: 관찰 기록이 서로 다릅니다 (관찰값 20, 19). 원본 실행 증거를 확인해 주세요."]
+
+
+def test_assertion_observations_require_matching_log_hash(tmp_path: Path) -> None:
+    stdout = _observation_line("ER-005", True, 30) + "\n"
+    run_dir, run_id = _write_agent4_inputs(
+        tmp_path, candidate_status=pipeline.NeutralExecutionStatus.ASSERTION_FAILED, candidate_stdout=stdout)
+    bundle = pipeline.ValidationExecutionBundle.model_validate_json(
+        (run_dir / "validation_execution.json").read_text(encoding="utf-8"))
+    result = bundle.candidate_result
+    assert pipeline_reporting._assertion_observations(run_dir, result, run_id)["ER-005"][0]["actual"] == 30
+    (run_dir / result.stdout_file).write_text(_observation_line("ER-005", False, 19) + "\n", encoding="utf-8")
+    assert pipeline_reporting._assertion_observations(run_dir, result, run_id) == {}
+
+
+def test_observed_value_text_reads_like_the_expected_value():
+    # 2026-10-17: saved logs record {"setTemp": 19.0}; the review shows 19.
+    from qa_pipeline_reporting import _observed_value_text
+    assert _observed_value_text({"setTemp": 19.0}) == "19"
+    assert _observed_value_text({"setTemp": 30}) == "30"
+    assert _observed_value_text(19.5) == "19.5"
+    assert _observed_value_text({"setTemp": 20.0, "mode": "COOL"}) == "setTemp 20, mode COOL"
+    assert _observed_value_text(None) == "null" and _observed_value_text(True) == "true"
+
+
+def test_human_review_row_names_the_existing_tc_a_candidate_revises(tmp_path):
+    """H-3 (2026-10-17): the person sees which existing TC the candidate would replace."""
+    run, run_id = _write_agent4_inputs(tmp_path, candidate_status=pipeline.NeutralExecutionStatus.ASSERTION_FAILED)
+    assert pipeline.run_agent4(SimpleNamespace(run_id=run_id, runs_root=str(tmp_path / "runs"))) == 0
+    path = run / "agent2_test_design.json"
+    design = json.loads(path.read_text(encoding="utf-8"))
+    candidate = design["test_cases"][0]["tc_id"]
+    before = next(r for r in pipeline_reporting.build_run_test_rows(run) if r["tc_id"] == candidate)
+    assert before["source"] == "신규·수정 후보"
+    design["기존_TC_수정"] = [dict(tc_id="TC-MODE-003", revised_by=candidate, reason="적용 버튼만 빠진 같은 전환 시험")]
+    path.write_text(json.dumps(design, ensure_ascii=False), encoding="utf-8")
+    row = next(r for r in pipeline_reporting.build_run_test_rows(run) if r["tc_id"] == candidate)
+    assert row["source"] == "TC-MODE-003 고쳐 쓰기 후보(교체는 사람 승인)"
+
+
+def test_human_review_lists_review_ai_warnings_that_did_not_stop_the_run(tmp_path):
+    """2026-10-18: warnings recorded at CP1/CP2 (severity tiers) are shown to the person."""
+    message = ("전체 항목의 모델 근거 검토·인용 존재·연결 검사를 통과했습니다. 의미 정확성의 보장은 아닙니다."
+               " 경고(진행, 사람 확인 권장): COND-002: [경고] 대상 선택 근거 문장이 약함;"
+               " TC-CAND-001/ER-003: [경고] 유지 조건 누락; 표현 보완 권장")
+    _write_json(tmp_path / "checkpoint2.json", {"checks": [{"rule_id": "AGENT2-GROUNDING", "status": "PASS",
+                                                           "message": message}]})
+    lines = pipeline_reporting._review_warning_lines(tmp_path)
+    assert lines[0] == "## 2-1. 검토 AI 경고 (진행했지만 사람 확인 권장)"
+    rows = [line for line in lines if line.startswith("| 시험 설계")]
+    assert len(rows) == 2 and "COND-002" in rows[0] and "표현 보완 권장" in rows[1]
+    assert "검토 AI가 남긴 경고는 없습니다." in pipeline_reporting._review_warning_lines(tmp_path / "none")
+
+
+def test_human_review_shows_cp1_scope_warning_and_review_language_note(tmp_path):
+    """2026-10-25 review: the CP1-011 warning starts its message with the marker (no leading
+    space) and never reached section 2-1; review-reason language notes are shown too."""
+    _write_json(tmp_path / "checkpoint1.json", {"checks": [
+        {"rule_id": "CP1-011", "status": "PASS",
+         "message": "경고(진행, 사람 확인 권장): 범위 근거 보완 필요 — REQ-STATE-001: 긍정 변경 요청 원문 조건에 연결되지 않은 범위 근거"},
+        {"rule_id": "AGENT1-GROUNDING", "status": "PASS",
+         "message": "근거 검토를 통과했습니다. 검토 이유에 한자·일본 문자(사람 확인 권장): COND-001"}]})
+    rows = [line for line in pipeline_reporting._review_warning_lines(tmp_path) if line.startswith("| 분석")]
+    assert len(rows) == 2
+    assert any("REQ-STATE-001" in row for row in rows) and any("COND-001" in row for row in rows)

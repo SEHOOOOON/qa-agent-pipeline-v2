@@ -1,0 +1,322 @@
+{
+  "request_id": "CR-EVAL-20261005-POWER-STOP",
+  "test_cases": [
+    {
+      "tc_id": "TC-CAND-001",
+      "title": "운전 상태 단일 장비의 정지 적용 후 제어 패널·카드·내부 status 확인",
+      "purpose": "CHANGE_VALIDATION",
+      "test_type": "NORMAL",
+      "requirement_ids": [
+        "REQ-POWER-001",
+        "REQ-CONTROL-001"
+      ],
+      "source_condition_ids": [
+        "COND-001",
+        "COND-002",
+        "COND-003",
+        "COND-004",
+        "COND-005"
+      ],
+      "control_path": "CENTRAL",
+      "target_role": "PRIMARY_TEST_DEVICE",
+      "test_data": {
+        "initial_mode": null,
+        "requested_mode": null,
+        "requested_modes": [],
+        "initial_temperature_c": null,
+        "requested_temperature_c": null,
+        "requested_temperatures_c": [],
+        "restore_observed_hvac_state": false
+      },
+      "condition_execution": "SINGLE_FLOW",
+      "grouping_reason": "OPERATION으로 준비한 단일 장비에 STOP를 적용한 뒤 같은 적용 시점의 제어 패널, 장비 카드 및 내부 status 결과를 하나의 전원 전환 규칙으로 확인한다.",
+      "intermediate_reset_steps": [],
+      "preconditions": [
+        "중앙 제어 패널에서 연결되어 있고 오류와 잠금이 없는 PRIMARY_TEST_DEVICE 한 대를 시험 대상으로 한다.",
+        "준비 조작 전에 대상 장비의 제어 패널 전원 선택, 장비 카드 상태 및 내부 status의 원래 관찰값을 기록한다.",
+        "중앙 제어 패널에서 대상 장비 카드를 선택한다.",
+        "대상 장비의 전원으로 OPERATION을 선택한다.",
+        "선택한 전원 상태를 적용한다.",
+        "제어 패널 전원 선택, 장비 카드 상태 및 내부 status가 OPERATION인지 확인한다."
+      ],
+      "steps": [
+        "대상 장비의 전원으로 STOP를 선택한다.",
+        "선택한 전원 상태를 적용한다."
+      ],
+      "expected_results": [
+        {
+          "result_id": "ER-001",
+          "statement": "STOP 적용 직후 대상 장비 제어 패널의 전원 선택은 STOP이다.",
+          "observation_layer": "UI",
+          "source_condition_ids": [
+            "COND-002"
+          ],
+          "verify_after_step": "선택한 전원 상태를 적용한다.",
+          "observation_target": "대상 장비 제어 패널의 전원 선택"
+        },
+        {
+          "result_id": "ER-002",
+          "statement": "STOP 적용 직후 대상 장비 카드는 STOP 상태를 표시한다.",
+          "observation_layer": "UI",
+          "source_condition_ids": [
+            "COND-003",
+            "COND-005"
+          ],
+          "verify_after_step": "선택한 전원 상태를 적용한다.",
+          "observation_target": "대상 장비 카드의 상태 표시"
+        },
+        {
+          "result_id": "ER-003",
+          "statement": "STOP 적용 직후 대상 장비의 내부 status는 STOP이다.",
+          "observation_layer": "INTERNAL_STATE",
+          "source_condition_ids": [
+            "COND-004",
+            "COND-005"
+          ],
+          "verify_after_step": "선택한 전원 상태를 적용한다.",
+          "observation_target": "대상 장비의 내부 status"
+        }
+      ],
+      "common_qa_criteria": [
+        "NORMAL_FLOW",
+        "RECOVERY_AND_RESET"
+      ],
+      "domain_qa_criteria": [
+        "TARGET_DEVICE_ACCURACY",
+        "UI_INTERNAL_STATE_CONSISTENCY"
+      ],
+      "feature_requirement_ids": [
+        "REQ-POWER-001",
+        "REQ-CONTROL-001"
+      ],
+      "independent_execution": true,
+      "independence_reason": "각 실행 전에 대상 장비의 원래 관찰값을 기록하고 OPERATION 준비 상태를 확인한 뒤 STOP 전환을 시험한다. 종료 후 준비와 시험으로 변경한 전원 상태를 실행 전 관찰값으로 복원하므로 다른 TC의 결과에 의존하지 않는다.",
+      "double_assert_policy": "REQUIRED",
+      "double_assert_reason": "요청은 STOP 적용 후 제어 패널 및 장비 카드의 화면 상태와 내부 status를 모두 요구한다.",
+      "restore_required": true,
+      "state_effect": "STATE_CHANGE",
+      "restore_steps": [
+        "시험 후 준비와 시험으로 변경한 대상 장비의 전원 상태를 준비 전 관찰한 원래 상태로 복원하고 적용한다.",
+        "복원 후 대상 장비 제어 패널의 전원 선택을 준비 전 관찰값과 비교한다.",
+        "복원 후 대상 장비 카드의 상태 표시를 준비 전 관찰값과 비교한다.",
+        "복원 후 대상 장비의 내부 status를 준비 전 관찰값과 비교한다."
+      ],
+      "restoration": {
+        "operation_steps": [
+          "시험 후 준비와 시험으로 변경한 대상 장비의 전원 상태를 준비 전 관찰한 원래 상태로 복원하고 적용한다."
+        ],
+        "confirmations": [
+          {
+            "source_text": "복원 후 대상 장비 제어 패널의 전원 선택을 준비 전 관찰값과 비교한다.",
+            "result_ids": [
+              "ER-001"
+            ],
+            "comparisons": [
+              {
+                "result_id": "ER-001",
+                "source_excerpt": "복원 후 대상 장비 제어 패널의 전원 선택을 준비 전 관찰값과 비교한다.",
+                "basis": "OBSERVED_BASELINE"
+              }
+            ]
+          },
+          {
+            "source_text": "복원 후 대상 장비 카드의 상태 표시를 준비 전 관찰값과 비교한다.",
+            "result_ids": [
+              "ER-002"
+            ],
+            "comparisons": [
+              {
+                "result_id": "ER-002",
+                "source_excerpt": "복원 후 대상 장비 카드의 상태 표시를 준비 전 관찰값과 비교한다.",
+                "basis": "OBSERVED_BASELINE"
+              }
+            ]
+          },
+          {
+            "source_text": "복원 후 대상 장비의 내부 status를 준비 전 관찰값과 비교한다.",
+            "result_ids": [
+              "ER-003"
+            ],
+            "comparisons": [
+              {
+                "result_id": "ER-003",
+                "source_excerpt": "복원 후 대상 장비의 내부 status를 준비 전 관찰값과 비교한다.",
+                "basis": "OBSERVED_BASELINE"
+              }
+            ]
+          }
+        ],
+        "verify_when": "AFTER_RESTORE"
+      },
+      "automation_candidate": true,
+      "automation_reason": "중앙 관제의 단일 대상 선택, OPERATION·STOP 선택과 적용, 패널·카드·내부 status 조회 및 관찰값 기반 복원이 현재 실행 연결표에 있다.",
+      "execution_spec": {
+        "operations": [
+          {
+            "action_id": "ACT-001",
+            "phase": "PRECONDITION",
+            "action_type": "SELECT_DEVICE",
+            "value": null,
+            "source_text": "중앙 제어 패널에서 대상 장비 카드를 선택한다.",
+            "target": "device.select"
+          },
+          {
+            "action_id": "ACT-002",
+            "phase": "PRECONDITION",
+            "action_type": "CLICK",
+            "value": null,
+            "source_text": "대상 장비의 전원으로 OPERATION을 선택한다.",
+            "target": "status.operation"
+          },
+          {
+            "action_id": "ACT-003",
+            "phase": "PRECONDITION",
+            "action_type": "APPLY_COMMANDS",
+            "value": null,
+            "source_text": "선택한 전원 상태를 적용한다.",
+            "target": "command.apply"
+          },
+          {
+            "action_id": "ACT-004",
+            "phase": "TEST",
+            "action_type": "CLICK",
+            "value": null,
+            "source_text": "대상 장비의 전원으로 STOP를 선택한다.",
+            "target": "status.stop"
+          },
+          {
+            "action_id": "ACT-005",
+            "phase": "TEST",
+            "action_type": "APPLY_COMMANDS",
+            "value": null,
+            "source_text": "선택한 전원 상태를 적용한다.",
+            "target": "command.apply"
+          },
+          {
+            "action_id": "ACT-006",
+            "phase": "RESTORE",
+            "action_type": "RESTORE_OBSERVED_CONTROLLER",
+            "value": null,
+            "source_text": "시험 후 준비와 시험으로 변경한 대상 장비의 전원 상태를 준비 전 관찰한 원래 상태로 복원하고 적용한다.",
+            "target": "controller.restore"
+          }
+        ],
+        "verifications": [
+          {
+            "result_id": "ER-001",
+            "observation_layer": "UI",
+            "strategy": "CONTROLLER_UI_FIELDS_EQUALS",
+            "expected_number": null,
+            "expected_text": null,
+            "expected_value": null,
+            "expected_fields": [
+              {
+                "field_name": "status",
+                "expected_value": "STOP"
+              }
+            ],
+            "after_action_id": "ACT-005",
+            "target": "panel.status"
+          },
+          {
+            "result_id": "ER-002",
+            "observation_layer": "UI",
+            "strategy": "CONTROLLER_UI_FIELDS_EQUALS",
+            "expected_number": null,
+            "expected_text": null,
+            "expected_value": null,
+            "expected_fields": [
+              {
+                "field_name": "status",
+                "expected_value": "STOP"
+              }
+            ],
+            "after_action_id": "ACT-005",
+            "target": "card.status"
+          },
+          {
+            "result_id": "ER-003",
+            "observation_layer": "INTERNAL_STATE",
+            "strategy": "INTERNAL_DEVICE_FIELDS_EQUALS",
+            "expected_number": null,
+            "expected_text": null,
+            "expected_value": null,
+            "expected_fields": [
+              {
+                "field_name": "status",
+                "expected_value": "STOP"
+              }
+            ],
+            "after_action_id": "ACT-005",
+            "target": "internal.status"
+          }
+        ],
+        "precondition_verifications": [
+          {
+            "source_text": "중앙 제어 패널에서 연결되어 있고 오류와 잠금이 없는 PRIMARY_TEST_DEVICE 한 대를 시험 대상으로 한다.",
+            "read_kind": "BASELINE_CONTEXT",
+            "expected_value": true,
+            "observation_target": "context.target_device_visible"
+          },
+          {
+            "source_text": "중앙 제어 패널에서 연결되어 있고 오류와 잠금이 없는 PRIMARY_TEST_DEVICE 한 대를 시험 대상으로 한다.",
+            "read_kind": "BASELINE_CONTEXT",
+            "expected_value": true,
+            "observation_target": "context.online"
+          },
+          {
+            "source_text": "중앙 제어 패널에서 연결되어 있고 오류와 잠금이 없는 PRIMARY_TEST_DEVICE 한 대를 시험 대상으로 한다.",
+            "read_kind": "BASELINE_CONTEXT",
+            "expected_value": true,
+            "observation_target": "context.error_free"
+          },
+          {
+            "source_text": "중앙 제어 패널에서 연결되어 있고 오류와 잠금이 없는 PRIMARY_TEST_DEVICE 한 대를 시험 대상으로 한다.",
+            "read_kind": "BASELINE_CONTEXT",
+            "expected_value": true,
+            "observation_target": "context.unlocked"
+          },
+          {
+            "source_text": "제어 패널 전원 선택, 장비 카드 상태 및 내부 status가 OPERATION인지 확인한다.",
+            "read_kind": "CONTROLLER_UI_FIELD",
+            "expected_value": "OPERATION",
+            "observation_target": "panel.status"
+          },
+          {
+            "source_text": "제어 패널 전원 선택, 장비 카드 상태 및 내부 status가 OPERATION인지 확인한다.",
+            "read_kind": "CONTROLLER_UI_FIELD",
+            "expected_value": "OPERATION",
+            "observation_target": "card.status"
+          },
+          {
+            "source_text": "제어 패널 전원 선택, 장비 카드 상태 및 내부 status가 OPERATION인지 확인한다.",
+            "read_kind": "INTERNAL_VALUE",
+            "expected_value": "OPERATION",
+            "observation_target": "internal.status"
+          }
+        ],
+        "binding_contract": "controller-map-1.0"
+      }
+    }
+  ],
+  "existing_tc_comparison_completed": true,
+  "관련_기존_TC": [],
+  "coverage_summary": "OPERATION으로 준비한 연결·정상·비잠금 단일 장비에 STOP를 적용한 뒤, 적용 직후 제어 패널 전원 선택, 장비 카드 상태 및 내부 status를 확인하는 변경 검증 후보 1건을 설계했습니다. 기존 카탈로그에는 동일 대상·전원 전환·적용 직후의 세 관찰 위치를 모두 검증하는 TC가 없습니다.",
+  "coverage_notes": [
+    "COND-005의 기존 전원 기능 기준은 이번 OPERATION→STOP 전환에서 카드 상태와 내부 status가 선택값과 일치하는 부분에만 연결했습니다. OPERATION과 STOP 두 선택지 전체를 시험 완료한 것으로 표현하지 않습니다.",
+    "기존 TC-MODE-001~003, TC-LOCK-001, TC-ERR-001, TC-TEMP-001, TC-V2-001 및 TC-V2-002는 전원 OPERATION→STOP 전환과 제어 패널·카드·내부 status의 요청된 조합을 검증하지 않으므로 재사용하지 않았습니다.",
+    "요청과 SRS는 기존 전원 기능의 시험 범위이며 SRS 개정은 불필요합니다."
+  ],
+  "제외_범위": [
+    "다중 장비 제어",
+    "벽면 리모컨과 실제 장비 통신",
+    "알림 문구와 색상 검사",
+    "명시한 전환 이외의 추가 회귀 시험",
+    "기존 전원 기능의 운전에서 정지로의 전환을 시험합니다. 제품 기준 변경이나 SRS 개정 요청이 아닙니다.",
+    "이번 시험 범위는 운전에서 정지로의 전환이며 기존 SRS 제품 기준은 변경하지 않습니다."
+  ],
+  "제외된_정보_부족": [],
+  "최종_확인_사항": [],
+  "중단_확인_사항": [],
+  "SRS_개정_제안": []
+}

@@ -1,29 +1,15 @@
 from __future__ import annotations
 
-import argparse
 import ast
 import hashlib
 import json
-import os
 import re
-import shutil
-import subprocess
-import sys
-import tempfile
-import time
-import urllib.error
-import urllib.request
-import uuid
-import zipfile
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, model_validator, model_serializer
-from qa_pipeline_trace import redact_playwright_trace as _redact_playwright_trace
 from qa_pipeline_io import *
 
 __version__ = "0.3.0"
@@ -174,7 +160,9 @@ class ScopeBasis(str, Enum):
 
 class RequirementScopeEvidence(StrictModel):
     basis: ScopeBasis
-    request_condition_ids: list[NonEmptyStr] = Field(min_length=1)
+    # The host derives these; an empty list used to raise inside analyze() with no CP1
+    # record or rewrite (2026-10-25 review). CP1-011 now reports it instead.
+    request_condition_ids: list[NonEmptyStr]
     srs_source_text: NonEmptyStr
 
 
@@ -358,10 +346,23 @@ class RestoreComparison(StrictModel):
 
 
 class RestoreConfirmation(StrictModel):
-    """Reference existing ER readers; never introduce a new selector or value."""
+    """Reference existing ER readers or preparation checks; never introduce a new selector or value."""
     source_text: NonEmptyStr
-    result_ids: list[Annotated[str, StringConstraints(pattern=r"^ER-\d{3}$")]] = Field(min_length=1)
+    result_ids: list[Annotated[str, StringConstraints(pattern=r"^ER-\d{3}$")]] = Field(default_factory=list)
     comparisons: list[RestoreComparison] = Field(default_factory=list)
+    # 2026-10-24 IMP-015: a controller field changed only in preparation (mode in a
+    # temperature TC) has no product ER, so its restore check links the preparation check.
+    precondition_indexes: list[Annotated[int, Field(ge=0)]] = Field(
+        default_factory=list,
+        description="execution_spec.precondition_verifications 번호(0부터). 시험 ER이 없는 준비 관제점의 복원 확인에만 사용.")
+
+    @model_serializer(mode="wrap")
+    def omit_empty_precondition_indexes(self, handler):
+        # Historical artifacts keep their digests.
+        result = handler(self)
+        if not self.precondition_indexes:
+            result.pop("precondition_indexes", None)
+        return result
 
 
 class RestoreVerificationTiming(str, Enum):
@@ -474,6 +475,36 @@ def _structured_restoration_errors(tc: ProductTestCaseCandidate) -> list[str]:
                 errors.append("설명 원문은 자르거나 재해석하지 않고 전체 문장을 연결해야 합니다")
     if not required or set(linked) != required or len(linked) != len(set(linked)):
         errors.append("상태 ER마다 복원 비교를 정확히 하나씩 연결해야 합니다")
+    errors.extend(_preparation_restore_errors(tc))
+    return errors
+
+
+_RESTORABLE_CONTROLLER_FIELDS = {"status", "mode", "fanSpeed", "setTemp", "locked"}
+
+
+def _preparation_restore_errors(tc: ProductTestCaseCandidate) -> list[str]:
+    """IMP-015: every controller field confirmed in preparation without a product ER needs its own restore check."""
+    confirmations = tc.restoration.confirmations
+    if any(not c.result_ids and not c.precondition_indexes for c in confirmations):
+        return ["복원 확인은 ER 또는 준비 확인을 하나 이상 참조해야 합니다"]
+    spec = tc.execution_spec
+    # Only the controller map names each check's field; older specs cannot tell which field has an ER.
+    mapped = spec is not None and spec.binding_contract == "controller-map-1.0"
+    checks = spec.precondition_verifications if mapped else []
+    er_fields = {v.target.rpartition(".")[2] for v in spec.verifications if v.target} if mapped else set()
+    required = {i for i, check in enumerate(checks)
+                if check.read_kind in (PreconditionReadKind.CONTROLLER_UI_FIELD, PreconditionReadKind.INTERNAL_VALUE)
+                and check.observation_target.rpartition(".")[2] in _RESTORABLE_CONTROLLER_FIELDS
+                and check.observation_target.rpartition(".")[2] not in er_fields}
+    linked = [i for c in confirmations for i in c.precondition_indexes]
+    errors = []
+    if set(linked) - required:
+        errors.append("복원 확인의 준비 확인 번호는 시험 ER이 없는 관제점의 준비 확인만 가리킬 수 있습니다")
+    missing = sorted(required - set(linked))
+    if missing or len(linked) != len(set(linked)):
+        targets = ", ".join(checks[i].observation_target for i in missing)
+        errors.append("준비에서 확인한 관제점(시험 ER 없음)마다 precondition_indexes로 복원 확인을 정확히 한 번 연결해야 합니다"
+                      + (f" (누락: {targets})" if targets else ""))
     return errors
 
 
@@ -485,6 +516,19 @@ class ExistingTestSelection(StrictModel):
         Annotated[str, StringConstraints(pattern=r"^COND-\d{3}$")]
     ] = Field(min_length=1)
     selection_reason: NonEmptyStr
+
+
+class ExistingTcRevision(StrictModel):
+    """New candidate written as the revised version of a nearly identical existing TC.
+
+    2026-10-17 사람 대조 H-3: 대상·조작이 거의 같고 일부 단계·확인만 빠진 기존 TC는
+    새로 만들지 않고 고쳐 쓴다. 기존 TC는 사람이 공식 대체(supersession)를 승인하기 전까지
+    그대로 남는다.
+    """
+
+    tc_id: Annotated[str, StringConstraints(pattern=r"^TC-[A-Z0-9]+-\d{3}$")]
+    revised_by: Annotated[str, StringConstraints(pattern=r"^TC-CAND-\d{3}$")]
+    reason: NonEmptyStr
 
 
 class SrsRevisionProposal(StrictModel):
@@ -551,6 +595,18 @@ class Agent2TestDesign(StrictModel):
     srs_revision_proposals: list[SrsRevisionProposal] = Field(
         default_factory=list, alias="SRS_개정_제안"
     )
+    existing_tc_revisions: list[ExistingTcRevision] = Field(
+        default_factory=list, alias="기존_TC_수정"
+    )
+
+    @model_serializer(mode="wrap")
+    def omit_empty_revisions(self, handler):
+        payload = handler(self)
+        # Do not change historical design digests by injecting an empty list.
+        if not self.existing_tc_revisions:
+            payload.pop("기존_TC_수정", None)
+            payload.pop("existing_tc_revisions", None)
+        return payload
 
 
 class Checkpoint2Result(StrictModel):
@@ -757,6 +813,25 @@ class PreconditionReadKind(str, Enum):
     BASELINE_CONTEXT = "BASELINE_CONTEXT"
 
 
+CONTROLLER_BASELINE_CAPTURE_SEQUENCE = (
+    "SELECT_TARGET_AND_WAIT_FOR_SELECTED_ID", "CAPTURE_ORIGINAL_READERS",
+    "PREPARE_AND_TEST", "RESTORE_AND_COMPARE_SAME_READERS",
+)
+CONTROLLER_BASELINE_CAPTURE_MEANING = (
+    "BEFORE_SETUP means after the leading target-selection actions and their selectedUnitId waits, "
+    "before the first non-selection action. The initial UI Inventory panel may show another device; "
+    "it is not the captured baseline. This describes compiler order only, not a successful trial "
+    "or permission to use another target/reader."
+)
+QA_CONTROLLER_BASELINE_GUIDANCE = """실행기의 원래값 기록 순서 (제품 기대결과가 아님):
+지원되는 중앙제어 복원 경로는 대상 장비를 선택하고 selectedUnitId가 그 대상인지 확인한 뒤, 준비 조작을 시작하기 전에 해당 장비의 원래값을 기록합니다.
+BEFORE_SETUP은 '대상 선택 완료 후 → 원래값 기록 → 첫 준비/시험 조작'입니다. 장비 선택 전 기록을 의미하지 않습니다.
+초기 UI Inventory에서 보인 패널은 다른 장비일 수 있으며 복원 기준값으로 사용하지 않습니다. 복원은 같은 대상·같은 관찰 위치의 실제 기록값과 비교합니다.
+이는 지원되는 전원·모드·풍량·온도·잠금 복원 기능의 순서 설명입니다. TC별 compiler_recovery_facts가 없는 경로나 다른 관찰 대상의 지원·성공을 보장하지 않습니다.
+요청에 별도의 기록 순서가 명시되어 충돌한다면 요청이나 TC를 몰래 바꾸지 말고 충돌을 설명합니다. 임의 초기값·제품 기대결과·새 필수 검사를 추가하지 않습니다.
+""" + CONTROLLER_BASELINE_CAPTURE_MEANING
+
+
 QA_EXECUTION_CONTRACT = """Host execution contract (not a new product requirement):
 restore_required and structured restoration define ordinary restoration. restore_observed_hvac_state is only the legacy mode/temperature compatibility option, NOT a master restoration switch. False is correct for fan/power/lock-only tests with valid restoration.
 For state_effect TCs, the compiler saves original observations BEFORE setup, checks preconditions AFTER setup, then runs TEST. RESTORE_OBSERVED_CONTROLLER restores all changed controller fields through the UI. restore_confirmations link ER readers to their saved original values; selectors/reader implementations need not be repeated in each confirmation. Actual success still requires runtime evidence.
@@ -768,6 +843,126 @@ SRS changes and official TC registration require separate human approval. Checkp
 
 
 QA_EXPECTATION_SCOPE_GUIDANCE = """차단·제한과 상태 유지의 범위를 구분합니다. 원문이 금지한 동작, 보존할 대상과 판정 시점만 기대결과에 연결합니다. 차단이라는 분류만으로 시험 시작 상태 전체 유지, 다른 관제점 불변, UI 선택 비활성이나 원래 값 복귀를 추가하지 않습니다. 반대로 원문에 명시된 유지·필수 검사도 생략하지 않습니다. 선택/입력 중 패널 값과 적용 후 장비 값은 서로 다른 관찰 대상이며, 연속 조작을 단일 입력으로 바꾸어 해석하지 않습니다. 화면 관찰은 조작 수단의 근거이지 제품 정답의 근거가 아닙니다. 근거가 모호하면 확인 사항으로 남기고 실제 관찰값에 맞춰 기대값을 바꾸지 않습니다.
+"""
+
+
+QA_DESIGN_REVIEW_GUIDANCE = """설계·검토 공통 기준 (시험 결과나 제품 요구사항을 대신하지 않음):
+요청 원문과 SRS를 함께 대조합니다. AI의 조건 목록·분류·coverage_summary를 정답으로 삼지 않습니다. 요청한 변경·유지·금지 조건과 그 판정을 위해 필요한 조작·관찰은 모두 연결하며, 미검증이라고 적는 것으로 필수 누락을 면제하지 않습니다.
+정책의 허용 범위를 변경하는 요청은 기존 경계 검사 원칙대로 변경 후 하한과 상한을 확인합니다. 단일 값/전환 시험에 등장한 기존 범위를 전체 범위 변경으로 해석하지 않습니다. 사용자가 시험 범위를 명시적으로 한정했다면 그 범위를 보존하고 확인한 부분만 보고합니다. 전체 범위 검증 요구와 제외가 충돌하면 임의로 어느 쪽을 지우지 않고 확인 사항으로 남깁니다.
+추가하면 유용하다는 이유만으로 요청 밖 검사를 필수로 확대하지 않습니다. 반려할 때는 원문의 어떤 요구가 실제 조작·관찰·판정에서 빠지거나 달라졌는지 설명합니다. 같은 의미의 문장 분할·동의어·추가 관찰만으로 반려하지 않습니다. 검사 누락·잘못된 기대값·대상/시점 혼동·근거 없는 전체 완료 주장은 계속 반려합니다.
+SRS 개정은 변경 부분만 수정하되 proposed_acceptance_criteria가 인수 기준 셀 전체를 교체한다는 점을 지킵니다. 현재 인수 기준의 의미를 출발점으로 바뀌는 대상·조건·값만 교체하고, 나머지 대상의 적용·차단·유지 기준은 완성 문장에 명시적으로 보존합니다. reason의 '나머지 동일' 설명이나 시험 TC 한 건을 전체 기준 대신 저장하지 않습니다. 기존 기준의 보존은 그 모든 기능을 이번에 실행하라는 뜻이 아닙니다. 요청에 없는 정책을 추정하거나 공식 SRS를 자동 변경하지 않습니다.
+"""
+
+QA_RANGE_CHANGE_RULES = """사람 판단 확정 규칙 v1 (2026-10-15, 허용 범위 변경 요청의 설계·검토 공통 기준):
+아래 L·U는 현재 요청/SRS가 정한 바뀐 모드의 새 하한·상한을 뜻하는 표기입니다. 값을 이 문서에서 가져오지 말고 현재 요청/SRS에서 확인하세요. 요청이 시험 범위를 명시적으로 한정했다면 그 한정을 우선합니다.
+T-1 범위가 바뀐 각 모드에서 새 하한 L 적용과 새 상한 U 적용을 각각 별도 ExpectedResult로 확인합니다. 한쪽 끝만 확인하거나 두 적용을 한 결과로 합치면 누락입니다.
+T-2 범위가 바뀐 각 모드에서 L-1과 U+1이 적용되지 않는 차단 시험이 모두 필요합니다. 한쪽 차단만 있으면 누락입니다. 범위가 바뀌지 않은 모드의 경계 차단은 권장일 뿐 필수로 확대하지 않습니다.
+T-5 모드 전환 시 기존 설정 온도가 새 모드의 범위 밖일 때의 동작(자동 조정·유지·차단 등)을 요청/SRS가 정하지 않았다면 기대값을 만들지 말고 확인 사항(질문)으로 남깁니다. 제품 관찰값을 정답으로 쓰지 않습니다.
+T-7 한 모드의 경계 시험(L 적용·U 적용·L-1 차단·U+1 차단)은 한 TC에 모읍니다. 여러 모드를 한 TC에 섞지 않습니다.
+T-8 차단 판정은 조작 뒤 값이 그대로인지(패널·카드·내부값)만으로 합니다. 요청에 없는 안내 문구·알림·색상·비활성화를 기대결과로 추가하지 않습니다.
+C-3 적용 결과는 같은 조작 시점의 패널·카드·내부값 세 곳을 TC 기대결과에 직접 적습니다. 내부값 확인이 빠지면 누락입니다.
+C-9 화면값과 내부값은 같은 대상 장비끼리 대조합니다. 다른 장비의 값으로 확인하면 수정 대상입니다.
+이 규칙은 누락·추가를 판단하는 기준이며 제품 동작이나 실행 성공의 근거가 아닙니다.
+"""
+
+# 2026-10-17 사용자 확정(질문지 QUESTIONS-20261017). 온도 범위 규칙(위 v1)과 함께 쓰며,
+# 새 Run의 review_severity_contract=1.0에서만 작성·검토 입력에 들어간다.
+QA_CONFIRMED_RULES = """사람 판단 확정 규칙 v2 (2026-10-17, 기능별 설계·검토 공통 기준. 요청/SRS가 직접 다루는 기능에만 적용):
+M-1 모드 변경은 적용 직후 패널·카드·내부 mode가 적용한 모드인지 확인합니다.
+M-2 FAN·DRY 적용 후 온도 증가·감소 버튼 비활성과 패널 설정 온도 '---' 표시를 확인합니다.
+M-3 FAN·DRY에서 COOL·HEAT·AUTO로 돌아오는 시험은 온도 버튼이 다시 활성인지 반드시 확인합니다.
+M-4 모드 전환 시 설정 온도 처리를 요청/SRS가 정하지 않았다면 원래 설정 온도 유지를 기대값으로 봅니다. 원래 온도가 새 모드의 허용 범위 밖이면 T-5대로 확인 사항(질문)으로 남깁니다.
+F-1 풍량 변경은 적용 직후 제어 패널 풍량 표시·장비 카드 라벨·내부 fanSpeed 코드 세 곳을 확인합니다(2026-10-18 사람 확정).
+F-2 장비 카드 표시는 SRS의 사용자 라벨로 확인하며 내부 코드 글자를 화면 기대값으로 쓰지 않습니다.
+F-3 표시 라벨을 바꾸는 요청은 화면 라벨과 내부 코드를 각각 따로 판정합니다.
+B-1 잠금·오류·게이트웨이·권한 차단은 명령 뒤 관련 값이 그대로인지(패널·카드·내부값)만으로 판정합니다. 안내 문구·Toast 표시는 판정하지 않습니다.
+B-4 선택하지 않은 장비·차단 장비가 그대로인지는 복수 장비가 요청 범위일 때만 확인합니다.
+P-1 전원 변경은 적용 직후 패널·카드·내부 status 세 곳을 확인합니다.
+P-2 오류 장비의 전원 변경 차단은 값 유지와 함께 ERROR 표시·오류 코드가 계속 보이는지 확인합니다.
+유지되는 모드·기능의 경계·회귀 확인은 권장이며 필수로 확대하지 않습니다.
+이 규칙은 누락·추가를 판단하는 기준이며 제품 동작이나 실행 성공의 근거가 아닙니다.
+"""
+
+# 2026-10-20: Agent 1 sees the confirmed rules only so that its scope statements do not
+# contradict them. The rules are applied by Agent 2; Agent 1 must not turn them into
+# conditions without source text (CP1 still rejects unsupported conditions).
+QA_AGENT1_RULES_NOTE = """아래 확정 규칙은 Agent 2가 시험을 설계할 때 적용하는 기준입니다(분석 단계 참고용):
+- 이 규칙이 요구하는 확인(예: 적용 직후 패널·카드·내부값 세 곳)을 영향 분석·이유·범위 설명에서 '확인하지 않는다', '별도 검사로 추가하지 않는다'처럼 제외하지 않습니다.
+- 규칙만을 근거로 confirmed_conditions를 새로 만들지 않습니다. 조건은 지금처럼 요청·SRS 원문에 근거합니다.
+- 요청·SRS가 규칙과 다르게 명시하면 원문을 따르고, 충돌이 판단에 필요하면 정보 부족으로 남깁니다.
+"""
+
+# 2026-10-17 사람 대조 H-3. Kept apart from QA_CONFIRMED_RULES, whose exact text is
+# bound into stored grounding inputs of earlier Runs.
+QA_TC_REVISION_RULE = """기존 TC 고쳐 쓰기 (H-3, 2026-10-17 사람 확정):
+기존 TC가 이번 요청과 대상 장비·모드 전환·조작 순서가 거의 같고 일부 단계(예: 적용 버튼)나 일부 확인(예: 내부값)만 빠졌다면 그 TC를 그대로 재사용(관련_기존_TC)하지도, 무관한 새 시험으로 따로 만들지도 않습니다.
+빠진 단계·확인을 보완한 후보를 test_cases에 작성하고, 기존_TC_수정에 {tc_id: 기존 TC ID, revised_by: 그 후보 TC-CAND ID, reason: 같은 점과 고친 점}을 기록합니다. 같은 기존 TC를 관련_기존_TC에 함께 넣지 않습니다.
+대상·목적·확인 범위가 실제로 다른 기존 TC는 고쳐 쓰기 대상이 아니며 coverage_notes에 미선택 이유만 남깁니다. 기존 TC 교체는 사람이 승인해야 하며 자동으로 대체됐다고 쓰지 않습니다.
+"""
+
+# 2026-10-25 (P2 IMP-018): the instructions never asked for Korean. A Chinese TC title,
+# a Japanese independence_reason and a Chinese judge reason appeared in saved runs.
+QA_LANGUAGE_RULE = """작성 언어 (2026-10-25):
+사람이 읽는 모든 문장(분석·질문·TC 제목·준비·절차·기대결과·복원·이유·설명·SRS 개정안)은 한국어로 씁니다. 중국어·일본어·한자를 쓰지 않습니다.
+제품 코드값(COOL·HIGH·setTemp 등)·ID·단위는 그대로 둘 수 있습니다. 요청·SRS·기존 TC 원문을 인용할 때는 원문 그대로 둡니다.
+"""
+
+# Kana, CJK ideographs (incl. compatibility, iteration mark, half-width kana). U+30FB and
+# U+30FC are excluded: Korean text uses them as separators (2026-10-25 review). Same range as
+# the P2 judge check.
+_FOREIGN_SCRIPT_RUN = re.compile(
+    r"[々぀-ヺヽ-ヿ㐀-䶿一-鿿豈-﫿ｦ-ﾟ]+")
+
+
+def foreign_script_texts(value, sources=()) -> list[str]:
+    """Paths of strings holding Han/Kana that are not quoted from the given source texts.
+
+    Walks every string of a model dump, so newly added fields are covered too.
+    """
+    # A quote must match a source run exactly or be a 2+ character part of one; a single
+    # character cut out of a quoted word (冷 from 冷房) is not a quote (2026-10-25).
+    source_runs = _FOREIGN_SCRIPT_RUN.findall("\n".join(sources))
+    exact = set(source_runs)
+
+    def quoted(run):
+        return run in exact or (len(run) >= 2 and any(run in source for source in source_runs))
+    found = []
+
+    def walk(item, path):
+        if isinstance(item, dict):
+            for key, child in item.items():
+                walk(child, f"{path}.{key}" if path else str(key))
+        elif isinstance(item, (list, tuple)):
+            for index, child in enumerate(item):
+                walk(child, f"{path}[{index}]")
+        elif isinstance(item, str):
+            # Show the offending characters; a 40-character prefix could hide them.
+            unquoted = [run for run in _FOREIGN_SCRIPT_RUN.findall(item) if not quoted(run)]
+            if unquoted:
+                found.append(f"{path}: '{' '.join(unquoted)[:30]}' (문장 '{item[:30]}')")
+    walk(value, "")
+    return found
+
+
+# 2026-10-17 사용자 결정: 치명만 멈추고 나머지는 기록 후 진행한다(저장 사례 8건 판정).
+QA_REVIEW_SEVERITY_GUIDANCE = """반려 등급 (review_severity_contract 1.0):
+UNSUPPORTED 판정의 reason은 반드시 [치명] 또는 [경고]로 시작합니다. 표시가 없으면 [치명]으로 처리됩니다.
+[치명]은 다음 중 하나일 때만 씁니다.
+(1) 준비·시험으로 바꾸는 값(화면값·내부값·모드 등)의 원래 상태 기록·복원·복원 확인이 빠져 시험 뒤 되돌렸는지 확인할 수 없음
+(2) 결과를 해당 조작 직후가 아닌 시점에 판정하거나 여러 조작의 결과를 마지막에 몰아서 판정함
+(3) 요청·확정 규칙이 요구하는 필수 시험·필수 확인·필수 질문이 빠짐
+(4) 기대값이 요청/SRS와 다르거나 요청/SRS에 없는 제품 기대결과를 추가함
+[경고]는 그 밖의 모든 지적에 씁니다: 표현·형식·근거 문장 위치, 대상 장비 선택처럼 시험 수행에 당연히 필요한 조작의 근거 부족, 관련·공통 SRS를 범위에 포함, 유지되는 조건·모드의 누락, 권장 확인 누락.
+경고는 기록하고 다음 단계로 진행합니다. 판단이 불확실하면 UNCERTAIN을 사용합니다.
+"""
+
+QA_HUMAN_JUDGMENT_EXAMPLES = """사람의 판단을 반영한 참고 사례 v1 (2026-10-10):
+아래는 대화에서 확인한 판단 원칙을 설명하는 개발용 예시입니다. 현재 요청의 정답·제품 SRS·실행 증거가 아닙니다. 예시의 값·대상·범위를 현재 TC에 복사하지 말고 현재 요청/SRS를 우선하세요. 전제가 다르거나 불명확하면 결론을 그대로 적용하지 않습니다. 인용 근거는 현재 입력의 REQUEST/SRS/실제 산출물에서 찾고 이 예시를 근거로 선택하지 마세요.
+R01/R02/R05 — 전제: IDU-00의 냉방 범위는 20~30°C이고, 여기서는 하한 조작만 비교합니다. 감소 직후 패널20 유지 → 적용 → 같은 장비 카드20·내부20 확인은 허용합니다. 적용 뒤 카드/내부 확인 순서만 바뀌고 그 사이 조작이 없으면 의미는 같습니다(R01). 감소 전에 확인한 카드/내부20만으로 감소 후 적용 결과를 확인했다고 하면 수정이 필요합니다(R02). 하한20에서 감소 후19를 기대하는 것도 수정 대상입니다(R05). 이유: 패널의 선택값과 적용 후 장비값은 다르며 하한에서 더 내려가지 않아야 합니다. 이 좁은 예시가 실제 범위 변경 요청의 상한 검사를 면제하지는 않습니다.
+R04/R06 — 전제: IDU-00을 난방17°C로 준비해16°C 적용 후 패널·카드·내부값을 확인하는 요청입니다. 적용 전 패널16을 추가로 확인해도 적용 후 필수 확인이 있으면 허용합니다(R04). IDU-00 화면과 IDU-01 내부값을 비교하면 수정 대상입니다(R06). 이유: 추가 관찰은 필수 관찰을 대신하지 않으며 같은 장비를 대조해야 합니다.
+R07/R08 — 전제: 실제 시작은 운전·냉방24°C·약풍, 준비는 운전·난방27°C·중풍, 시험은 정지하면서 나머지 설정 유지입니다. 시험 후 준비 상태로만 되돌리면 복원 대상이 잘못됐습니다(R07). 준비를 시작하기 전에 기록한 원래 상태로 되돌리고 화면·내부값을 대조해야 합니다(R08). 이유: 시험 준비도 장비 상태를 바꾼 작업이므로 복원에 포함합니다. 고정된24°C가 아니라 실제 기록값이 복원 기준입니다.
+R03은 사용자가 내부값 검사를 프로그램이 자동 보충한다고 이해했던 사례라 확정 예시에서 제외했습니다. 누락 허용의 근거로 쓰지 않습니다. 실제 자동 보장 범위는 별도로 제공되는 실행 계약으로만 판단하세요.
+이 사례들은 이미 검토·공유된 참고 자료이며 독립 평가 정답지나 실제 AI 성공 기록이 아닙니다.
 """
 
 
@@ -850,6 +1045,37 @@ class LiveProductTestCaseCandidate(ProductTestCaseCandidate):
 
 class LiveAgent2TestDesign(Agent2TestDesign):
     test_cases: list[LiveProductTestCaseCandidate] = Field(default_factory=list)
+
+
+class SrsRevisionDraft(StrictModel):
+    """Model-authored change only; current text belongs to the frozen SRS."""
+    proposal_id: Annotated[str, StringConstraints(pattern=r"^SRS-REV-\d{3}$")]
+    requirement_id: RequirementId
+    source_condition_ids: list[Annotated[str, StringConstraints(pattern=r"^COND-\d{3}$")]] = Field(min_length=1)
+    proposed_acceptance_criteria: NonEmptyStr
+    reason: NonEmptyStr
+
+
+class Agent2TransportDesign(LiveAgent2TestDesign):
+    srs_revision_proposals: list[SrsRevisionDraft] = Field(default_factory=list, alias="SRS_개정_제안")
+
+
+def materialize_srs_revision_sources(draft, requirements):
+    """Attach only original text. Never repair IDs or proposed semantics."""
+    payload = draft.model_dump(mode="json", by_alias=True)
+    attached = []
+    for proposal in payload["SRS_개정_제안"]:
+        key = proposal["requirement_id"]
+        source = requirements.get(key)
+        if source is None or source.requirement_id != key:
+            raise ValueError("SRS 개정안의 Requirement ID가 고정 SRS에 없습니다: " + key)
+        if "current_acceptance_criteria" in proposal:
+            raise ValueError("새 모델 응답에 프로그램 소유 원문이 포함됐습니다.")
+        proposal["current_acceptance_criteria"] = source.acceptance_criteria
+        attached.append({"proposal_id": proposal["proposal_id"], "requirement_id": key,
+                         "current_acceptance_criteria": source.acceptance_criteria,
+                         "source": "FROZEN_SRS_PROGRAM_COPY"})
+    return Agent2TestDesign.model_validate(payload), attached
 
 
 class OperationBinding(StrictModel):
@@ -1280,10 +1506,6 @@ EXISTING_REGRESSION_CATALOG = (
         ),
     ),
 )
-
-EXISTING_REGRESSION_BY_ID = {
-    item.tc_id: item for item in EXISTING_REGRESSION_CATALOG
-}
 
 
 def _existing_regression_by_id(

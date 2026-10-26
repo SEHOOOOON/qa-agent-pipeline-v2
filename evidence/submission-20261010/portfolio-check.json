@@ -1,0 +1,146 @@
+{
+  "candidate": "submission-review-20261010",
+  "branch": "codex/night-review-20261009",
+  "status": "LOCAL_VERIFIED_CANDIDATE_NOT_PUBLIC_RELEASE",
+  "date_kst": "2026-10-10",
+  "project_api_calls_this_revision": 0,
+  "portfolio_tests": {
+    "passed": 22,
+    "failed": 0
+  },
+  "browser_check": {
+    "viewports": [
+      {
+        "page": "main",
+        "width": 1440,
+        "http": 200,
+        "overflow": false,
+        "javascript_errors": [],
+        "missing_anchors": [],
+        "pass": true
+      },
+      {
+        "page": "p1",
+        "width": 1440,
+        "http": 200,
+        "overflow": false,
+        "javascript_errors": [],
+        "missing_anchors": [],
+        "lock_diagram_visible": true,
+        "workflow_tabs": 4,
+        "pass": true
+      },
+      {
+        "page": "p2",
+        "width": 1440,
+        "http": 200,
+        "overflow": false,
+        "javascript_errors": [],
+        "missing_anchors": [],
+        "criteria_count": 26,
+        "detail_buttons": 6,
+        "pass": true
+      },
+      {
+        "page": "main",
+        "width": 768,
+        "http": 200,
+        "overflow": false,
+        "javascript_errors": [],
+        "missing_anchors": [],
+        "pass": true
+      },
+      {
+        "page": "p1",
+        "width": 768,
+        "http": 200,
+        "overflow": false,
+        "javascript_errors": [],
+        "missing_anchors": [],
+        "lock_diagram_visible": true,
+        "workflow_tabs": 4,
+        "pass": true
+      },
+      {
+        "page": "p2",
+        "width": 768,
+        "http": 200,
+        "overflow": false,
+        "javascript_errors": [],
+        "missing_anchors": [],
+        "criteria_count": 26,
+        "detail_buttons": 6,
+        "pass": true
+      },
+      {
+        "page": "main",
+        "width": 390,
+        "http": 200,
+        "overflow": false,
+        "javascript_errors": [],
+        "missing_anchors": [],
+        "pass": true
+      },
+      {
+        "page": "p1",
+        "width": 390,
+        "http": 200,
+        "overflow": false,
+        "javascript_errors": [],
+        "missing_anchors": [],
+        "lock_diagram_visible": true,
+        "workflow_tabs": 4,
+        "pass": true
+      },
+      {
+        "page": "p2",
+        "width": 390,
+        "http": 200,
+        "overflow": false,
+        "javascript_errors": [],
+        "missing_anchors": [],
+        "criteria_count": 26,
+        "detail_buttons": 6,
+        "pass": true
+      }
+    ],
+    "interactions": {
+      "videos": [
+        {
+          "duration": 60,
+          "played": true
+        }
+      ]
+    },
+    "links": {
+      "checked": 251,
+      "failed": []
+    },
+    "notes": [
+      "External requests blocked; remote GitHub access not tested.",
+      "No project API, product scenarios or official approvals executed."
+    ],
+    "protected_scores_unchanged": true,
+    "latest_criteria_states": {
+      "SCORED": 21,
+      "NOT_APPLICABLE": 1,
+      "UNASSESSED": 3,
+      "NEEDS_REVIEW": 1
+    },
+    "passed": true
+  },
+  "runtime_unchanged_this_revision": true,
+  "full_fresh_runtime_regression_this_revision": false,
+  "limitations": [
+    "P1 latest branch full regression not freshly rerun",
+    "P2 26 criteria not all finally assessed",
+    "New model repeated generation reliability not established",
+    "Official asset registration not performed",
+    "Public deployment and public URL checks not performed"
+  ],
+  "baseline_commits": {
+    "P1": "4077e21724aeb3a4c287c79eda973d38b1849c5e",
+    "P2": "920ed6d2112b1b807e07d5d5743aa870ade8194a",
+    "MAIN": "fcc2fb0236c05d097da70af083f0a8cdac9c3f0f"
+  }
+}

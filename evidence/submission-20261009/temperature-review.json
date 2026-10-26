@@ -1,0 +1,119 @@
+{
+  "kind": "SAVED_CP2_NEW_A3_REVIEW_AND_LOCAL_TRIAL",
+  "date_kst": "2026-10-09",
+  "model": "gpt-5.6-terra",
+  "api_attempts": 1,
+  "responses": 1,
+  "sdk_retries": 0,
+  "usage": {
+    "input_tokens": 35536,
+    "input_tokens_details": {
+      "cache_write_tokens": 35533,
+      "cached_tokens": 0
+    },
+    "output_tokens": 2799,
+    "output_tokens_details": {
+      "reasoning_tokens": 385
+    },
+    "total_tokens": 38335
+  },
+  "checkpoint3": "PASS",
+  "checkpoint4": "PASS",
+  "product_result": "PRODUCT_MISMATCH_CANDIDATE",
+  "report_recommendation": "HUMAN_REVIEW",
+  "observations": [
+    {
+      "version": "assertion-observations-1.0",
+      "run_id": "RUN-20261005-040514-7A9525",
+      "tc_id": "TC-CAND-001",
+      "target_device_id": 1,
+      "assertion": {
+        "result_id": "ER-001",
+        "observation_layer": "UI",
+        "strategy": "CONTROLLER_UI_FIELDS_EQUALS",
+        "selector": ".detail-panel",
+        "expected_number": null,
+        "expected_text": null,
+        "expected_value": null,
+        "expected_fields": [
+          {
+            "field_name": "setTemp",
+            "expected_value": 16
+          }
+        ],
+        "after_action_id": "ACT-006"
+      },
+      "actual": {
+        "setTemp": 15.0
+      },
+      "matched": false
+    },
+    {
+      "version": "assertion-observations-1.0",
+      "run_id": "RUN-20261005-040514-7A9525",
+      "tc_id": "TC-CAND-001",
+      "target_device_id": 1,
+      "assertion": {
+        "result_id": "ER-002",
+        "observation_layer": "UI",
+        "strategy": "CONTROLLER_UI_FIELDS_EQUALS",
+        "selector": "#device-card-1",
+        "expected_number": null,
+        "expected_text": null,
+        "expected_value": null,
+        "expected_fields": [
+          {
+            "field_name": "setTemp",
+            "expected_value": 16
+          }
+        ],
+        "after_action_id": "ACT-006"
+      },
+      "actual": {
+        "setTemp": 15.0
+      },
+      "matched": false
+    },
+    {
+      "version": "assertion-observations-1.0",
+      "run_id": "RUN-20261005-040514-7A9525",
+      "tc_id": "TC-CAND-001",
+      "target_device_id": 1,
+      "assertion": {
+        "result_id": "ER-003",
+        "observation_layer": "INTERNAL_STATE",
+        "strategy": "INTERNAL_DEVICE_FIELDS_EQUALS",
+        "selector": "window.__vccs.devices",
+        "expected_number": null,
+        "expected_text": null,
+        "expected_value": null,
+        "expected_fields": [
+          {
+            "field_name": "setTemp",
+            "expected_value": 16
+          }
+        ],
+        "after_action_id": "ACT-006"
+      },
+      "actual": {
+        "setTemp": 15
+      },
+      "matched": false
+    }
+  ],
+  "restore_status": "RESTORED",
+  "before_setup_temperature": 24,
+  "fresh_agent1_agent2_generation": false,
+  "final_execution_reused_candidate_trial": true,
+  "official_approval": false,
+  "posting": false,
+  "source_hashes": {
+    "agent2_test_design.json": "a9009d4a82d31e9a5a10f04f5c012b888f69e0ba2de4d2f87cfe53743169e0dd",
+    "agent3_grounding_review.json": "aed1dd2de17c9344e967898ae63eb33bd06137df3fa500fd63d93c12638bb16d",
+    "checkpoint3.json": "9f5fd98f75899f33c9233893417b645cf280e2e32c2f42d8f39892d9370c413c",
+    "agent3_trial.json": "a3d2b31c4c2e11398203d83329a86577841ebed8ad3ae1d64cf5f8add860ce14",
+    "validation_execution.json": "e342770420422ef21367ca1e4b0995046e3ba00cbeec7d9c9e1a16b1229e3632",
+    "final_report.json": "ef8c40f4e5a504865f0a80b62724548ba3687a2c617eef777106864bfcc28385",
+    "evidence/TC-CAND-001/trial-stdout.txt": "ab7d950aa81b29d9b2a20c338be2ca42dcc19260f10132d8d43651048c680755"
+  }
+}

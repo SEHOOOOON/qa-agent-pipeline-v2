@@ -1,0 +1,31 @@
+{
+  "export_date_kst": "2026-10-10",
+  "source_records_unchanged": true,
+  "files": {
+    "agent2_test_design.json": {
+      "source": "runs/manual_checks/final-five-20261009-1922/evidence/p1-run/agent2_test_design.json",
+      "source_sha256": "2f654792564bb9526cb96421c8c7dd390e96b0ecdb69750bd2571732bdedf7db",
+      "export_sha256": "687b95a408d6b91a3ad5969d852a1202862ceee4ced772c8cc4a83b08ebc2951"
+    },
+    "agent3_run_summary.json": {
+      "source": "runs/manual_checks/final-five-20261009-1922/evidence/p1-run/agent3_run_summary.json",
+      "source_sha256": "219adf30689dcfd1d1fbb4a692b6228157d667c0d4dbc127875ae4624f04708d",
+      "export_sha256": "dfaca9cbbbca05093533c4a9ea96afab2e6dfd8f603a8a06473dc57f01f41aec"
+    },
+    "final_report.json": {
+      "source": "runs/manual_checks/final-five-20261009-1922/evidence/p1-run/final_report.json",
+      "source_sha256": "5db767680ba5a4217fc0370136878470bcc359cd6ab1e180de502dab5c778138",
+      "export_sha256": "1de02b262f37f10b8d8245dd9c29b3ef4a5023888dbb6f553fb2287dc95e3bcf"
+    },
+    "request.example.json": {
+      "source": "runs/manual_checks/publish-code-only-20260925/runs/close1009/request.example.json",
+      "source_sha256": "878c2f27e57704a7fd3c36d7078c71607fc6bcd734537aacb248091327a13927",
+      "export_sha256": "a8dcf0cd5f5237837fb714c99824998872e54eb207a56eb8ab4b9e0646984582"
+    },
+    "previous-interruption.json": {
+      "source": "runs/manual_checks/publish-code-only-20260925/runs/ex1007/summary.json",
+      "source_sha256": "12965489b83987b349419990e4946841d0b0a933853e15864261359b08ab121e",
+      "export_sha256": "12965489b83987b349419990e4946841d0b0a933853e15864261359b08ab121e"
+    }
+  }
+}

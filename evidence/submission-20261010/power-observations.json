@@ -1,0 +1,214 @@
+{
+  "kind": "DERIVED_VIEW_OF_SAVED_EXECUTION_NOT_NEW_TEST",
+  "export_date_kst": "2026-10-10",
+  "run_id": "RUN-20261009-103040-2FC290",
+  "tc_id": "TC-CAND-001",
+  "target_device_id": 1,
+  "execution_date_kst": "2026-10-09",
+  "source_stdout": {
+    "file": "power-trial-stdout.txt",
+    "source_relative_path": "agent3_candidates/TC-CAND-001/evidence/TC-CAND-001/trial-stdout.txt",
+    "sha256": "1d879803f58fb01bd3d87caaeed3927bc86a1f8488b0bb784ff1d3ec3770489c"
+  },
+  "source_records": {
+    "validation_execution": "7bebdff6105a7ecce225d94e85b247aca05098a486faa0426ab7b18bb15652ec",
+    "validation_manifest": "850747b67f279a87f43abb2565a805ce06247c712c2c3ddb6ffbb48e20d8ccb1",
+    "automation": "191c2c04fdcaeb5cf562436fe3fa7f148d5e3b90c2f52c7098b083a5bcf9ab9e",
+    "target_html": "66a7170dd4b0ea6c7ee1394df0bc5263054367da5ccd2b5de4c892430a7d1320",
+    "agent3_manifest": "f1cf97fc9a7e2d10fb2d14a5da3b247b2b0cc6ad97f330005b61aa5b5521276b",
+    "agent3_trial": "9c3f6557470096c393fdadd0f66cddab1849fa9ea7cab1f0e666dc112b0d0dca"
+  },
+  "final_execution_used_saved_candidate_trial": true,
+  "before_setup": {
+    "state": {
+      "status": "STOP",
+      "mode": "COOL",
+      "fanSpeed": "LOW",
+      "setTemp": 24,
+      "locked": false
+    },
+    "ui": {
+      "status": {
+        "#det-power-on-btn": false,
+        "#det-power-off-btn": true
+      },
+      "mode": {
+        "#det-mode-auto": false,
+        "#det-mode-cool": true,
+        "#det-mode-heat": false,
+        "#det-mode-fan": false,
+        "#det-mode-dry": false
+      },
+      "fanSpeed": {
+        "#det-fan-low": true,
+        "#det-fan-med": false,
+        "#det-fan-high": false,
+        "#det-fan-auto": false
+      },
+      "locked": {
+        "#det-lock-on-btn": false,
+        "#det-lock-off-btn": true
+      },
+      "temperature": "24.0°C",
+      "temperature_enabled": [
+        true,
+        true
+      ],
+      "card_classes": [
+        "ac-device-card",
+        "mode-cool",
+        "state-stop"
+      ],
+      "card_values": [
+        "❄️ 냉방",
+        "약풍",
+        "24.0°C"
+      ],
+      "card_locked": false
+    }
+  },
+  "prepared": {
+    "state": {
+      "status": "OPERATION",
+      "mode": "COOL",
+      "fanSpeed": "LOW",
+      "setTemp": 24,
+      "locked": false
+    },
+    "ui": {
+      "status": {
+        "#det-power-on-btn": true,
+        "#det-power-off-btn": false
+      },
+      "mode": {
+        "#det-mode-auto": false,
+        "#det-mode-cool": true,
+        "#det-mode-heat": false,
+        "#det-mode-fan": false,
+        "#det-mode-dry": false
+      },
+      "fanSpeed": {
+        "#det-fan-low": true,
+        "#det-fan-med": false,
+        "#det-fan-high": false,
+        "#det-fan-auto": false
+      },
+      "locked": {
+        "#det-lock-on-btn": false,
+        "#det-lock-off-btn": true
+      },
+      "temperature": "24.0°C",
+      "temperature_enabled": [
+        true,
+        true
+      ],
+      "card_classes": [
+        "ac-device-card",
+        "mode-cool",
+        "state-run"
+      ],
+      "card_values": [
+        "❄️ 냉방",
+        "약풍",
+        "24.0°C"
+      ],
+      "card_locked": false
+    }
+  },
+  "test_assertions": [
+    {
+      "version": "assertion-observations-1.0",
+      "run_id": "RUN-20261009-103040-2FC290",
+      "tc_id": "TC-CAND-001",
+      "target_device_id": 1,
+      "assertion": {
+        "result_id": "ER-001",
+        "observation_layer": "UI",
+        "strategy": "CONTROLLER_UI_FIELDS_EQUALS",
+        "selector": ".detail-panel",
+        "expected_number": null,
+        "expected_text": null,
+        "expected_value": null,
+        "expected_fields": [
+          {
+            "field_name": "status",
+            "expected_value": "STOP"
+          }
+        ],
+        "after_action_id": "ACT-005"
+      },
+      "actual": {
+        "status": "STOP"
+      },
+      "matched": true
+    },
+    {
+      "version": "assertion-observations-1.0",
+      "run_id": "RUN-20261009-103040-2FC290",
+      "tc_id": "TC-CAND-001",
+      "target_device_id": 1,
+      "assertion": {
+        "result_id": "ER-002",
+        "observation_layer": "UI",
+        "strategy": "CONTROLLER_UI_FIELDS_EQUALS",
+        "selector": "#device-card-1",
+        "expected_number": null,
+        "expected_text": null,
+        "expected_value": null,
+        "expected_fields": [
+          {
+            "field_name": "status",
+            "expected_value": "STOP"
+          }
+        ],
+        "after_action_id": "ACT-005"
+      },
+      "actual": {
+        "status": "STOP"
+      },
+      "matched": true
+    },
+    {
+      "version": "assertion-observations-1.0",
+      "run_id": "RUN-20261009-103040-2FC290",
+      "tc_id": "TC-CAND-001",
+      "target_device_id": 1,
+      "assertion": {
+        "result_id": "ER-003",
+        "observation_layer": "INTERNAL_STATE",
+        "strategy": "INTERNAL_DEVICE_FIELDS_EQUALS",
+        "selector": "window.__vccs.devices",
+        "expected_number": null,
+        "expected_text": null,
+        "expected_value": null,
+        "expected_fields": [
+          {
+            "field_name": "status",
+            "expected_value": "STOP"
+          }
+        ],
+        "after_action_id": "ACT-005"
+      },
+      "actual": {
+        "status": "STOP"
+      },
+      "matched": true
+    }
+  ],
+  "restoration": {
+    "status_recorded": "RESTORED",
+    "verified_result_ids": [
+      "ER-001",
+      "ER-002",
+      "ER-003"
+    ],
+    "after_values_recorded": null,
+    "evidence_kind": "COMPARISON_SUCCESS_LOG_NOT_AFTER_VALUE_DUMP"
+  },
+  "limits": [
+    "저장된 실행 근거의 발췌이며 새 AI 호출·제품 재시험이 아니다.",
+    "복원 후 실측값 자체는 로그에 별도로 출력되지 않았다. 원래 상태와 비교한 통과 기록을 제시한다.",
+    "후보 시험과 최종 실행에서 재사용한 같은 증거를 두 번의 시험으로 세지 않는다.",
+    "공식 TC 등록이나 전체 안정성 확인이 아니다."
+  ]
+}

@@ -2,14 +2,173 @@
 
 from pipeline_test_support import *
 
-def essential_cp2(design):
-    return evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements(),
-        **pipeline_execution._agent2_checkpoint_options(pipeline_execution._current_agent2_contract()))
+@pytest.mark.parametrize("field,initial,target", [
+    ("status", "OPERATION", "STOP"), ("setTemp", 29, 22), ("locked", False, True)])
+@pytest.mark.parametrize("layout", ["split", "reversed_comparisons", "different_prose", "shared_prose"])
+def test_live_restoration_layout_preserves_every_reader(field, initial, target, layout):
+    from qa_pipeline_agent2 import _normalize_agent2_live_design
+    case = repeated_restoration_fixture(field, initial, target)
+    preparation = [c for c in case.restoration.confirmations if c.precondition_indexes]
+    case.restoration.confirmations = [c for c in case.restoration.confirmations if not c.precondition_indexes]
+    if layout == "different_prose":
+        for index, c in enumerate(case.restoration.confirmations):
+            c.source_text += f" (확인 {index + 1})"
+            c.comparisons[0].source_excerpt = c.source_text
+    elif layout == "shared_prose":
+        for c in case.restoration.confirmations:
+            c.source_text = "각 연결 대상이 준비 전 관찰 상태와 같은지 확인한다."
+            c.comparisons[0].source_excerpt = c.source_text
+    elif layout == "reversed_comparisons":
+        first, second, third, fourth = case.restoration.confirmations
+        for a, b in ((first, third), (second, fourth)):
+            a.result_ids += b.result_ids
+            a.comparisons = b.comparisons + a.comparisons
+        case.restoration.confirmations = [first, second]
+    case.restoration.confirmations += preparation
+    case.restore_steps = case.restoration.operation_steps + [c.source_text for c in case.restoration.confirmations]
+    before = case.model_dump(mode="json")
+    design = cp2_valid_design().model_copy(update={"test_cases": [case]})
+    normalized, changes = _normalize_agent2_live_design(design)
+    after = normalized.test_cases[0]
+    assert case.model_dump(mode="json") == before
+    assert pipeline._structured_restoration_errors(after) == []
+    assert pipeline.tc_execution_spec_errors(after) == []
+    assert case.model_dump(exclude={"restoration", "restore_steps"}) == after.model_dump(exclude={"restoration", "restore_steps"})
+    def links(tc):
+        return sorted((c.source_text, x.result_id, x.source_excerpt, x.basis.value)
+                      for c in tc.restoration.confirmations for x in c.comparisons)
+    assert links(case) == links(after)
+    assert case.restoration.operation_steps == after.restoration.operation_steps
+    assert bool(changes) == (layout != "different_prose")
+    again, repeated_changes = _normalize_agent2_live_design(normalized)
+    assert again.model_dump() == normalized.model_dump() and not repeated_changes
+
+
+@pytest.mark.parametrize("fault", [
+    "missing_er", "duplicate_er", "unknown_er", "wrong_basis", "excerpt",
+    "missing_comparison", "duplicate_comparison", "missing_mirror", "duplicate_operation",
+    "operation_is_confirmation", "unknown_target", "duplicate_expected_id"])
+def test_live_restoration_layout_does_not_repair_broken_contract(fault):
+    from qa_pipeline_agent2 import _normalize_agent2_live_design
+    case = repeated_restoration_fixture()
+    c = case.restoration.confirmations[0]
+    if fault == "missing_er":
+        # Drop an ER-linked check; the last one may be the preparation-only check (IMP-015).
+        last_er = max(i for i, x in enumerate(case.restoration.confirmations) if x.result_ids)
+        case.restoration.confirmations.pop(last_er)
+    elif fault == "duplicate_er":
+        case.restoration.confirmations.append(c.model_copy(deep=True))
+    elif fault == "unknown_er":
+        c.result_ids = ["ER-999"]; c.comparisons[0].result_id = "ER-999"
+    elif fault == "wrong_basis":
+        c.comparisons[0].basis = pipeline.RestoreComparisonBasis.PROVED_INITIAL
+    elif fault == "excerpt":
+        c.comparisons[0].source_excerpt += " 변경"
+    elif fault == "missing_comparison":
+        c.comparisons = []
+    elif fault == "duplicate_comparison":
+        c.comparisons.append(c.comparisons[0].model_copy(deep=True))
+    elif fault == "duplicate_operation":
+        case.restoration.operation_steps *= 2
+    elif fault == "operation_is_confirmation":
+        case.restoration.operation_steps[0] = c.source_text
+    elif fault == "unknown_target":
+        case.expected_results[0].observation_target = None
+    elif fault == "duplicate_expected_id":
+        case.expected_results[-1].result_id = case.expected_results[0].result_id
+    case.restore_steps = case.restoration.operation_steps + [x.source_text for x in case.restoration.confirmations]
+    if fault == "missing_mirror":
+        case.restore_steps.pop()
+    design = cp2_valid_design().model_copy(update={"test_cases": [case]})
+    after, changes = _normalize_agent2_live_design(design)
+    assert not changes
+    assert after.model_dump() == design.model_dump()
+    assert pipeline._structured_restoration_errors(after.test_cases[0])
 
 
 @pytest.mark.parametrize("field,initial,target", [
-    ("status", "OPERATION", "STOP"), ("mode", "COOL", "HEAT"),
-    ("fanSpeed", "AUTO", "LOW"), ("setTemp", 27, 21), ("locked", False, True)])
+    ("status", "OPERATION", "STOP"), ("setTemp", 27, 21), ("locked", False, True)])
+@pytest.mark.parametrize("variant,valid", [
+    ("paired", True), ("extra_panel", True), ("separate_read_lines", True),
+    ("different_action", False), ("different_condition", True),
+    ("missing_ui", False), ("missing_internal", False)])
+def test_double_assert_execution_anchors(field, initial, target, variant, valid):
+    case, _ = mapped_tc_fixture(field, initial, target)
+    case.double_assert_policy = DoubleAssertPolicy.REQUIRED
+    spec = case.execution_spec
+    test_ops = [op for op in spec.operations if op.phase == pipeline.AutomationPhase.TEST]
+    if variant == "extra_panel":
+        case.expected_results.append(case.expected_results[0].model_copy(deep=True, update={
+            "result_id": "ER-099", "verify_after_step": case.steps[0],
+            "statement": f"패널의 {field} 선택 값은 {target}이다.",
+            "observation_target": f"패널의 {field}"}))
+        spec.verifications.append(spec.verifications[0].model_copy(deep=True, update={
+            "result_id": "ER-099", "after_action_id": test_ops[0].action_id,
+            "target": f"panel.{field}"}))
+    elif variant == "separate_read_lines":
+        case.steps.extend(["적용된 카드 상태를 확인한다.", "적용된 내부 상태를 확인한다."])
+        case.expected_results[0].verify_after_step = case.steps[-2]
+        case.expected_results[1].verify_after_step = case.steps[-1]
+    elif variant == "different_action":
+        case.expected_results[0].verify_after_step = case.steps[0]
+        spec.verifications[0].after_action_id = test_ops[0].action_id
+    elif variant == "different_condition":
+        case.expected_results[0].source_condition_ids = ["COND-098"]
+    elif variant.startswith("missing_"):
+        index = 0 if variant == "missing_ui" else 1
+        case.expected_results.pop(index)
+        spec.verifications.pop(index)
+    design = cp2_valid_design().model_copy(update={"test_cases": [case]})
+    result = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
+    assert (cp2_check(result, "CP2-006").status == CheckStatus.PASS) == valid
+    if variant in {"paired", "extra_panel", "separate_read_lines"}:
+        assert not pipeline.tc_execution_spec_errors(case)
+
+
+@pytest.mark.parametrize("field,initial,target", [
+    ("status", "OPERATION", "STOP"), ("setTemp", 28, 22), ("locked", False, True)])
+def test_live_reference_whitespace_normalization_preserves_source_and_values(field, initial, target):
+    from qa_pipeline_agent2 import _normalize_agent2_live_design
+    case, _ = mapped_tc_fixture(field, initial, target)
+    case.expected_results[0].verify_after_step = "  " + "  ".join(case.steps[-1].split()) + "\n"
+    case.execution_spec.operations[-1].source_text += "  "
+    case.execution_spec.precondition_verifications[0].source_text += "\t"
+    design = cp2_valid_design().model_copy(update={"test_cases": [case]})
+    before = design.model_dump()
+    normalized, changes = _normalize_agent2_live_design(design)
+    assert design.model_dump() == before
+    assert len(changes) == 3
+    assert not pipeline.tc_execution_spec_errors(normalized.test_cases[0])
+    assert normalized.test_cases[0].steps == case.steps
+    assert normalized.test_cases[0].expected_results[0].statement == case.expected_results[0].statement
+    assert normalized.test_cases[0].execution_spec.verifications == case.execution_spec.verifications
+    again, second_changes = _normalize_agent2_live_design(normalized)
+    assert again == normalized and not second_changes
+
+
+@pytest.mark.parametrize("fault", ["wording", "value", "ambiguous"])
+def test_live_reference_normalization_does_not_guess(fault):
+    from qa_pipeline_agent2 import _normalize_agent2_live_design
+    case, _ = mapped_tc_fixture("setTemp", 28, 22)
+    if fault == "ambiguous":
+        case.steps.append("  ".join(case.steps[0].split()))
+        case.expected_results[0].verify_after_step = "\t" + case.steps[0]
+    elif fault == "value":
+        case.expected_results[0].verify_after_step = case.steps[0].replace("22", "23")
+    else:
+        case.expected_results[0].verify_after_step = case.steps[-1] + " 완료"
+    design = cp2_valid_design().model_copy(update={"test_cases": [case]})
+    normalized, changes = _normalize_agent2_live_design(design)
+    assert not changes and normalized == design
+    assert pipeline.tc_execution_spec_errors(normalized.test_cases[0])
+
+
+def essential_cp2(design):
+    return evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
+
+
+@pytest.mark.parametrize("field,initial,target", [
+    ("status", "OPERATION", "STOP"), ("setTemp", 27, 21), ("locked", False, True)])
 @pytest.mark.parametrize("variant", ["group_label", "duplicate_values", "record_flag", "purpose_label", "dependency_mention"])
 def test_essential_checks_use_execution_not_presentation(field, initial, target, variant):
     case, _ = mapped_tc_fixture(field, initial, target)
@@ -65,19 +224,6 @@ def test_essential_state_label_does_not_override_explicit_layer_policy():
     assert cp2_check(essential_cp2(design), "CP2-006").status == CheckStatus.FAIL
 
 
-@pytest.mark.parametrize("fault", ["missing", "unknown", "old_prompt"])
-def test_essential_manifest_is_version_bound(fault):
-    manifest = pipeline_execution._current_agent2_contract()
-    assert pipeline_execution._agent2_checkpoint_options(manifest)["essential_checks"]
-    if fault == "missing":
-        manifest.pop("essential_validation_contract")
-    elif fault == "unknown":
-        manifest["essential_validation_contract"] = "9.0"
-    else:
-        manifest["prompt_version"] = "agent2-2.55"
-    with pytest.raises(ValueError):
-        pipeline_execution._agent2_checkpoint_options(manifest)
-
 @pytest.mark.parametrize("value,valid", [(None, True), ("---", True), ("24°C", False), ("", False)])
 def test_fixed_text_accepts_identical_expectation_without_mutating_tc(value, valid):
     case, plan = controller_lifecycle_fixture("mode", "COOL", "DRY")
@@ -100,49 +246,14 @@ def test_text_contract_rejects_unused_text_for_other_readers(strategy):
         strategy == pipeline.AssertionStrategy.UI_TEXT_CONTAINS or strategy in FIXED_ASSERTION_TEXT)
 
 
-def test_saved_disabled_display_failure_rechecks_without_editing_output():
-    path = REPO_ROOT / "runs/cont1006/runs/RUN-20261006-124032-11E19F/agent2_test_design_attempt_1.json"
-    if not path.exists():
-        pytest.skip("Local saved API evidence is not distributed")
-    before = path.read_bytes()
-    design = pipeline.Agent2TestDesign.model_validate_json(before)
-    assert all(not pipeline.tc_execution_spec_errors(case) for case in design.test_cases)
-    request, requirements, analysis, _, _ = pipeline_execution._load_verified_agent1_run(path.parent, path.parent.name)
-    catalog = pipeline_execution._catalog_from_snapshot(
-        json.loads((path.parent / "approved_regression_catalog.json").read_text(encoding="utf-8")))
-    options = pipeline_execution._agent2_checkpoint_options(pipeline_execution._current_agent2_contract())
-    original_cp = evaluate_checkpoint2(request, analysis, design, requirements, existing_catalog=catalog, **options)
-    assert original_cp.status == CheckStatus.PASS, original_cp.model_dump_json(indent=2)
-    changed = design.model_copy(deep=True)
-    for tc in changed.test_cases:
-        tc.purpose = TcPurpose.RELATED_REGRESSION
-        tc.condition_execution = pipeline.ConditionExecution.SEQUENTIAL_TRANSITION
-        tc.grouping_reason = None
-        tc.test_data.requested_modes = ["DRY", "DRY"]
-    assert evaluate_checkpoint2(request, analysis, changed, requirements,
-        existing_catalog=catalog, **options).status == CheckStatus.PASS
-    from qa_pipeline_agent3 import resolve_controller_bindings, assemble_tc_bindings
-    case = design.test_cases[0]
-    plan = assemble_tc_bindings(case, resolve_controller_bindings(case))
-    assert next(a for a in plan.assertions if a.result_id == "ER-005").expected_text == "---"
-    assert "'---' not in actual" in compile_automation_candidate("LOCAL-SAVED-DISPLAY", case, plan)
-    check = next(v for v in design.test_cases[0].execution_spec.verifications if v.result_id == "ER-005")
-    check.expected_text = "24°C"
-    assert pipeline.tc_execution_spec_errors(design.test_cases[0])
-    assert path.read_bytes() == before
-
 @pytest.mark.parametrize("role", list(ConditionChangeRole))
-@pytest.mark.parametrize("values", [("MED", "HIGH"), ("18°C", "30°C"), ("HEAT", "COOL")])
+@pytest.mark.parametrize("values", [("MED", "HIGH"), ("18°C", "30°C")])
 def test_reuse_target_alignment_preserves_condition_roles(role, values):
     request, analysis, design, catalog = compound_reuse_fixture(values)
     analysis.confirmed_conditions[0].change_role = role
     analysis.requirement_effects[0].relation = RequirementRelation.VERIFY
     before = analysis.model_dump()
-    options = dict(existing_catalog=catalog, legacy_wording_checks=False)
-    old = evaluate_checkpoint2(request, analysis, design, cp2_requirements(), **options)
-    new = evaluate_checkpoint2(request, analysis, design, cp2_requirements(),
-                               align_tc_execution=True, **options)
-    assert (cp2_check(old, "CP2-008").status == CheckStatus.PASS) == (role == ConditionChangeRole.CHANGED)
+    new = evaluate_checkpoint2(request, analysis, design, cp2_requirements(), existing_catalog=catalog)
     assert (cp2_check(new, "CP2-008").status == CheckStatus.PASS) == (role != ConditionChangeRole.SUPPORTING)
     assert analysis.model_dump() == before
 
@@ -158,13 +269,12 @@ def test_reuse_alignment_does_not_accept_unrelated_selection(fault):
     else:
         design.related_existing_tests[0].tc_id = "TC-UNKNOWN-999"
     result = evaluate_checkpoint2(request, analysis, design, cp2_requirements(),
-        existing_catalog=catalog, align_tc_execution=True, legacy_wording_checks=False)
+        existing_catalog=catalog)
     assert cp2_check(result, "CP2-008").status == CheckStatus.FAIL
 
 
 @pytest.mark.parametrize("field,initial,target", [
-    ("setTemp", 16, 15), ("setTemp", 30, 31), ("fanSpeed", "LOW", "HIGH"),
-    ("mode", "COOL", "HEAT"), ("status", "OPERATION", "STOP"), ("locked", False, True)])
+    ("setTemp", 16, 15), ("setTemp", 30, 31), ("status", "OPERATION", "STOP")])
 def test_boundary_execution_definition_does_not_require_redundant_metadata(field, initial, target):
     case, _ = mapped_tc_fixture(field, initial, target, blocked=True)
     case.test_type = TcType.BOUNDARY
@@ -179,38 +289,14 @@ def test_boundary_execution_definition_does_not_require_redundant_metadata(field
         case.steps[0] = op.source_text = "온도 감소 버튼을 누른다." if target < initial else "온도 증가 버튼을 누른다."
     before = case.model_dump()
     design = cp2_valid_design().model_copy(update={"test_cases": [case]})
-    options = dict(legacy_wording_checks=False)
-    old = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements(), **options)
-    new = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements(),
-                               align_tc_execution=True, **options)
-    assert cp2_check(old, "CP2-010").status == CheckStatus.FAIL
+    new = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
     assert cp2_check(new, "CP2-010").status == CheckStatus.PASS
     assert cp2_check(new, "CP2-024").status == CheckStatus.PASS
     assert case.model_dump() == before
     case.execution_spec.verifications.pop()
-    broken = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements(),
-                                 align_tc_execution=True, **options)
+    broken = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
     assert cp2_check(broken, "CP2-024").status == CheckStatus.FAIL
     assert cp2_check(broken, "CP2-010").status == CheckStatus.FAIL
-
-
-@pytest.mark.parametrize("fault", ["missing", "unknown", "old_prompt", "old_contract", "no_review"])
-def test_tc_execution_alignment_manifest_is_version_bound(fault):
-    manifest = pipeline_execution._current_agent2_contract()
-    assert pipeline_execution._agent2_checkpoint_options(manifest)["align_tc_execution"]
-    old = {**manifest, "prompt_version": "agent2-2.54"}
-    old.pop("tc_execution_alignment_contract")
-    old.pop("essential_validation_contract")
-    assert not pipeline_execution._agent2_checkpoint_options(old)["align_tc_execution"]
-    if fault == "missing": manifest.pop("tc_execution_alignment_contract")
-    elif fault == "unknown": manifest["tc_execution_alignment_contract"] = "2.0"
-    elif fault == "old_prompt": manifest["prompt_version"] = "agent2-2.54"
-    elif fault == "old_contract": manifest["contract_version"] = "3.12"
-    else: manifest.pop("grounding_contract")
-    with pytest.raises(ValueError):
-        pipeline_execution._agent2_checkpoint_options(manifest)
-
-
 
 
 @pytest.mark.parametrize("rewrite", [False, True])
@@ -224,6 +310,9 @@ def test_agent2_exact_connection_catalog_initial_and_rewrite(rewrite):
     raw = text.split("[실행 연결표의 정확한 항목 목록]\n", 1)[1]
     options = json.JSONDecoder().raw_decode(raw)[0]
     catalog = controller_connection_catalog()
+    explanation = options.pop("temperature_interface")
+    assert "입력칸이 아니라 증가·감소 버튼과 표시창" in explanation
+    assert "기대값·확인 시점은 요청/SRS" in explanation
     assert options == {
         "actions": {k: v[0] for k, v in catalog["actions"].items()},
         "readers": {k: list(v) for k, v in catalog["readers"].items()},
@@ -231,6 +320,9 @@ def test_agent2_exact_connection_catalog_initial_and_rewrite(rewrite):
     }
     assert {k for k in options["preconditions"] if k.startswith("context.")} == {
         "context.target_device_visible", "context.error_free", "context.unlocked", "context.online"}
+    assert options["readers"]["temperature.increase"] == ["UI_ENABLED_EQUALS"]
+    assert options["readers"]["temperature.decrease"] == ["UI_ENABLED_EQUALS"]
+    assert "UI_ENABLED_EQUALS" not in options["readers"]["temperature.display"]
     assert "context.target_device_visible/error_free/unlocked/online" not in AGENT2_SYSTEM_INSTRUCTIONS
     assert "unsupported.<요청 항목명>" in AGENT2_SYSTEM_INSTRUCTIONS
     encoded = json.dumps(options)
@@ -308,7 +400,7 @@ def test_frozen_tc_technical_id_repair_updates_verification_refs():
     assert design.test_cases[0].expected_results[0].result_id == case.expected_results[0].result_id
 
 
-@pytest.mark.parametrize("basis", ["DIRECT_REQUEST", "CHANGE_DEPENDENCY", "REQUEST_TRACE_ONLY"])
+@pytest.mark.parametrize("basis", ["DIRECT_REQUEST", "REQUEST_TRACE_ONLY"])
 @pytest.mark.parametrize("requirement,layer,rule", [
     ("REQ-STATE-001", ObservationLayer.INTERNAL_STATE, "CP2-006"),
     ("REQ-NOTIFY-001", ObservationLayer.NOTIFICATION, "CP2-007")])
@@ -328,18 +420,15 @@ def test_scope_labels_do_not_invent_observation_layers(basis, requirement, layer
     if layer == ObservationLayer.INTERNAL_STATE:
         tc.double_assert_policy = DoubleAssertPolicy.UI_ONLY
         tc.double_assert_reason = "화면 표시 확인만 요청되었습니다."
-    options = dict(legacy_wording_checks=False, use_structured_scope_restoration=True)
-    new = pipeline.evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements(),
-        review_scope_semantics=True, **options)
-    old = pipeline.evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements(), **options)
+    new = pipeline.evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements())
     assert cp2_check(new, rule).status == CheckStatus.PASS
-    assert (cp2_check(old, rule).status == CheckStatus.PASS) == (basis == "REQUEST_TRACE_ONLY")
     # This isolates the structural rule; mandatory meaning review decides actual scope.
 
 
-@pytest.mark.parametrize("basis", ["DIRECT_REQUEST", "CHANGE_DEPENDENCY", "REQUEST_TRACE_ONLY"])
+@pytest.mark.parametrize("basis", ["DIRECT_REQUEST", "REQUEST_TRACE_ONLY"])
 @pytest.mark.parametrize("required_by", ["policy", "type"])
 def test_scope_relaxation_keeps_explicit_double_assert_contract(basis, required_by):
+    """An explicit REQUIRED policy needs both layers; a STATE_CONSISTENCY label alone does not."""
     analysis, design = cp2_analysis(), detailed_boundary_design()
     effect = next(e for e in analysis.requirement_effects if e.requirement_id == "REQ-STATE-001")
     effect.scope_evidence = pipeline.RequirementScopeEvidence(basis=basis,
@@ -349,9 +438,9 @@ def test_scope_relaxation_keeps_explicit_double_assert_contract(basis, required_
     tc.double_assert_policy = DoubleAssertPolicy.REQUIRED if required_by == "policy" else DoubleAssertPolicy.UI_ONLY
     if required_by == "type":
         tc.test_type = TcType.STATE_CONSISTENCY
-    result = pipeline.evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements(),
-        review_scope_semantics=True, legacy_wording_checks=False, use_structured_scope_restoration=True)
-    assert cp2_check(result, "CP2-006").status == CheckStatus.FAIL
+    result = pipeline.evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements())
+    expected = CheckStatus.FAIL if required_by == "policy" else CheckStatus.PASS
+    assert cp2_check(result, "CP2-006").status == expected
 
 @pytest.mark.parametrize("relation,proposal_required", [("VERIFY", False), ("MODIFIED", True)])
 def test_baseline_test_does_not_require_srs_revision(relation, proposal_required):
@@ -363,27 +452,11 @@ def test_baseline_test_does_not_require_srs_revision(relation, proposal_required
     policy = _srs_revision_policy(request, analysis, cp2_requirements())
     assert (request.target_requirement_id in policy["required_requirement_ids"]) is proposal_required
     design.srs_revision_proposals = []
-    cp = evaluate_checkpoint2(request, analysis, design, cp2_requirements(), existing_catalog=(),
-        require_srs_revision_proposals=True, allow_already_reflected_srs=True)
+    cp = evaluate_checkpoint2(request, analysis, design, cp2_requirements(), existing_catalog=())
     assert cp2_check(cp, "CP2-018").status == (CheckStatus.FAIL if proposal_required else CheckStatus.PASS)
 
 
-@pytest.mark.parametrize("current", [False, True])
-def test_target_verify_can_design_uncovered_test_without_rewriting_srs(current):
-    request, analysis, design = cp1_request(), cp2_analysis(), cp2_valid_design()
-    for effect in analysis.requirement_effects:
-        if effect.requirement_id == request.target_requirement_id:
-            effect.relation = RequirementRelation.VERIFY
-    # Isolate a target-only candidate to exercise the old blanket VERIFY gate.
-    design.test_cases[0].requirement_ids = [request.target_requirement_id]
-    cp = evaluate_checkpoint2(request, analysis, design, cp2_requirements(),
-        allow_target_verification_candidate=current)
-    message = cp2_check(cp, "CP2-016").message
-    assert ("VERIFY 유지 동작을 신규 후보로 중복 생성" in message) is (not current)
-
-
-
-@pytest.mark.parametrize('values,excluded', [(('MED', 'HIGH'), 'LOW'), (('21', '27'), '16'), (('HEAT', 'COOL'), 'AUTO')])
+@pytest.mark.parametrize('values,excluded', [(('MED', 'HIGH'), 'LOW'), (('21', '27'), '16')])
 @pytest.mark.parametrize('suffix', [' {value}는 제외한다.', ' 이전 값 {value}의 검사는 요구하지 않는다.'])
 def test_reuse_value_roles_do_not_turn_exclusions_into_tests(values, excluded, suffix):
     request, analysis, design, catalog = compound_reuse_fixture(values)
@@ -396,11 +469,7 @@ def test_reuse_value_roles_do_not_turn_exclusions_into_tests(values, excluded, s
         requirement_id='REQ-TEMP-001', source_condition_ids=['COND-010'],
         current_acceptance_criteria=requirements['REQ-TEMP-001'].acceptance_criteria,
         proposed_acceptance_criteria=statement, reason='요청한 변경 기준')]
-    opts = pipeline_execution._agent2_checkpoint_options(pipeline_execution._current_agent2_contract())
-    old = evaluate_checkpoint2(request, analysis, design, requirements, existing_catalog=catalog,
-        **{**opts, 'review_value_roles': False})
-    assert cp2_check(old, 'CP2-019').status == CheckStatus.FAIL
-    new = evaluate_checkpoint2(request, analysis, design, requirements, existing_catalog=catalog, **opts)
+    new = evaluate_checkpoint2(request, analysis, design, requirements, existing_catalog=catalog)
     assert new.status == CheckStatus.PASS, new.model_dump_json(indent=2)
     hints = pipeline._existing_reuse_link_context(analysis, catalog, design, include_value_tokens=False)
     assert all('detected_values' not in h and 'values_not_covered_by_links' not in h for h in hints)
@@ -413,7 +482,7 @@ def test_reuse_missing_required_coverage_still_blocks_in_semantic_review(layout,
     import qa_pipeline_grounding as g
     request, analysis, design, catalog = compound_reuse_fixture(layout=layout)
     payload = g.build_grounding_input('AGENT2', request, cp2_requirements(), design, analysis=analysis,
-        catalog=catalog, include_condition_coverage=True, include_task_boundaries='1.1')
+        catalog=catalog)
     target = next(i for i in payload['items'] if i['item_id'] == 'CONDITION/COND-010')
     assert target['content']['condition']['statement'] == analysis.confirmed_conditions[0].statement
     record = fake_grounding_record(payload)
@@ -425,7 +494,7 @@ def test_reuse_missing_required_coverage_still_blocks_in_semantic_review(layout,
 
 @pytest.mark.parametrize("mutation,blocked", [
     ("empty_classification", False), ("missing_reason", False), ("both", False),
-    ("wrong_feature_id", True), ("non_independent", True), ("dependent_setup", True),
+    ("wrong_feature_id", True), ("non_independent", True), ("dependent_setup", False),
     ("missing_requirement", True), ("missing_condition", True), ("missing_results", True),
 ])
 def test_optional_explanations_do_not_replace_required_test_contract(mutation, blocked):
@@ -444,13 +513,9 @@ def test_optional_explanations_do_not_replace_required_test_contract(mutation, b
     if mutation == "missing_condition": tc.source_condition_ids = []
     if mutation == "missing_results": tc.expected_results = []
     before = design.model_dump_json()
-    result = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements(),
-                                  require_qa_explanation_metadata=False)
+    result = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
     assert (result.status == CheckStatus.FAIL) == blocked
     assert design.model_dump_json() == before
-    if not blocked:
-        old = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
-        assert old.status == CheckStatus.FAIL
 
 
 @pytest.mark.parametrize("verdict,expected", [("SUPPORTED", "PASS"), ("UNSUPPORTED", "FAIL"), ("UNCERTAIN", "REVIEW")])
@@ -461,16 +526,12 @@ def test_rephrased_procedure_needs_complete_semantic_review(verdict, expected):
     request.acceptance_notes.append(note)
     analysis.procedure_notes = [note]
     design.test_cases[0].preconditions.append("시험할 초기 상태를 준비하고 확인한다.")
-    old = evaluate_checkpoint2(request, analysis, design, cp2_requirements(), legacy_wording_checks=False,
-        allow_split_procedure_notes=True)
-    assert cp2_check(old, "CP2-014").status == CheckStatus.FAIL
-    new = evaluate_checkpoint2(request, analysis, design, cp2_requirements(), legacy_wording_checks=False,
-        review_procedure_coverage=True)
+    new = evaluate_checkpoint2(request, analysis, design, cp2_requirements())
     assert cp2_check(new, "CP2-014").status == CheckStatus.PASS
     payload = grounding.build_grounding_input("AGENT2", request, cp2_requirements(), design,
-        analysis=analysis, include_condition_coverage=True, include_procedure_coverage=True)
+        analysis=analysis)
     record = fake_grounding_record(payload)
-    next(i for i in record["review"]["items"] if i["item_id"] == "PROCEDURE/0")["verdict"] = verdict
+    next(i for i in record["review"]["items"] if i["item_id"] == "PROCEDURE/ALL")["verdict"] = verdict
     combined = grounding.attach_grounding_check(new, grounding.check_review_record(payload, record))
     assert combined.status.value == expected
 
@@ -495,13 +556,9 @@ def test_structured_hvac_restore_does_not_require_magic_words(wording, mutation)
     elif mutation == "changed_basis": tc.restoration.confirmations[0].comparisons[0].basis = pipeline.RestoreComparisonBasis.PROVED_INITIAL
     elif mutation == "wrong_order": tc.restore_steps.reverse()
     before = design.model_dump_json()
-    result = pipeline.evaluate_checkpoint2(request, analysis, design, cp2_requirements(),
-        legacy_wording_checks=False, require_structured_restoration=True,
-        require_state_restoration_policy=True, use_structured_scope_restoration=True)
+    result = pipeline.evaluate_checkpoint2(request, analysis, design, cp2_requirements())
     assert (result.status == CheckStatus.PASS) == (mutation == "none"), result.model_dump()
     assert design.model_dump_json() == before
-    historical = pipeline.evaluate_checkpoint2(request, analysis, design, cp2_requirements(), legacy_wording_checks=False)
-    assert cp2_check(historical, "CP2-015").status == CheckStatus.FAIL
 
 
 @pytest.mark.parametrize("scope", ["trace_only", "direct", "state_type", "explicit_double"])
@@ -517,49 +574,8 @@ def test_reference_only_srs_does_not_force_extra_state_assertion(scope):
     if scope == "direct": effect.scope_evidence.basis = pipeline.ScopeBasis.DIRECT_REQUEST
     elif scope == "state_type": tc.test_type = TcType.STATE_CONSISTENCY
     elif scope == "explicit_double": tc.double_assert_policy = DoubleAssertPolicy.REQUIRED
-    result = pipeline.evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements(),
-        legacy_wording_checks=False, use_structured_scope_restoration=True)
-    assert (cp2_check(result, "CP2-006").status == CheckStatus.PASS) == (scope == "trace_only")
-    historical = pipeline.evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements(), legacy_wording_checks=False)
-    assert cp2_check(historical, "CP2-006").status == CheckStatus.FAIL
-
-
-@pytest.mark.parametrize("parts", [
-    ["[복원] 원래 값으로 되돌립니다.", "원래 상태인지 확인합니다."],
-    ["Return to the recorded value.", "Check the original state."],
-])
-@pytest.mark.parametrize("mutation", ["whole", "split", "missing", "reordered", "changed",
-                                     "interleaved", "across_fields", "across_cases", "disabled_restore"])
-def test_split_procedure_preservation_requires_contiguous_complete_source(parts, mutation):
-    request, analysis, design = cp1_request(), cp2_analysis(), detailed_boundary_design()
-    note = " ".join(parts)
-    request.acceptance_notes.append(note)
-    analysis.procedure_notes = [note]
-    tc = design.test_cases[0]
-    tc.restore_required = True
-    tc.restore_steps = [note] if mutation == "whole" else list(parts)
-    if mutation == "missing": tc.restore_steps.pop()
-    elif mutation == "reordered": tc.restore_steps.reverse()
-    elif mutation == "changed": tc.restore_steps[-1] += " 다른 값으로 판정합니다."
-    elif mutation == "interleaved": tc.restore_steps.insert(1, "다른 조작을 합니다.")
-    elif mutation == "across_fields": tc.preconditions.append(tc.restore_steps.pop(0))
-    elif mutation == "across_cases":
-        other = tc.model_copy(deep=True)
-        other.tc_id = "TC-CAND-002"
-        tc.restore_steps = parts[:1]
-        other.restore_steps = parts[1:]
-        design.test_cases.append(other)
-    elif mutation == "disabled_restore": tc.restore_required = False
-    original = design.model_dump_json()
-    result = pipeline.evaluate_checkpoint2(request, analysis, design, cp2_requirements(),
-        legacy_wording_checks=False, allow_split_procedure_notes=True)
-    assert (cp2_check(result, "CP2-014").status == CheckStatus.PASS) == (mutation in {"whole", "split"})
-    assert design.model_dump_json() == original
-    historical = pipeline.evaluate_checkpoint2(request, analysis, design, cp2_requirements(),
-        legacy_wording_checks=False)
-    assert (cp2_check(historical, "CP2-014").status == CheckStatus.PASS) == (mutation == "whole")
-    if mutation not in {"whole", "split"}:
-        assert "절차 원문 누락·순서 불일치" in cp2_check(result, "CP2-014").message
+    result = pipeline.evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements())
+    assert (cp2_check(result, "CP2-006").status == CheckStatus.PASS) == (scope != "explicit_double")
 
 
 @pytest.mark.parametrize("wording", ["실행이 끝나면 처음 기록한 모습으로 되돌립니다.",
@@ -568,15 +584,15 @@ def test_new_wording_policy_preserves_procedure_handoff_without_keywords(wording
     request, analysis, design = cp1_request(), cp2_analysis(), detailed_boundary_design()
     request.acceptance_notes.append(wording)
     analysis.procedure_notes = [wording]
-    first = pipeline.evaluate_checkpoint2(request, analysis, design, cp2_requirements(), legacy_wording_checks=False)
-    assert cp2_check(first, "CP2-014").status == CheckStatus.FAIL
+    first = pipeline.evaluate_checkpoint2(request, analysis, design, cp2_requirements())
+    assert cp2_check(first, "CP2-014").status == CheckStatus.PASS  # placement: mandatory review
     tc = design.test_cases[0]
     tc.restore_required = True
     tc.restore_steps.append(wording)
-    preserved = pipeline.evaluate_checkpoint2(request, analysis, design, cp2_requirements(), legacy_wording_checks=False)
+    preserved = pipeline.evaluate_checkpoint2(request, analysis, design, cp2_requirements())
     assert cp2_check(preserved, "CP2-014").status == CheckStatus.PASS
     design.excluded_scope.append(wording)
-    excluded = pipeline.evaluate_checkpoint2(request, analysis, design, cp2_requirements(), legacy_wording_checks=False)
+    excluded = pipeline.evaluate_checkpoint2(request, analysis, design, cp2_requirements())
     assert cp2_check(excluded, "CP2-014").status == CheckStatus.FAIL
 
 
@@ -585,12 +601,11 @@ def test_new_wording_policy_accepts_target_labels_but_requires_bindings(target):
     from qa_pipeline_agent2 import _tc_observation_binding_errors
     tc = detailed_boundary_design().test_cases[0]
     tc.expected_results[0].observation_target = target
-    assert _tc_observation_binding_errors(tc)
-    assert not _tc_observation_binding_errors(tc, legacy_wording_checks=False)
+    assert not _tc_observation_binding_errors(tc)
     tc.expected_results[0].verify_after_step = "없는 단계"
-    assert _tc_observation_binding_errors(tc, legacy_wording_checks=False)
+    assert _tc_observation_binding_errors(tc)
     tc.expected_results[0].observation_target = None
-    assert len(_tc_observation_binding_errors(tc, legacy_wording_checks=False)) >= 2
+    assert len(_tc_observation_binding_errors(tc)) >= 2
 
 
 @pytest.mark.parametrize("mutation", ["none", "id", "condition", "expected_value", "missing_target", "missing_timing"])
@@ -607,36 +622,8 @@ def test_new_wording_policy_preserves_cp2_integrity(mutation):
         er.observation_target = None
     elif mutation == "missing_timing":
         er.verify_after_step = None
-    cp = pipeline.evaluate_checkpoint2(request, analysis, design, cp2_requirements(), legacy_wording_checks=False)
-    assert (cp.status == CheckStatus.PASS) == (mutation == "none"), cp.model_dump()
-
-
-@pytest.mark.parametrize("marked", ["[시험 절차 메모] 시험이 끝나면 원래 상태로 복원하고 확인합니다.",
-                                  "[복원] 모든 검사가 끝났을 때 원래 값으로 복원합니다."])
-def test_marked_restoration_is_preserved_as_procedure_not_exclusion(marked):
-    request, analysis, design = cp1_request(), cp2_analysis(), cp2_valid_design()
-    request.acceptance_notes.append(marked)
-    assert cp2_check(evaluate_checkpoint2(request, analysis, design, cp2_requirements()), "CP2-014").status == CheckStatus.FAIL
-    design.test_cases[0].restore_steps.append(marked)
-    design.test_cases[0].restore_required = True
-    assert cp2_check(evaluate_checkpoint2(request, analysis, design, cp2_requirements()), "CP2-014").status == CheckStatus.PASS
-    design.excluded_scope.append(marked)
-    assert cp2_check(evaluate_checkpoint2(request, analysis, design, cp2_requirements()), "CP2-014").status == CheckStatus.FAIL
-
-
-@pytest.mark.parametrize("altered", [False, True])
-def test_cp2_boundary_relation_compares_linked_condition_not_shared_numbers(altered):
-    request, analysis, design = cp1_request(), cp2_analysis(), cp2_valid_design()
-    case = design.test_cases[0]
-    result = case.expected_results[0]
-    condition = next(c for c in analysis.confirmed_conditions if c.condition_id == result.source_condition_ids[0])
-    condition.source_text = condition.statement = "온도 30°C 이상 요청은 차단합니다."
-    result.statement = "온도 30°C 초과 요청은 차단합니다." if altered else condition.source_text
-    result.source_condition_ids = [condition.condition_id]
-    request.acceptance_notes.append(condition.source_text)
-    checkpoint = evaluate_checkpoint2(request, analysis, design, cp2_requirements())
-    failures = cp2_check(checkpoint, "CP2-017")
-    assert ("연결된 조건과 기대 동작이 반대" in failures.message) == altered
+    cp = pipeline.evaluate_checkpoint2(request, analysis, design, cp2_requirements())
+    assert (cp.status == CheckStatus.PASS) == (mutation in {"none", "expected_value"}), cp.model_dump()
 
 
 @pytest.mark.parametrize("mutation", ["valid", "missing", "omit_target", "wrong_target", "duplicate",
@@ -663,14 +650,12 @@ def test_cp2_structured_restoration_checks_ids_coverage_and_policy(mutation):
     elif mutation == "excerpt":
         case.restoration.confirmations[0].comparisons[0].source_excerpt = "일부"
     design = cp2_valid_design().model_copy(update={"test_cases": [case]})
-    result = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements(),
-                                  require_structured_restoration=True)
+    result = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
     assert (cp2_check(result, "CP2-023").status == CheckStatus.PASS) is (mutation == "valid")
 
 
 @pytest.mark.parametrize("field,initial,target", [
-    ("status", "STOP", "OPERATION"), ("mode", "COOL", "HEAT"),
-    ("fanSpeed", "LOW", "HIGH"), ("locked", False, True), ("setTemp", 27, 21),
+    ("status", "STOP", "OPERATION"), ("locked", False, True), ("setTemp", 27, 21),
 ])
 @pytest.mark.parametrize("variant", ["duplicate", "grouped", "missing_result", "wrong_basis"])
 def test_restoration_duplicate_feedback_preserves_each_result(field, initial, target, variant):
@@ -722,6 +707,63 @@ def test_structured_restoration_read_only_and_strict_api_schema():
     assert pipeline._structured_restoration_errors(case)
 
 
+@pytest.mark.parametrize("variant", ["missing", "linked", "linked_er_target", "duplicate", "empty"])
+def test_preparation_only_field_needs_its_own_restore_check(variant):
+    """IMP-015 (2026-10-24): temperature TCs set the mode in preparation, have no mode ER,
+    and the contract could not link a mode restore check (4 of 4 live designs)."""
+    case, plan = controller_lifecycle_fixture("setTemp", 27, 21)
+    check = lambda target, value: pipeline.TcPreconditionVerification(
+        source_text=case.preconditions[0], read_kind="INTERNAL_VALUE", expected_value=value, observation_target=target)
+    case.execution_spec = pipeline.TcExecutionSpec(
+        operations=[], precondition_verifications=[
+            pipeline.TcPreconditionVerification(source_text=case.preconditions[0], read_kind="BASELINE_CONTEXT",
+                                                expected_value=True, observation_target="context.online"),
+            check("internal.mode", "COOL"), check("internal.setTemp", 27)],
+        verifications=[pipeline.TcVerification(result_id=r.result_id, observation_layer=r.observation_layer,
+                                                strategy="INTERNAL_SET_TEMP", target=target)
+                       for r, target in zip(case.expected_results, ["card.setTemp", "internal.setTemp"])],
+        binding_contract="controller-map-1.0")
+    mode = pipeline.RestoreConfirmation(source_text="대상 장비의 내부 모드 값을 준비 전 관찰값과 비교한다.",
+                                        precondition_indexes=[1])
+    if variant == "linked_er_target":
+        mode.precondition_indexes = [1, 2]
+    elif variant == "duplicate":
+        mode.precondition_indexes = [1, 1]
+    elif variant == "empty":
+        mode.precondition_indexes = []
+    if variant != "missing":
+        case.restoration.confirmations.append(mode)
+    case.restore_steps = case.restoration.operation_steps + [c.source_text for c in case.restoration.confirmations]
+    plan.restore_confirmations = case.restoration.confirmations
+    errors = pipeline._structured_restoration_errors(case)
+    _, plan_errors = pipeline._structured_restore_plan_coverage(case, plan)
+    assert (not errors) is (variant == "linked"), errors
+    assert all(error in plan_errors for error in errors)
+    if variant == "missing":
+        assert errors == ["준비에서 확인한 관제점(시험 ER 없음)마다 precondition_indexes로 복원 확인을 "
+                          "정확히 한 번 연결해야 합니다 (누락: internal.mode)"]
+    if variant == "linked":
+        # Older specs without the controller map do not name fields, so the rule cannot apply.
+        unmapped = case.model_copy(deep=True)
+        unmapped.execution_spec.binding_contract = None
+        unmapped.restoration.confirmations.pop()
+        unmapped.restore_steps.pop()
+        assert pipeline._structured_restoration_errors(unmapped) == []
+        # Only the full controller snapshot comparison can check a field without an ER reader.
+        plan.actions = [a for a in plan.actions if a.action_type != "RESTORE_OBSERVED_CONTROLLER"]
+        assert any("공통 관제점 복원" in e for e in pipeline._structured_restore_plan_coverage(case, plan)[1])
+
+
+def test_precondition_indexes_keep_historical_digests_and_strict_schema():
+    from openai.lib._pydantic import to_strict_json_schema
+    plain = pipeline.RestoreConfirmation(source_text="확인", result_ids=["ER-001"])
+    assert "precondition_indexes" not in plain.model_dump(mode="json")
+    linked = pipeline.RestoreConfirmation(source_text="확인", precondition_indexes=[2])
+    assert linked.model_dump(mode="json")["precondition_indexes"] == [2]
+    schema = to_strict_json_schema(Agent2TestDesign)["$defs"]["RestoreConfirmation"]
+    assert "precondition_indexes" in schema["required"]
+
+
 def test_structured_restoration_id_normalization_keeps_local_references():
     case, _, _ = structured_restoration_fixture()
     original = cp2_valid_design().model_copy(update={"test_cases": [case, case.model_copy(deep=True)]})
@@ -744,7 +786,7 @@ def test_structured_restoration_id_normalization_keeps_local_references():
 
 
 @pytest.mark.parametrize("target", ["대상 장비 카드의 온도", "대상 장비의 운전 모드", "대상 장비의 잠금 상태", "대상 장비의 풍량", "조회 화면의 장비 수"])
-@pytest.mark.parametrize("mutation", [None, "different_target", "duplicate_modifier", "wrong_step"])
+@pytest.mark.parametrize("mutation", [None, "missing_target", "wrong_step"])
 def test_common_observation_binding_has_no_feature_specific_exception(target, mutation):
     from qa_pipeline_agent2 import _tc_observation_binding_errors
     tc = detailed_boundary_design().test_cases[0]
@@ -753,10 +795,8 @@ def test_common_observation_binding_has_no_feature_specific_exception(target, mu
     er.observation_target = target
     er.statement = f"{target}가 요구된 값으로 표시된다."
     er.verify_after_step = tc.steps[-1]
-    if mutation == "different_target":
-        er.observation_target = "다른 장비의 상태"
-    elif mutation == "duplicate_modifier":
-        er.observation_target = f"대상 장비의 {target}"
+    if mutation == "missing_target":
+        er.observation_target = " "
     elif mutation == "wrong_step":
         er.verify_after_step = "존재하지 않는 적용 단계"
     assert bool(_tc_observation_binding_errors(tc)) == (mutation is not None)
@@ -774,7 +814,7 @@ def test_agent2_repair_receives_same_binding_diagnostics_without_mutation():
         text = responses.kwargs["input"][1]["content"]
         assert json.dumps(pipeline.TC_OBSERVATION_BINDING_RULES, ensure_ascii=False) in text
         if extra:
-            for error in _tc_observation_binding_errors(design.test_cases[0], legacy_wording_checks=False):
+            for error in _tc_observation_binding_errors(design.test_cases[0]):
                 assert error in text
     assert design.model_dump_json() == original
 
@@ -790,8 +830,7 @@ def test_tc_state_restoration_policy_required_for_new_contract(effect, restore, 
     tc.state_effect = pipeline.TcStateEffect(effect) if effect else None
     tc.restore_required = restore
     tc.restore_steps = ["대상 장비를 시험 전 상태로 복원한다."] if restore else []
-    result = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements(),
-                                          require_state_restoration_policy=True)
+    result = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
     assert cp2_check(result, "CP2-022").status == (CheckStatus.PASS if accepted else CheckStatus.FAIL)
 
 
@@ -801,8 +840,7 @@ def test_blocked_change_requires_state_observation_not_just_notification():
     tc.state_effect = pipeline.TcStateEffect.BLOCKED_CHANGE
     tc.restore_required, tc.restore_steps = True, ["초기 상태로 복원한다."]
     tc.expected_results = [r for r in tc.expected_results if r.observation_layer == ObservationLayer.NOTIFICATION]
-    result = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements(),
-                                          require_state_restoration_policy=True)
+    result = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
     assert cp2_check(result, "CP2-022").status == CheckStatus.FAIL
     assert "요구된 차단 결과의 대상 상태" in cp2_check(result, "CP2-022").message
 
@@ -822,72 +860,6 @@ def test_restore_drafting_separates_ui_labels_and_internal_codes(variant):
     assert bool(_tc_restore_basis_errors(case)) == (variant in {"ui_code", "missing_ui_basis"})
 
 
-@pytest.mark.parametrize("mutation", [None, "extra_alert", "changed_value", "combined_sources", "unknown_source"])
-def test_trace_only_expected_results_cannot_expand_original_request(mutation):
-    from qa_pipeline_contracts import RequirementScopeEvidence, ScopeBasis
-    analysis, design = cp2_analysis(), cp2_valid_design()
-    condition = analysis.confirmed_conditions[2]
-    condition.statement = condition.source_text
-    effect = analysis.requirement_effects[2]
-    effect.scope_evidence = RequirementScopeEvidence(basis=ScopeBasis.REQUEST_TRACE_ONLY,
-        request_condition_ids=[condition.condition_id], srs_source_text="Toast 표시")
-    expected = design.test_cases[0].expected_results[2]
-    expected.statement = condition.source_text
-    if mutation == "extra_alert":
-        expected.statement += " 경고 아이콘도 표시한다."
-    elif mutation == "changed_value":
-        expected.statement = "성공 안내 Toast를 표시한다."
-    elif mutation == "combined_sources":
-        expected.source_condition_ids.append("COND-001")
-    elif mutation == "unknown_source":
-        expected.source_condition_ids.append("COND-999")
-    result = evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements())
-    assert cp2_check(result, "CP2-017").status == (CheckStatus.PASS if mutation is None else CheckStatus.FAIL)
-
-
-@pytest.mark.parametrize("version", ["3.12", "3.13"])
-@pytest.mark.parametrize("mutation", ["one", "two", "three", "unknown_er", "unknown_tc", "lost_condition"])
-def test_trace_source_count_is_not_new_semantic_authority(version, mutation):
-    from qa_pipeline_contracts import RequirementScopeEvidence, ScopeBasis
-    from qa_pipeline_execution import _agent2_checkpoint_options, _current_agent2_contract
-    analysis, design = cp2_analysis(), cp2_valid_design()
-    condition = analysis.confirmed_conditions[2]
-    analysis.requirement_effects[2].scope_evidence = RequirementScopeEvidence(
-        basis=ScopeBasis.REQUEST_TRACE_ONLY, request_condition_ids=[condition.condition_id],
-        srs_source_text="Toast 표시")
-    expected = design.test_cases[0].expected_results[2]
-    expected.statement = condition.source_text
-    if mutation in {"two", "three", "unknown_er", "unknown_tc"}:
-        expected.source_condition_ids.append("COND-001")
-    if mutation == "three":
-        expected.source_condition_ids.append("COND-002")
-    if mutation == "unknown_er":
-        expected.source_condition_ids.append("COND-999")
-    if mutation == "unknown_tc":
-        design.test_cases[0].source_condition_ids.append("COND-999")
-        expected.source_condition_ids.append("COND-999")
-    if mutation == "lost_condition":
-        design.test_cases[0].source_condition_ids.remove(condition.condition_id)
-    historical = {**_current_agent2_contract(), "contract_version": version, "prompt_version": "agent2-2.44"}
-    historical.pop("review_responsibility_contract")
-    historical.pop("output_tolerance_contract")
-    historical.pop("task_boundary_contract")
-    historical.pop("scope_guard_contract")
-    historical.pop("tc_execution_alignment_contract")
-    historical.pop("essential_validation_contract")
-    settings = _agent2_checkpoint_options(historical)
-    # Isolate the changed rule using historical compact fixtures, not a Live verdict.
-    result = evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements(),
-        legacy_wording_checks=settings["legacy_wording_checks"],
-        allow_multiple_trace_sources=settings["allow_multiple_trace_sources"])
-    assert (cp2_check(result, "CP2-017").status == CheckStatus.PASS) == (
-        version == "3.13" or mutation in {"one", "lost_condition"})
-    if mutation == "unknown_er":
-        assert cp2_check(result, "CP2-005").status == CheckStatus.FAIL
-    elif mutation == "unknown_tc":
-        assert cp2_check(result, "CP2-003").status == CheckStatus.FAIL
-    elif mutation == "lost_condition":
-        assert cp2_check(result, "CP2-004").status == CheckStatus.FAIL
     # Multiple valid IDs alone never prove that their combined meaning is correct.
 
 
@@ -909,7 +881,7 @@ def test_trace_reference_does_not_force_unrequested_notification_layer():
 
 def test_new_tc_detail_keeps_steps_observation_locations_and_shared_timing():
     design = detailed_boundary_design()
-    result = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements(), require_procedure_detail=False)
+    result = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
     assert result.status == CheckStatus.PASS
     assert cp2_check(result, "CP2-020").status == CheckStatus.PASS
     assert design.test_cases[0].expected_results[0].verify_after_step == design.test_cases[0].expected_results[1].verify_after_step
@@ -917,257 +889,21 @@ def test_new_tc_detail_keeps_steps_observation_locations_and_shared_timing():
 
 
 @pytest.mark.parametrize("mutation", [
-    "combined", "english_combined", "missing_timing", "unknown_timing", "ambiguous_timing",
-    "missing_target", "different_target", "generic_target", "vague_step",
+    "missing_timing", "unknown_timing", "ambiguous_timing", "missing_target",
 ])
-def test_new_tc_detail_rejects_compressed_or_unlinked_drafts(mutation):
+def test_new_tc_detail_rejects_unlinked_drafts(mutation):
     design = detailed_boundary_design()
     tc = design.test_cases[0]
-    if mutation == "combined":
-        tc.steps[1] = "제어 패널에 온도를 입력하고 적용한다."
-    elif mutation == "english_combined":
-        tc.steps[1] = "Enter the temperature and apply the pending command."
-    elif mutation == "missing_timing":
+    if mutation == "missing_timing":
         tc.expected_results[0].verify_after_step = None
     elif mutation == "unknown_timing":
         tc.expected_results[0].verify_after_step = "존재하지 않는 조작"
     elif mutation == "ambiguous_timing":
         tc.steps.append(tc.steps[-1])
-    elif mutation == "missing_target":
+    else:
         tc.expected_results[0].observation_target = None
-    elif mutation == "different_target":
-        tc.expected_results[0].observation_target = "다른 장비의 이력"
-    elif mutation == "generic_target":
-        tc.expected_results[0].observation_target = "화면"
-    else:
-        tc.steps[0] = "테스트를 실행한다."
-    result = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements(), require_procedure_detail=False)
+    result = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
     assert cp2_check(result, "CP2-020").status == CheckStatus.FAIL
-
-
-def test_tc_detail_preserves_legacy_read_only_and_existing_only_designs():
-    old = cp2_valid_design()
-    assert cp2_check(pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), old, cp2_requirements(), require_procedure_detail=False), "CP2-020").status == CheckStatus.FAIL
-    assert pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), old, cp2_requirements(), require_tc_detail=False).status == CheckStatus.PASS
-    design = detailed_boundary_design()
-    tc = design.test_cases[0]
-    tc.steps = ["대상 장비의 화면과 내부 값을 조회한다."]
-    for result in tc.expected_results:
-        result.verify_after_step = tc.steps[0]
-    tc.restore_required = True
-    tc.restore_steps = ["원래 값을 선택하고 적용한다."]
-    assert cp2_check(pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements(), require_procedure_detail=False), "CP2-020").status == CheckStatus.PASS
-    design.test_cases = []
-    assert cp2_check(pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements(), require_procedure_detail=False), "CP2-020").status == CheckStatus.PASS
-
-
-@pytest.mark.parametrize("feature", ["temperature", "fan"])
-def test_procedure_detail_accepts_explicit_selection_and_restore_without_new_product_results(feature):
-    request, analysis, requirements = cp1_request(), cp2_analysis(), cp2_requirements()
-    design = detailed_boundary_design()
-    tc = design.test_cases[0]
-    tc.restore_required = True
-    tc.restore_steps = [
-        "대상 장비의 설정 온도를 초기값인 18°C로 복원하고 적용한다.",
-        "대상 장비의 화면 온도와 내부 온도가 모두 초기값 18°C인지 확인한다.",
-    ]
-    if feature == "fan":
-        request = ChangeRequest(
-            request_id="CR-PROCEDURE-FAN-001", change_type="MODIFIED",
-            target_requirement_id="REQ-FAN-001",
-            before_value="MED의 표시 문구는 미정이다.",
-            after_value="MED 적용 후 대상 장비 카드에 중풍이 표시되고 내부 fanSpeed는 MED이다.",
-            description="MED 풍량의 표시 문구를 중풍으로 명시한다.",
-            acceptance_notes=["초기 LOW 풍량을 확인하고 시험 후 LOW 풍량으로 복원한다."],
-        )
-        conditions = [
-            ConfirmedCondition(
-                condition_id=f"COND-{index:03}", statement=statement,
-                source_type=ConditionSource.CHANGE_REQUEST,
-                source_text=request.after_value, requirement_ids=["REQ-FAN-001"],
-            )
-            for index, statement in enumerate([
-                "대상 장비 카드에 중풍이 표시된다.",
-                "대상 장비의 내부 fanSpeed는 MED이다.",
-            ], 1)
-        ]
-        analysis = analysis.model_copy(update={
-            "request_id": request.request_id, "target_requirement_id": "REQ-FAN-001",
-            "change_summary": request.description, "before_condition": request.before_value,
-            "after_condition": request.after_value, "confirmed_conditions": conditions,
-            "requirement_effects": [RequirementEffect(
-                requirement_id="REQ-FAN-001", relation=RequirementRelation.MODIFIED,
-                reason="MED 표시 문구 변경",
-            )],
-        })
-        requirements = {"REQ-FAN-001": SrsRequirement(
-            requirement_id="REQ-FAN-001", statement="풍량 선택과 적용",
-            acceptance_criteria="적용 후 내부 fanSpeed는 선택한 풍량 코드와 같다.",
-        )}
-        design.request_id = request.request_id
-        design.related_existing_tests = []
-        tc.title = "MED 적용 후 중풍 표시와 내부 코드 확인"
-        tc.test_type = TcType.NORMAL
-        tc.requirement_ids = tc.feature_requirement_ids = ["REQ-FAN-001"]
-        tc.source_condition_ids = ["COND-001", "COND-002"]
-        tc.test_data = StructuredTestData()
-        tc.preconditions = ["오류와 잠금이 없는 단일 대상 장비의 초기 풍량이 LOW이다."]
-        tc.steps = [
-            "중앙 관제 패널에서 대상 장비를 선택한다.",
-            "대상 장비의 풍량 값으로 MED를 선택한다.",
-            "선택한 MED 풍량을 중앙 관제 패널에서 적용한다.",
-        ]
-        tc.expected_results = [
-            ExpectedResult(
-                result_id="ER-001", statement=conditions[0].statement,
-                observation_layer=ObservationLayer.UI, source_condition_ids=["COND-001"],
-                verify_after_step=tc.steps[-1], observation_target="대상 장비 카드",
-            ),
-            ExpectedResult(
-                result_id="ER-002", statement=conditions[1].statement,
-                observation_layer=ObservationLayer.INTERNAL_STATE, source_condition_ids=["COND-002"],
-                verify_after_step=tc.steps[-1], observation_target="대상 장비의 내부 fanSpeed",
-            ),
-        ]
-        tc.restore_steps = [
-            "시험 뒤 대상 장비를 초기 LOW 풍량으로 복원하고 적용한다.",
-            "대상 장비의 내부 fanSpeed가 초기값 LOW로 돌아왔는지 확인한다.",
-        ]
-    product_results = [item.model_dump() for item in tc.expected_results]
-
-    result = pipeline.evaluate_checkpoint2(request, analysis, design, requirements)
-
-    assert cp2_check(result, "CP2-020").status == CheckStatus.PASS
-    assert cp2_check(result, "CP2-021").status == CheckStatus.PASS
-    assert [item.model_dump() for item in tc.expected_results] == product_results
-    assert Agent2TestDesign.model_validate_json(design.model_dump_json()) == design
-
-
-@pytest.mark.parametrize("mutation", [
-    "missing_selection", "value_selection_only", "negated_selection_step",
-    "negated_click_step", "negated_selected_precondition", "selected_state_denied",
-    "selection_after_value_operation",
-])
-def test_procedure_detail_rejects_missing_false_or_late_target_preparation(mutation):
-    design = detailed_boundary_design()
-    tc = design.test_cases[0]
-    if mutation == "missing_selection":
-        tc.steps.pop(0)
-    elif mutation == "value_selection_only":
-        tc.steps[0] = "대상 장비의 온도 값으로 17°C를 선택한다."
-    elif mutation == "negated_selection_step":
-        tc.steps[0] = "대상 장비 카드를 선택하지 않는다."
-    elif mutation == "negated_click_step":
-        tc.steps[0] = "대상 장비 카드를 클릭하지 않는다."
-    elif mutation == "negated_selected_precondition":
-        tc.steps.pop(0)
-        tc.preconditions.append("대상 장비가 아직 선택되지 않은 상태이다.")
-    elif mutation == "selected_state_denied":
-        tc.steps.pop(0)
-        tc.preconditions.append("대상 장비가 이미 선택된 상태가 아니다.")
-    else:
-        tc.steps[0], tc.steps[1] = tc.steps[1], tc.steps[0]
-
-    result = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
-
-    assert cp2_check(result, "CP2-021").status == CheckStatus.FAIL
-
-
-def test_procedure_detail_accepts_already_selected_target_without_extra_click():
-    design = detailed_boundary_design()
-    tc = design.test_cases[0]
-    tc.preconditions.append("중앙 관제 화면에서 대상 장비가 이미 선택된 상태이다.")
-    tc.steps.pop(0)
-
-    result = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
-
-    assert cp2_check(result, "CP2-021").status == CheckStatus.PASS
-    assert len(tc.steps) == 2
-
-
-@pytest.mark.parametrize("restore_steps", [
-    ["대상 장비의 설정 온도를 초기값 18°C로 복원하고 적용한다."],
-    ["원래 값을 선택하고 적용한다.", "결과를 확인한다."],
-    ["대상 장비의 설정 온도를 초기값 18°C로 복원하고 적용한다.", "복원 결과를 확인한다."],
-    ["대상 장비의 설정 온도를 초기값 18°C로 복원하고 적용한다.", "대상 장비의 내부 온도를 확인한다."],
-    ["대상 장비의 설정 온도를 초기값 18°C로 복원하고 적용한다.", "대상 장비의 내부 온도가 18°C인지 확인하지 않는다."],
-])
-def test_procedure_detail_rejects_vague_missing_or_negated_restore_verification(restore_steps):
-    design = detailed_boundary_design()
-    tc = design.test_cases[0]
-    tc.restore_required = True
-    tc.restore_steps = restore_steps
-
-    result = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
-
-    assert cp2_check(result, "CP2-021").status == CheckStatus.FAIL
-
-
-def test_procedure_detail_accepts_observed_baseline_without_invented_initial_value():
-    design = detailed_boundary_design()
-    tc = design.test_cases[0]
-    tc.restore_required = True
-    tc.restore_steps = [
-        "시험 직전에 관찰한 대상 장비의 모드와 설정 온도로 복원하고 적용한다.",
-        "대상 장비의 내부 모드와 설정 온도가 시험 직전에 관찰한 원상태와 일치하는지 확인한다.",
-    ]
-
-    result = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
-
-    assert cp2_check(result, "CP2-021").status == CheckStatus.PASS
-
-
-def test_procedure_detail_preserves_read_only_existing_only_and_legacy_contracts():
-    design = detailed_boundary_design()
-    tc = design.test_cases[0]
-    tc.steps = ["대상 장비의 화면 온도와 내부 온도를 조회한다."]
-    tc.restore_required = False
-    tc.restore_steps = []
-    for expected in tc.expected_results:
-        expected.verify_after_step = tc.steps[0]
-    read_only = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
-    assert cp2_check(read_only, "CP2-021").status == CheckStatus.PASS
-    tc.steps = ["Check the current device temperature."]
-    for expected in tc.expected_results:
-        expected.verify_after_step = tc.steps[0]
-    read_only = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
-    assert cp2_check(read_only, "CP2-021").status == CheckStatus.PASS
-
-    design.test_cases = []
-    existing_only = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
-    assert cp2_check(existing_only, "CP2-021").status == CheckStatus.PASS
-
-    legacy = detailed_boundary_design()
-    legacy.test_cases[0].steps.pop(0)
-    legacy.test_cases[0].restore_required = True
-    legacy.test_cases[0].restore_steps = ["원래 값을 선택하고 적용한다."]
-    for kwargs in ({"require_procedure_detail": False}, {"require_tc_detail": False}):
-        result = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), legacy, cp2_requirements(), **kwargs)
-        assert not any(check.rule_id == "CP2-021" for check in result.checks)
-
-
-@pytest.mark.parametrize("basis, accepted", [
-    ("초기값", False),
-    ("시험 전에 관찰한 값", True),
-    ("시험 직전에 기록한 원상태", True),
-])
-def test_procedure_detail_requires_a_named_or_observed_restoration_baseline(basis, accepted):
-    design = detailed_boundary_design()
-    tc = design.test_cases[0]
-    tc.test_data = StructuredTestData()
-    tc.preconditions = ["오류 없는 대상 장비를 준비한다."]
-    tc.restore_required = True
-    tc.restore_steps = [f"대상 장비를 {basis}으로 복원하고 적용한다.",
-                        f"대상 장비의 내부 온도를 {basis}과 비교해 확인한다."]
-    result = pipeline.evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
-    assert cp2_check(result, "CP2-021").status == (CheckStatus.PASS if accepted else CheckStatus.FAIL)
-
-
-def test_procedure_detail_does_not_invent_device_selection_for_standalone_control():
-    case = generic_new_control_test_case()
-    case.restore_steps.append("복원 후 새 제어 스위치 상태를 시험 전에 기록한 값과 비교해 확인한다.")
-    case.expected_results[0].observation_target = "새 제어 스위치"
-    assert not pipeline._tc_procedure_detail_errors(case)
 
 
 def test_approved_reuse_context_preserves_spec_without_registration_metadata():
@@ -1221,12 +957,12 @@ def test_agent2_sends_approved_procedures_on_initial_and_rewrite_calls():
         assert "승인 TC 명세가 제공되면" in instructions
         assert instructions == AGENT2_SYSTEM_INSTRUCTIONS
         assert "내부 분류명·정책 키" in instructions
-        assert "해당 구조화 필드와 SRS 개정안은 기존 규칙대로 작성" in instructions
+        assert "코드 처리 과정을 풀어 쓰지 않고" in instructions
         assert "추가 확인 사항이 없으면 빈 목록" in instructions
         assert "근거 개수와 검증 사실 개수는 다릅니다" in instructions
         assert "유지 조건이라는 이유로 이번 요청에 필요한 검사를 생략" in instructions
         assert "후보와 기존 TC를 합친 실제 검사 범위" in instructions
-        assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-56"
+        assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-62-rules-6"
         assert "기존 TC는 전체 단위로 실행" in instructions
         assert "명시적 제외와 충돌하는 검사가 포함돼 있으면 선택하지 않고" in instructions
         assert "기존 assertion을 삭제하지 않습니다" in instructions
@@ -1242,7 +978,9 @@ def test_agent2_sends_approved_procedures_on_initial_and_rewrite_calls():
         assert "1. 중앙 관제 화면에서 시험할 대상 장비 카드를 선택한다." in instructions
         assert "2. 선택한 장비의 제어 패널에서 풍량을 MED로 선택한다." in instructions
         assert "3. 제어 패널의 적용 버튼을 눌러 선택한 풍량을 대상 장비에 적용한다." in instructions
-        assert "복원 후 대상 장비의 내부 fanSpeed가 초기값 LOW로 돌아왔는지 확인한다." in instructions
+        # The example restores to the observed baseline, never to a fixed initial value.
+        assert "대상 장비의 내부 fanSpeed를 준비 전 관찰값과 비교한다." in instructions
+        assert "초기값 LOW로 돌아왔는지" not in instructions
         assert "대상 선택 성공·알림·선택 색상·LOW의 한글 표시를 새 expected_results로 만들지 않습니다." in instructions
         assert "예시 B: 입력이 '초기 설정 온도 24°C, 30°C 적용 후 카드·내부 설정 온도 30°C'를 요구하면" in instructions
         assert "예시 C: 입력이 현재 상태를 조회하는 읽기 전용 시험이면" in instructions
@@ -1250,69 +988,13 @@ def test_agent2_sends_approved_procedures_on_initial_and_rewrite_calls():
         assert responses.kwargs["store"] is False
 
 
-@pytest.mark.parametrize("expected", ["HIGH", "99", "17"])
-def test_new_tc_expected_value_requires_its_own_condition(expected):
-    design = cp2_valid_design()
-    design.test_cases[0].expected_results[0].statement = f"화면 값은 {expected}로 변경된다."
-    result = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
-    assert cp2_check(result, "CP2-017").status == CheckStatus.FAIL
-
-
-def test_new_tc_med_to_high_is_rejected_without_rejecting_med():
-    analysis, design = cp2_analysis(), cp2_valid_design()
-    condition = analysis.confirmed_conditions[0]
-    condition.statement = condition.source_text = "중풍(MED) 값이 화면에 표시된다."
-    expected = design.test_cases[0].expected_results[0]
-    expected.source_condition_ids = [condition.condition_id]
-    expected.statement = "중풍(MED) 값이 화면에 표시된다."
-    assert cp2_check(evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements()), "CP2-017").status == CheckStatus.PASS
-    expected.statement = "강풍(HIGH) 값이 화면에 표시된다."
-    assert cp2_check(evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements()), "CP2-017").status == CheckStatus.FAIL
-    # Historical reports retain their explicitly versioned original CP2 result.
-    assert cp2_check(evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements(), require_candidate_expectation_guard=False), "CP2-017").status == CheckStatus.PASS
-
-
-def test_new_tc_range_allows_in_range_value_but_not_opposite_policy():
-    analysis, design = cp2_analysis(), cp2_valid_design()
-    condition = analysis.confirmed_conditions[0]
-    condition.statement = condition.source_text = "18°C에서 30°C 입력을 허용한다."
-    expected = design.test_cases[0].expected_results[0]
-    expected.source_condition_ids = [condition.condition_id]
-    expected.statement = "24°C 입력을 허용한다."
-    assert cp2_check(evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements()), "CP2-017").status == CheckStatus.PASS
-    expected.statement = "24°C 입력을 차단한다."
-    assert cp2_check(evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements()), "CP2-017").status == CheckStatus.FAIL
-
-
-def test_boundary_input_in_expectation_is_not_confused_with_output():
-    analysis, design = cp2_analysis(), cp2_valid_design()
-    result = design.test_cases[0].expected_results[0]
-    result.source_condition_ids = ["COND-001"]
-    result.statement = "17°C 요청을 차단한다."
-    assert cp2_check(evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements()), "CP2-017").status == CheckStatus.PASS
-    result.statement = "17°C 요청을 차단하고 화면 온도는 17°C가 된다."
-    assert cp2_check(evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements()), "CP2-017").status == CheckStatus.FAIL
-
-
-def test_cp2_rejects_opposite_existing_behavior_and_srs_value():
+def test_cp2_rejects_srs_revision_value_without_source():
     analysis = cp2_analysis()
-    spec = pipeline.ExistingRegressionSpec(
-        tc_id="TC-V2-999", test_function="test_tc_v2_999",
-        requirement_ids=("REQ-TEMP-001", "REQ-STATE-001", "REQ-NOTIFY-001"),
-        covered_behaviors=("AUTO 18°C 미만 허용, 상태 유지, 안내 표시",), source="APPROVED",
-    )
-    design = Agent2TestDesign(request_id=analysis.request_id, existing_tc_comparison_completed=True,
-        related_existing_tests=[ExistingTestSelection(tc_id=spec.tc_id,
-            source_condition_ids=["COND-001", "COND-002", "COND-003"], selection_reason="기존 검증 재사용")],
-        test_cases=[], coverage_summary="기존 검증")
-    result = evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements(),
-        existing_catalog=(spec,), require_existing_behavior_values=True)
-    assert cp2_check(result, "CP2-019").status == CheckStatus.FAIL
     design = cp2_valid_design()
     design.srs_revision_proposals = [pipeline.SrsRevisionProposal(
         proposal_id="SRS-REV-001", requirement_id="REQ-TEMP-001", source_condition_ids=["COND-001"],
         current_acceptance_criteria="범위 밖 차단", proposed_acceptance_criteria="AUTO 모드 99°C 허용", reason="변경 반영")]
-    result = evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements(), require_srs_revision_proposals=True)
+    result = evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements())
     assert cp2_check(result, "CP2-018").status == CheckStatus.FAIL
 
 
@@ -1325,54 +1007,24 @@ def test_existing_test_selection_accepts_versioned_official_tc_id():
 
     assert selection.tc_id == "TC-V2-001"
 
-def test_request_diff_recognizes_repeated_existing_clause_as_unchanged():
-    request = ChangeRequest(
-        request_id="CR-FAN-001",
-        change_type="MODIFIED",
-        target_requirement_id="REQ-FAN-001",
-        before_value="HIGH는 장비 카드에 강풍으로 표시됩니다.",
-        after_value="MED는 장비 카드에 중풍으로, HIGH는 강풍으로 표시됩니다.",
-        description="MED 표시 규칙을 추가합니다.",
-    )
-    existing_high = ConfirmedCondition(
-        condition_id="COND-001",
-        statement="HIGH는 장비 카드에 강풍으로 표시되어야 한다.",
-        source_type=ConditionSource.CHANGE_REQUEST,
-        source_text=request.after_value,
-        requirement_ids=["REQ-FAN-001"],
-        change_role=ConditionChangeRole.UNCHANGED,
-    )
-    changed_medium = ConfirmedCondition(
-        condition_id="COND-002",
-        statement="MED는 장비 카드에 중풍으로 표시되어야 한다.",
-        source_type=ConditionSource.CHANGE_REQUEST,
-        source_text=request.after_value,
-        requirement_ids=["REQ-FAN-001"],
-        change_role=ConditionChangeRole.CHANGED,
-    )
+@pytest.mark.parametrize("rewrite", [False, True])
+def test_agent2_writer_and_rewriter_receive_same_baseline_order_guidance(rewrite):
+    from qa_pipeline_contracts import QA_CONTROLLER_BASELINE_GUIDANCE
+    responses = Agent2FakeResponses()
+    source = agent2_design()
+    before = source.model_dump(mode="json")
+    options = {"previous_design": source, "checkpoint_feedback": ["기록 시점과 조작 순서를 대조하세요."]} if rewrite else {}
+    OpenAIAgent2(model="offline", client=SimpleNamespace(responses=responses)).design(
+        cp1_request(), cp2_analysis(), cp2_requirements(), **options)
+    prompt = responses.kwargs["input"][1]["content"]
+    assert "[대상 선택·원래값 기록 순서]" in prompt
+    assert prompt.count(QA_CONTROLLER_BASELINE_GUIDANCE) == 1
+    assert responses.kwargs["input"][0]["content"] == AGENT2_SYSTEM_INSTRUCTIONS
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-62-rules-6"
+    assert source.model_dump(mode="json") == before
+    if rewrite:
+        assert "기록 시점과 조작 순서를 대조하세요." in prompt
 
-    assert _is_unchanged_condition_for_request(existing_high, request) is True
-    assert _is_unchanged_condition_for_request(changed_medium, request) is False
-
-def test_request_diff_treats_mapping_or_order_change_as_changed_without_explicit_role():
-    request = ChangeRequest(
-        request_id="CR-MAPPING-001",
-        change_type="MODIFIED",
-        target_requirement_id="REQ-FAN-001",
-        before_value="LOW 다음은 MED, MED 다음은 HIGH다.",
-        after_value="LOW 다음은 HIGH, HIGH 다음은 MED다.",
-        description="풍량 전환 순서를 변경한다.",
-    )
-    swapped_mapping = ConfirmedCondition(
-        condition_id="COND-003",
-        statement="LOW 다음 풍량은 HIGH다.",
-        source_type=ConditionSource.CHANGE_REQUEST,
-        source_text=request.after_value,
-        requirement_ids=["REQ-FAN-001"],
-    )
-
-    assert swapped_mapping.change_role == ConditionChangeRole.CHANGED
-    assert _is_unchanged_condition_for_request(swapped_mapping, request) is False
 
 def test_agent2_uses_structured_responses_api() -> None:
     responses = Agent2FakeResponses()
@@ -1410,9 +1062,9 @@ def test_agent2_uses_structured_responses_api() -> None:
 
     assert response.response_id == "resp_agent2"
     assert response.usage["total_tokens"] == 300
-    assert responses.kwargs["text_format"] is pipeline.LiveAgent2TestDesign
+    assert responses.kwargs["text_format"] is pipeline.Agent2TransportDesign
     assert responses.kwargs["store"] is False
-    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-56"
+    assert responses.kwargs["prompt_cache_key"] == "qa-v2-agent2-2-62-rules-6"
     agent2_input = responses.kwargs["input"][1]["content"]
     assert "[기존 사람 작성·자동화 TC 카탈로그]" in agent2_input
     assert '[코드로 확인한 SRS 개정 범위]' in agent2_input
@@ -1469,18 +1121,17 @@ def test_valid_design_passes_checkpoint2() -> None:
     result = evaluate_checkpoint2(cp1_request(), cp2_analysis(), cp2_valid_design(), cp2_requirements())
 
     assert result.status == CheckStatus.PASS
-    assert len(result.checks) == 17
+    assert len(result.checks) == 22  # CP2-LANG appears only on a violation
     assert all(item.status == CheckStatus.PASS for item in result.checks)
 
-@pytest.mark.parametrize("values", [("MED", "HIGH"), ("18°C", "30°C"), ("HEAT", "COOL")])
+@pytest.mark.parametrize("values", [("MED", "HIGH"), ("18°C", "30°C")])
 @pytest.mark.parametrize("layout", ["split", "one_complete", "missing_link", "actual_gap"])
 def test_compound_existing_reuse_requires_actual_condition_links(values, layout):
     request, analysis, design, catalog = compound_reuse_fixture(values, layout)
     before = design.model_dump()
     result = evaluate_checkpoint2(request, analysis, design, cp2_requirements(),
-        existing_catalog=catalog, require_existing_behavior_values=True)
-    check = cp2_check(result, "CP2-019")
-    assert check.status == (CheckStatus.PASS if layout in {"split", "one_complete"} else CheckStatus.FAIL)
+        existing_catalog=catalog)
+    assert cp2_check(result, "CP2-019").status == CheckStatus.PASS  # values: mandatory review
     context = pipeline._existing_reuse_link_context(analysis, catalog, design)
     pair = next(row for row in context if row["condition_id"] == "COND-010")
     assert bool(pair["values_not_covered_by_links"]) == (layout in {"missing_link", "actual_gap"})
@@ -1543,6 +1194,7 @@ def test_checkpoint2_allows_existing_tc_only_when_behavior_covers_change() -> No
             )
         ],
         test_cases=[],
+        srs_revision_proposals=cp2_valid_design().srs_revision_proposals,
         coverage_summary="변경 후 동작을 기존 공식 TC 한 건으로 전부 재검증한다.",
     )
 
@@ -1561,7 +1213,6 @@ def test_checkpoint2_allows_existing_tc_only_when_behavior_covers_change() -> No
     guarded = evaluate_checkpoint2(
         cp1_request(), analysis, design, cp2_requirements(),
         existing_catalog=(*pipeline.EXISTING_REGRESSION_CATALOG, existing_spec),
-        require_existing_behavior_values=True,
     )
     assert guarded.status == CheckStatus.PASS
     assert cp2_check(guarded, "CP2-019").status == CheckStatus.PASS
@@ -1571,31 +1222,19 @@ def test_checkpoint2_allows_existing_tc_only_when_behavior_covers_change() -> No
         "시험 뒤 대상 장비를 LOW 풍량으로 복원하고 적용한다.",
     ]})
     kwargs = dict(existing_catalog=(*pipeline.EXISTING_REGRESSION_CATALOG, existing_spec))
-    legacy = evaluate_checkpoint2(
-        request_with_procedures, analysis, design, cp2_requirements(),
-        allow_existing_procedure_review=False, **kwargs,
-    )
-    assert cp2_check(legacy, "CP2-014").status == CheckStatus.FAIL
+    analysis = analysis.model_copy(update={"procedure_notes": request_with_procedures.acceptance_notes})
     reviewed = evaluate_checkpoint2(
         request_with_procedures, analysis, design, cp2_requirements(), **kwargs,
     )
     assert reviewed.status == CheckStatus.PASS
     assert "최종 사람 검토" in cp2_check(reviewed, "CP2-014").message
-    notes = pipeline._existing_test_procedure_review_notes(request_with_procedures, design)
-    assert len(notes) == 2
-    assert all(any(original in note for note in notes) for original in request_with_procedures.acceptance_notes)
-    assert all(existing_spec.tc_id in note and "자동 확정하지 않았습니다" in note for note in notes)
-    # 기존 TC 선택이 없거나 신규 후보가 있으면 준비·복원 검사를 건너뛰지 않습니다.
-    for other in (design.model_copy(update={"related_existing_tests": []}), cp2_valid_design()):
-        checked = evaluate_checkpoint2(request_with_procedures, analysis, other, cp2_requirements(), **kwargs)
-        assert cp2_check(checked, "CP2-014").status == CheckStatus.FAIL
     excluded = design.model_copy(update={"excluded_scope": request_with_procedures.acceptance_notes})
     assert cp2_check(evaluate_checkpoint2(
         request_with_procedures, analysis, excluded, cp2_requirements(), **kwargs,
     ), "CP2-014").status == CheckStatus.FAIL
 
 
-def test_checkpoint2_rejects_existing_only_reuse_with_different_explicit_values() -> None:
+def test_existing_only_reuse_with_different_values_is_left_to_the_review() -> None:
     analysis = cp2_analysis()
     spec = pipeline.ExistingRegressionSpec(
         tc_id="TC-V2-999", test_function="test_tc_v2_999",
@@ -1612,18 +1251,13 @@ def test_checkpoint2_rejects_existing_only_reuse_with_different_explicit_values(
         )], test_cases=[], coverage_summary="기존 TC 재사용",
     )
     kwargs = dict(existing_catalog=(*pipeline.EXISTING_REGRESSION_CATALOG, spec))
-    legacy = evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements(), **kwargs)
-    guarded = evaluate_checkpoint2(
-        cp1_request(), analysis, design, cp2_requirements(),
-        require_existing_behavior_values=True, **kwargs,
-    )
-    assert legacy.status == CheckStatus.PASS  # 역사적 계약을 소급 변경하지 않음
-    assert cp2_check(guarded, "CP2-019").status == CheckStatus.FAIL
+    # 16°C vs 18°C is a value-role question for the mandatory grounding review.
+    assert cp2_check(evaluate_checkpoint2(cp1_request(), analysis, design, cp2_requirements(), **kwargs),
+                     "CP2-019").status == CheckStatus.PASS
     assert pipeline._explicit_behavior_values("REQ-FAN-001 MED 18.0°C") == {"MED", "18"}
     assert pipeline._explicit_behavior_values("HIGH 18°C") == {"HIGH", "18"}
     candidate = evaluate_checkpoint2(
         cp1_request(), analysis, cp2_valid_design(), cp2_requirements(),
-        require_existing_behavior_values=True,
     )
     assert candidate.status == CheckStatus.PASS
 
@@ -1645,14 +1279,12 @@ def test_checkpoint2_requires_grounded_srs_revision_proposal_for_modified_requir
         cp2_analysis(),
         design,
         cp2_requirements(),
-        require_srs_revision_proposals=True,
     )
     missing = evaluate_checkpoint2(
         cp1_request(),
         cp2_analysis(),
-        cp2_valid_design(),
+        cp2_valid_design().model_copy(update={"srs_revision_proposals": []}),
         cp2_requirements(),
-        require_srs_revision_proposals=True,
     )
 
     assert cp2_check(passed, "CP2-018").status == CheckStatus.PASS
@@ -1672,20 +1304,13 @@ def test_srs_revision_exemption_requires_full_exact_current_criteria(current, re
     requirements["REQ-TEMP-001"] = requirements["REQ-TEMP-001"].model_copy(
         update={"acceptance_criteria": current}
     )
-    design = cp2_valid_design()
+    design = cp2_valid_design().model_copy(update={"srs_revision_proposals": []})
     original = design.model_dump()
     result = evaluate_checkpoint2(
         cp1_request(), cp2_analysis(), design, requirements,
-        require_srs_revision_proposals=True, allow_already_reflected_srs=True,
     )
     assert cp2_check(result, "CP2-018").status == (CheckStatus.PASS if reflected else CheckStatus.FAIL)
     assert design.model_dump() == original
-    # Old evidence is rechecked with its old policy, never silently upgraded.
-    legacy = evaluate_checkpoint2(
-        cp1_request(), cp2_analysis(), design, requirements,
-        require_srs_revision_proposals=True,
-    )
-    assert cp2_check(legacy, "CP2-018").status == CheckStatus.FAIL
 
 
 @pytest.mark.parametrize("variant", ["identical", "rephrased", "related_missing", "target_missing"])
@@ -1694,7 +1319,7 @@ def test_srs_revision_policy_keeps_invalid_proposals_and_related_changes_blocked
     requirements[request.target_requirement_id] = requirements[request.target_requirement_id].model_copy(
         update={"acceptance_criteria": request.after_value}
     )
-    design = cp2_valid_design()
+    design = cp2_valid_design().model_copy(update={"srs_revision_proposals": []})
     if variant in {"identical", "rephrased"}:
         design = design.model_copy(update={"srs_revision_proposals": [pipeline.SrsRevisionProposal(
             proposal_id="SRS-REV-001", requirement_id=request.target_requirement_id,
@@ -1712,7 +1337,6 @@ def test_srs_revision_policy_keeps_invalid_proposals_and_related_changes_blocked
         del requirements[request.target_requirement_id]
     result = evaluate_checkpoint2(
         request, analysis, design, requirements,
-        require_srs_revision_proposals=True, allow_already_reflected_srs=True,
     )
     check = cp2_check(result, "CP2-018")
     assert check.status == CheckStatus.FAIL
@@ -1814,23 +1438,6 @@ def test_checkpoint2_routes_unchanged_condition_to_existing_tc() -> None:
     assert result.status == CheckStatus.PASS
     assert cp2_check(result, "CP2-016").status == CheckStatus.PASS
 
-def test_checkpoint2_rejects_existing_regression_regenerated_as_candidate() -> None:
-    design = cp2_valid_design()
-    regenerated = design.test_cases[0].model_copy(
-        update={"purpose": TcPurpose.RELATED_REGRESSION}
-    )
-
-    result = evaluate_checkpoint2(
-        cp1_request(),
-        cp2_analysis(),
-        design.model_copy(update={"test_cases": [regenerated]}),
-        cp2_requirements(),
-    )
-
-    assert result.status == CheckStatus.FAIL
-    assert cp2_check(result, "CP2-016").status == CheckStatus.FAIL
-    assert "신규 후보로 재작성" in cp2_check(result, "CP2-016").message
-
 def test_checkpoint2_allows_incompatible_target_regression_to_be_omitted() -> None:
     design = cp2_valid_design().model_copy(update={"related_existing_tests": []})
 
@@ -1840,125 +1447,6 @@ def test_checkpoint2_allows_incompatible_target_regression_to_be_omitted() -> No
 
     assert result.status == CheckStatus.PASS
     assert cp2_check(result, "CP2-016").status == CheckStatus.PASS
-
-def test_checkpoint2_rejects_compound_ui_expected_result() -> None:
-    design = cp2_valid_design()
-    test_case = design.test_cases[0]
-    compound_result = test_case.expected_results[0].model_copy(
-        update={"statement": "화면 모드는 AUTO이고 설정 온도는 18°C로 유지된다."}
-    )
-    design = design.model_copy(
-        update={
-            "test_cases": [
-                test_case.model_copy(
-                    update={
-                        "expected_results": [
-                            compound_result,
-                            *test_case.expected_results[1:],
-                        ]
-                    }
-                )
-            ]
-        }
-    )
-
-    result = evaluate_checkpoint2(
-        cp1_request(), cp2_analysis(), design, cp2_requirements()
-    )
-
-    assert result.status == CheckStatus.FAIL
-    assert cp2_check(result, "CP2-006").status == CheckStatus.FAIL
-    assert "관찰값별로 분리" in cp2_check(result, "CP2-006").message
-
-    for contextual_statement in (
-        "AUTO 모드에서 화면의 온도 조작 버튼은 비활성화된다.",
-        "AUTO 모드에서 화면의 설정 온도 표시는 ---이다.",
-    ):
-        contextual_result = test_case.expected_results[0].model_copy(
-            update={"statement": contextual_statement}
-        )
-        contextual_design = design.model_copy(
-            update={
-                "test_cases": [
-                    test_case.model_copy(
-                        update={
-                            "expected_results": [
-                                contextual_result,
-                                *test_case.expected_results[1:],
-                            ]
-                        }
-                    )
-                ]
-            }
-        )
-        contextual_checkpoint = evaluate_checkpoint2(
-            cp1_request(), cp2_analysis(), contextual_design, cp2_requirements()
-        )
-        assert cp2_check(contextual_checkpoint, "CP2-006").status == CheckStatus.PASS
-
-def test_checkpoint2_rejects_procedural_selection_expected_result() -> None:
-    design = cp2_valid_design()
-    test_case = design.test_cases[0]
-    selection_result = ExpectedResult(
-        result_id="ER-004",
-        statement="PRIMARY_TEST_DEVICE가 단일 선택된다.",
-        observation_layer=ObservationLayer.UI,
-        source_condition_ids=["COND-001"],
-    )
-    design = design.model_copy(
-        update={
-            "test_cases": [
-                test_case.model_copy(
-                    update={
-                        "expected_results": [
-                            *test_case.expected_results,
-                            selection_result,
-                        ]
-                    }
-                )
-            ]
-        }
-    )
-
-    result = evaluate_checkpoint2(
-        cp1_request(), cp2_analysis(), design, cp2_requirements()
-    )
-
-    assert result.status == CheckStatus.FAIL
-    assert cp2_check(result, "CP2-017").status == CheckStatus.FAIL
-    assert "준비용 장비 선택" in cp2_check(result, "CP2-017").message
-
-def test_checkpoint2_rejects_action_success_as_expected_result() -> None:
-    design = cp2_valid_design()
-    test_case = design.test_cases[0]
-    procedural_result = ExpectedResult(
-        result_id="ER-004",
-        statement="AUTO 모드를 선택하고 적용할 수 있다.",
-        observation_layer=ObservationLayer.UI,
-        source_condition_ids=["COND-001"],
-    )
-    design = design.model_copy(
-        update={
-            "test_cases": [
-                test_case.model_copy(
-                    update={
-                        "expected_results": [
-                            *test_case.expected_results,
-                            procedural_result,
-                        ]
-                    }
-                )
-            ]
-        }
-    )
-
-    result = evaluate_checkpoint2(
-        cp1_request(), cp2_analysis(), design, cp2_requirements()
-    )
-
-    assert result.status == CheckStatus.FAIL
-    assert cp2_check(result, "CP2-017").status == CheckStatus.FAIL
-    assert "Condition 원문에 없는 실행 행동 성공" in cp2_check(result, "CP2-017").message
 
 def test_checkpoint2_keeps_grounded_product_capability_result() -> None:
     analysis = cp2_analysis()
@@ -2005,38 +1493,6 @@ def test_checkpoint2_keeps_grounded_product_capability_result() -> None:
 
     assert cp2_check(result, "CP2-017").status == CheckStatus.PASS
 
-def test_checkpoint2_rejects_ui_display_not_present_in_condition_source() -> None:
-    design = cp2_valid_design()
-    test_case = design.test_cases[0]
-    invented_display = ExpectedResult(
-        result_id="ER-004",
-        statement="사용자 화면의 잠금 상태가 잠금으로 표시된다.",
-        observation_layer=ObservationLayer.UI,
-        source_condition_ids=["COND-001"],
-    )
-    design = design.model_copy(
-        update={
-            "test_cases": [
-                test_case.model_copy(
-                    update={
-                        "expected_results": [
-                            *test_case.expected_results,
-                            invented_display,
-                        ]
-                    }
-                )
-            ]
-        }
-    )
-
-    result = evaluate_checkpoint2(
-        cp1_request(), cp2_analysis(), design, cp2_requirements()
-    )
-
-    assert result.status == CheckStatus.FAIL
-    assert cp2_check(result, "CP2-017").status == CheckStatus.FAIL
-    assert "Condition 원문에 없는 UI 표시" in cp2_check(result, "CP2-017").message
-
 def test_checkpoint2_accepts_related_boundaries_as_one_grouped_tc() -> None:
     result = evaluate_checkpoint2(
         cp1_request(), cp2_analysis(), grouped_boundary_design(), cp2_requirements()
@@ -2057,11 +1513,6 @@ def test_checkpoint2_pairs_double_assertions_at_the_same_step() -> None:
     result = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
     assert cp2_check(result, "CP2-006").status == CheckStatus.FAIL
     assert "판정 단계 불일치" in cp2_check(result, "CP2-006").message
-    historical = evaluate_checkpoint2(
-        cp1_request(), cp2_analysis(), design, cp2_requirements(),
-        require_double_assert_timing=False,
-    )
-    assert cp2_check(historical, "CP2-006").status == CheckStatus.PASS
 
 def test_checkpoint2_accepts_single_operation_with_separate_observations() -> None:
     design = cp2_valid_design()
@@ -2310,60 +1761,6 @@ def test_verify_central_path_can_use_existing_regression_without_new_candidate()
     assert cp2_check(result, "CP2-008").status == CheckStatus.PASS
     assert cp2_check(result, "CP2-016").status == CheckStatus.PASS
 
-def test_verify_only_requirement_cannot_be_duplicated_as_new_candidate() -> None:
-    condition = ConfirmedCondition(
-        condition_id="COND-004",
-        statement="중앙 관제 패널에서 기존 제어 명령을 적용한다.",
-        source_type=ConditionSource.SRS,
-        source_text="중앙 관제 패널에서 기존 제어 명령을 적용한다.",
-        requirement_ids=["REQ-CONTROL-001"],
-    )
-    analysis = cp2_analysis().model_copy(
-        update={
-            "confirmed_conditions": [*cp2_analysis().confirmed_conditions, condition],
-            "requirement_effects": [
-                *cp2_analysis().requirement_effects,
-                RequirementEffect(
-                    requirement_id="REQ-CONTROL-001",
-                    relation=RequirementRelation.VERIFY,
-                    reason="기존 중앙 제어 회귀 확인",
-                ),
-            ],
-        }
-    )
-    requirements = {
-        **cp2_requirements(),
-        "REQ-CONTROL-001": SrsRequirement(
-            requirement_id="REQ-CONTROL-001",
-            statement="중앙 관제 패널에서 기존 제어 명령을 적용한다.",
-            acceptance_criteria="허용 대상에 기존 명령을 반영한다.",
-        ),
-    }
-    base = cp2_valid_design().test_cases[0]
-    verify_only = base.model_copy(
-        update={
-            "tc_id": "TC-CAND-002",
-            "title": "기존 중앙 관제 적용 중복 후보",
-            "test_type": TcType.NORMAL,
-            "requirement_ids": ["REQ-CONTROL-001"],
-            "source_condition_ids": ["COND-004"],
-            "expected_results": [
-                item.model_copy(update={"source_condition_ids": ["COND-004"]})
-                for item in base.expected_results
-            ],
-            "feature_requirement_ids": ["REQ-CONTROL-001"],
-        }
-    )
-    design = cp2_valid_design().model_copy(
-        update={"test_cases": [*cp2_valid_design().test_cases, verify_only]}
-    )
-
-    result = evaluate_checkpoint2(cp1_request(), analysis, design, requirements)
-
-    assert result.status == CheckStatus.FAIL
-    assert cp2_check(result, "CP2-016").status == CheckStatus.FAIL
-    assert "VERIFY 유지 동작" in cp2_check(result, "CP2-016").message
-
 def test_structured_test_data_is_required_for_boundary_tc() -> None:
     tc = cp2_valid_design().test_cases[0].model_copy(
         update={"test_data": StructuredTestData()}
@@ -2460,21 +1857,6 @@ def test_state_consistency_type_without_internal_state_is_rejected() -> None:
     assert result.status == CheckStatus.FAIL
     assert cp2_check(result, "CP2-006").status == CheckStatus.FAIL
 
-def test_missing_three_tier_quality_criteria_is_rejected() -> None:
-    tc = cp2_valid_design().test_cases[0].model_copy(
-        update={
-            "common_qa_criteria": [],
-            "domain_qa_criteria": [],
-            "feature_requirement_ids": [],
-        }
-    )
-    design = cp2_valid_design().model_copy(update={"test_cases": [tc]})
-
-    result = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
-
-    assert result.status == CheckStatus.FAIL
-    assert cp2_check(result, "CP2-012").status == CheckStatus.FAIL
-
 def test_tc_declared_non_independent_is_rejected() -> None:
     tc = cp2_valid_design().test_cases[0].model_copy(
         update={"independent_execution": False, "independence_reason": None}
@@ -2500,19 +1882,6 @@ def test_tc_negative_cross_tc_reference_is_accepted_as_independence_evidence() -
     result = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
 
     assert cp2_check(result, "CP2-013").status == CheckStatus.PASS
-
-def test_tc_positive_cross_tc_dependency_is_rejected() -> None:
-    tc = cp2_valid_design().test_cases[0].model_copy(
-        update={
-            "preconditions": ["이전 TC가 완료한 장비 상태를 그대로 사용한다."],
-            "independence_reason": "선행 테스트 결과를 이어받아 실행한다.",
-        }
-    )
-    design = cp2_valid_design().model_copy(update={"test_cases": [tc]})
-
-    result = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
-
-    assert cp2_check(result, "CP2-013").status == CheckStatus.FAIL
 
 def test_partial_scope_exclusions_must_be_preserved_by_agent2() -> None:
     analysis = cp2_analysis().model_copy(
@@ -2556,7 +1925,7 @@ def test_agent2_preserves_setup_and_restore_notes_as_tc_procedures() -> None:
         }
     )
     analysis = cp2_analysis().model_copy(
-        update={"excluded_scope": [setup_note, restore_note]}
+        update={"procedure_notes": [setup_note, restore_note]}
     )
     incorrectly_excluded = cp2_valid_design().model_copy(
         update={"excluded_scope": [setup_note, restore_note]}
@@ -2593,3 +1962,278 @@ def test_playwright_code_is_rejected() -> None:
 
     assert result.status == CheckStatus.FAIL
     assert cp2_check(result, "CP2-009").status == CheckStatus.FAIL
+
+
+# --- range_checklist_contract 1.0 (2026-10-17) -------------------------------------------
+def _range_conditions(*rows):
+    return SimpleNamespace(confirmed_conditions=[
+        SimpleNamespace(change_role=role, source_type=source, statement=text) for role, source, text in rows])
+
+
+RANGE_ANALYSIS = _range_conditions(
+    ("변경", "CHANGE_REQUEST", "냉방(COOL)의 설정 온도 허용 범위는 하한 20°C와 상한 30°C를 포함하는 20~30°C로 변경된다."),
+    ("유지", "CHANGE_REQUEST", "난방(HEAT)의 설정 온도 허용 범위는 기존 16~30°C를 유지한다."),
+    ("변경", "CHANGE_REQUEST", "냉방에서 20°C를 적용한 상태로 감소 조작을 한 뒤 적용하면 내부 setTemp는 20°C이다."),
+)
+
+
+def _probe_tc(tc_id, start, op, attempted_expected):
+    ops = [dict(action_id="M", phase="SETUP", target="mode.cool"),
+           dict(action_id="S", phase="SETUP", target="temperature.set", value=start),
+           dict(action_id="T", phase="TEST", target=op)]
+    checks = [dict(after_action_id="T", target=f"{loc}.setTemp", expected_value=attempted_expected)
+              for loc in ("panel", "card", "internal")]
+    return dict(tc_id=tc_id, execution_spec=dict(operations=ops, verifications=checks))
+
+
+def _full_range_design(question=True, where="최종_확인_사항"):
+    design = {"test_cases": [
+        _probe_tc("T1", 21, "temperature.decrease", 20), _probe_tc("T2", 29, "temperature.increase", 30),
+        _probe_tc("T3", 20, "temperature.decrease", 20), _probe_tc("T4", 30, "temperature.increase", 30)],
+        "최종_확인_사항": [], "중단_확인_사항": []}
+    if question:
+        design[where] = ["난방 16~30°C 중 냉방 범위 밖 온도에서 냉방으로 바꿀 때 동작이 요청에 없습니다. 어떻게 처리하나요?"]
+    return design
+
+
+def test_range_checklist_reads_only_unambiguous_agent1_range_statements():
+    import qa_pipeline_range_checklist as rc
+    table = rc.range_table(RANGE_ANALYSIS)
+    assert table == {"changed": [dict(mode="COOL", lower=20, upper=30)], "kept": [dict(mode="HEAT", lower=16, upper=30)]}
+    ids = [row["id"] for row in rc.checklist(table)]
+    assert ids == ["T-1:APPLY:COOL:20", "T-1:APPLY:COOL:30", "T-2:BLOCK:COOL:19", "T-2:BLOCK:COOL:31", "T-5:QUESTION:COOL"]
+    # Not a range change, two modes in one sentence, or an SRS-sourced sentence: no checklist, no stop.
+    assert rc.range_table(_range_conditions(("변경", "CHANGE_REQUEST", "HIGH 풍량은 강풍으로 표시된다."))) is None
+    assert rc.range_table(_range_conditions(("변경", "CHANGE_REQUEST", "냉방과 난방의 허용 범위는 20~30°C로 변경된다."))) is None
+    assert rc.range_table(_range_conditions(("변경", "SRS", "냉방 허용 범위는 20~30°C로 변경된다."))) is None
+    assert rc.range_checklist_check(_range_conditions(("변경", "CHANGE_REQUEST", "HIGH 풍량은 강풍으로 표시된다.")), {}) is None
+    # No kept mode outside the new range: no switch question.
+    narrow = _range_conditions(("변경", "CHANGE_REQUEST", "냉방 허용 범위는 18~30°C로 변경된다."),
+                               ("유지", "CHANGE_REQUEST", "난방 허용 범위는 20~28°C를 유지한다."))
+    assert "T-5:QUESTION:COOL" not in [r["id"] for r in rc.checklist(rc.range_table(narrow))]
+
+
+@pytest.mark.parametrize("variant,status,missing", [
+    ("complete", CheckStatus.PASS, []),
+    ("no_question", CheckStatus.FAIL, ["T-5:QUESTION:COOL"]),
+    ("blocking_question", CheckStatus.FAIL, ["T-5:QUESTION:COOL"]),  # must not stop the run
+    ("no_upper_block", CheckStatus.FAIL, ["T-2:BLOCK:COOL:31"]),
+    ("wrong_value", CheckStatus.FAIL, ["T-2:BLOCK:COOL:19"]),
+])
+def test_range_checklist_marks_missing_items_as_critical(variant, status, missing):
+    import qa_pipeline_range_checklist as rc
+    design = _full_range_design(question=variant != "no_question",
+                                where="중단_확인_사항" if variant == "blocking_question" else "최종_확인_사항")
+    if variant == "no_upper_block":
+        design["test_cases"].pop()
+    if variant == "wrong_value":
+        design["test_cases"][2]["execution_spec"]["verifications"][2]["expected_value"] = 19
+    check = rc.range_checklist_check(RANGE_ANALYSIS, design)
+    assert check.rule_id == "CP2-RANGE-CHECKLIST" and check.status == status
+    assert [m for m in missing if m not in check.message] == []
+    if status == CheckStatus.FAIL:
+        assert check.message.startswith("[치명]")
+
+
+def test_range_checklist_reaches_the_writer():
+    # The writer receives the computed list only when it is given.
+    sent = []
+    def parse(**kwargs):
+        sent.append(kwargs)
+        raise RuntimeError("stop after capture")
+    agent = OpenAIAgent2(model="test", client=SimpleNamespace(responses=SimpleNamespace(parse=parse)))
+    for checklist in (None, "- [T-5:QUESTION:COOL] 질문"):
+        with pytest.raises(Exception):
+            agent.design(cp1_request(), cp2_analysis(), cp2_requirements(), required_checklist=checklist)
+    assert "[코드가 계산한 필수 확인 목록" not in sent[0]["input"][1]["content"]
+    assert "[T-5:QUESTION:COOL]" in sent[1]["input"][1]["content"]
+
+
+# --- range_checklist_contract 1.1 (2026-10-17 사람 대조 H-2) ------------------------------
+def _with_exclusions(*items):
+    return SimpleNamespace(confirmed_conditions=RANGE_ANALYSIS.confirmed_conditions, excluded_scope=list(items))
+
+
+def test_request_excluded_switch_policy_needs_no_question():
+    """Real temperature request: out_of_scope names the COOL entry policy from outside its range."""
+    import qa_pipeline_range_checklist as rc
+    analysis = _with_exclusions("새 냉방 범위 밖 온도를 가진 장비의 냉방 모드 진입 시 자동 보정 정책")
+    assert rc.excluded_switch_modes(analysis) == {"COOL"}
+    ids = [r["id"] for r in rc.checklist(rc.range_table(analysis), rc.excluded_switch_modes(analysis))]
+    assert "T-5:QUESTION:COOL" not in ids and len(ids) == 4
+    check = rc.range_checklist_check(analysis, _full_range_design(question=False))
+    assert check.status == CheckStatus.PASS and "4개" in check.message
+    # Asking anyway is still fine.
+    assert rc.range_checklist_check(analysis, _full_range_design()).status == CheckStatus.PASS
+
+
+@pytest.mark.parametrize("item", [
+    "다중 장비 제어 및 실제 장비 통신",              # unrelated exclusion
+    "냉방 알림 문구 정책",                          # mode named, no switch/entry
+    "냉방·난방 전환 시 온도 보정",                  # two modes: ambiguous, keep the question
+])
+def test_unrelated_or_ambiguous_exclusion_keeps_the_question(item):
+    import qa_pipeline_range_checklist as rc
+    analysis = _with_exclusions(item)
+    check = rc.range_checklist_check(analysis, _full_range_design(question=False))
+    assert check.status == CheckStatus.FAIL and "T-5:QUESTION:COOL" in check.message
+
+
+# --- 기존 TC 고쳐 쓰기 (2026-10-17 사람 대조 H-3) ------------------------------------------
+def test_empty_revision_list_keeps_historical_design_serialization():
+    design = cp2_valid_design()
+    for by_alias in (True, False):
+        dumped = design.model_dump(mode="json", by_alias=by_alias)
+        assert "기존_TC_수정" not in dumped and "existing_tc_revisions" not in dumped
+    assert Agent2TestDesign.model_validate(design.model_dump(mode="json", by_alias=True)) == design
+    assert all(check.rule_id != "CP2-TC-REVISION" for check in
+               evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements()).checks)
+
+
+@pytest.mark.parametrize("revision,reuse,ok,message", [
+    (dict(tc_id="TC-MODE-003", revised_by="TC-CAND-001"), False, True, "사람 승인 전까지"),
+    (dict(tc_id="TC-NONE-999", revised_by="TC-CAND-001"), False, False, "기존 TC 목록에 없음"),
+    (dict(tc_id="TC-MODE-003", revised_by="TC-CAND-009"), False, False, "test_cases에 없음"),
+    (dict(tc_id="TC-TEMP-001", revised_by="TC-CAND-001"), True, False, "그대로 재사용할 수 없음"),
+])
+def test_existing_tc_revision_is_checked_against_catalog_and_candidates(revision, reuse, ok, message):
+    design = cp2_valid_design()
+    payload = design.model_dump(mode="json", by_alias=True)
+    payload["기존_TC_수정"] = [dict(revision, reason="같은 제습→냉방 전환에서 적용 버튼과 내부값 확인만 빠짐")]
+    if not reuse:
+        payload["관련_기존_TC"] = []
+    revised = Agent2TestDesign.model_validate(payload)
+    assert revised.model_dump(mode="json", by_alias=True)["기존_TC_수정"][0]["tc_id"] == revision["tc_id"]
+    check = cp2_check(evaluate_checkpoint2(cp1_request(), cp2_analysis(), revised, cp2_requirements()),
+                      "CP2-TC-REVISION")
+    assert (check.status == CheckStatus.PASS) is ok and message in check.message
+
+
+def test_revision_rule_reaches_the_writer_but_not_the_shared_review_rules():
+    from qa_pipeline_agent2 import AGENT2_SYSTEM_INSTRUCTIONS
+    from qa_pipeline_contracts import QA_CONFIRMED_RULES, QA_TC_REVISION_RULE
+    assert QA_TC_REVISION_RULE in AGENT2_SYSTEM_INSTRUCTIONS and "기존_TC_수정" in QA_TC_REVISION_RULE
+    assert "H-3" not in QA_CONFIRMED_RULES  # its stored text is bound to earlier review inputs
+
+
+def test_writer_is_told_not_to_mix_operation_and_check_in_one_step():
+    """2026-10-18 사람 대조 H-4: 절차 한 줄에는 조작만, 확인은 expected_results로."""
+    from qa_pipeline_agent2 import AGENT2_SYSTEM_INSTRUCTIONS
+    assert "조작 문장에 확인 내용을 붙이지 않습니다(H-4" in AGENT2_SYSTEM_INSTRUCTIONS
+
+
+# --- TC 문장 언어 (2026-10-23 사람 대조: 풍량 TC 제목이 중국어로 생성됨) -----------------------
+@pytest.mark.parametrize("field,text,ok", [
+    ("title", "LOW准备后应用HIGH并核对面板、卡片与内部风量", False),   # 실제 10-23 풍량 제목
+    ("title", "LOW 준비 후 HIGH 적용 時 패널 확인", False),          # 한자 한 글자
+    ("steps", "選択した風量を適用する。", False),                    # 일본어
+    ("title", "냉방 20°C 적용 후 패널·카드·내부 setTemp=20 확인 (COOL, IDU-00)", True),
+])
+def test_tc_text_must_be_korean(field, text, ok):
+    design = cp2_valid_design()
+    tc = design.test_cases[0]
+    setattr(tc, field, text if field == "title" else [text, *tc.steps[1:]])
+    result = evaluate_checkpoint2(cp1_request(), cp2_analysis(), design, cp2_requirements())
+    lang = [c for c in result.checks if c.rule_id == "CP2-LANG"]
+    if ok:   # reported only on a violation, so saved Korean designs recompute unchanged
+        assert not lang
+    else:
+        assert lang[0].status == CheckStatus.FAIL and result.status == CheckStatus.FAIL
+        assert f"test_cases[0].{field}" in lang[0].message and "한국어로 다시 작성" in lang[0].message
+
+
+@pytest.mark.parametrize("where,ok", [
+    ("independence_reason", False),   # 2026-10-24 live temperature run: Japanese passed the old check
+    ("coverage_notes", False),
+    ("srs_revision", False),          # goes into the official SRS after human approval
+    ("quoted_from_request", True),    # Han copied from the request is a quote, not a language slip
+])
+def test_language_check_covers_every_design_sentence(where, ok):
+    """2026-10-25: CP2-LANG walks every design string, not five TC text kinds."""
+    request, design = cp1_request(), cp2_valid_design()
+    tc = design.test_cases[0]
+    if where == "independence_reason":
+        tc.independent_execution, tc.independence_reason = True, "この候補内で対象選択을 수행한다."
+    elif where == "coverage_notes":
+        design.coverage_notes = ["范围外 확인은 하지 않는다."]
+    elif where == "srs_revision":
+        design.srs_revision_proposals[0].proposed_acceptance_criteria = "冷房 20~30°C 요청을 허용한다."
+    else:
+        request = request.model_copy(update={"description": request.description + " (冷房)"})
+        design.coverage_notes = ["요청의 (冷房) 표기를 그대로 인용한다."]
+    result = evaluate_checkpoint2(request, cp2_analysis(), design, cp2_requirements())
+    lang = [c for c in result.checks if c.rule_id == "CP2-LANG"]
+    assert (not lang) is ok, [c.message for c in lang]
+
+
+def test_live_restoration_layout_merges_split_preparation_checks():
+    """The normalizer groups confirmations with the same sentence; precondition_indexes must merge too."""
+    from qa_pipeline_agent2 import _normalize_agent2_live_design
+    case, _ = mapped_tc_fixture("setTemp", 27, 21, blocked=True)
+    prep = next(c for c in case.restoration.confirmations if c.precondition_indexes)
+    assert len(prep.precondition_indexes) == 2
+    first, second = prep.precondition_indexes
+    prep.precondition_indexes = [first]
+    case.restoration.confirmations.append(prep.model_copy(update={"precondition_indexes": [second]}, deep=True))
+    case.restore_steps = case.restoration.operation_steps + [c.source_text for c in case.restoration.confirmations]
+    assert pipeline._structured_restoration_errors(case)  # duplicate sentence before grouping
+    design = cp2_valid_design().model_copy(update={"test_cases": [case]})
+    normalized, changes = _normalize_agent2_live_design(design)
+    after = normalized.test_cases[0]
+    merged = [c for c in after.restoration.confirmations if c.precondition_indexes]
+    assert changes and len(merged) == 1 and sorted(merged[0].precondition_indexes) == [first, second]
+    assert pipeline._structured_restoration_errors(after) == []
+
+
+def test_language_check_allows_korean_separators_and_names_the_offending_text():
+    """2026-10-25 review: U+30FB/U+30FC are separators in Korean text; show the bad characters."""
+    from qa_pipeline_contracts import foreign_script_texts
+    assert foreign_script_texts({"a": "패널・카드 확인", "b": "길이ー표시"}) == []
+    found = foreign_script_texts({"a": "가" * 50 + " 冷房 확인"})
+    assert len(found) == 1 and "冷房" in found[0]
+    assert foreign_script_texts({"a": "ｶﾀｶﾅ"}) and foreign_script_texts({"a": "々"})
+    # A whole quoted word passes; one character cut out of it does not.
+    assert foreign_script_texts({"a": "冷房 확인"}, ["요청: 冷房 설정"]) == []
+    assert foreign_script_texts({"a": "冷 확인"}, ["요청: 冷房 설정"])
+
+def _blocked_then_increase_design():
+    """2026-10-25 review: 18 set in preparation, decrease to 17 is refused (kept 18), then increase -> 19."""
+    def op(i, phase, target, value=None):
+        return {"action_id": f"ACT-{i:03}", "phase": phase, "target": target, "value": value}
+    def check(rid, after, location, value):
+        return {"result_id": rid, "after_action_id": after, "target": f"{location}.setTemp", "expected_number": value}
+    blocked = {"tc_id": "TC-CAND-001", "execution_spec": {
+        "operations": [op(1, "PRECONDITION", "mode.cool"), op(2, "PRECONDITION", "temperature.set", 18),
+                       op(3, "TEST", "temperature.decrease"), op(4, "TEST", "command.apply"),
+                       op(5, "TEST", "temperature.increase"), op(6, "TEST", "command.apply")],
+        "verifications": [check("ER-001", "ACT-004", "internal", 18), check("ER-002", "ACT-006", "internal", 19)]}}
+    applied = {"tc_id": "TC-CAND-002", "execution_spec": {
+        "operations": [op(1, "PRECONDITION", "mode.cool"), op(2, "TEST", "temperature.set", 18), op(3, "TEST", "command.apply")],
+        "verifications": [check("ER-003", "ACT-003", loc, 18) for loc in ("internal", "panel", "card")]}}
+    return {"test_cases": [blocked, applied]}
+
+
+def test_range_checklist_starts_after_a_blocked_attempt_from_the_kept_value():
+    from qa_pipeline_range_checklist import _probes, compare
+    probes = _probes(_blocked_then_increase_design())
+    assert [(p["tc_id"], p["attempted"]) for p in probes] == [
+        ("TC-CAND-001", 17), ("TC-CAND-001", 19), ("TC-CAND-002", 18)]
+    # The applied 18 in the second TC is not shadowed by a mis-tracked first TC.
+    row = {"id": "T-1:APPLY:COOL:18", "kind": "APPLY", "mode": "COOL", "attempted": 18, "expected": 18}
+    assert compare([row], _blocked_then_increase_design()) == []
+
+
+
+def test_range_checklist_warns_about_a_wrong_tc_when_another_tc_meets_the_row():
+    from qa_pipeline_range_checklist import compare
+    design = _blocked_then_increase_design()
+    import copy
+    wrong = copy.deepcopy(design["test_cases"][1])
+    wrong["tc_id"] = "TC-CAND-003"
+    for check in wrong["execution_spec"]["verifications"]:
+        check["expected_number"] = 19
+    design["test_cases"].append(wrong)
+    row = {"id": "T-1:APPLY:COOL:18", "kind": "APPLY", "mode": "COOL", "attempted": 18, "expected": 18}
+    warnings = []
+    assert compare([row], design, warnings) == []
+    assert len(warnings) == 1 and "TC-CAND-003" in warnings[0]

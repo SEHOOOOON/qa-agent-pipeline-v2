@@ -1,0 +1,37 @@
+{
+  "contract_version": "1.0",
+  "run_id": "RUN-20261009-103040-2FC290",
+  "stage": "AGENT_3_RUN_SUMMARY",
+  "status": "PASS",
+  "internal_error_tc_ids": [],
+  "unattempted_tc_ids": [],
+  "planned_tc_ids": [
+    "TC-CAND-001"
+  ],
+  "unselected_tc_ids": [],
+  "selected_tc_ids": [
+    "TC-CAND-001"
+  ],
+  "executed_tc_ids": [
+    "TC-CAND-001"
+  ],
+  "entries": [
+    {
+      "tc_id": "TC-CAND-001",
+      "artifact_dir": "agent3_candidates/TC-CAND-001",
+      "exit_code": 0,
+      "status": "PASS",
+      "candidate_status": "READY_FOR_EXECUTION",
+      "trial_outcome": "PASS",
+      "reason": null,
+      "manifest_sha256": "f1cf97fc9a7e2d10fb2d14a5da3b247b2b0cc6ad97f330005b61aa5b5521276b",
+      "trial_sha256": "9c3f6557470096c393fdadd0f66cddab1849fa9ea7cab1f0e666dc112b0d0dca",
+      "checkpoint_status": "PASS",
+      "precondition_proof_contract": "1.0"
+    }
+  ],
+  "자동화_제외_TC": [],
+  "target_file": "virtual-controller.html",
+  "target_sha256": "66a7170dd4b0ea6c7ee1394df0bc5263054367da5ccd2b5de4c892430a7d1320",
+  "created_at": "2026-10-09T10:37:40.899997+00:00"
+}

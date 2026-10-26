@@ -44,8 +44,7 @@ def test_current_approved_refresh_contract_and_original_preservation():
         saved_code = (assets / asset['automation_file']).read_text(encoding='utf-8')
         # Registry hashes above pin approved files. Later compiler improvements
         # must not require silently rebuilding or replacing those frozen files.
-        code = pipeline.compile_automation_candidate(maintenance['compilation_id'], tc, plan,
-            explicit_expectations_only=True, typed_values=True)
+        code = pipeline.compile_automation_candidate(maintenance['compilation_id'], tc, plan)
         for candidate in (saved_code, code):
             ast.parse(candidate)
             assert 'RESTORE_STATUS:' in candidate and 'QA_ASSERTION_OBSERVED:' in candidate
