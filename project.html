@@ -695,14 +695,15 @@ header .version{display:none}
 @media(max-width:700px){.portfolio-reading p{font-size:14px}.portfolio-reference-body{padding:18px}.portfolio-reference-body .grid3,.portfolio-reference-body .limits-grid{grid-template-columns:1fr}}
 </style>
 <style id="pf-bar-style">
-.pf-bar{position:sticky;top:0;z-index:60;background:rgba(11,12,11,.92);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border-bottom:1px solid #1f201d;font-family:Pretendard,"Noto Sans KR",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+/* 프로젝트 페이지 메뉴 막대: 프로젝트 색(푸른 검정·파랑). 메인은 주황 */
+.pf-bar{position:sticky;top:0;z-index:60;background:rgba(8,12,19,.94);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border-bottom:1px solid #1c2533;font-family:Pretendard,"Noto Sans KR",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 .pf-bar-in{width:min(var(--pf-w,1100px),calc(100% - 48px));margin:0 auto;height:62px;display:flex;align-items:center;justify-content:space-between;gap:16px}
-.pf-brand{color:#f1eee7;font-size:13px;font-weight:800;letter-spacing:.02em;text-decoration:none;white-space:nowrap}
-.pf-brand:hover{text-decoration:none;color:#f1eee7}
+.pf-brand{color:#dce6f3;font-size:13px;font-weight:800;letter-spacing:.02em;text-decoration:none;white-space:nowrap}
+.pf-brand:hover{text-decoration:none;color:#dce6f3}
 .pf-links{display:flex;gap:22px;font-size:12px;line-height:1}
-.pf-links a{color:#a8a199;text-decoration:none;white-space:nowrap;padding:6px 0;border-bottom:2px solid transparent}
-.pf-links a:hover{color:#f1eee7;text-decoration:none}
-.pf-links a[aria-current="page"]{color:#f1eee7;border-bottom-color:#d27f48}
+.pf-links a{color:#94a3b8;text-decoration:none;white-space:nowrap;padding:6px 0;border-bottom:2px solid transparent}
+.pf-links a:hover{color:#dce6f3;text-decoration:none}
+.pf-links a[aria-current="page"]{color:#dce6f3;border-bottom-color:#58a6ff}
 @media(max-width:640px){.pf-bar-in{width:calc(100% - 28px);height:54px}.pf-brand{font-size:12px}.pf-links{gap:14px;font-size:11px}}
 </style>
 <style id="edit-20261025">
@@ -760,7 +761,7 @@ header .version{display:none}
 <nav class="pf-bar" aria-label="포트폴리오 메뉴" style="--pf-w:1100px"><div class="pf-bar-in"><a class="pf-brand" href="../portfolio_export/main.html">OH SEHOON · QA</a><div class="pf-links"><a href="../portfolio_export/main.html">메인</a><a href="project.html" aria-current="page">프로젝트1</a><a href="../agent-evaluation-framework/portfolio/index.html">프로젝트2</a><a href="../portfolio_export/main.html#contact">Contact</a></div></div></nav>
 <main id="main">
   <div class="hero"><div class="wrap hero-grid">
-<div><span class="eyebrow">PERSONAL PROJECT 01 · QA AGENT PIPELINE V2</span><h1>요구사항에서 승인까지,<br><em>같은 기준으로 판단하기</em></h1><p class="lead">변경 요청을 분석하고, 필요한 테스트를 만들어 실행·보고하는 QA 자동화 프로젝트입니다. AI가 만든 결과를 그대로 쓰지 않고 요구사항·TC·실행 증거를 단계별로 대조하며, 공식 등록은 사람이 결정하도록 구성했습니다.</p><div class="actions"><a class="button primary" href="#workflow">요청부터 결과까지 보기</a><a class="button" href="#execution">대표 사례 보기</a></div><p class="hero-meta">가상 중앙제어 시스템으로 만든 개인 프로젝트</p><nav class="hero-jump" aria-label="이 페이지 바로가기"><a href="#workflow">전체 흐름</a><a href="#design">개발 과정의 고민</a><a href="#execution">대표 사례</a><a href="#scenarios">결과 유형별 사례</a><a href="#demo-video">60초 영상</a><a href="#scope">배운 점과 한계</a><a href="#evidence">산출물</a></nav></div>
+<div><span class="eyebrow">PERSONAL PROJECT 01 · QA AGENT PIPELINE V2</span><h1>요구사항에서 승인까지,<br><em>같은 기준으로 판단하기</em></h1><p class="lead">변경 요청을 분석하고, 필요한 테스트를 만들어 실행·보고하는 QA 자동화 프로젝트입니다. AI가 만든 결과를 그대로 쓰지 않고 요구사항·TC·실행 증거를 단계별로 대조하며, 공식 등록은 사람이 결정하도록 구성했습니다.</p><div class="actions"><a class="button primary" href="#workflow">요청부터 결과까지 보기</a><a class="button" href="#execution">대표 사례 보기</a></div><p class="hero-meta">가상 중앙제어 시스템으로 만든 개인 프로젝트</p><nav class="hero-jump" aria-label="이 페이지 바로가기"><a href="#workflow">전체 흐름</a><a href="#design">개발 과정의 고민</a><a href="#execution">대표 사례</a><a href="#scenarios">결과 유형별 사례</a><a href="#demo-video">실행 영상</a><a href="#scope">배운 점과 한계</a><a href="#evidence">산출물</a></nav></div>
 </div></div>
 
 <section id="why"><div class="wrap"><div class="section-head"><div><span class="num"><b>1</b> 개발 배경</span><h2>변경 요청마다 반복되는 QA 업무에서 출발했습니다.</h2></div><p>중앙제어 시스템을 검증하며 경험한 요구사항 대조·TC 검토·시험·보고를 개인 프로젝트로 연결했습니다.</p></div>
@@ -874,16 +875,16 @@ header .version{display:none}
 
 
 <section id="demo-video"><div class="wrap">
-<div class="section-head"><div><span class="num"><b>8</b> 60초 사례 영상</span><h2>대표 사례를 화면으로 보기</h2></div><p>5절의 온도 범위 변경 요청을 60초로 보여 줍니다. 정답 시험 5개를 가상 중앙제어 화면에서 Playwright로 조작하고, 장비를 시험 전 상태로 되돌린 뒤 결과를 보고합니다.</p></div>
-<div class="video-slot"><span>60초 · 무음 · 한국어 자막</span>
-<p id="demo-video-description">냉방 20°C 설정, 막혀야 할 19°C가 설정되는 제품 불일치, 30°C 설정과 31°C 막힘, 난방 16°C 설정, 장비 복원, 사람의 등록 판단을 차례로 보여 줍니다.</p>
-<ul class="video-cases"><li>00:00 변경 요청과 정답 시험 5개</li><li>00:13 가상 중앙제어 화면에서 시험 실행</li><li>00:41 시험 전 상태로 복원</li><li>00:48 결과 보고 · 공식 등록은 사람이 결정</li></ul>
-<p id="demo-video-scope">장비 조작 장면은 가상 중앙제어 화면을 Playwright로 실제 조작해 녹화했습니다. 제품이 아직 바뀌기 전이라 냉방 19°C가 설정되며, 이를 제품 불일치로 보고합니다. 승인·등록 버튼은 누르지 않고 사람의 판단을 기다리는 단계에서 끝납니다.</p>
-<video controls loop muted playsinline preload="metadata" poster="assets/video/qa-pipeline-v2-poster-60s-v2.png" aria-label="온도 범위 변경 대표 사례 60초 영상" aria-describedby="demo-video-description demo-video-scope">
-<source src="assets/video/qa-pipeline-v2-demo-60s-v2.mp4" type="video/mp4">
+<div class="section-head"><div><span class="num"><b>8</b> 실행 영상</span><h2>대표 사례를 실제 화면으로 보기</h2></div><p>5절의 온도 범위 변경 요청을 실제로 실행한 기록입니다. 프로젝트1의 결과 화면과, 그 실행이 만든 자동화 시험 코드를 다시 돌린 화면을 이어 붙였습니다.</p></div>
+<div class="video-slot"><span>약 1분 · 무음 · 한국어 자막</span>
+<p id="demo-video-description">요구사항 분석과 TC 설계 결과, 자동화 코드가 가상 중앙제어 화면을 조작하는 모습(20°C 설정, 19°C로 내려가는 제품 불일치, 30°C 설정과 31°C 막힘, 시험 전 상태로 복원), 결과 표와 사람의 등록 판단 화면을 차례로 보여 줍니다.</p>
+<ul class="video-cases"><li>00:00 요구사항 분석·TC 설계 결과</li><li>00:14 자동화 코드가 가상 중앙제어 화면을 조작</li><li>00:40 결과: 냉방 TC 제품 불일치, 난방 TC 통과</li><li>00:47 등록 여부는 사람이 결정</li></ul>
+<p id="demo-video-scope">결과 화면은 저장된 실행 기록을 프로젝트1 화면에서 연 것입니다. 장비 조작 장면은 그 실행이 만든 자동화 코드를 고치지 않고 다시 실행해 녹화했고, 보기 쉽게 1.6배속으로 줄였습니다. 날짜가 들어간 실행 번호와 시각만 흐리게 가렸습니다.</p>
+<video controls loop muted playsinline preload="metadata" poster="assets/video/qa-pipeline-v2-poster-real-run.png" aria-label="온도 범위 변경 대표 사례 실행 영상" aria-describedby="demo-video-description demo-video-scope">
+<source src="assets/video/qa-pipeline-v2-demo-real-run.mp4" type="video/mp4">
 이 브라우저에서는 영상을 재생할 수 없습니다. 아래 영상 파일 링크를 이용해 주세요.
 </video>
-<div class="actions"><a class="button" href="assets/video/qa-pipeline-v2-demo-60s-v2.mp4">60초 영상 열기 ↗</a></div>
+<div class="actions"><a class="button" href="assets/video/qa-pipeline-v2-demo-real-run.mp4">영상 파일 열기 ↗</a></div>
 </div></div></section>
 <section id="scope"><div class="wrap"><div class="section-head"><div><span class="num"><b>9</b> 결과와 배운 점</span><h2>확인한 범위와 남은 한계</h2></div><p>반복 작업을 연결하는 것과, 새로운 요청을 믿고 맡길 수 있는 것은 다른 문제였습니다.</p></div>
 <div class="lesson-cards">
