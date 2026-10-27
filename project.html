@@ -727,7 +727,7 @@ header .version{display:none}
 .case-steps li.warn span,.case-steps li.warn b{color:#edcf99}
 .case-steps b{display:block;margin:4px 0 6px;font-size:17px;color:#e8f1ff}
 .case-steps p{margin:0;font-size:13px;line-height:1.75;color:#b3c4d9}
-#change-example .qa-inline-links{display:flex;flex-wrap:wrap;gap:8px 20px}
+#change-example .qa-inline-links{display:flex;flex-wrap:wrap;gap:8px 20px}.inline-ref{color:#8abfff;white-space:nowrap}
 /* 결과와 배운 점 */
 .lesson-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
 .lesson-cards article{padding:22px 24px;border:1px solid var(--line);border-radius:12px;background:linear-gradient(180deg,rgba(21,30,45,.93),rgba(14,20,31,.93))}
@@ -788,7 +788,7 @@ header .version{display:none}
     <div class="qa-stage">
       <div class="qa-stage-head"><b>실행·보고 · 결과와 이유를 남깁니다</b><span>TC의 기준과 실제 관찰을 비교</span></div>
       <div class="qa-pair">
-        <div class="qa-node"><span class="qa-kicker">AGENT 3 · 자동화 수행</span><h4>TC대로 조작하고 결과 확인</h4><p>TC의 조작·기대값을 프로그램이 제품 연결표로 실제 화면 요소에 연결합니다. 위치를 고르는 AI는 쓰지 않습니다. 자동 검사와 AI 근거 검토를 통과하면 허용된 동작만 Playwright 코드로 바꿔 시험하고 원래 상태로 복원합니다.</p><div class="qa-output"><b>결과물</b> 자동화 코드 · 관찰값 · 실행·복원 기록</div></div>
+        <div class="qa-node"><span class="qa-kicker">AGENT 3 · 자동화 수행</span><h4>TC대로 조작하고 결과 확인</h4><p>TC의 조작·기대값을 프로그램이 제품 연결표로 실제 화면 요소에 연결합니다. AI가 화면 요소를 직접 찾지 않고, 미리 만든 제품 연결표로 연결합니다. 자동 검사와 AI 근거 검토를 통과하면 허용된 동작만 Playwright 코드로 바꿔 시험하고 원래 상태로 복원합니다.</p><div class="qa-output"><b>결과물</b> 자동화 코드 · 관찰값 · 실행·복원 기록</div></div>
         <div class="qa-arrow" aria-hidden="true">→</div>
         <div class="qa-node"><span class="qa-kicker">AGENT 4 · 규칙 기반 분석 · AI 미사용</span><h4>결과와 이유를 보고</h4><p>새 TC와 선택한 기존 TC의 실행 결과를 모읍니다. 제품 불일치, 실행 문제, 미실행을 근거와 함께 구분합니다.</p><div class="qa-output"><b>결과물</b> 결과 보고서 · 결과 검토서 · 외부 보고 데이터</div></div>
       </div>
@@ -803,13 +803,13 @@ header .version{display:none}
 </div></div></section>
 
 <section id="verified"><div class="wrap" id="design"><div class="section-head"><div><span class="num"><b>3</b> 개발 과정에서의 고민</span><h2>기준을 정해도 AI의 해석은 달랐습니다.</h2></div><p>업무를 나누어 맡기는 것만으로는 단계마다 같은 판단을 유지하기 어려웠습니다.</p></div>
-<div class="table-wrap" role="region" tabindex="0" aria-label="개발 중 부딪힌 문제와 바꾼 방법"><table><thead><tr><th scope="col">부딪힌 문제</th><th scope="col">바꾼 방법</th></tr></thead><tbody><tr><th scope="row">단계마다 해석이 달라짐<br><small>같은 요구사항을 분석·설계·실행 단계가 다르게 읽었습니다.</small></th><td>확정된 원문과 시험 내용은 다음 단계가 다시 쓰지 않고, 프로그램이 그대로 넘기도록 했습니다.</td></tr><tr><th scope="row">검토가 너무 엄격함<br><small>근거 문장의 위치 같은 작은 차이에도 정상 TC가 멈췄습니다.</small></th><td>값·대상·판정 시점은 프로그램이 엄격하게 검사하고, 검토 AI의 지적은 '치명'(멈춤)과 '경고'(기록하고 진행)로 나눴습니다.</td></tr><tr><th scope="row">사람의 기준을 AI가 놓침<br><small>경계 양쪽 확인, 조작과 확인을 나눠 쓰기 같은 기준이 빠졌습니다.</small></th><td>규칙으로 만들어 작성 지침과 코드 검사에 함께 넣었습니다.</td></tr><tr><th scope="row">지침을 고쳐도 반복되는 누락<br><small>시험 준비에서 바꾼 모드를 시험 뒤 되돌렸는지 확인하는 단계가 4번 중 4번 빠졌습니다.</small></th><td>TC 데이터 형식에 "준비 단계에서 바꾼 값"의 복원 확인을 적을 칸이 없었습니다. 칸을 추가하고 빠지면 자동 검사에서 막도록 했더니, 이후 3번 모두 들어갔습니다.</td></tr><tr><th scope="row">사람이 읽는 문장에 다른 언어<br><small>TC 제목이 중국어로 생성됐는데 검토 AI와 채점 AI가 모두 놓쳤습니다.</small></th><td>분석·설계 결과에 한자나 일본 문자가 섞이면 자동 검사에서 걸러 다시 쓰게 했습니다. 요구사항 원문을 그대로 옮긴 부분은 예외로 둡니다.</td></tr></tbody></table></div>
+<div class="table-wrap" role="region" tabindex="0" aria-label="개발 중 부딪힌 문제와 바꾼 방법"><table><thead><tr><th scope="col">부딪힌 문제</th><th scope="col">바꾼 방법</th></tr></thead><tbody><tr><th scope="row">단계마다 해석이 달라짐<br><small>같은 요구사항을 분석·설계·실행 단계가 다르게 읽었습니다.</small></th><td>확정된 원문과 시험 내용은 다음 단계가 다시 쓰지 않고, 프로그램이 그대로 넘기도록 했습니다.</td></tr><tr><th scope="row">검토가 너무 엄격함<br><small>근거 문장의 위치 같은 작은 차이에도 정상 TC가 멈췄습니다.</small></th><td>값·대상·판정 시점은 프로그램이 엄격하게 검사하고, 검토 AI의 지적은 '치명'(멈춤)과 '경고'(기록하고 진행)로 나눴습니다.</td></tr><tr><th scope="row">사람의 기준을 AI가 놓침<br><small>경계 양쪽 확인, 조작과 확인을 나눠 쓰기 같은 기준이 빠졌습니다.</small></th><td>규칙으로 만들어 작성 지침과 코드 검사에 함께 넣었습니다.</td></tr><tr><th scope="row">지침을 고쳐도 반복되는 누락<br><small>시험 준비에서 바꾼 모드를 시험 뒤 되돌렸는지 확인하는 단계가 4번 중 4번 빠졌습니다(전체 실행 1번 + 시험 설계만 3번).</small></th><td>TC 데이터 형식에 "준비 단계에서 바꾼 값"의 복원 확인을 적을 칸이 없었습니다. 칸을 추가하고 빠지면 자동 검사에서 막도록 했더니, 같은 분석 결과로 시험 설계를 3번 다시 실행해 3번 모두 들어갔습니다. <a class="inline-ref" href="../agent-evaluation-framework/portfolio/report.html#improvements">실행 기록 ↗</a></td></tr><tr><th scope="row">사람이 읽는 문장에 다른 언어<br><small>TC 제목이 중국어로 생성됐는데 검토 AI와 채점 AI가 모두 놓쳤습니다.</small></th><td>분석·설계 결과에 한자나 일본 문자가 섞이면 자동 검사에서 걸러 다시 쓰게 했습니다. 요구사항 원문을 그대로 옮긴 부분은 예외로 둡니다.</td></tr></tbody></table></div>
 <p class="fine"><strong>배운 점:</strong> AI에게 맡길 판단과 프로그램이 정해 둘 부분을 나눠야 했습니다.</p>
 <p class="fine"><a href="#scope">확인한 범위와 남은 한계 ↓</a></p></div></section>
 
 <section id="requirements"><div class="wrap"><div class="section-head"><div><span class="num"><b>4</b> 요구사항 분석</span><h2>확정 조건과 추가 확인 사항 구분</h2></div><p>Agent 1은 기존 SRS와 변경 요청을 실제 AI 모델로 분석합니다. 결과를 확정·추정·정보 부족으로 나누고, 프로그램이 원문의 값과 조건을 대조합니다.</p></div><div class="info-grid"><article class="info confirmed"><b>확정 정보</b><h3>판단 기준으로 사용</h3><p>요구사항 또는 승인된 제품 기준에서 직접 확인한 조건입니다.</p></article><article class="info inferred"><b>추정 정보</b><h3>기대결과로 사용하지 않음</h3><p>원문에 근거가 없는 AI의 해석입니다. 표시만 하고 시험 기준에서는 뺍니다.</p></article><article class="info gap"><b>정보 부족</b><h3>질문 또는 해당 범위 보류</h3><p>시험에 필요한 값이 원문에 없는 상태입니다. 미정 조건은 질문으로 보고하고, 핵심 범위가 불명확하면 답을 받을 때까지 멈춥니다.</p></article></div><p class="qa-bridge"><b>다음은 처리 방식을 설명하는 예시입니다.</b></p><div class="ba-grid"><article class="ba-card before"><span class="ba-label"><span class="comparison-icon" aria-hidden="true">×</span>잘못된 분석 예시 · 자동 검사에서 막힘</span><h3>냉방 최저 온도를 16°C 그대로 둠</h3><p>요청은 냉방 최저 온도를 20°C로 올리는 것입니다. AI가 기존 SRS의 16°C를 그대로 옮겨 적으면, 바뀐 기준이 아닌 옛 기준으로 TC를 만들게 됩니다.</p><div class="ba-verdict">요청과 다른 값 · 다시 작성</div></article><article class="ba-card after"><span class="ba-label"><span class="comparison-icon" aria-hidden="true">✓</span>다시 작성한 분석 · 검사 통과</span><h3>냉방 20°C, 난방 16°C를 확인한 뒤 TC 설계로 전달</h3><p>프로그램이 분석의 값을 요청·SRS 원문과 대조하고, 검토 AI가 뜻이 맞는지 한 번 더 봅니다. 틀리면 한 번 다시 쓰게 하고, 다시 검사를 통과해야 TC 설계로 넘깁니다. 이 검사로도 AI의 해석 오류를 모두 막지는 못합니다.</p><div class="ba-verdict">검사 통과 · TC 설계로 전달</div></article></div></div></section>
 
-<section id="execution"><div class="wrap"><div class="section-head"><div><span class="num"><b>5</b> 대표 사례</span><h2>온도 범위 변경 요청 하나로 보는 실제 결과</h2></div><p>실제 AI로 분석부터 보고까지 실행한 요청입니다. 먼저 무엇이 바뀌는지, 정답이라면 어떤 시험이 있어야 하는지 보고, AI가 만든 TC와 비교합니다.</p></div>
+<section id="execution"><div class="wrap"><div class="section-head"><div><span class="num"><b>5</b> 대표 사례</span><h2>온도 범위 변경 요청 하나로 보는 실제 결과</h2></div><p>실제 AI로 분석부터 보고까지 실행한 요청입니다. 먼저 무엇이 바뀌는지, 이 변경에서 꼭 있어야 하는 시험은 무엇인지 보고, AI가 만든 TC와 비교합니다.</p></div>
 <article class="qa-run-example qa-change-example" id="change-example" aria-labelledby="change-example-title">
   <div class="qa-run-heading"><div><span class="qa-kicker">변경 요청</span><h3 id="change-example-title">“냉방은 20°C 아래로 내려가지 않게 해 주세요.<br>난방은 지금처럼 16°C까지 설정할 수 있게 해 주세요.”</h3></div></div>
 
@@ -822,9 +822,9 @@ header .version{display:none}
     <div class="range-axis"><span></span><div class="range-ticks"><b style="left:6.25%">16</b><b style="left:31.25%">20</b><b style="left:93.75%">30</b></div><span></span></div>
   </div>
 
-  <h4 class="case-steps-title"><span class="step-no">2</span>정답: 꼭 있어야 하는 시험 5개</h4>
+  <h4 class="case-steps-title"><span class="step-no">2</span>이번 평가의 필수 시험 5개</h4>
   <p class="case-text">범위가 바뀌면 양쪽 끝에서 <strong>안쪽 값은 설정되는지</strong>, <strong>바로 바깥 값은 막히는지</strong>를 둘 다 봐야 합니다. 바뀌지 않은 난방은 이번 변경에 영향을 받지 않았는지 하나만 봅니다. 이 기준은 실행 전에 사람이 정했습니다.</p>
-  <div class="table-wrap" role="region" tabindex="0" aria-label="정답 시험 5개와 AI가 만든 TC 비교"><table><thead><tr><th scope="col">정답 시험</th><th scope="col">왜 필요한가</th><th scope="col">AI가 처음 만든 TC</th><th scope="col">규칙을 넣은 뒤</th></tr></thead><tbody>
+  <div class="table-wrap" role="region" tabindex="0" aria-label="필수 시험 5개와 AI가 만든 TC 비교"><table><thead><tr><th scope="col">필수 시험</th><th scope="col">왜 필요한가</th><th scope="col">AI가 처음 만든 TC</th><th scope="col">규칙을 넣은 뒤</th></tr></thead><tbody>
   <tr><th scope="row">냉방 19°C 막힘</th><td>새 최저값 바로 아래가 막히는지</td><td class="pass">있음</td><td class="pass">있음</td></tr>
   <tr><th scope="row">냉방 20°C 설정</th><td>새 최저값이 실제로 설정되는지</td><td class="review">없음</td><td class="pass">있음</td></tr>
   <tr><th scope="row">냉방 30°C 설정</th><td>최고값이 그대로 설정되는지</td><td class="pass">있음</td><td class="pass">있음</td></tr>
@@ -834,9 +834,9 @@ header .version{display:none}
 
   <h4 class="case-steps-title"><span class="step-no">3</span>실행 결과와 고친 과정</h4>
   <ol class="case-steps">
-    <li><span>처음 실행</span><b>제품 문제는 정확히 보고</b><p>제품이 아직 바뀌기 전이라 냉방이 19°C까지 내려갔고, AI는 이를 요구사항과 다르다고 보고했습니다.</p></li>
-    <li class="warn"><span>사람이 다시 확인</span><b>정답 시험 5개 중 3개만</b><p>TC에 20°C 설정과 31°C 막힘 시험이 없었습니다. AI 검토와 AI 채점은 이 TC를 통과시켰습니다.</p></li>
-    <li><span>규칙 추가 후</span><b>5개 모두 포함</b><p>"범위 끝은 설정되는 값과 막히는 값을 각각 시험한다"를 TC 작성 지침과 자동 검사에 넣었습니다. 이후 같은 요청으로 TC를 8번 다시 만들었고, 8번 모두 5개가 다 있었습니다.</p></li>
+    <li><span>처음 실행</span><b>요구사항과 다른 동작을 근거와 함께 보고</b><p>제품이 아직 바뀌기 전이라 냉방이 19°C까지 내려갔고, AI는 이를 요구사항과 다르다고 보고했습니다.</p></li>
+    <li class="warn"><span>사람이 다시 확인</span><b>필수 시험 5개 중 3개만</b><p>TC에 20°C 설정과 31°C 막힘 시험이 없었습니다. AI 검토와 AI 채점은 이 TC를 통과시켰습니다.</p></li>
+    <li><span>규칙 추가 후</span><b>5개 모두 포함</b><p>"범위 끝은 설정되는 값과 막히는 값을 각각 시험한다"를 TC 작성 지침과 자동 검사에 넣었습니다. 이후 같은 요청으로 TC를 8번 다시 만들었고, 8번 모두 5개가 다 있었습니다. <a class="inline-ref" href="../agent-evaluation-framework/portfolio/report.html#improvements">실행 조건과 기록 ↗</a></p></li>
   </ol>
   <div class="qa-inline-links"><a href="https://github.com/SEHOOOOON/qa-agent-pipeline-v2/blob/c6362ef44fe2bb812377abb93148a8c2991468b3/examples/change_request.representative-temperature.json">이 실행에 쓴 변경 요청 원문 ↗</a><a href="../agent-evaluation-framework/portfolio/index.html#case-range">프로젝트2에서 찾은 과정 ↗</a></div>
 </article>
@@ -851,7 +851,7 @@ header .version{display:none}
 <figure class="qa-visual" id="main-judgment-diagram" aria-labelledby="main-judgment-title">
   <div class="qa-visual-title"><h3 id="main-judgment-title">잠금 적용 후에도 온도 버튼이 활성화된 사례</h3><span>실제 실행 기록을 설명한 도식</span></div>
   <div class="qa-pair">
-    <div class="qa-node primary"><span class="qa-kicker">요구사항 → 시험의 기준</span><h4>잠금 시 온도 버튼이 비활성 상태여야 함</h4><div class="qa-device-strip"><b>기대결과 · 온도 조작 비활성</b><div class="qa-mock-controls inactive" aria-hidden="true"><span>−</span><span>+</span></div></div><p>시험에서 무엇이 맞아야 하는지는 요청과 SRS에서 정합니다. 제품의 현재 동작을 정답으로 복사하지 않습니다.</p></div>
+    <div class="qa-node primary"><span class="qa-kicker">요구사항 → 시험의 기준</span><h4>잠금 시 온도 버튼이 비활성 상태여야 함</h4><div class="qa-device-strip"><b>기대결과 · 온도 조작 비활성</b><div class="qa-mock-controls inactive" aria-hidden="true"><span>−</span><span>+</span></div></div><p>시험에서 무엇이 맞아야 하는지는 요청과 SRS에서 정합니다. 제품의 현재 동작을 기대값으로 복사하지 않습니다.</p></div>
     <div class="qa-arrow difference" aria-label="기대결과와 실제 관찰이 다름">≠</div>
     <div class="qa-node"><span class="qa-kicker">실행 기록 → 실제 관찰</span><h4>내부 잠금은 켜졌지만, 버튼은 활성 상태</h4><div class="qa-device-strip"><b>실제 관찰 · 온도 버튼 활성</b><div class="qa-mock-controls" aria-hidden="true"><span>−</span><span>+</span></div></div><p>내부 잠금 값과 화면의 버튼 상태를 각각 확인했습니다. 내부 값만 보면 화면의 차이를 놓칠 수 있습니다.</p></div>
   </div>
@@ -867,10 +867,10 @@ header .version{display:none}
 <tr><th scope="row">실행 환경</th><td>가상 중앙제어 화면의 준비 상태 확인</td><td class="pass">환경 점검 1건 통과</td></tr>
 <tr><th scope="row">알림 색상 변경</th><td>목표 색상이 미정이므로 기대값을 만들지 않고 정보 부족으로 보고</td><td class="review">미정 조건 1건 · 사람에게 질문</td></tr>
 </tbody></table></div>
-<div class="case-conclusion"><p><b class="review">제품 시험 2건 통과 → 최종 사람 검토</b> 정해지지 않은 색상은 추측해서 시험하지 않고, 별도 확인 항목으로 사람에게 넘겼습니다.</p><a href="examples/results/agent1-agent2-agent3-agent4-partial-information/README.md">실행·판단 근거 ↗</a></div>
+<div class="case-conclusion"><p><b class="review">확정된 조건의 시험 2건은 통과했지만, 미정 조건 1건이 남아 사람 검토가 필요합니다.</b> 정해지지 않은 색상은 추측해서 시험하지 않고, 별도 확인 항목으로 사람에게 넘겼습니다.</p><a href="examples/results/agent1-agent2-agent3-agent4-partial-information/README.md">실행·판단 근거 ↗</a></div>
 </div></details></div><div class="auxiliary-evidence"></div><p class="fine">중앙제어 화면은 PC에서 체험해 주세요. 장비는 직접 조작할 수 있고, Agent 결과와 승인 화면은 저장된 예시라 새 AI 실행이나 실제 등록은 하지 않습니다. <a href="product_baseline/virtual-controller.html?mode=demo">저장 데모 보기 ↗</a></p></div></section>
 
-<section id="reporting"><div class="wrap"><div class="section-head"><div><span class="num"><b>7</b> 결과 분석 및 보고</span><h2>실행 결과 분류와 사람의 최종 판단</h2></div><p>Agent 4는 규칙 기반으로 실행 결과를 분류합니다. 프로그램이 실행 근거·집계·보고 내용의 일치를 검사한 뒤 Slack·Notion 보고 데이터를 생성합니다.</p></div><div class="result-board"><div class="bhead"><div>번호</div><div>분류</div><div>판단 기준</div><div>대표 예시</div><div>후속 조치</div></div><div class="brow defect"><div>01</div><div class="ctype"><b>제품 불일치 후보</b><span>제품 영역</span></div><div>유효 실행에서 기대값 불일치</div><div>잠금 상태인데 온도 버튼 활성</div><div>제품 확인 요청</div></div><div class="brow req"><div>02</div><div class="ctype"><b>판정 근거 부족</b><span>실행 근거</span></div><div>환경 점검 차단으로 회귀 증거 미확보</div><div>선택된 회귀 테스트가 실행되지 않음</div><div>환경 복구·재실행</div></div><div class="brow env"><div>03</div><div class="ctype"><b>환경·시뮬레이터 문제</b><span>실행 환경</span></div><div>응답·초기화 문제</div><div>환경 준비·초기화 실패</div><div>정상화 후 재실행</div></div><div class="brow auto"><div>04</div><div class="ctype"><b>자동화 실행 문제</b><span>준비·시험·복원</span></div><div>실행 오류·시간 초과·준비/복원 실패</div><div>시험 전 초기 상태가 TC와 다름</div><div>자동화 확인·재실행</div></div><div class="brow blocked"><div>05</div><div class="ctype"><b>미실행</b><span>실행 상태</span></div><div>실행 결과에 미실행으로 기록</div><div>시험이 건너뛰어져 관찰 결과가 없음</div><div>사유 확인·재실행</div></div></div><p class="v1-table-note">요구사항 정보 부족과 자동화 제외 TC는 별도 목록으로 보고합니다. 실행한 TC가 모두 통과해도 미확인 항목이 남으면 사람 검토로 넘깁니다. <a href="#tc-partial">미정 조건이 남은 실제 사례 ↑</a></p><div id="mixed-report-example"><p><b>실제 온도 변경 요청에서는 냉방의 제품 불일치와 난방의 통과를 구분해 보고했습니다.</b> 냉방은 요청한 최저 20°C와 달리 19°C로 내려간 것을 기록하고 원래 상태로 복원했습니다. 난방 16°C 설정은 통과했습니다. 두 결과는 Slack·Notion 보고 형식으로 만들었습니다. 실제 전송은 다른 실행에서 Slack 1건·Notion 3건으로 확인했고, 평소 실행은 보내지 않는 미리보기로 둡니다.</p></div></div></section>
+<section id="reporting"><div class="wrap"><div class="section-head"><div><span class="num"><b>7</b> 결과 분석 및 보고</span><h2>실행 결과 분류와 사람의 최종 판단</h2></div><p>Agent 4는 규칙 기반으로 실행 결과를 분류합니다. 프로그램이 실행 근거·집계·보고 내용의 일치를 검사한 뒤 Slack·Notion 보고 데이터를 생성합니다.</p></div><div class="result-board"><div class="bhead"><div>번호</div><div>분류</div><div>판단 기준</div><div>대표 예시</div><div>후속 조치</div></div><div class="brow defect"><div>01</div><div class="ctype"><b>제품 불일치 후보</b><span>제품 영역</span></div><div>유효 실행에서 기대값 불일치</div><div>잠금 상태인데 온도 버튼 활성</div><div>제품 확인 요청</div></div><div class="brow req"><div>02</div><div class="ctype"><b>판정 근거 부족</b><span>실행 근거</span></div><div>환경 점검 차단으로 회귀 증거 미확보</div><div>선택된 회귀 테스트가 실행되지 않음</div><div>환경 복구·재실행</div></div><div class="brow env"><div>03</div><div class="ctype"><b>환경·시뮬레이터 문제</b><span>실행 환경</span></div><div>응답·초기화 문제</div><div>환경 준비·초기화 실패</div><div>정상화 후 재실행</div></div><div class="brow auto"><div>04</div><div class="ctype"><b>자동화 실행 문제</b><span>준비·시험·복원</span></div><div>실행 오류·시간 초과·준비/복원 실패</div><div>시험 전 초기 상태가 TC와 다름</div><div>자동화 확인·재실행</div></div><div class="brow blocked"><div>05</div><div class="ctype"><b>미실행</b><span>실행 상태</span></div><div>실행 결과에 미실행으로 기록</div><div>시험이 건너뛰어져 관찰 결과가 없음</div><div>사유 확인·재실행</div></div></div><p class="v1-table-note">요구사항 정보 부족과 자동화 제외 TC는 별도 목록으로 보고합니다. 실행한 TC가 모두 통과해도 미확인 항목이 남으면 사람 검토로 넘깁니다. <a href="#tc-partial">미정 조건이 남은 실제 사례 ↑</a></p><div id="mixed-report-example"><p><b>실제 온도 변경 요청에서는 냉방의 제품 불일치와 난방의 통과를 구분해 보고했습니다.</b> 냉방은 요청한 최저 20°C와 달리 19°C로 내려간 것을 기록하고 원래 상태로 복원했습니다. 난방 16°C 설정은 통과했습니다. 두 결과는 Slack·Notion 보고 형식으로 만들었습니다. 기본 실행은 실제로 보내지 않고 보고 미리보기만 만듭니다. 실제 전송은 별도 시험에서 Slack 1건·Notion 3건으로 확인했습니다.</p></div></div></section>
 
 
 
@@ -888,9 +888,9 @@ header .version{display:none}
 </div></div></section>
 <section id="scope"><div class="wrap"><div class="section-head"><div><span class="num"><b>9</b> 결과와 배운 점</span><h2>확인한 범위와 남은 한계</h2></div><p>반복 작업을 연결하는 것과, 새로운 요청을 믿고 맡길 수 있는 것은 다른 문제였습니다.</p></div>
 <div class="lesson-cards">
-<article><span class="lc-label">확인한 것</span><h3>QA 반복 작업을 한 흐름으로</h3><ul><li>가상 제품에서 조작·관찰·복원·보고까지 이어서 실행</li><li>전원·풍량·모드·온도·잠금 대표 요청 5개가 정답 기준대로 끝남</li><li>정보가 빠진 요청은 추측하지 않고 질문을 남기고 멈춤</li></ul></article>
+<article><span class="lc-label">확인한 것</span><h3>QA 반복 작업을 한 흐름으로</h3><ul><li>가상 제품에서 조작·관찰·복원·보고까지 이어서 실행</li><li>전원·풍량·모드·온도·잠금 대표 요청 5개가 미리 정한 기대 결과대로 끝남</li><li>정보가 빠진 요청은 추측하지 않고 질문을 남기고 멈춤</li></ul></article>
 <article><span class="lc-label">가장 어려웠던 것</span><h3>AI에게 QA 기준을 알려 주는 일</h3><p>사람에게는 "바뀐 범위의 끝을 확인해 주세요"면 충분합니다. AI는 한쪽 끝만 시험하고도 기준을 지켰다고 판단했습니다. 그래서 경험으로 알던 기준을 구체적인 규칙으로 적어 작성 지침과 자동 검사에 넣었습니다.</p></article>
-<article><span class="lc-label warn">남은 한계</span><h3>아직 확인할 것</h3><ul><li>모드·온도 요청은 첫 TC가 자동 검사에서 걸려 한 번 다시 쓰는 경우가 많음(6번 중 4번, 최종은 모두 통과)</li><li>정답 시험을 프로그램으로 대조하는 기능은 아직 온도 범위 요청에만 있음</li><li>대상은 가상 제품·장비 1대·기존 기능을 바꾸는 요청</li></ul></article>
+<article><span class="lc-label warn">남은 한계</span><h3>아직 확인할 것</h3><ul><li>모드·온도 요청은 첫 TC가 자동 검사에서 걸려 한 번 다시 쓰는 경우가 많음(6번 중 4번, 최종은 모두 통과)</li><li>필수 시험을 프로그램으로 대조하는 기능은 아직 온도 범위 요청에만 있음</li><li>대상은 가상 제품·장비 1대·기존 기능을 바꾸는 요청</li></ul></article>
 <article><span class="lc-label">다음 단계</span><h3>실제 업무에 쓸 수 있는 범위로</h3><ul><li>장비 여러 대를 한 번에 제어하는 요청</li><li>기존 기능 변경뿐 아니라 새 기능 추가 요청</li><li>가상 화면이 아닌 실제 제품 환경과 연결</li></ul></article>
 </div>
 <div class="actions scope-actions"><a class="button primary" href="../agent-evaluation-framework/portfolio/index.html">평가 결과는 프로젝트2에서 ↗</a><a class="button" href="#mixed-report-example">냉방·난방 보고 사례</a></div></div></section>
