@@ -1,5 +1,18 @@
 # QA Agent Pipeline V2
 
+<div align="center">
+
+<p><b>포트폴리오 바로 보기</b></p>
+
+[![메인 포트폴리오](https://img.shields.io/badge/%EB%A9%94%EC%9D%B8_%ED%8F%AC%ED%8A%B8%ED%8F%B4%EB%A6%AC%EC%98%A4-%EC%97%B4%EA%B8%B0-2ea44f?style=for-the-badge&labelColor=0b1220)](https://sehooooon.github.io/qa-agent-pipeline/main.html)
+[![프로젝트1 소개](https://img.shields.io/badge/%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B81_%EC%86%8C%EA%B0%9C-%EC%97%B4%EA%B8%B0-2ea44f?style=for-the-badge&labelColor=0b1220)](https://sehooooon.github.io/qa-agent-pipeline-v2/project.html)
+[![프로젝트2 소개](https://img.shields.io/badge/%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B82_%EC%86%8C%EA%B0%9C-%EC%97%B4%EA%B8%B0-2ea44f?style=for-the-badge&labelColor=0b1220)](https://sehooooon.github.io/agent-evaluation-framework/portfolio/index.html)
+[![프로젝트2 평가 결과](https://img.shields.io/badge/%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B82_%ED%8F%89%EA%B0%80_%EA%B2%B0%EA%B3%BC-%EC%97%B4%EA%B8%B0-2ea44f?style=for-the-badge&labelColor=0b1220)](https://sehooooon.github.io/agent-evaluation-framework/portfolio/report.html)
+
+<sub>세 페이지는 상단 메뉴로 서로 이동할 수 있습니다. 프로젝트1에는 대표 사례를 실제 화면으로 녹화한 약 1분 영상이 있습니다.</sub>
+
+</div>
+
 가상 중앙제어 시스템(에어컨 관제 화면)에 **변경 요청**이 들어오면, AI가 요구사항을 분석하고 시험을 설계하고, 프로그램이 실제 화면에서 시험한 뒤, **사람이 최종 승인**하는 QA 파이프라인입니다.
 
 ## 전체 흐름
@@ -20,7 +33,7 @@
 - **프로그램이 하는 일**: 단계 간 파일 해시 확인, 필수 시험 목록 계산·대조(예: 온도 범위가 바뀌면 새 하한·상한 적용과 한 칸 밖 차단), 자동화 코드 생성, 실제 화면 시험·복원, 결과 분류(Agent 4는 규칙 기반).
 - **사람이 하는 일**: 애매한 요구사항에 대한 답, 최종 등록·교체·SRS 수정 결정.
 
-AI가 기대값이나 시험 범위를 임의로 바꾸지 못하게 하고, 근거 없는 내용은 검토에서 막습니다. 다만 AI 판단에는 여전히 오판 가능성이 있어서, 사람이 정한 정답과 비교하는 평가를 별도 평가 저장소([agent-evaluation-framework](https://github.com/SEHOOOOON/agent-evaluation-framework))에서 합니다. 채점은 생성과 다른 회사의 모델(Claude)로 합니다.
+AI가 기대값이나 시험 범위를 임의로 바꾸지 못하게 하고, 근거 없는 내용은 검토에서 막습니다. 다만 AI 판단에는 여전히 오판 가능성이 있어서, 사람이 정한 필수 시험·기대 결과와 비교하는 평가를 별도 평가 저장소([agent-evaluation-framework](https://github.com/SEHOOOOON/agent-evaluation-framework))에서 합니다. 채점은 지금 생성과 다른 회사의 모델(Claude)로 합니다(포트폴리오의 대표 요청 점수는 바꾸기 전 OpenAI로 채점).
 
 ## 주요 안전장치
 
