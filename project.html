@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="변경 범위·시험 기준·실행 증거·사람 승인을 연결하고 반복 오류의 공통 원인을 보완한 개인 QA 프로세스 프로젝트입니다.">
   <meta name="color-scheme" content="dark">
-  <title>중앙제어 AI QA 파이프라인 V2 · 오세훈</title>
+  <title>프로젝트1 · QA 에이전트 워크플로</title>
+<link rel="icon" type="image/svg+xml" href="https://sehooooon.github.io/qa-agent-pipeline/favicon.svg">
   <style>
 
 :root{--section-title-size:clamp(1.375rem,2.4vw,1.75rem);--bg:#080c13;--panel:#111824;--line:#252d39;--text:#dce6f3;--muted:#a1adbf;--blue:#58a6ff;--green:#3fb950;--orange:#f59e0b;--red:#f85149;--mono:Consolas,monospace;--sans:Pretendard,"Noto Sans KR",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
@@ -962,7 +963,7 @@ main td{font-size:13px!important}
 <tr><th scope="row">알림 색상 변경</th><td>목표 색상이 미정이므로 기대값을 만들지 않고 정보 부족으로 보고</td><td class="review">미정 조건 1건 · 사람에게 질문</td></tr>
 </tbody></table></div>
 <div class="case-conclusion"><p><b class="review">확정된 조건의 시험 2건은 통과했지만 미정 조건 1건이 남아 사람 검토가 필요합니다.</b> 정해지지 않은 색상은 추측해서 시험하지 않고 별도 확인 항목으로 사람에게 넘겼습니다.</p><a href="examples/results/agent1-agent2-agent3-agent4-partial-information/README.md">실행·판단 근거 ↗</a></div>
-</div></details></div><div class="auxiliary-evidence"></div><p class="fine">중앙제어 화면은 PC에서 체험해 주세요. 장비는 직접 조작할 수 있고, Agent 결과와 승인 화면은 저장된 예시라 새 AI 실행이나 실제 등록은 하지 않습니다. <a href="product_baseline/virtual-controller.html?mode=demo">저장 데모 보기 ↗</a></p></div></section>
+</div></details></div><div class="auxiliary-evidence"></div><p class="fine">중앙제어 화면은 PC에서 체험해 주세요. 장비는 직접 조작할 수 있고, Agent 결과와 승인 화면은 저장된 예시라 새 AI 실행이나 실제 등록은 하지 않습니다. 화면이 열리면 왼쪽 메뉴의 '자율 QA'를 눌러 저장된 결과를 볼 수 있습니다. <a href="product_baseline/virtual-controller.html?mode=demo">저장 데모 보기 ↗</a></p></div></section>
 
 <section id="reporting"><div class="wrap"><div class="section-head"><div><span class="num"><b>07</b> · 결과 분석 및 보고</span><h2>실행 결과 분류와 사람의 최종 판단</h2></div><p>Agent 4는 규칙 기반으로 실행 결과를 분류합니다. 프로그램이 실행 근거·집계·보고 내용의 일치를 검사한 뒤 Slack·Notion 보고 데이터를 생성합니다.</p></div><div class="result-board"><div class="bhead"><div>번호</div><div>분류</div><div>판단 기준</div><div>대표 예시</div><div>후속 조치</div></div><div class="brow defect"><div>01</div><div class="ctype"><b>제품 불일치 후보</b><span>제품 영역</span></div><div>유효 실행에서 기대값 불일치</div><div>잠금 상태인데 온도 버튼 활성</div><div>제품 확인 요청</div></div><div class="brow req"><div>02</div><div class="ctype"><b>판정 근거 부족</b><span>실행 근거</span></div><div>환경 점검 차단으로 회귀 증거 미확보</div><div>선택된 회귀 테스트가 실행되지 않음</div><div>환경 복구·재실행</div></div><div class="brow env"><div>03</div><div class="ctype"><b>환경·시뮬레이터 문제</b><span>실행 환경</span></div><div>응답·초기화 문제</div><div>환경 준비·초기화 실패</div><div>정상화 후 재실행</div></div><div class="brow auto"><div>04</div><div class="ctype"><b>자동화 실행 문제</b><span>준비·시험·복원</span></div><div>실행 오류·시간 초과·준비/복원 실패</div><div>시험 전 초기 상태가 TC와 다름</div><div>자동화 확인·재실행</div></div><div class="brow blocked"><div>05</div><div class="ctype"><b>미실행</b><span>실행 상태</span></div><div>실행 결과에 미실행으로 기록</div><div>시험이 건너뛰어져 관찰 결과가 없음</div><div>사유 확인·재실행</div></div></div><p class="v1-table-note">요구사항 정보 부족과 자동화 제외 TC는 별도 목록으로 보고합니다. 실행한 TC가 모두 통과해도 미확인 항목이 남으면 사람 검토로 넘깁니다. <a href="#tc-partial">미정 조건이 남은 실제 사례 ↑</a></p><div id="mixed-report-example"><p><b>실제 온도 변경 요청에서는 냉방의 제품 불일치와 난방의 통과를 구분해 보고했습니다.</b> 냉방은 요청한 최저 20°C와 달리 19°C로 내려간 것을 기록한 뒤 원래 상태로 복원했고 난방 16°C 설정은 통과였습니다. 두 결과는 Slack·Notion 보고 형식으로 만들었습니다. 기본 실행은 실제로 보내지 않고 보고 미리보기만 만듭니다. 실제 전송은 별도 실행(6절의 잠금 사례)에서 Slack 1건·Notion 4건으로 확인했습니다.</p></div></div></section>
 
