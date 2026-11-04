@@ -56,5 +56,5 @@
   "protected_files_unchanged": true,
   "originals_preserved": true,
   "limitations": "Headless local virtual product; offline observation injected without disconnecting actual page. Predicate also tested directly for OFFLINE/missing target. No API accuracy claim.",
-  "evidence_location": "C:\\Users\\훈\\.gemini\\antigravity\\scratch\\industrial-qa\\qa-agent-pipeline-v2\\runs\\manual_checks\\fan-connectivity-20261011"
+  "evidence_location": "runs/manual_checks/fan-connectivity-20261011"
 }
